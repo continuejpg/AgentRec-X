@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+*.key
+
+# Data
+data/
+*.jsonl.gz
+*.parquet
+
+# Models
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+
+# Cache
+.cache/
+
+# OS
+.DS_Store
