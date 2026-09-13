@@ -1,0 +1,10 @@
+# Development / test dependencies for AgentRec-X.
+#
+# The preprocessing pipeline itself imports only the Python standard library.
+# pytest is needed only to run tests/test_preprocess.py the conventional way;
+# `python tests/test_preprocess.py` runs the same tests with no dependencies.
+#
+#   python -m venv .venv
+#   .venv/bin/python -m pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest tests/ -v
+pytest>=7.0

@@ -15,18 +15,44 @@ venv/
 *.key
 
 # Data
+# `data/` holds the real Amazon Reviews 2023 archives, downloaded samples and
+# the generated processed artifacts. None of it belongs in git: the archives
+# are multi-GB and the artifacts are regenerable from them. The pipeline creates
+# data/raw/ and data/processed/ on demand, so nothing here needs a .gitkeep.
 data/
+*.jsonl
 *.jsonl.gz
 *.parquet
+*.feather
+*.arrow
+*.tsv
+
+# Experiment outputs (Milestone 5+): run manifests, training logs, metric history.
+# `data/` already covers processed artifacts; checkpoints are covered below.
+logs/
+runs/
+artifacts/
 
 # Models
 *.pt
 *.pth
 *.ckpt
+*.onnx
+*.safetensors
+*.pkl
+*.pickle
+*.npy
+*.npz
 checkpoints/
+runs/
+outputs/
+wandb/
 
 # Cache
 .cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
 # OS
 .DS_Store
