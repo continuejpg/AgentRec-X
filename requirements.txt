@@ -1,0 +1,19 @@
+# Runtime dependencies for the AgentRec-X recommendation service (Milestone 6).
+#
+# The recommendation library itself (preprocessing, evaluation, baselines, datasets,
+# models, training, inference) imports only the standard library plus PyTorch, which
+# is provided by the environment -- see AGENTS.md: do not reinstall or upgrade the
+# CUDA/PyTorch stack.
+#
+# This file adds only the minimal HTTP stack needed to serve recommendations.
+#   .venv/bin/python -m pip install -r requirements.txt
+#
+# NOTE: pytest-asyncio lives in requirements-dev.txt; the API tests use FastAPI's
+# synchronous TestClient, which needs httpx (already present).
+
+fastapi>=0.110,<1.0
+uvicorn>=0.27,<1.0
+
+# Pydantic is FastAPI's validation core; it is pinned here indirectly but listed
+# explicitly so the served contract does not drift silently.
+pydantic>=2.5,<3.0
