@@ -31,7 +31,7 @@ only as external ``parent_asin`` values inside the Tool's typed result.
 from __future__ import annotations
 
 import hashlib
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -138,6 +138,12 @@ class AgentGraphState(TypedDict, total=False):
 
     # -- written by the tool node ----------------------------------------- #
     tool_result: RecommendationToolResult
+
+    # -- written by the enrichment node (Milestone 8, optional) ------------ #
+    #: Candidate-scoped product evidence.  Typed as ``Any`` so this module does not
+    #: depend on the RAG package; when present it is an
+    #: ``recommendation.rag.schemas.EnrichmentResult``.
+    enrichment: Any
 
     # -- written by the finalizing node ----------------------------------- #
     final_response: str

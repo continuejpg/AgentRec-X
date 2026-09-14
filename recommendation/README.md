@@ -380,8 +380,14 @@ offline LangGraph graph (`recommendation/agent/`) and the real-chain integration
 (`tests/test_agent_tool_e2e.py`, `experiments/agent_tool_e2e_smoke.py`) consume
 these artifacts without changing any recommender semantics. Milestone 7C validates
 composition only — it does not recompute the formal benchmark, and it makes no
-recommendation-quality claim. Product metadata and semantic enrichment remain
-deferred to Milestone 8.
+recommendation-quality claim.
+
+**Product metadata and candidate-scoped RAG (M8).** `recommendation/catalog/` builds
+a deterministic `parent_asin`-keyed artifact from the official Amazon Reviews 2023
+product-metadata file, and `recommendation/rag/` retrieves attributable evidence for
+**only** the candidates the recommender already produced. Neither layer changes
+candidate generation, ranking or the accepted mapping. See
+[`catalog/README.md`](catalog/README.md) and [`rag/README.md`](rag/README.md).
 
 ---
 
@@ -401,6 +407,8 @@ deferred to Milestone 8.
 | `recommendation/api/` | FastAPI recommendation service (see its README) |
 | `recommendation/tools/` | Agent-facing Recommendation Tool contract (see its README) |
 | `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool (see its README) |
+| `recommendation/catalog/` | `parent_asin`-keyed product metadata: normalization, artifact, coverage, lookup (see its README) |
+| `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |

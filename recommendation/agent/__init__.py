@@ -44,6 +44,7 @@ from .decision import (
 from .graph import (
     AGENT_GRAPH_VERSION,
     NODE_DECIDE,
+    NODE_ENRICH,
     NODE_FINALIZE,
     NODE_RECOMMEND,
     ROUTE_DIRECT,
@@ -51,6 +52,7 @@ from .graph import (
     AgentConfigurationError,
     AgentGraph,
     AgentGraphError,
+    ProductEnricherLike,
     build_agent_graph,
 )
 from .state import (
@@ -66,6 +68,7 @@ __all__ = [
     "AGENT_DECISION_VERSION",
     "AGENT_GRAPH_VERSION",
     "NODE_DECIDE",
+    "NODE_ENRICH",
     "NODE_FINALIZE",
     "NODE_RECOMMEND",
     "ROUTE_DIRECT",
@@ -80,6 +83,7 @@ __all__ = [
     "DecisionMessage",
     "DecisionModel",
     "MalformedDecision",
+    "ProductEnricherLike",
     "TrustedHistory",
     "build_agent_graph",
     "build_decision_messages",

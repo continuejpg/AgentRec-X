@@ -141,3 +141,35 @@ def default_raw_path(category: str = DEFAULT_CATEGORY, raw_dir: Path | None = No
     """Return the conventional raw review path for ``category``."""
     base = Path(raw_dir) if raw_dir is not None else RAW_DIR
     return base / "review_categories" / f"{category}.jsonl.gz"
+
+
+#: Category slug used by the official product-metadata files.  Amazon ships the
+#: metadata as ``meta_<Category>.jsonl.gz`` with "&" and spaces replaced by "_" and
+#: runs of "_" collapsed, so "Sports & Outdoors" -> "Sports_Outdoors".  That is the
+#: same string the server path uses, so one helper serves both the filename and the
+#: download URL.
+def metadata_category_slug(category: str = DEFAULT_CATEGORY) -> str:
+    """Return the official metadata slug for ``category``."""
+    replaced = category.replace("&", "_").replace(" ", "_")
+    return "_".join(part for part in replaced.split("_") if part)
+
+
+#: Conventional raw product-metadata path, mirroring the official download layout
+#: (``meta_categories/meta_<Category>.jsonl.gz``).  Product metadata is a distinct
+#: source from the review interactions in :func:`default_raw_path`; it is keyed by
+#: ``parent_asin`` and is never used to generate recommendation candidates.
+def default_metadata_path(
+    category: str = DEFAULT_CATEGORY, raw_dir: Path | None = None
+) -> Path:
+    """Return the conventional raw product-metadata path for ``category``."""
+    base = Path(raw_dir) if raw_dir is not None else RAW_DIR
+    return base / "meta_categories" / f"meta_{metadata_category_slug(category)}.jsonl.gz"
+
+
+#: Conventional processed artifact path for normalized catalog metadata.
+def default_catalog_metadata_path(
+    category: str = DEFAULT_CATEGORY, processed_dir: Path | None = None
+) -> Path:
+    """Return the conventional normalized catalog-metadata artifact path."""
+    out_dir = Path(processed_dir) if processed_dir is not None else PROCESSED_DIR
+    return out_dir / f"{metadata_category_slug(category)}_products.jsonl"
