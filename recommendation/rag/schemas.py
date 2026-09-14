@@ -149,6 +149,11 @@ class EnrichedRecommendation(BaseModel):
     metadata: ProductMetadata | None = None
     evidence: tuple[ProductEvidence, ...] = ()
     fallback_reason: Literal["no_metadata", "no_searchable_text", "no_lexical_match"] | None = None
+    #: Zero-based position of this candidate in the *supplied* list, i.e. the order the
+    #: accepted Recommendation Tool produced.  Recorded so a consumer can always
+    #: recover the model-visible order independently of the rank field.  It is a
+    #: position, never a score, and it never ranks one product against another.
+    position: int = Field(default=0, ge=0)
 
     @property
     def parent_asin(self) -> str:

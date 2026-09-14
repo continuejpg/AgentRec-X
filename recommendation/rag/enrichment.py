@@ -97,8 +97,8 @@ def enrich_candidates(
 
     items: list[EnrichedRecommendation] = []
     found = missing = evidence_count = 0
-    for item, record, evidence in zip(
-        result.recommendations, records, evidence_per_candidate
+    for position, (item, record, evidence) in enumerate(
+        zip(result.recommendations, records, evidence_per_candidate)
     ):
         is_missing = isinstance(record, MissingMetadata)
         if is_missing:
@@ -114,6 +114,7 @@ def enrich_candidates(
                 metadata=None if is_missing else record,
                 evidence=evidence,
                 fallback_reason=_fallback_reason(is_missing, record, evidence, fallback_used),
+                position=position,
             )
         )
 

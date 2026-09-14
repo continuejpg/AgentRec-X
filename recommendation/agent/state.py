@@ -110,6 +110,13 @@ class AgentInput(BaseModel):
             "Never supplied by a model."
         ),
     )
+    turn_id: str | None = Field(
+        default=None,
+        description=(
+            "Application-supplied identifier of this user turn. Used only to make "
+            "preference-memory writes idempotent; never produced by a model."
+        ),
+    )
 
     @field_validator("user_message")
     @classmethod
@@ -132,6 +139,9 @@ class AgentGraphState(TypedDict, total=False):
     # -- input, written once by the application ---------------------------- #
     user_message: str
     trusted_user_history: TrustedHistory
+    #: Optional application-supplied identifier of this user turn, used for
+    #: idempotent preference-memory writes.  It is not model output.
+    turn_id: str
 
     # -- written by the decision node ------------------------------------- #
     decision: AgentDecision
@@ -144,6 +154,15 @@ class AgentGraphState(TypedDict, total=False):
     #: depend on the RAG package; when present it is an
     #: ``recommendation.rag.schemas.EnrichmentResult``.
     enrichment: Any
+
+    # -- written by the memory nodes (Milestone 9, optional) --------------- #
+    #: Immutable snapshot of the user's ACTIVE preferences, read before the decision.
+    #: Typed ``Any`` so this module does not depend on the memory package; when present
+    #: it is a ``recommendation.memory.schemas.PreferenceMemorySnapshot``.  Trusted
+    #: interaction history is deliberately *not* part of this or any memory type.
+    preference_snapshot: Any
+    #: Result of persisting this turn's explicit preferences (audit/diagnostics).
+    memory_update: Any
 
     # -- written by the finalizing node ----------------------------------- #
     final_response: str
@@ -179,8 +198,16 @@ def history_digest(history: TrustedHistory) -> str:
 
 
 def new_agent_state(agent_input: AgentInput) -> AgentGraphState:
-    """Build the initial graph state from validated application input."""
-    return AgentGraphState(
+    """Build the initial graph state from validated application input.
+
+    Note what is *not* here: there is no preference-memory field seeded from model
+    output, and no interaction-history field that a preference could feed.  Trusted
+    history arrives from the application and stays exactly as supplied.
+    """
+    state = AgentGraphState(
         user_message=agent_input.user_message,
         trusted_user_history=tuple(agent_input.trusted_user_history),
     )
+    if agent_input.turn_id:
+        state["turn_id"] = agent_input.turn_id
+    return state

@@ -328,9 +328,11 @@ M7A/M7B regressions. No catalog corruption was engineered to force the condition
 | --- | --- |
 | M7B | Offline orchestration contract; fakes only; **no** checkpoint, engine or catalog |
 | **M7C** | Real-chain integration: injected deterministic decision model + real Tool + real engine + real checkpoint |
-| M8 | Out of scope here: Product RAG, product metadata retrieval and semantic enrichment |
+| M8 | Product metadata + candidate-scoped evidence retrieval (realisation of the row above) |
+| M9 | Preference memory: explicit conversational preferences, loaded before `decide`, persisted after `finalize` (see `../memory/README.md`). Does **not** rerank. |
+| M10 | Out of scope here: preference-aware scoring, critique and reranking |
 
-**Product metadata and semantic enrichment remain deferred to M8.** M7C responses
+**Product metadata and semantic enrichment belong to M8, not M7C.** M7C responses
 expose only candidate identity (`parent_asin`), rank and raw model score; the
 response states explicitly that scores are not probabilities and not evidence about
 a product. M7C makes no claim that the recommendations are good, well personalised,

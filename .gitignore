@@ -48,6 +48,14 @@ runs/
 outputs/
 wandb/
 
+# Runtime memory store (Milestone 9). The SQLite preference-memory database is
+# generated at runtime and must never be committed; tests use temp dirs or :memory:.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
 # Cache
 .cache/
 .mypy_cache/

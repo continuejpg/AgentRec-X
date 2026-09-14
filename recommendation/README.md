@@ -389,6 +389,14 @@ product-metadata file, and `recommendation/rag/` retrieves attributable evidence
 candidate generation, ranking or the accepted mapping. See
 [`catalog/README.md`](catalog/README.md) and [`rag/README.md`](rag/README.md).
 
+**Preference memory (M9).** `recommendation/memory/` stores *explicit* conversational
+preferences, user-scoped, with provenance and a deterministic lifecycle. It is a
+separate domain from the trusted interaction history SASRec consumes: it holds no
+behavioural events, and conversational statements are never converted into interactions.
+Preference memory does **not** modify recommendation candidate order in M9 — candidate
+identity, count, rank and raw SASRec score are untouched. See
+[`memory/README.md`](memory/README.md).
+
 ---
 
 ## 8. Module layout
@@ -409,6 +417,7 @@ candidate generation, ranking or the accepted mapping. See
 | `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool (see its README) |
 | `recommendation/catalog/` | `parent_asin`-keyed product metadata: normalization, artifact, coverage, lookup (see its README) |
 | `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
+| `recommendation/memory/` | Explicit conversational preference memory: schema, stores, lifecycle (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |

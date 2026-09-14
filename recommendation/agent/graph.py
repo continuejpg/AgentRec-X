@@ -85,6 +85,8 @@ __all__ = [
     "NODE_DECIDE",
     "NODE_ENRICH",
     "NODE_FINALIZE",
+    "NODE_LOAD_MEMORY",
+    "NODE_PERSIST_MEMORY",
     "NODE_RECOMMEND",
     "ROUTE_DIRECT",
     "ROUTE_RECOMMEND",
@@ -92,6 +94,7 @@ __all__ = [
     "AgentConfigurationError",
     "AgentGraph",
     "AgentGraphError",
+    "PreferenceMemoryLike",
     "ProductEnricherLike",
     "build_agent_graph",
     "history_digest",
@@ -101,10 +104,12 @@ __all__ = [
 AGENT_GRAPH_VERSION = 1
 
 #: Node names, exposed so tests and the smoke experiment can assert structure.
+NODE_LOAD_MEMORY = "load_memory"
 NODE_DECIDE = "decide"
 NODE_RECOMMEND = "recommend"
 NODE_ENRICH = "enrich"
 NODE_FINALIZE = "finalize"
+NODE_PERSIST_MEMORY = "persist_memory"
 
 #: Conditional-edge labels returned by the decision router.
 ROUTE_DIRECT = "direct"
@@ -166,7 +171,79 @@ _FIELD_LABELS: dict[str, str] = {
 }
 
 
-def _build_recommendation_response(result: Any) -> str:
+@runtime_checkable
+class PreferenceMemoryLike(Protocol):
+    """Structural interface for the optional Milestone 9 preference-memory service.
+
+    The graph depends on this shape rather than on the concrete
+    :class:`~recommendation.memory.service.PreferenceMemoryService`, so
+    ``recommendation/agent`` does not hard-import the memory package and a test can
+    inject any conforming object.
+
+    Note what is **absent**: there is no method that accepts or returns trusted
+    interaction history.  The Agent therefore cannot read, rewrite or extend the
+    SASRec history through this seam.
+    """
+
+    def get_active_preferences(self, user_key: str) -> Any:
+        """Return the user's active preference snapshot (read-only)."""
+        ...
+
+    def process_turn(self, **kwargs: Any) -> Any:
+        """Extract and persist explicit preferences from one user-authored turn."""
+        ...
+
+
+def _active_preference_lines(snapshot: Any) -> list[str]:
+    """Render a preference snapshot as short, attributed constraint lines."""
+    if snapshot is None:
+        return []
+    lines: list[str] = []
+    for entry in snapshot.active_entries:
+        marker = "prefers" if entry.polarity.value == "prefer" else "avoids"
+        lines.append(f"{entry.kind.value}: {marker} {entry.value}")
+    return lines
+
+
+def _memory_context(query: str, snapshot: Any) -> str:
+    """Augment a retrieval query with active explicit preferences.
+
+    Format is explicit and documented rather than implicit::
+
+        <user query>
+        preferences:
+        - <kind>: <prefer|avoid> <value>
+        - ...
+
+    This only changes *which evidence fragments* are selected from the metadata of
+    the already-fixed candidate set.  It cannot add, drop or reorder a candidate, and
+    it never touches trusted interaction history.
+    """
+    lines = _active_preference_lines(snapshot)
+    if not lines:
+        return query
+    return "\n".join([query, "preferences:", *[f"- {line}" for line in lines]])
+
+
+def _preference_block(preferences: Any) -> list[str]:
+    """Render the user's stored preferences as an honest, clearly-labelled block.
+
+    The block states what the user said.  It deliberately contains **no match score,
+    no "perfectly matches" claim and no ranking hint** -- Milestone 9 has no
+    preference-to-product scoring, and presenting one would be fabrication.
+    """
+    lines = _active_preference_lines(preferences)
+    if not lines:
+        return []
+    return [
+        "Your stated preferences (stored from your own messages; not used to rank "
+        "these candidates):",
+        *[f"- {line}" for line in lines],
+        "",
+    ]
+
+
+def _build_recommendation_response(result: Any, preferences: Any = None) -> str:
     """Render a Tool result as candidate lines plus an honest score disclaimer."""
     if not result.recommendations:
         return _NO_CANDIDATES_TEXT
@@ -174,6 +251,7 @@ def _build_recommendation_response(result: Any) -> str:
     lines = [
         f"Top {result.returned_k} candidate(s) from the sequential recommender:",
         "",
+        *_preference_block(preferences),
     ]
     lines.extend(
         f"{item.rank}. {item.parent_asin} (score {item.score:+.4f})"
@@ -202,7 +280,7 @@ def _shorten(text: str, limit: int = 240) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
-def _build_grounded_response(enrichment: Any) -> str:
+def _build_grounded_response(enrichment: Any, preferences: Any = None) -> str:
     """Render enriched candidates with attributed catalogue facts.
 
     Milestone 8 is the first point where product attribute claims may appear, and
@@ -217,6 +295,8 @@ def _build_grounded_response(enrichment: Any) -> str:
     lines = [
         f"Top {enrichment.returned_k} candidate(s) from the sequential recommender, "
         "with catalogue facts where available:",
+        "",
+        *_preference_block(preferences),
     ]
 
     for item in enrichment.items:
@@ -267,6 +347,9 @@ class AgentGraph:
         decision_model: DecisionModel,
         tool: RecommendationTool,
         product_enricher: ProductEnricherLike | None = None,
+        memory_service: PreferenceMemoryLike | None = None,
+        user_key: str | None = None,
+        augment_query_with_preferences: bool = True,
     ) -> None:
         if decision_model is None or not callable(
             getattr(decision_model, "decide", None)
@@ -284,9 +367,22 @@ class AgentGraph:
             raise AgentConfigurationError(
                 "product_enricher must provide a callable enrich(result, query) method"
             )
+        if memory_service is not None:
+            for method in ("get_active_preferences", "process_turn"):
+                if not callable(getattr(memory_service, method, None)):
+                    raise AgentConfigurationError(
+                        f"memory_service must provide a callable {method}() method"
+                    )
+            if not isinstance(user_key, str) or not user_key.strip():
+                raise AgentConfigurationError(
+                    "a non-empty user_key is required when memory_service is configured"
+                )
         self._decision_model = decision_model
         self._tool = tool
         self._product_enricher = product_enricher
+        self._memory_service = memory_service
+        self._user_key = user_key.strip() if isinstance(user_key, str) else None
+        self._augment_query_with_preferences = bool(augment_query_with_preferences)
         self._graph = self._build()
 
     # -- metadata ---------------------------------------------------------- #
@@ -316,6 +412,26 @@ class AgentGraph:
         """True when the recommendation route includes an enrichment node."""
         return self._product_enricher is not None
 
+    @property
+    def memory_service(self) -> PreferenceMemoryLike | None:
+        """The injected preference-memory service, or ``None`` when memory is off."""
+        return self._memory_service
+
+    @property
+    def user_key(self) -> str | None:
+        """The memory namespace this graph instance operates in."""
+        return self._user_key
+
+    @property
+    def uses_memory(self) -> bool:
+        """True when the run loads and persists conversational preference memory."""
+        return self._memory_service is not None
+
+    @property
+    def augments_query_with_preferences(self) -> bool:
+        """True when active preferences are appended to the retrieval query."""
+        return self._memory_service is not None and self._augment_query_with_preferences
+
     # -- construction ------------------------------------------------------ #
 
     def _build(self) -> Any:
@@ -329,15 +445,33 @@ class AgentGraph:
         * **enricher present** -- an ``enrich`` node is inserted between ``recommend``
           and ``finalize`` on the recommendation route only.
 
-        The graph never constructs a metadata store itself: enrichment exists only
-        because a caller injected one.
+        Topology is conditional, and each condition preserves the previously accepted
+        shape when its collaborator is absent:
+
+        * **no enricher, no memory** -- the accepted Milestone 7B/7C topology,
+          ``decide -> {finalize | recommend -> finalize}``, unchanged;
+        * **enricher present** -- an ``enrich`` node is inserted between ``recommend``
+          and ``finalize`` (Milestone 8);
+        * **memory present** -- a ``load_memory`` entry node runs before ``decide``
+          (read-only) and a ``persist_memory`` node runs after ``finalize`` on both
+          routes, so the direct route can read and update conversational memory
+          without ever invoking the recommender.
+
+        The graph never constructs a metadata store or a memory store itself: both
+        exist only because a caller injected them.
         """
         builder: StateGraph = StateGraph(AgentGraphState)
         builder.add_node(NODE_DECIDE, self._decide_node)
         builder.add_node(NODE_RECOMMEND, self._recommend_node)
         builder.add_node(NODE_FINALIZE, self._finalize_node)
 
-        builder.add_edge(START, NODE_DECIDE)
+        entry_node = START
+        if self._memory_service is not None:
+            builder.add_node(NODE_LOAD_MEMORY, self._load_memory_node)
+            builder.add_edge(START, NODE_LOAD_MEMORY)
+            entry_node = NODE_LOAD_MEMORY
+        builder.add_edge(entry_node, NODE_DECIDE)
+
         builder.add_conditional_edges(
             NODE_DECIDE,
             self._route,
@@ -349,10 +483,77 @@ class AgentGraph:
             builder.add_node(NODE_ENRICH, self._enrich_node)
             builder.add_edge(NODE_RECOMMEND, NODE_ENRICH)
             builder.add_edge(NODE_ENRICH, NODE_FINALIZE)
-        builder.add_edge(NODE_FINALIZE, END)
+
+        if self._memory_service is None:
+            builder.add_edge(NODE_FINALIZE, END)
+        else:
+            builder.add_node(NODE_PERSIST_MEMORY, self._persist_memory_node)
+            builder.add_edge(NODE_FINALIZE, NODE_PERSIST_MEMORY)
+            builder.add_edge(NODE_PERSIST_MEMORY, END)
         return builder.compile()
 
     # -- nodes ------------------------------------------------------------- #
+
+    def _load_memory_node(self, state: AgentGraphState) -> dict[str, Any]:
+        """Read the user's active preference memory **without writing anything**.
+
+        This node is reached before the decision, so both routes see the same
+        snapshot, and a read cannot change memory.  It never receives or returns
+        trusted interaction history.
+
+        Turn ordering is deliberate::
+
+            load_memory (read)  ->  decide  ->  [recommend -> enrich]  ->  finalize
+                                                                            |
+                                                              persist_memory (write)
+
+        The snapshot this node reads is what the retrieval query and the rendered
+        response are built from, so memory changes take effect from the following
+        turn.  A turn therefore cannot observe its own write, and no read is ever
+        influenced by a write from the same turn.
+        """
+        if self._memory_service is None or self._user_key is None:  # pragma: no cover
+            return {}
+        snapshot = self._memory_service.get_active_preferences(self._user_key)
+        return {"preference_snapshot": snapshot}
+
+    def _persist_memory_node(self, state: AgentGraphState) -> dict[str, Any]:
+        """Extract and persist explicit preferences from the user's own message.
+
+        Only ``user_message`` is passed, because only user-authored text is eligible
+        for extraction.  The node writes conversational preference memory and returns
+        nothing that could influence candidates.
+        """
+        if self._memory_service is None or self._user_key is None:  # pragma: no cover
+            return {}
+
+        user_message = state.get("user_message")
+        if not isinstance(user_message, str) or not user_message.strip():
+            return {}
+
+        turn_id = state.get("turn_id")
+        if not isinstance(turn_id, str) or not turn_id.strip():
+            # Idempotency needs a turn identity; without one a stable per-message id
+            # is derived so re-processing the same text is still deduplicated.
+            turn_id = f"auto-{abs(hash(user_message)) % (10 ** 12)}"
+
+        result = self._memory_service.process_turn(
+            user_key=self._user_key,
+            user_message=user_message,
+            turn_id=turn_id,
+        )
+        # Writes happen after the response has been produced, and this node does not
+        # rewrite ``preference_snapshot``.  Consequences, all deliberate:
+        #
+        #   * the retrieval query and the rendered preference block are built from the
+        #     snapshot loaded at the start of the turn, so a preference stated in *this*
+        #     message takes effect from the next turn;
+        #   * a turn can therefore never appear to have let its own statement influence
+        #     the candidates it returned;
+        #   * candidate identity, count, rank and score are untouched either way.
+        #
+        # The write is persisted before the run ends, so nothing is lost.
+        return {"memory_update": result}
 
     def _decide_node(self, state: AgentGraphState) -> dict[str, Any]:
         """Ask the decision model which route to take.
@@ -424,6 +625,8 @@ class AgentGraph:
         # current candidates; it never reaches history, ids or the candidate universe.
         user_message = state.get("user_message")
         query = user_message if isinstance(user_message, str) else ""
+        if self.augments_query_with_preferences:
+            query = _memory_context(query, state.get("preference_snapshot"))
         return {"enrichment": self._product_enricher.enrich(result, query)}
 
     def _finalize_node(self, state: AgentGraphState) -> dict[str, Any]:
@@ -443,11 +646,15 @@ class AgentGraph:
             if enrichment is not None:
                 return {
                     "route": ROUTE_RECOMMEND,
-                    "final_response": _build_grounded_response(enrichment),
+                    "final_response": _build_grounded_response(
+                        enrichment, state.get("preference_snapshot")
+                    ),
                 }
             return {
                 "route": ROUTE_RECOMMEND,
-                "final_response": _build_recommendation_response(result),
+                "final_response": _build_recommendation_response(
+                    result, state.get("preference_snapshot")
+                ),
             }
         return {
             "route": ROUTE_DIRECT,
@@ -495,10 +702,22 @@ def build_agent_graph(
     decision_model: DecisionModel,
     tool: RecommendationTool,
     product_enricher: ProductEnricherLike | None = None,
+    memory_service: PreferenceMemoryLike | None = None,
+    user_key: str | None = None,
+    augment_query_with_preferences: bool = True,
 ) -> AgentGraph:
     """Construct the agent graph (factory form).
 
     Without ``product_enricher`` this builds the accepted Milestone 7B/7C graph;
     supplying one inserts the Milestone 8 enrichment node on the recommendation route.
+    Supplying ``memory_service`` adds the Milestone 9 read/persist nodes and requires
+    ``user_key``.
     """
-    return AgentGraph(decision_model, tool, product_enricher=product_enricher)
+    return AgentGraph(
+        decision_model,
+        tool,
+        product_enricher=product_enricher,
+        memory_service=memory_service,
+        user_key=user_key,
+        augment_query_with_preferences=augment_query_with_preferences,
+    )
