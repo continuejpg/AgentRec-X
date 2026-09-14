@@ -222,7 +222,72 @@ chain and on synthetic candidate counts of 5 / 20 / 100 — see
 .venv/bin/python -m experiments.preference_reranking_smoke --k 5 --json /tmp/m10b.json
 ```
 
-## 13. Boundary summary
+## 13. Policy evaluation (Milestone 10C)
+
+`evaluation.py` and `evaluation_schemas.py` add an **observational** layer over this
+reranker. It reuses the production `PreferenceReranker` as-is — it does not re-implement
+the policy — and reports:
+
+| Diagnostic | Definition |
+| --- | --- |
+| displacement | `moved_count`, promoted/demoted/unchanged, `mean`/`max`/`median abs(original_rank - reranked_rank)` |
+| `top_k_overlap` | `|original_top_k INTERSECT reranked_top_k| / k` at `k ∈ {1,3,5,10}` (valid `k` only) |
+| adherence | per `k`: violations / matches / UNKNOWN **before** and **after** |
+| preference coverage | per active preference: candidates with non-UNKNOWN evidence (`known_count / candidate_count`) |
+| candidate coverage | per candidate: `match_count`, `violation_count`, `unknown_count`, `all_unknown` |
+| type coverage / movement | the same, broken out per preference kind |
+| policy consistency | every adjacent pair is non-decreasing under the canonical key; expected `0` violations |
+| violation protection | pairs where a violating candidate ranks above a clean one; expected `0` |
+| position reasons | **ordering** distribution over *all* candidates: `fewer_violations` / `more_matches` / `ordinal_rank` / `item_id_tiebreak` / `last_position`, with `total == candidate_count` |
+| movement attribution | **movement** distribution over *moved* candidates only: `fewer_violations` / `more_matches` / `ordinal_fallback` / `item_id_tiebreak`, with `attributed_total == moved_count` |
+| invariants | candidate count/universe/ids/scores/evidence/rank/order/mutation all unchanged |
+| baselines | restricted diagnostic orders (original, violation-only, match-only) for characterising key contributions |
+
+### Ordering reason vs movement cause
+
+These are two different questions with different denominators, and they are reported
+separately:
+
+* **Position reason** answers *"why does this candidate sit here, relative to the one
+  below it?"* It is defined for every candidate (moved or not) and its denominator is
+  `candidate_count`. It must never be presented as movement attribution.
+* **Movement cause** answers *"why did this candidate's rank change?"* It is defined
+  **only** for candidates where `original_rank != reranked_rank`, its denominator is
+  `moved_count`, and every moved candidate receives exactly one cause, so
+  `attributed_total == moved_count` always holds.
+
+A movement cause is decided by the single comparison that produced the new position: for
+a promotion, the highest-ranked candidate it overtook; for a demotion, the candidate
+immediately above it. The classification is **symmetric** — it names the canonical
+dimension that decided that pair from either side — so a candidate that overtook a
+cleaner rival and the rival it displaced both report `fewer_violations`.
+
+`ordinal_fallback` means the pair's evidence tied and the original SASRec rank decided
+it, i.e. the ordering changed because preference evidence demoted another candidate, not
+because this pair's evidence differed.
+
+### `item_id` is unreachable for valid input
+
+The canonical key's fourth component is consulted only when a pair shares an evidence
+profile **and** an `original_rank`. The accepted M10B reranker rejects duplicate
+`original_rank` values, so no ordering can ever depend on `item_id`: both the position
+and movement `item_id_tiebreak` counts must be **0**. This is audited on every run via
+`duplicate_original_rank_count` and `item_id_fallback_reachable`, and the field is kept
+purely as a defensive diagnostic for noncanonical input.
+
+**These are policy and adherence diagnostics, not quality metrics.** There are no
+preference-conditioned relevance labels in this project, so M10C reports no HR, Recall,
+NDCG, MRR, CTR, satisfaction or relevance figure — such a number would be fabricated.
+`matches`/`violations` measure agreement with *explicit preference evidence*;
+`top_k_overlap` measures *stability/displacement*; movement is not improvement.
+
+Aggregates always carry an explicit numerator and denominator. Timing lives outside the
+deterministic payload, so repeated runs produce the same report digest.
+
+The restricted baselines exist only to show what each canonical key contributes. They are
+never production alternatives.
+
+## 14. Boundary summary
 
 | Milestone | Scope |
 | --- | --- |

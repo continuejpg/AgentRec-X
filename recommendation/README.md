@@ -410,7 +410,10 @@ candidates under an explicit lexicographic policy — fewer explicit violations 
 then more explicit matches, then the original SASRec rank, then `item_id` as a final
 deterministic fallback. It never adds, removes or filters candidates, never modifies the
 raw SASRec score and computes no weighted score; `UNKNOWN` evidence is neutral. See
-[`reranking/README.md`](reranking/README.md).
+[`reranking/README.md`](reranking/README.md). The same package carries the Milestone 10C
+**policy evaluation** (displacement, top-k overlap, adherence, coverage, consistency and
+movement attribution) — an observational layer that reuses the production reranker and
+reports no relevance or quality metric.
 
 ---
 
@@ -434,7 +437,7 @@ raw SASRec score and computes no weighted score; `UNKNOWN` evidence is neutral. 
 | `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
 | `recommendation/memory/` | Explicit conversational preference memory: schema, stores, lifecycle (see its README) |
 | `recommendation/preference_matching/` | Preference–candidate evidence: MATCH / VIOLATION / UNKNOWN (see its README) |
-| `recommendation/reranking/` | Deterministic preference-aware reranking over that evidence (see its README) |
+| `recommendation/reranking/` | Deterministic preference-aware reranking, plus its policy evaluation (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |
