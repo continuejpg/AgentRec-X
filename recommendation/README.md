@@ -375,6 +375,14 @@ that would move the held-out item's timestamp relative to the history and leak
 the future. Filtering happens here, before any split, which is exactly the
 ordering this milestone guarantees.
 
+**Agent layer (M7A–M7C).** The accepted Tool (`recommendation/tools/`), the
+offline LangGraph graph (`recommendation/agent/`) and the real-chain integration
+(`tests/test_agent_tool_e2e.py`, `experiments/agent_tool_e2e_smoke.py`) consume
+these artifacts without changing any recommender semantics. Milestone 7C validates
+composition only — it does not recompute the formal benchmark, and it makes no
+recommendation-quality claim. Product metadata and semantic enrichment remain
+deferred to Milestone 8.
+
 ---
 
 ## 8. Module layout
@@ -395,3 +403,4 @@ ordering this milestone guarantees.
 | `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
+| `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |

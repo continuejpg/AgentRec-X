@@ -246,3 +246,21 @@ result = tool.run(request, context)   # history injected from application state
 The core Tool stays framework-free, so it can still be driven by a CLI, a batch job
 or a plain Python application. The agent layer adds orchestration, not recommender
 semantics.
+
+## Milestone 7C — real-chain integration
+
+Milestone 7C proves this Tool composes with the accepted LangGraph graph and the real
+engine + accepted Milestone 5 checkpoint. The Tool itself is **unchanged**: the
+integration builds `engine → Tool → graph` once, injects a deterministic decision
+model, and asserts that the request contract (`k` only) and the trusted-context
+contract (application-owned history) hold on the real path, with no internal HTTP
+hop through the Milestone 6 service.
+
+```bash
+.venv/bin/python -m pytest -q tests/test_agent_tool_e2e.py
+.venv/bin/python -m experiments.agent_tool_e2e_smoke
+```
+
+Milestone 7C validates integration, not recommendation quality, and adds no product
+metadata or semantic enrichment — those remain deferred to Milestone 8. See
+[`../agent/README.md`](../agent/README.md) for the full path and boundary table.

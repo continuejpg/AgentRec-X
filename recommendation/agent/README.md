@@ -229,3 +229,110 @@ Its transitive tree brings `langchain-core`, `langgraph-checkpoint`,
 helpers. None of them is an LLM provider SDK and none is imported by this package
 except `langgraph.graph`. No provider client, no API key parsing and no network
 call exists anywhere in `recommendation/agent/`.
+
+---
+
+## Milestone 7C — real-chain integration
+
+**M7C validates integration, not recommendation quality.**
+
+Milestone 7C does not change the agent. It proves that this accepted graph executes
+against the accepted real stack:
+
+```
+trusted application history
+    → AgentGraph (M7B, unchanged)
+    → decision = RECOMMEND(k)      (injected deterministic DecisionModel)
+    → RecommendationTool           (M7A contract, unchanged)
+    → SASRecInferenceEngine        (M6, unchanged)
+    → accepted M5 best.pt
+    → full-catalog ranking + seen-item masking
+    → structured result into the graph's final state
+    → honest final response
+```
+
+### Dependency construction
+
+The real chain is built **once per runtime** — `engine -> Tool -> graph` — and
+reused for every invocation. Model reload per node or per call does not happen, and
+the tests assert it via object identity and the engine's `loaded_at` timestamp
+rather than private PyTorch internals.
+
+Artifact discovery reuses the repository's existing configuration surface:
+`recommendation.api.app.ServiceSettings` supplies repository-relative defaults
+(`runs/sasrec_canonical_2026/best.pt`, its `run.json`, and
+`data/processed/Sports_and_Outdoors_mappings.json`), honours the existing
+`AGENTRECX_*` overrides, and its `to_inference_config()` supplies the engine config
+including the accepted-checkpoint digest check. Only that configuration object is
+reused — **the FastAPI app is never started and no HTTP request is made.** The
+shared harness lives in `tests/agent_tool_e2e_runtime.py`.
+
+### Trusted-history flow
+
+History is selected deterministically from the accepted processed sequences
+artifact: walk user records in stored order (ascending `user_int_id`), take the
+**first** record with `length > 3`, and supply
+`parent_asins[:-2] + [parent_asins[-2]]` — the training prefix plus the validation
+target, with the final leave-one-out test target excluded, matching the accepted
+M7A convention. Selection never inspects scores or candidates, so it cannot be
+tuned toward a preferred output. The selected history is reported as a
+length + one-way digest (`user_int_id=1`, length 5, digest `498eaa23691ca459`), and
+its order and duplicates reach the engine unchanged.
+
+The M7B trust boundary is unchanged on the real path: the decision model receives
+only the user message, and the graph's trusted history is what the real engine gets.
+
+### No internal HTTP
+
+`AgentGraph → RecommendationTool → SASRecInferenceEngine` is entirely in process.
+The M7C tests block `socket`, `create_connection`, `getaddrinfo` and `gethostbyname`
+while the real chain runs, so an accidental HTTP hop would fail the suite.
+
+### Deterministic decision model
+
+M7C is not an LLM-provider milestone. The route is chosen by an injected
+`SwitchableDecisionModel` (conceptually `ScriptedDecisionModel(AgentDecision(
+action=RECOMMEND, k=5))`); no provider SDK, external API call, credential or online
+inference is involved. A real LLM adapter, if ever required, is a later milestone.
+
+### Real checkpoint identity
+
+The E2E path asserts the accepted checkpoint digest
+`352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912` and the accepted
+`run.json` digest `e3549049f955bb0540444c221523444b2a333e8df5eac6b97984342e40c6e2c7`
+before and after running. The artifacts are read-only: no retraining, refitting,
+checkpoint selection, split change or metric recomputation occurs.
+
+### Running the gate
+
+```bash
+.venv/bin/python -m pytest -q tests/test_agent_tool_e2e.py     # 36 tests, real chain
+.venv/bin/python -m experiments.agent_tool_e2e_smoke           # 40 gates, prints evidence
+```
+
+M7C loads the 348 MB checkpoint and the 156,746-item catalog, so the test builds its
+runtime once per session; every other suite stays lightweight. Both commands skip or
+fail cleanly when the git-ignored artifacts are absent.
+
+### Candidate exhaustion
+
+With 156,746 catalog items and a longest real history of ~700 items, genuine
+exhaustion (`returned_k == 0`) is **not reachable** on the accepted artifacts. The
+reachable real-data case — a history longer than the maximum `k = 100` — is covered
+by the E2E suite, and the authoritative exhaustion assertions remain the lower-level
+M7A/M7B regressions. No catalog corruption was engineered to force the condition.
+
+### Boundary summary
+
+| Milestone | Scope |
+| --- | --- |
+| M7B | Offline orchestration contract; fakes only; **no** checkpoint, engine or catalog |
+| **M7C** | Real-chain integration: injected deterministic decision model + real Tool + real engine + real checkpoint |
+| M8 | Out of scope here: Product RAG, product metadata retrieval and semantic enrichment |
+
+**Product metadata and semantic enrichment remain deferred to M8.** M7C responses
+expose only candidate identity (`parent_asin`), rank and raw model score; the
+response states explicitly that scores are not probabilities and not evidence about
+a product. M7C makes no claim that the recommendations are good, well personalised,
+relevant or better than any baseline — that requires benchmark or qualitative
+evaluation evidence this milestone does not provide.
