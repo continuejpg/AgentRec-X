@@ -358,3 +358,76 @@ def test_sqlite_convenience_read_of_unknown_turn_is_empty(
     sqlite_store: SQLitePreferenceStore,
 ) -> None:
     assert sqlite_store.get_entries_for_turn("alice", "never") == ()
+
+
+# --------------------------------------------------------------------------- #
+# Cross-thread usability (Milestone 11 integration regression)
+# --------------------------------------------------------------------------- #
+
+
+def test_sqlite_store_is_usable_from_a_different_thread(tmp_path: Path) -> None:
+    """Regression: the store must work when created and used on different threads.
+
+    Milestone 11 serves the demo from a multi-threaded ASGI server, which creates the
+    store during startup and then touches it from request worker threads.  SQLite's
+    default ``check_same_thread`` affinity made every such request fail with
+    ``sqlite3.ProgrammingError``.  The store already serialises every access behind its
+    own ``RLock``, so sharing the connection is safe and is what this test pins.
+    """
+    import threading
+
+    database = tmp_path / "cross_thread.sqlite3"
+    store = SQLitePreferenceStore(database)
+    creator = threading.get_ident()
+    results: dict[str, object] = {}
+
+    def use_from_another_thread() -> None:
+        try:
+            results["thread"] = threading.get_ident()
+            store.add_entry(make_entry(seq=1))
+            store.add_entry(make_entry(turn_id="t2", value="blue", seq=2))
+            results["values"] = [entry.value for entry in store.get_entries("alice", active_only=True)]
+            results["count"] = store.count("alice", active_only=True)
+        except BaseException as exc:  # noqa: BLE001 - reported through ``results``
+            results["error"] = exc
+
+    worker = threading.Thread(target=use_from_another_thread)
+    worker.start()
+    worker.join()
+
+    assert "error" not in results, results.get("error")
+    assert results["thread"] != creator, "the fixture did not leave the creating thread"
+    assert results["values"] == ["black", "blue"]
+    assert results["count"] == 2
+    # The creating thread can still use it afterwards.
+    assert store.count("alice", active_only=True) == 2
+    store.close()
+
+
+def test_sqlite_store_serialises_concurrent_writers(tmp_path: Path) -> None:
+    """Concurrent writers from many threads leave a consistent store, with no lost rows."""
+    import threading
+
+    store = SQLitePreferenceStore(tmp_path / "concurrent.sqlite3")
+    errors: list[BaseException] = []
+
+    def write(index: int) -> None:
+        try:
+            store.add_entry(make_entry(turn_id=f"t{index}", value=f"v{index}", seq=index))
+        except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(index,)) for index in range(1, 13)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert store.count("alice") == 12
+    assert {entry.value for entry in store.get_entries("alice")} == {
+        f"v{index}" for index in range(1, 13)
+    }
+    # Deterministic ordering is by ``logical_seq``, not by thread scheduling.
+    assert [entry.logical_seq for entry in store.get_entries("alice")] == list(range(1, 13))
+    store.close()

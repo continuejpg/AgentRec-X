@@ -434,6 +434,23 @@ every catalogue fact is attached by `(parent_asin, item_id)` identity rather tha
 position. M10C remains offline: no serving node imports or calls the evaluator. See
 [`agent/README.md`](agent/README.md).
 
+**Multi-turn web demo (M11).** `recommendation/demo/` exposes the whole accepted chain
+through a browser-usable, multi-turn demo, with `recommendation/api/demo_routes.py` as a
+thin FastAPI controller and `recommendation/web/` as plain HTML/CSS/JS static assets:
+
+```text
+browser -> FastAPI demo routes -> DemoSessionManager -> AgentGraph -> M7A..M10B
+```
+
+M11 adds no recommendation logic. A session owns an opaque `session_id`, a
+session-derived preference-memory `user_key`, the application-owned trusted history taken
+from a `DemoProfile`, and a per-session turn lock; the trusted history is never written
+from chat text, and two sessions on the same profile never share preference memory. The
+compiled graph is cached per `(k, session user_key)`, while the engine, Tool, metadata
+index, enricher, memory service, matcher and reranker are constructed exactly once per
+process. The three accepted Milestone 6 endpoints keep their exact contracts, and the demo
+API is opt-in. See [`demo/README.md`](demo/README.md).
+
 ---
 
 ## 8. Module layout
@@ -452,6 +469,8 @@ position. M10C remains offline: no serving node imports or calls the evaluator. 
 | `recommendation/api/` | FastAPI recommendation service (see its README) |
 | `recommendation/tools/` | Agent-facing Recommendation Tool contract (see its README) |
 | `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool, including the M10D preference-reranking integration (see its README) |
+| `recommendation/demo/` | Milestone 11 multi-turn web demo: demo profiles, session manager, runtime composition, public serialization (see its README) |
+| `recommendation/web/` | Static browser demo: plain HTML, CSS and JavaScript served by FastAPI |
 | `recommendation/catalog/` | `parent_asin`-keyed product metadata: normalization, artifact, coverage, lookup (see its README) |
 | `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
 | `recommendation/memory/` | Explicit conversational preference memory: schema, stores, lifecycle (see its README) |
@@ -461,4 +480,9 @@ position. M10C remains offline: no serving node imports or calls the evaluator. 
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |
 | `tests/test_agent_reranking.py` | Milestone 10D offline integration tests for the M10A -> M10B agent route |
+| `tests/test_demo_sessions.py` | Milestone 11 session-layer tests: profiles, turn ids, isolation, reset, capacity |
+| `tests/test_demo_api.py` | Milestone 11 HTTP contract tests, plus the M6 compatibility checks |
+| `tests/test_demo_web.py` | Milestone 11 frontend tests: served assets, structure, safety guards |
+| `tests/test_demo_multiturn.py` | Milestone 11 multi-turn, lifecycle, isolation, concurrency and determinism tests |
+| `experiments/web_demo_smoke.py` | Milestone 11 real-chain smoke over HTTP (39 gates) |
 | `experiments/agent_reranking_smoke.py` | Milestone 10D real-chain smoke: graph -> Tool -> SASRec -> M8 -> M9 -> M10A -> M10B |

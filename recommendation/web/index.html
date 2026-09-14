@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgentRec-X — multi-turn demo</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!--
+    AgentRec-X Milestone 11 demo.
+
+    This page is a thin client: it renders exactly the structured data the API returns.
+    It performs no scoring, no filtering and no re-ordering of recommendations, and it
+    never writes user or metadata text with innerHTML.
+  -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">AgentRec-X</span>
+      <span class="brand-sub">multi-turn shopping agent demo</span>
+    </div>
+    <div class="session-controls">
+      <label for="profile-select">Demo profile</label>
+      <select id="profile-select" disabled></select>
+      <button id="new-session" type="button">New session</button>
+      <button id="reset-session" type="button" class="danger" disabled>Reset session</button>
+    </div>
+  </header>
+
+  <p class="notice" role="note">
+    Local research demo. Recommendations come from the accepted SASRec checkpoint and a
+    deterministic explicit-preference policy. Scores are raw ranking scores, not
+    probabilities. No production authentication is provided.
+  </p>
+
+  <div id="banner" class="banner" role="alert" hidden></div>
+
+  <main class="layout">
+    <section class="panel conversation" aria-label="Conversation">
+      <h2>Conversation</h2>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+      <form id="chat-form" class="composer" autocomplete="off">
+        <input
+          id="message-input"
+          type="text"
+          name="message"
+          maxlength="2000"
+          placeholder="Recommend some hiking gear."
+          aria-label="Message"
+          disabled
+        />
+        <button id="send-button" type="submit" disabled>Send</button>
+      </form>
+      <p class="hint">
+        Stating a preference stores it for <strong>future</strong> turns — the accepted
+        memory contract applies a preference from the following turn onward.
+      </p>
+    </section>
+
+    <aside class="sidebar">
+      <section class="panel" aria-label="Active preferences">
+        <h2>Active preferences</h2>
+        <div id="preferences" class="preferences">
+          <p class="muted">No active preferences yet.</p>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="System status">
+        <h2>System / audit</h2>
+        <dl id="audit" class="audit">
+          <div><dt>State</dt><dd id="state-value">initializing</dd></div>
+          <div><dt>Session</dt><dd id="session-value">—</dd></div>
+          <div><dt>Turn</dt><dd id="turn-value">—</dd></div>
+          <div><dt>Route</dt><dd id="route-value">—</dd></div>
+          <div><dt>Candidates</dt><dd id="candidate-value">—</dd></div>
+          <div><dt>Moved</dt><dd id="moved-value">—</dd></div>
+          <div><dt>Ranked with</dt><dd id="ranked-with-value">—</dd></div>
+        </dl>
+        <details class="orders">
+          <summary>Candidate order (audit)</summary>
+          <p class="muted">Original SASRec order</p>
+          <ol id="original-order" class="order-list"></ol>
+          <p class="muted">Order after the explicit-preference policy</p>
+          <ol id="reranked-order" class="order-list"></ol>
+        </details>
+      </section>
+    </aside>
+  </main>
+
+  <section class="panel recommendations" aria-label="Recommendations">
+    <h2>Recommendation cards</h2>
+    <p class="hint">
+      Cards appear in the exact order the backend produced. The page never re-sorts them.
+    </p>
+    <div id="cards" class="cards">
+      <p class="muted">Send a message that asks for recommendations to see cards here.</p>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span id="api-version">api —</span>
+    <span class="muted">
+      Trusted behavioural history, preference memory and this page's transcript are three
+      separate things; this page only shows the last two.
+    </span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>

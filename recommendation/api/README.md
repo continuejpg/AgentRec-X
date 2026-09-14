@@ -15,8 +15,16 @@ deterministic ranking        recommendation/inference/ranking.py
 SASRec (eval, inference_mode)
 ```
 
-There is **no** Agent, RAG, Memory, Critic, conversation state or LLM call here, and no
-authentication, database or user accounts.
+There is **no** Agent, RAG, Memory, Critic or LLM call in the Milestone 6 endpoints, and
+no authentication, database or user accounts.
+
+**Milestone 11 addition.** The same FastAPI application can additionally serve the
+multi-turn web demo (`/v1/demo/*`, opt-in via `create_app(..., enable_demo=True)`, which is
+how the module-level `app` is built). The demo endpoints delegate to the accepted
+`AgentGraph` through [`../demo/`](../demo/) and are registered by
+[`demo_routes.py`](demo_routes.py); the three Milestone 6 endpoints above keep their exact
+paths, schemas and semantics and are never routed through the agent. See
+[`../demo/README.md`](../demo/README.md).
 
 ---
 
@@ -225,3 +233,24 @@ ranking cannot drift from the documented rule. The API suite drives FastAPI's
 in-process `TestClient` against a tiny synthetic checkpoint
 (`tests/sasrec_inference_fixture.py`); normal pytest never loads the 349 MB formal run
 or the 156,746-item catalog. All suites run on CPU.
+
+## 8. Milestone 11 demo routes
+
+Added alongside the Milestone 6 endpoints; opt-in, so `create_app()` without
+`enable_demo=True` remains exactly the Milestone 6 service.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/demo/health` | demo readiness (`model_loaded`, `metadata_loaded`, `demo_ready`) |
+| `GET` | `/v1/demo/profiles` | server-owned demo profiles |
+| `POST` | `/v1/demo/sessions` | create an isolated demo session |
+| `GET` | `/v1/demo/sessions/{id}` | session state and ACTIVE preferences |
+| `POST` | `/v1/demo/sessions/{id}/chat` | one conversational turn |
+| `DELETE` | `/v1/demo/sessions/{id}` | reset that session |
+| `GET` | `/demo/` | browser demo (static assets) |
+
+`demo_routes.py` is a thin controller: it validates, looks up the session, allocates a
+server-owned turn id, invokes the accepted graph and serializes through an explicit
+whitelist. It contains no scoring, sorting, retrieval, matching, reranking or explanation
+logic, and it imports none of those implementations (AST-guarded by
+`tests/test_demo_api.py`).

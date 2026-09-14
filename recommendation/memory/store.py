@@ -233,7 +233,16 @@ class SQLitePreferenceStore:
     def __init__(self, database: str | Path) -> None:
         self._database = str(database)
         self._lock = threading.RLock()
-        self._connection = sqlite3.connect(self._database, isolation_level=None)
+        # ``check_same_thread=False`` is required, not cosmetic.  Every access in this
+        # class is already serialised by ``self._lock`` (an RLock) and multi-statement
+        # updates run inside one ``BEGIN IMMEDIATE`` transaction, so the connection is
+        # safe to share across threads.  SQLite's default same-thread check would
+        # otherwise make the store unusable from a multi-threaded ASGI server, where the
+        # store is created on one thread and requests are served on worker threads --
+        # reproduced as ``sqlite3.ProgrammingError`` on the first cross-thread read.
+        self._connection = sqlite3.connect(
+            self._database, isolation_level=None, check_same_thread=False
+        )
         self._connection.row_factory = sqlite3.Row
         # Durability/consistency settings that are safe for a single-writer local store.
         self._connection.execute("PRAGMA journal_mode = WAL")
