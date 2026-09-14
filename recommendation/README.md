@@ -397,6 +397,14 @@ Preference memory does **not** modify recommendation candidate order in M9 — c
 identity, count, rank and raw SASRec score are untouched. See
 [`memory/README.md`](memory/README.md).
 
+**Preference–candidate evidence (M10A).** `recommendation/preference_matching/` reports,
+for each candidate and each ACTIVE preference, whether the candidate's already-attached
+metadata satisfies it (`MATCH`), breaks it (`VIOLATION`) or cannot decide
+(`UNKNOWN`). It is an evidence layer only: it does **not** rerank, filter, add or drop
+candidates, and it computes no combined score. Missing metadata is always `UNKNOWN`,
+never a match or a violation. See
+[`preference_matching/README.md`](preference_matching/README.md).
+
 ---
 
 ## 8. Module layout
@@ -418,6 +426,7 @@ identity, count, rank and raw SASRec score are untouched. See
 | `recommendation/catalog/` | `parent_asin`-keyed product metadata: normalization, artifact, coverage, lookup (see its README) |
 | `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
 | `recommendation/memory/` | Explicit conversational preference memory: schema, stores, lifecycle (see its README) |
+| `recommendation/preference_matching/` | Preference–candidate evidence: MATCH / VIOLATION / UNKNOWN (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |
