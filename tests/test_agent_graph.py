@@ -120,9 +120,14 @@ def test_graph_has_no_cycle() -> None:
 
 
 def test_graph_version_is_exposed() -> None:
-    """The orchestration contract is versioned like the Tool contract."""
+    """The orchestration contract is versioned like the Tool contract.
+
+    Milestone 10D bumped the graph contract to 2 by adding the optional
+    ``match_preferences`` / ``rerank`` nodes.  A graph built without that pair keeps the
+    version 1 topology and behaviour, which the M10D tests assert separately.
+    """
     graph, _, _ = make_graph(RECOMMEND_PAYLOAD)
-    assert graph.version == AGENT_GRAPH_VERSION == 1
+    assert graph.version == AGENT_GRAPH_VERSION == 2
     assert AGENT_DECISION_VERSION == 1
 
 

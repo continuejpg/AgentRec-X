@@ -415,6 +415,25 @@ raw SASRec score and computes no weighted score; `UNKNOWN` evidence is neutral. 
 movement attribution) — an observational layer that reuses the production reranker and
 reports no relevance or quality metric.
 
+**Agent integration of reranking (M10D).** `recommendation/agent/` now composes the
+accepted M10A and M10B stages into the real recommendation route as **optional injected
+collaborators**:
+
+```text
+recommend -> enrich -> match_preferences -> rerank -> finalize
+  (M7A)       (M8)         (M10A)          (M10B)
+```
+
+M10D is an integration milestone: the M10A evidence semantics, the M10B policy, the M9
+lifecycle, the M8 candidate-scoped retrieval and the M7A/M7B contracts are all
+unchanged. The graph holds no matcher or reranker of its own — supplying only one of the
+pair, or a matcher without an enricher, fails construction explicitly, and the `DIRECT`
+route still performs zero recommendation, metadata, matching or reranking work. The
+final response is rendered in reranked order while keeping `original_rank` auditable, and
+every catalogue fact is attached by `(parent_asin, item_id)` identity rather than by list
+position. M10C remains offline: no serving node imports or calls the evaluator. See
+[`agent/README.md`](agent/README.md).
+
 ---
 
 ## 8. Module layout
@@ -432,7 +451,7 @@ reports no relevance or quality metric.
 | `recommendation/inference/` | serving inference engine + deterministic top-k ranking (see its README) |
 | `recommendation/api/` | FastAPI recommendation service (see its README) |
 | `recommendation/tools/` | Agent-facing Recommendation Tool contract (see its README) |
-| `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool (see its README) |
+| `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool, including the M10D preference-reranking integration (see its README) |
 | `recommendation/catalog/` | `parent_asin`-keyed product metadata: normalization, artifact, coverage, lookup (see its README) |
 | `recommendation/rag/` | Candidate-scoped product evidence retrieval (see its README) |
 | `recommendation/memory/` | Explicit conversational preference memory: schema, stores, lifecycle (see its README) |
@@ -441,3 +460,5 @@ reports no relevance or quality metric.
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |
 | `tests/test_agent_tool_e2e.py` | Milestone 7C real-chain E2E: graph -> Tool -> real engine -> accepted checkpoint |
+| `tests/test_agent_reranking.py` | Milestone 10D offline integration tests for the M10A -> M10B agent route |
+| `experiments/agent_reranking_smoke.py` | Milestone 10D real-chain smoke: graph -> Tool -> SASRec -> M8 -> M9 -> M10A -> M10B |

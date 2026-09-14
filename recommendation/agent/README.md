@@ -1,40 +1,46 @@
-# Minimal LangGraph Agent (Milestone 7B)
+# Minimal LangGraph Agent (Milestones 7B-10D)
 
 A deliberately small LangGraph workflow that proves the orchestration contract
-around the already accepted Milestone 7A Recommendation Tool.
+around the already accepted Milestone 7A Recommendation Tool, and composes the
+accepted Milestone 8, 9, 10A and 10B stages as **optional injected collaborators**.
 
 ```
 user message + trusted history
         │
         ▼
+   ┌─────────────┐
+   │ load_memory │   M9: read-only active-preference snapshot (optional)
+   └──────┬──────┘
+          ▼
    ┌─────────┐
    │ decide  │   decision model: decide(messages) -> AgentDecision
    └────┬────┘
         │
-        ├── action == "direct_response" ──────────────► finalize ──► END
+        ├── action == "direct_response" ──────────────────────────► finalize ──► END
         │
-        └── action == "recommend" ──► recommend ─────► finalize ──► END
-                                      │
-                              RecommendationTool          recommendation/tools/
-                                      │
-                              SASRecInferenceEngine       recommendation/inference/
-                                      │
-                                 SASRec model
+        └── action == "recommend" ──► recommend ──► enrich ──► match_preferences ──► rerank
+                                        │            │              │                │
+                                        │            │              │                └─ M10B
+                                        │            │              └─ M10A evidence      policy
+                                        │            └─ M8 metadata
+                                        └─ RecommendationTool → SASRecInferenceEngine
+
+   (… every node after `decide` is present only when its collaborator was injected)
 ```
 
 ## What Milestone 7B is for
 
 One thing: showing that LangGraph can drive the accepted Tool while the
-trusted-history boundary stays intact. The graph has three nodes, two routes, no
+trusted-history boundary stays intact. The base graph has three nodes, two routes, no
 cycle, and at most one Tool call per run.
 
 ## What it is not
 
-Not a shopping assistant. Milestone 7B contains **no**:
+Not a shopping assistant. The base Milestone 7B graph contains **no**:
 
 * planner, task decomposition, ReAct loop, reflection, retry or summarizer;
 * intent classifier beyond the single two-way route choice;
-* critic, constraint checker or reranker;
+* critic, learned reranker or LLM critic;
 * RAG, vector database, embedding, product-metadata retrieval or product search;
 * memory, profile store or user database;
 * semantic IDs, RQ-VAE or SID transformer;
@@ -44,6 +50,12 @@ Not a shopping assistant. Milestone 7B contains **no**:
   **never** calls it;
 * retraining, new benchmark, evaluator/preprocessing/ItemCF change, or any change
   to Milestone 5 checkpoint or Milestone 6 inference/ranking semantics.
+
+The later milestones add stages only through injection, and each one keeps its own
+boundary: M8 attaches candidate-scoped metadata, M9 reads and writes explicit
+conversational preferences, M10A produces evidence and M10B produces an order. M10D
+merely wires M10A and M10B into the route; it adds no scoring, no weighting, no
+filtering and no new policy.
 
 ---
 
@@ -122,8 +134,14 @@ model is loud rather than silently recommending.
 | --- | --- | --- |
 | `user_message` | application | the only natural-language input |
 | `trusted_user_history` | application (read-only thereafter) | trusted chronological `parent_asin` tuple |
+| `turn_id` | application (optional) | idempotency key for the memory write |
 | `decision` | `decide` | the validated `AgentDecision` |
 | `tool_result` | `recommend` | the Tool's typed result |
+| `enrichment` | `enrich` (M8) | candidate-scoped metadata, same candidates and order |
+| `preference_snapshot` | `load_memory` (M9) | immutable ACTIVE-preference snapshot read at turn start |
+| `memory_update` | `persist_memory` (M9) | what this turn's write did (audit only) |
+| `preference_evidence` | `match_preferences` (M10D) | M10A evidence, still in SASRec order |
+| `reranking` | `rerank` (M10D) | M10B result: same identities, policy order |
 | `final_response` | `finalize` | the run's text |
 | `route` | `finalize` | `direct` or `recommend` |
 
@@ -145,8 +163,8 @@ scores, and nothing more. Every recommendation response carries:
 **Milestone 7B provides no product semantic enrichment.** Candidate IDs and scores
 are **not** sufficient evidence for product-attribute claims: this milestone has no
 titles, brands, prices, categories, descriptions, images or reviews, and no
-retrieval over product metadata. A later RAG milestone is what would supply such
-evidence.
+retrieval over product metadata. Milestone 8 supplies that evidence; Milestone 10D
+renders it without adding any claim of its own.
 
 Candidate exhaustion is normal and is never turned into an error or padded with
 fabricated items: `returned_k < requested_k` when fewer unseen items remain, and
@@ -161,10 +179,16 @@ fabricated items: `returned_k < requested_k` when fewer unseen items remain, and
 | unknown `parent_asin` in trusted history | `UnknownHistoryItem` |
 | engine unavailable / unexpected failure | `RecommendationUnavailable` |
 | graph constructed with an unusable collaborator | `AgentConfigurationError` |
+| a recommendation-route stage ran without its required upstream state (M8/M10D) | `AgentGraphError` |
+| the reranker changed the candidate set (count or identity) | `AgentGraphError` |
+| the matcher or reranker itself failed | the collaborator's own exception, propagated |
 
 Tool domain errors propagate unchanged, so there is one stable taxonomy across the
-Tool and the graph. `MalformedDecision` and `AgentGraphError` are the only
-graph-level additions.
+Tool and the graph. M10D adds **no** fallback: a failed matcher never yields a
+partially reranked list, and a failed reranker never yields a raw-order answer
+presented as if the policy had run. The `DIRECT` route is unaffected by any failure in
+the preference stages, because it never reaches them.
+
 
 ## Usage
 
@@ -330,7 +354,10 @@ M7A/M7B regressions. No catalog corruption was engineered to force the condition
 | **M7C** | Real-chain integration: injected deterministic decision model + real Tool + real engine + real checkpoint |
 | M8 | Product metadata + candidate-scoped evidence retrieval (realisation of the row above) |
 | M9 | Preference memory: explicit conversational preferences, loaded before `decide`, persisted after `finalize` (see `../memory/README.md`). Does **not** rerank. |
-| M10 | Out of scope here: preference-aware scoring, critique and reranking |
+| **M10A** | Preference–candidate evidence: MATCH / VIOLATION / UNKNOWN over the candidates' own metadata (see `../preference_matching/README.md`) |
+| **M10B** | Deterministic reranking under the frozen lexicographic policy (see `../reranking/README.md`) |
+| **M10D** | Integration: the accepted M10A → M10B path wired into the recommendation route (this section) |
+| M11 | Out of scope: web demo |
 
 **Product metadata and semantic enrichment belong to M8, not M7C.** M7C responses
 expose only candidate identity (`parent_asin`), rank and raw model score; the
@@ -338,3 +365,101 @@ response states explicitly that scores are not probabilities and not evidence ab
 a product. M7C makes no claim that the recommendations are good, well personalised,
 relevant or better than any baseline — that requires benchmark or qualitative
 evaluation evidence this milestone does not provide.
+
+## Milestone 10D — preference reranking integrated into the route
+
+The accepted M10A matcher and M10B reranker are now reachable from the real Agent
+recommendation route. Nothing about either stage changes: M10D is an integration
+milestone, not a policy milestone.
+
+### Topology
+
+```
+recommend ──► enrich ──► match_preferences ──► rerank ──► finalize
+   (M7A)       (M8)            (M10A)           (M10B)      (M7B/M8/M10D formatter)
+```
+
+The two new nodes sit on the recommendation route only, so `DIRECT` never reaches
+them.
+
+### Dependency matrix
+
+| Injected | Resulting behaviour |
+| --- | --- |
+| `tool` | M7B/M7C: `decide -> {finalize \| recommend -> finalize}` |
+| `tool` + `product_enricher` | M8: `enrich` inserted before `finalize` |
+| `tool` + `product_enricher` + `memory_service` | M9: `load_memory` / `persist_memory` added; unchanged otherwise |
+| `tool` + `product_enricher` + `memory_service` + `preference_matcher` + `reranker` | M10D: full route above |
+| `tool` + `product_enricher` + `preference_matcher` + `reranker` (**no memory**) | Valid and documented: the matcher receives an **empty** preference sequence, so evidence is empty and M10B is order-preserving |
+
+Rejected at construction with `AgentConfigurationError`:
+
+* `preference_matcher` **or** `reranker` alone — the pair is all-or-nothing, so a
+  half-configured reranking stage can never be built silently;
+* `preference_matcher` without `product_enricher` — M10A reads the metadata M8 attached,
+  so matching cannot run without it;
+* a collaborator missing its one method (`match` / `rerank`).
+
+No default matcher, reranker, metadata store or memory store is ever constructed by the
+graph.
+
+### Graph state additions
+
+Two derived channels, both written only on the recommendation route:
+
+| Channel | Concrete type | Meaning |
+| --- | --- | --- |
+| `preference_evidence` | `recommendation.preference_matching.schemas.PreferenceEvidenceReport` | M10A evidence, still in SASRec order |
+| `reranking` | `recommendation.reranking.schemas.RerankingReport` | M10B result: the same identities in policy order |
+
+Original order is never rewritten. `tool_result` and `enrichment` keep the upstream
+SASRec sequence and their `rank` values are the authoritative `original_rank`; every
+`RerankedCandidate` carries both `original_rank` and `reranked_rank`. Audit paths can
+therefore always recover the original order from the upstream channels even when the
+final text is rendered in reranked order.
+
+### Preference snapshot timing
+
+Unchanged from M9, and re-asserted for M10D: `load_memory` reads once at the start of
+the turn, `match_preferences` consumes **that** snapshot, and `persist_memory` writes
+after `finalize`. A preference stated in the current user message is therefore stored
+during the turn but does **not** affect the recommendation that turn returns — it takes
+effect from the next turn.
+
+### Grounding and wording rules
+
+* every catalogue fact in the response comes from that candidate's own M8 metadata,
+  matched by `(parent_asin, item_id)` — never by list position;
+* every match / violation claim comes from M10A; every rank movement from M10B;
+* the raw SASRec score is labelled a ranking score and explicitly disclaimed as not a
+  probability, confidence value, rating or preference score;
+* the M10B `rerank_reason` label is **not** used as a user-facing explanation — M10C
+  showed its tail `DETERMINISTIC_TIE_BREAK` wording can be imprecise. Movement is
+  described with directly supported facts (`original_rank`, `reranked_rank`, and the
+  evidence counts) only;
+* `item_id` is never shown, and no tie-break claim is ever made: M10C proved `item_id`
+  is unreachable for valid input with unique original ranks;
+* no quality or relevance claim is made — not "best", not "most relevant", not
+  "better"/"more personalized"/"optimal". Policy adherence is not converted into a
+  quality claim, because no preference-conditioned relevance labels exist.
+
+### M10C stays offline
+
+M10C is diagnostics, not serving. No runtime node imports or calls
+`recommendation.reranking.evaluation`. The evaluator is used **test-side only** —
+after a graph run, to validate the produced `RerankingReport` — and AST guards enforce
+that the agent package imports neither the matching/reranking packages nor the
+evaluator, and writes no ordering key of its own.
+
+### Running the gate
+
+```bash
+.venv/bin/python -m pytest -q tests/test_agent_reranking.py   # 76 tests, fully offline
+.venv/bin/python -m experiments.agent_reranking_smoke          # 21 gates, real chain
+```
+
+The smoke uses a **globally fixed synthetic preference fixture** declared before any
+candidate output is examined; it is not derived from the user's real history and is not
+a claim about any real shopper. It makes no recommendation-quality claim: the accepted
+M5 benchmark remains sealed and is not recomputed.
+

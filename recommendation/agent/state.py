@@ -26,6 +26,24 @@ add to, drop from, reorder or otherwise alter the history a run was started with
 The state also never carries internal item ids, encoded model histories, SASRec
 tensors, mapping internals or checkpoint internals.  Candidate identity appears
 only as external ``parent_asin`` values inside the Tool's typed result.
+
+Original order versus reranked order
+------------------------------------
+Milestone 10D adds two *derived* channels and rewrites nothing:
+
+``tool_result``
+    The accepted Tool result, in SASRec order.  Its ``rank`` values are the
+    authoritative ``original_rank``; it is never mutated to look reranked.
+``enrichment``
+    The same candidates in the same order, plus candidate-scoped metadata.
+``preference_evidence``
+    M10A evidence over those candidates, still in the upstream order.
+``reranking``
+    The M10B result: the same candidate identities in policy order, each carrying
+    both ``original_rank`` and ``reranked_rank``.
+
+A consumer can therefore always recover the original order from the upstream
+channels even when the final response is presented in reranked order.
 """
 
 from __future__ import annotations
@@ -163,6 +181,24 @@ class AgentGraphState(TypedDict, total=False):
     preference_snapshot: Any
     #: Result of persisting this turn's explicit preferences (audit/diagnostics).
     memory_update: Any
+
+    # -- written by the preference nodes (Milestone 10D, optional) --------- #
+    #: M10A evidence for the *already-enriched* candidates.  Typed ``Any`` so this
+    #: module does not depend on the preference-matching package; when present it is a
+    #: ``recommendation.preference_matching.schemas.PreferenceEvidenceReport``.
+    #:
+    #: This channel is evidence, never an order: the candidates inside it appear in the
+    #: exact upstream SASRec order, each keeping its ``original_rank``, ``item_id``,
+    #: ``parent_asin`` and raw ``sasrec_score`` unchanged.
+    preference_evidence: Any
+    #: M10B reranking result.  Typed ``Any`` so this module does not depend on the
+    #: reranking package; when present it is a
+    #: ``recommendation.reranking.schemas.RerankingReport``.
+    #:
+    #: This is the *derived* view: it carries the reranked order.  It is additive
+    #: state -- ``tool_result``, ``enrichment`` and ``preference_evidence`` keep the
+    #: authoritative upstream order and are never rewritten to look reranked.
+    reranking: Any
 
     # -- written by the finalizing node ----------------------------------- #
     final_response: str

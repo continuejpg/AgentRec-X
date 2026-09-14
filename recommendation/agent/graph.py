@@ -1,20 +1,41 @@
-"""Minimal LangGraph agent orchestration around the Recommendation Tool (Milestone 7B).
+"""LangGraph agent orchestration around the Recommendation Tool (Milestones 7B-10D).
 
-The graph proves one thing: that a LangGraph workflow can drive the already
-accepted Milestone 7A Recommendation Tool while keeping the trusted-history
-boundary intact.
+The graph drives the already accepted Milestone 7A Recommendation Tool while keeping
+the trusted-history boundary intact, and composes the accepted Milestone 8, 9, 10A and
+10B stages as *optional injected collaborators*.
 
-::
+Complete topology (every optional stage present)::
 
     START
       |
       v
-    decide            (decision model: see recommendation/agent/decision.py)
+    load_memory        (M9: read-only active-preference snapshot)
       |
-      +-- action == "direct_response" --> finalize --> END
+      v
+    decide             (decision model: see recommendation/agent/decision.py)
       |
-      +-- action == "recommend" --------> recommend -> finalize --> END
-                                          (RecommendationTool)
+      +-- action == "direct_response" --> finalize --> persist_memory --> END
+      |
+      +-- action == "recommend" --------> recommend -> enrich
+                                            (RecommendationTool)
+                                            (M8 candidate-scoped metadata)
+                                                          |
+                                                          v
+                                                 match_preferences
+                                                    (M10A evidence)
+                                                          |
+                                                          v
+                                                       rerank
+                                                  (M10B frozen policy)
+                                                          |
+                                                          v
+                                                      finalize --> persist_memory --> END
+
+Every stage after ``decide`` is conditional on what the caller injected.  With nothing
+injected the graph is exactly the accepted Milestone 7B/7C shape; with only an enricher
+it is Milestone 8; with memory as well it is Milestone 9; adding the Milestone 10D
+matcher/reranker pair appends the two nodes above.  No default collaborator is ever
+constructed.
 
 The ``recommend`` node is the *only* component that touches the recommender, and
 it does so through the accepted Tool - never through HTTP, never by reimplementing
@@ -23,6 +44,18 @@ scoring, masking or ranking:
 ::
 
     LangGraph -> RecommendationTool -> SASRecInferenceEngine -> SASRec model
+
+Original order versus reranked order
+------------------------------------
+Milestone 10D adds derived state, never a rewrite.  ``tool_result`` and ``enrichment``
+keep the upstream SASRec order and their ``rank`` values are the authoritative
+``original_rank``; ``preference_evidence`` holds M10A evidence still in that order; and
+``reranking`` holds the M10B result, where each candidate carries both ``original_rank``
+and ``reranked_rank``.  The final text is rendered in reranked order, and the graph
+itself never sorts: ordering comes from the injected reranker.
+
+M10C (offline policy evaluation) is deliberately **not** part of this path.  A serving
+request needs evidence and order, not a cohort evaluator.
 
 Trust boundary
 --------------
@@ -37,13 +70,14 @@ Trust boundary
 * The Tool node builds a fresh :class:`RecommendationContext` from the state and
   passes it as the *separate* ``context`` argument.  The model-facing request
   (:class:`RecommendationToolRequest`) carries only ``k``.
+* Preferences come from the M9 snapshot only, and that snapshot is read once per turn.
 
 What this milestone is not
 --------------------------
 No planner, intent classifier, ReAct loop, reflection, retry, summarizer, critic,
-reranker, memory, RAG, vector store, embedding, product-metadata lookup, semantic
-ID, multi-agent hand-off or conversation history is implemented here.  The graph
-has no cycles and makes at most one Tool call per run.
+learned reranker, LLM critic, vector store, embedding, semantic ID, multi-agent
+hand-off or conversation history is implemented here.  The graph has no cycles and
+makes at most one Tool call per run.
 
 No provider SDK is imported and no network call is made: the decision model is
 injected, so tests and the smoke experiment supply a deterministic offline stub.
@@ -86,28 +120,40 @@ __all__ = [
     "NODE_ENRICH",
     "NODE_FINALIZE",
     "NODE_LOAD_MEMORY",
+    "NODE_MATCH_PREFERENCES",
     "NODE_PERSIST_MEMORY",
     "NODE_RECOMMEND",
+    "NODE_RERANK",
     "ROUTE_DIRECT",
     "ROUTE_RECOMMEND",
     "AgentAction",
     "AgentConfigurationError",
     "AgentGraph",
     "AgentGraphError",
+    "PreferenceMatcherLike",
     "PreferenceMemoryLike",
+    "PreferenceRerankerLike",
     "ProductEnricherLike",
     "build_agent_graph",
     "history_digest",
 ]
 
 #: Graph contract version, bumped when the node/route contract changes.
-AGENT_GRAPH_VERSION = 1
+#:
+#: * ``1`` -- Milestone 7B/7C/8/9: ``decide`` routing, optional ``enrich``, optional
+#:   ``load_memory`` / ``persist_memory``;
+#: * ``2`` -- Milestone 10D adds the optional ``match_preferences`` and ``rerank``
+#:   nodes on the recommendation route.  Graphs built without a matcher/reranker pair
+#:   keep the version 1 shape and behaviour.
+AGENT_GRAPH_VERSION = 2
 
 #: Node names, exposed so tests and the smoke experiment can assert structure.
 NODE_LOAD_MEMORY = "load_memory"
 NODE_DECIDE = "decide"
 NODE_RECOMMEND = "recommend"
 NODE_ENRICH = "enrich"
+NODE_MATCH_PREFERENCES = "match_preferences"
+NODE_RERANK = "rerank"
 NODE_FINALIZE = "finalize"
 NODE_PERSIST_MEMORY = "persist_memory"
 
@@ -191,6 +237,40 @@ class PreferenceMemoryLike(Protocol):
 
     def process_turn(self, **kwargs: Any) -> Any:
         """Extract and persist explicit preferences from one user-authored turn."""
+        ...
+
+
+@runtime_checkable
+class PreferenceMatcherLike(Protocol):
+    """Structural interface for the optional Milestone 10A evidence matcher.
+
+    The graph depends on this shape rather than on the concrete
+    :class:`~recommendation.preference_matching.PreferenceCandidateMatcher`, so
+    ``recommendation/agent`` does not hard-import the matching package and a test can
+    inject any conforming object.
+
+    Note what the seam exposes: **already-enriched candidates plus a preference
+    snapshot in, evidence out**.  There is no store, no retriever and no Tool here, so
+    the Agent cannot use this seam to reach a product outside the candidate universe,
+    and it cannot use it to read or write trusted interaction history.
+    """
+
+    def match(self, *, candidates: Any, preferences: Any) -> Any:
+        """Return M10A evidence for ``candidates`` against ``preferences``."""
+        ...
+
+
+@runtime_checkable
+class PreferenceRerankerLike(Protocol):
+    """Structural interface for the optional Milestone 10B reranker.
+
+    Evidence in, reranked report out.  The graph never sorts candidates itself: it
+    calls this seam, so the canonical lexicographic policy exists in exactly one place
+    (``recommendation/reranking``).
+    """
+
+    def rerank(self, report: Any) -> Any:
+        """Return the reranked view of an M10A evidence report."""
         ...
 
 
@@ -329,6 +409,161 @@ def _build_grounded_response(enrichment: Any, preferences: Any = None) -> str:
     return "\n".join(lines)
 
 
+#: Header for the final response when M10D reranking is active.  It names the policy
+#: and nothing else: no "best", no "relevant", no quality word.
+_RERANK_HEADER = (
+    "candidate(s) from the sequential recommender, ordered by the configured "
+    "explicit-preference policy (fewer supported violations first, then more supported "
+    "preference matches, then the original ranking order), with catalogue facts where "
+    "available:"
+)
+
+#: Footer clauses for the reranked response.  Each is a statement about *policy
+#: adherence*, never about product quality or relevance.
+_RERANK_FOOTER = (
+    "Original SASRec ranks are shown so the upstream order stays auditable; the "
+    "recommendation itself always comes from the sequential recommender.",
+    "A preference match or violation describes what this candidate's catalogue "
+    "metadata says about your stored explicit preferences. It is not a product-quality "
+    "judgement, and policy adherence is not a relevance or satisfaction measure.",
+)
+
+
+def _preference_block_for_reranking(preferences: Any) -> list[str]:
+    """Render the stored preferences that the reranking policy consumed.
+
+    Unlike :func:`_preference_block` this says the preferences **were** used, because
+    with M10D active they are exactly what the matching node evaluated.  It still makes
+    no claim that a candidate satisfies them; that claim appears per candidate, and only
+    where M10A produced it.
+    """
+    lines = _active_preference_lines(preferences)
+    if not lines:
+        return []
+    return [
+        "Your stated preferences (stored from your own messages; evaluated as explicit "
+        "preference evidence by the reranking policy):",
+        *[f"- {line}" for line in lines],
+        "",
+    ]
+
+
+def _aligned_candidates(reranking: Any, enrichment: Any) -> list[tuple[Any, Any]]:
+    """Pair each reranked candidate with the enriched candidate of the same identity.
+
+    Alignment is by ``(parent_asin, item_id)``, never by position, so a reranked order
+    of ``C, A, B`` prints ``C``'s metadata next to ``C`` rather than whatever metadata
+    happened to sit at that index.  Any mismatch is a hard error: the graph must not
+    print one product's facts beside another product's identity, and it must not paper
+    over a reranker that changed the candidate set.
+    """
+    if len(reranking.candidates) != len(enrichment.items):
+        raise AgentGraphError(
+            "reranking changed the candidate count "
+            f"({len(reranking.candidates)} != {len(enrichment.items)})"
+        )
+
+    by_identity = {
+        (item.parent_asin, item.recommendation.item_id): item for item in enrichment.items
+    }
+    if len(by_identity) != len(enrichment.items):  # pragma: no cover - defensive
+        raise AgentGraphError("the enriched candidate set contains a duplicate identity")
+
+    pairs: list[tuple[Any, Any]] = []
+    for candidate in reranking.candidates:
+        item = by_identity.get((candidate.parent_asin, candidate.item_id))
+        if item is None:
+            raise AgentGraphError(
+                "reranking produced a candidate that is not in the enriched candidate set"
+            )
+        pairs.append((candidate, item))
+    return pairs
+
+
+def _movement_line(candidate: Any) -> str | None:
+    """Describe a rank movement using only directly supported facts.
+
+    Deliberately does **not** use the M10B ``rerank_reason`` label: Milestone 10C
+    established that its tail ``DETERMINISTIC_TIE_BREAK`` wording can be imprecise (the
+    candidate actually lost on the original-rank key), so it is not used as a
+    user-facing explanation.  Only ``original_rank``/``reranked_rank`` -- facts the
+    reranker really produced -- are stated.
+    """
+    if not candidate.moved:
+        return None
+    return (
+        f"   moved from rank {candidate.original_rank} to rank {candidate.reranked_rank} "
+        "under the configured explicit-preference policy"
+    )
+
+
+def _evidence_line(candidate: Any) -> str:
+    """The per-candidate M10A evidence counts, stated as counts only."""
+    return (
+        f"   preference evidence: {candidate.match_count} supported match(es), "
+        f"{candidate.violation_count} supported violation(s), "
+        f"{candidate.unknown_count} unknown"
+    )
+
+
+def _build_reranked_response(reranking: Any, enrichment: Any, preferences: Any = None) -> str:
+    """Render the recommendation in **reranked** order, grounded and auditable.
+
+    The candidate sequence follows ``reranking.candidates``; the catalogue facts come
+    from each candidate's *own* enriched record, matched by identity.  No metadata is
+    looked up again and no ranked value is recomputed -- this function only decides
+    presentation.
+    """
+    if not reranking.candidates:
+        return _NO_CANDIDATES_TEXT
+
+    pairs = _aligned_candidates(reranking, enrichment)
+
+    lines = [
+        f"Top {len(pairs)} {_RERANK_HEADER}",
+        "",
+        *_preference_block_for_reranking(preferences),
+    ]
+
+    for candidate, item in pairs:
+        lines.extend(
+            [
+                "",
+                f"{candidate.reranked_rank}. {candidate.parent_asin} "
+                f"(original SASRec rank {candidate.original_rank}, "
+                f"ranking score {candidate.sasrec_score:+.4f})",
+                _evidence_line(candidate),
+            ]
+        )
+        movement = _movement_line(candidate)
+        if movement is not None:
+            lines.append(movement)
+
+        if item.metadata_status == "missing":
+            lines.append("   metadata unavailable for this item")
+            continue
+        if not item.evidence:
+            reason = item.fallback_reason or "no_evidence"
+            lines.append(f"   no matching catalogue detail retrieved ({reason})")
+            continue
+        for evidence in item.evidence:
+            label = _FIELD_LABELS.get(evidence.field, evidence.field)
+            if evidence.detail_key:
+                label = evidence.detail_key
+            lines.append(f"   {label}: {_shorten(evidence.text)}")
+
+    lines.extend(
+        [
+            "",
+            "Facts above are quoted from Amazon Reviews 2023 product metadata for the "
+            "listed item and are not present for every item.",
+            *_RERANK_FOOTER,
+            _SCORE_DISCLAIMER,
+        ]
+    )
+    return "\n".join(lines)
+
+
 class AgentGraph:
     """The compiled Milestone 7B workflow plus its validated entry points.
 
@@ -340,6 +575,11 @@ class AgentGraph:
     tool:
         The accepted Milestone 7A :class:`~recommendation.tools.RecommendationTool`.
         The graph calls it in process; it never routes through the FastAPI service.
+    preference_matcher, reranker:
+        The optional Milestone 10D pair.  When both are supplied (which requires
+        ``product_enricher``) the recommendation route becomes
+        ``recommend -> enrich -> match_preferences -> rerank -> finalize``.  Neither is
+        constructed by the graph, and supplying only one is a configuration error.
     """
 
     def __init__(
@@ -350,6 +590,8 @@ class AgentGraph:
         memory_service: PreferenceMemoryLike | None = None,
         user_key: str | None = None,
         augment_query_with_preferences: bool = True,
+        preference_matcher: PreferenceMatcherLike | None = None,
+        reranker: PreferenceRerankerLike | None = None,
     ) -> None:
         if decision_model is None or not callable(
             getattr(decision_model, "decide", None)
@@ -377,12 +619,38 @@ class AgentGraph:
                 raise AgentConfigurationError(
                     "a non-empty user_key is required when memory_service is configured"
                 )
+        # Milestone 10D dependency matrix.  The two preference collaborators are a
+        # **pair**: evidence without a policy (or a policy without evidence) would be a
+        # half-configured reranking stage, and the graph will not guess the missing half.
+        if (preference_matcher is None) != (reranker is None):
+            raise AgentConfigurationError(
+                "preference_matcher and reranker must be configured together; a "
+                "half-configured preference reranking stage is not supported"
+            )
+        if preference_matcher is not None:
+            if not callable(getattr(preference_matcher, "match", None)):
+                raise AgentConfigurationError(
+                    "preference_matcher must provide a callable "
+                    "match(candidates=..., preferences=...) method"
+                )
+            if not callable(getattr(reranker, "rerank", None)):
+                raise AgentConfigurationError(
+                    "reranker must provide a callable rerank(report) method"
+                )
+            if product_enricher is None:
+                raise AgentConfigurationError(
+                    "preference_matcher requires product_enricher: Milestone 10A evidence "
+                    "is read from the metadata the Milestone 8 enricher attached to the "
+                    "current candidates, so matching cannot run without it"
+                )
         self._decision_model = decision_model
         self._tool = tool
         self._product_enricher = product_enricher
         self._memory_service = memory_service
         self._user_key = user_key.strip() if isinstance(user_key, str) else None
         self._augment_query_with_preferences = bool(augment_query_with_preferences)
+        self._preference_matcher = preference_matcher
+        self._reranker = reranker
         self._graph = self._build()
 
     # -- metadata ---------------------------------------------------------- #
@@ -432,18 +700,30 @@ class AgentGraph:
         """True when active preferences are appended to the retrieval query."""
         return self._memory_service is not None and self._augment_query_with_preferences
 
+    @property
+    def preference_matcher(self) -> PreferenceMatcherLike | None:
+        """The injected M10A matcher, or ``None`` when evidence is not produced."""
+        return self._preference_matcher
+
+    @property
+    def reranker(self) -> PreferenceRerankerLike | None:
+        """The injected M10B reranker, or ``None`` when reranking is off."""
+        return self._reranker
+
+    @property
+    def matches_preferences(self) -> bool:
+        """True when the recommendation route includes an M10A evidence node."""
+        return self._preference_matcher is not None
+
+    @property
+    def reranks_preferences(self) -> bool:
+        """True when the recommendation route includes an M10B reranking node."""
+        return self._reranker is not None
+
     # -- construction ------------------------------------------------------ #
 
     def _build(self) -> Any:
         """Assemble and compile the state graph.
-
-        The topology is conditional on whether a product enricher was injected:
-
-        * **no enricher** -- the accepted Milestone 7B/7C topology is built exactly as
-          before (``decide -> {finalize | recommend -> finalize}``), so existing
-          behaviour and node set are preserved bit-for-bit;
-        * **enricher present** -- an ``enrich`` node is inserted between ``recommend``
-          and ``finalize`` on the recommendation route only.
 
         Topology is conditional, and each condition preserves the previously accepted
         shape when its collaborator is absent:
@@ -452,13 +732,20 @@ class AgentGraph:
           ``decide -> {finalize | recommend -> finalize}``, unchanged;
         * **enricher present** -- an ``enrich`` node is inserted between ``recommend``
           and ``finalize`` (Milestone 8);
+        * **matcher and reranker present** -- ``match_preferences`` and ``rerank`` are
+          appended after ``enrich``, so the recommendation route becomes
+          ``recommend -> enrich -> match_preferences -> rerank -> finalize``
+          (Milestone 10D);
         * **memory present** -- a ``load_memory`` entry node runs before ``decide``
           (read-only) and a ``persist_memory`` node runs after ``finalize`` on both
           routes, so the direct route can read and update conversational memory
           without ever invoking the recommender.
 
-        The graph never constructs a metadata store or a memory store itself: both
-        exist only because a caller injected them.
+        The direct route is untouched by Milestone 10D: it never reaches ``recommend``,
+        ``enrich``, ``match_preferences`` or ``rerank``.
+
+        The graph never constructs a metadata store, a memory store, a matcher or a
+        reranker itself: each exists only because a caller injected it.
         """
         builder: StateGraph = StateGraph(AgentGraphState)
         builder.add_node(NODE_DECIDE, self._decide_node)
@@ -482,7 +769,17 @@ class AgentGraph:
         else:
             builder.add_node(NODE_ENRICH, self._enrich_node)
             builder.add_edge(NODE_RECOMMEND, NODE_ENRICH)
-            builder.add_edge(NODE_ENRICH, NODE_FINALIZE)
+            if self._preference_matcher is None:
+                builder.add_edge(NODE_ENRICH, NODE_FINALIZE)
+            else:
+                # Milestone 10D: evidence over the enriched candidates, then the
+                # accepted policy.  Both nodes are on the recommendation route only, so
+                # the direct route still touches neither.
+                builder.add_node(NODE_MATCH_PREFERENCES, self._match_preferences_node)
+                builder.add_node(NODE_RERANK, self._rerank_node)
+                builder.add_edge(NODE_ENRICH, NODE_MATCH_PREFERENCES)
+                builder.add_edge(NODE_MATCH_PREFERENCES, NODE_RERANK)
+                builder.add_edge(NODE_RERANK, NODE_FINALIZE)
 
         if self._memory_service is None:
             builder.add_edge(NODE_FINALIZE, END)
@@ -629,8 +926,79 @@ class AgentGraph:
             query = _memory_context(query, state.get("preference_snapshot"))
         return {"enrichment": self._product_enricher.enrich(result, query)}
 
+    def _match_preferences_node(self, state: AgentGraphState) -> dict[str, Any]:
+        """Produce Milestone 10A evidence over the **already-enriched** candidates.
+
+        Inputs, and nothing else:
+
+        * ``enrichment`` -- the M8 candidate set, whose metadata is the only evidence
+          source; the matcher has no catalogue handle, so no new product can enter;
+        * ``preference_snapshot`` -- the M9 snapshot loaded at the **start** of this
+          turn.  It is read, never refreshed here, so one turn uses one coherent
+          snapshot even if ``persist_memory`` later writes to the store.
+
+        Preferences are never inferred from trusted interaction history, SASRec scores,
+        candidate identities or retrieved evidence: they come from the snapshot alone.
+        With no memory configured the snapshot is absent and an empty preference
+        sequence is passed, which is the documented way the matcher runs with zero
+        active preferences -- it yields an empty-evidence report rather than being
+        skipped, so the reranking stage still sees a well-formed report.
+
+        Failures propagate.  The node never substitutes fabricated or partial evidence.
+        """
+        if self._preference_matcher is None:  # pragma: no cover - node not built then
+            raise AgentGraphError("no preference matcher is configured")
+
+        enrichment = state.get("enrichment")
+        if enrichment is None:
+            raise AgentGraphError(
+                "the recommendation route produced no enriched candidates to match"
+            )
+
+        # ``None`` means "no memory configured"; ``()`` reaches the matcher as the
+        # explicit "no active preferences" sequence.  Both yield empty evidence.
+        snapshot = state.get("preference_snapshot")
+        preferences = () if snapshot is None else snapshot
+        return {
+            "preference_evidence": self._preference_matcher.match(
+                candidates=enrichment.items, preferences=preferences
+            )
+        }
+
+    def _rerank_node(self, state: AgentGraphState) -> dict[str, Any]:
+        """Apply the accepted Milestone 10B policy to the evidence report.
+
+        The graph delegates the ordering: it never sorts candidates itself, so the
+        canonical key exists in exactly one place.  The Tool result, the enrichment and
+        the evidence report are left exactly as they were -- only the derived
+        ``reranking`` channel is written.
+
+        Failures propagate, so a run can never present un-reranked output as if the
+        policy had been applied.
+        """
+        if self._reranker is None:  # pragma: no cover - node not built then
+            raise AgentGraphError("no reranker is configured")
+
+        report = state.get("preference_evidence")
+        if report is None:
+            raise AgentGraphError(
+                "the recommendation route produced no preference evidence to rerank"
+            )
+        return {"reranking": self._reranker.rerank(report)}
+
     def _finalize_node(self, state: AgentGraphState) -> dict[str, Any]:
-        """Produce the run's final text and route tag."""
+        """Produce the run's final text and route tag.
+
+        The presentation branch is chosen by **which structured stage actually ran**,
+        in order of derivation:
+
+        1. ``reranking`` present -- render the M10B order (Milestone 10D);
+        2. else ``enrichment`` present -- render the M8 order (Milestone 8);
+        3. else -- render the Tool's order (Milestone 7B/7C).
+
+        It is deliberately not a string check: a candidate list is presented in the
+        reranked order only when a real ``RerankingReport`` exists.
+        """
         decision = state.get("decision")
         if not isinstance(decision, AgentDecision):
             raise MalformedDecision("no decision is present in the graph state")
@@ -642,6 +1010,19 @@ class AgentGraph:
             result = state.get("tool_result")
             if result is None:
                 raise AgentGraphError("the recommend route produced no Tool result")
+            reranking = state.get("reranking")
+            if reranking is not None:
+                enrichment = state.get("enrichment")
+                if enrichment is None:
+                    raise AgentGraphError(
+                        "reranking is present but the enriched candidate set is missing"
+                    )
+                return {
+                    "route": ROUTE_RECOMMEND,
+                    "final_response": _build_reranked_response(
+                        reranking, enrichment, state.get("preference_snapshot")
+                    ),
+                }
             enrichment = state.get("enrichment")
             if enrichment is not None:
                 return {
@@ -705,6 +1086,8 @@ def build_agent_graph(
     memory_service: PreferenceMemoryLike | None = None,
     user_key: str | None = None,
     augment_query_with_preferences: bool = True,
+    preference_matcher: PreferenceMatcherLike | None = None,
+    reranker: PreferenceRerankerLike | None = None,
 ) -> AgentGraph:
     """Construct the agent graph (factory form).
 
@@ -712,6 +1095,11 @@ def build_agent_graph(
     supplying one inserts the Milestone 8 enrichment node on the recommendation route.
     Supplying ``memory_service`` adds the Milestone 9 read/persist nodes and requires
     ``user_key``.
+
+    Supplying ``preference_matcher`` **and** ``reranker`` (together, and with an
+    ``product_enricher``) adds the Milestone 10D evidence and reranking nodes.  Memory
+    is not required for that pair: without it the matcher receives an empty preference
+    sequence and the reranker is order-preserving.
     """
     return AgentGraph(
         decision_model,
@@ -720,4 +1108,6 @@ def build_agent_graph(
         memory_service=memory_service,
         user_key=user_key,
         augment_query_with_preferences=augment_query_with_preferences,
+        preference_matcher=preference_matcher,
+        reranker=reranker,
     )
