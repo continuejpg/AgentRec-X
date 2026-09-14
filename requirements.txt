@@ -1,19 +1,52 @@
-# Runtime dependencies for the AgentRec-X recommendation service (Milestone 6).
+# Runtime dependencies for the AgentRec-X recommendation service (Milestone 6) and
+# the minimal LangGraph agent (Milestone 7B).
+#
+#   .venv/bin/python -m pip install -r requirements.txt
 #
 # The recommendation library itself (preprocessing, evaluation, baselines, datasets,
-# models, training, inference) imports only the standard library plus PyTorch, which
-# is provided by the environment -- see AGENTS.md: do not reinstall or upgrade the
-# CUDA/PyTorch stack.
-#
-# This file adds only the minimal HTTP stack needed to serve recommendations.
-#   .venv/bin/python -m pip install -r requirements.txt
+# models, training, inference, tools) imports only the standard library plus PyTorch,
+# which is provided by the environment -- see AGENTS.md: do not reinstall or upgrade
+# the CUDA/PyTorch stack.
 #
 # NOTE: pytest-asyncio lives in requirements-dev.txt; the API tests use FastAPI's
 # synchronous TestClient, which needs httpx (already present).
+#
+# After installing, `.venv/bin/python -m pip check` must report
+# "No broken requirements found."
 
+# --- Milestone 6: HTTP recommendation service --------------------------------- #
 fastapi>=0.110,<1.0
 uvicorn>=0.27,<1.0
 
 # Pydantic is FastAPI's validation core; it is pinned here indirectly but listed
 # explicitly so the served contract does not drift silently.
 pydantic>=2.5,<3.0
+
+# --- Milestone 7B: minimal agent orchestration -------------------------------- #
+# Exactly one framework is added, and it is used for orchestration only.  No LLM
+# provider SDK is required: the milestone's decision model is injected (see
+# recommendation/agent/README.md), so `openai`, `anthropic`, `google-generativeai`
+# and friends are deliberately absent, no API key is read and no network call is
+# made.  Only `langgraph.graph` is imported by our code.
+langgraph>=1.0,<2.0
+
+# ----------------------------------------------------------------------------- #
+# REQUIRED COMPATIBILITY PIN -- do not drop without re-running `pip check`
+# ----------------------------------------------------------------------------- #
+# `langsmith` is a transitive dependency of `langgraph` (via `langchain-core`, which
+# allows `langsmith<1.0.0,>=0.3.45`).  Pinning it below 0.12 is REQUIRED, not
+# cosmetic:
+#
+#   * langsmith <0.12  declares `httpx<1,>=0.23.0`
+#   * langsmith >=0.12 declares `httpx2<3,>=2`
+#
+# `httpx2` pulls `httpcore2`, which requires `h11>=0.16`.  The accepted Milestone 6
+# HTTP stack is `httpx==0.27.0` -> `httpcore==1.0.5` -> `h11<0.15`, so installing
+# httpx2 makes `pip check` fail and breaks the FastAPI/TestClient stack.  Capping
+# langsmith here keeps the whole closure satisfiable on the accepted h11 0.14.0.
+#
+# LangSmith is LangChain's optional remote tracing client: it is not imported by
+# `recommendation/agent/`, and tracing is never enabled.  Verified working pair
+# (Python 3.10.8, `pip check` clean): langgraph 1.2.11 / langchain-core 1.6.3 /
+# langsmith 0.11.2 / httpx 0.27.0 / httpcore 1.0.5 / h11 0.14.0.
+langsmith>=0.3.45,<0.12

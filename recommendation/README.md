@@ -392,5 +392,6 @@ ordering this milestone guarantees.
 | `recommendation/inference/` | serving inference engine + deterministic top-k ranking (see its README) |
 | `recommendation/api/` | FastAPI recommendation service (see its README) |
 | `recommendation/tools/` | Agent-facing Recommendation Tool contract (see its README) |
+| `recommendation/agent/` | Minimal LangGraph agent orchestration over the Tool (see its README) |
 | `tests/sample_data.py` | deterministic synthetic dataset + expected results |
 | `tests/test_preprocess.py` | 27 tests (pytest-compatible, dependency-free runner included) |

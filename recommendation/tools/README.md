@@ -235,11 +235,14 @@ accepted-checkpoint smoke. CPU only.
 
 ## Milestone 7B boundary
 
-A future LangGraph node can wrap this Tool directly:
+The LangGraph adapter this section anticipated now exists in
+[`../agent/`](../agent/README.md), and it consumes the Tool exactly as documented
+here:
 
 ```python
 result = tool.run(request, context)   # history injected from application state
 ```
 
-That adapter is **not** implemented here. The core Tool stays framework-free so it can
-be driven by a graph node, a CLI, a batch job or a plain Python application.
+The core Tool stays framework-free, so it can still be driven by a CLI, a batch job
+or a plain Python application. The agent layer adds orchestration, not recommender
+semantics.
