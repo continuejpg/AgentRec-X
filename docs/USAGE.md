@@ -12,12 +12,15 @@ Cross-references: [README](../README.md) · [Architecture](ARCHITECTURE.md) ·
 
 ## Environment assumptions
 
-* The project virtualenv already exists at `.venv/`. It was created with
-  `--system-site-packages` so it reuses the system PyTorch/CUDA stack; **do not reinstall
-  or upgrade CUDA/PyTorch**.
-* Python 3.10.8; the accepted benchmark environment is PyTorch 2.1.2+cu118 on an RTX 4090,
-  but everything in this document runs on **CPU**.
-* All commands are relative to the repository root (`/root/AgentRec-X`).
+* The project virtualenv lives at `.venv/`. This machine's `.venv` is self-contained
+  (created **without** `--system-site-packages`) and already contains the accepted
+  CPU-only PyTorch build; **do not reinstall or upgrade CUDA/PyTorch**.
+* Python 3.10.12; the accepted benchmark environment is PyTorch 2.1.2+cu118 on an RTX 4090,
+  but everything in this document runs on **CPU**. The accepted local-demo build is
+  `torch 2.1.2+cpu` (`torch.version.cuda is None`).
+* Commands are relative to the repository root unless stated otherwise. The launcher
+  (`./scripts/start_demo.sh`) works from any directory; the `.venv/bin/python -m ...`
+  commands below assume the repository root as the current directory.
 * The demo deliberately imports no provider SDK and needs no network access and no API key.
 
 ```bash
@@ -92,10 +95,71 @@ Notes:
 
 ---
 
-## Running the Web Demo
+## One-command local demo
+
+Setup and start are **separate concepts**. Setup is the only mutating step; a normal start
+never runs `pip` and never changes the environment.
 
 ```bash
-cd /root/AgentRec-X
+./scripts/setup_demo.sh        # once, per fresh environment
+./scripts/start_demo.sh        # every time after that
+```
+
+`setup_demo.sh` (~1-3 min, needs network access once):
+
+1. validates a supported Python (3.10.x);
+2. creates `<repo>/.venv` when missing;
+3. installs `requirements.txt` (FastAPI, Uvicorn, Pydantic, LangGraph, NumPy);
+4. installs `requirements-cpu.txt` — the accepted CPU PyTorch build from the official CPU
+   wheel index (`torch==2.1.2+cpu`);
+5. asserts the result really is CPU-only (`torch.version.cuda is None`, no `nvidia` package
+   directory) and that `pip check` is clean;
+6. full **SHA-256** verification of the five accepted runtime artifacts;
+7. a final doctor run.
+
+`start_demo.sh` is read-only and location-independent (it derives the repository root from
+its own path, so it works from any directory):
+
+| Flag | Meaning | Default |
+| --- | --- | --- |
+| `--host` / `--port` | bind address | `127.0.0.1` / `8000` |
+| `--device` | inference device | `cpu` |
+| `--verify` | full SHA-256 artifact verification in the preflight | off (size check) |
+| `--doctor` | environment + artifact report, then exit (no server) | — |
+| `--json` | machine-readable `--doctor` output | off |
+
+The preflight refuses to start unless the environment, the five artifacts and the port are
+all acceptable, and it distinguishes three port outcomes:
+
+* **port free** — starts normally;
+* **AgentRec-X already running** — reports the existing instance and exits `0` without
+  starting a second server (two servers would share one preference-memory database);
+* **foreign process on the port** — reports it and exits `3`. The launcher **never** kills,
+  stops or signals a process it did not start.
+
+The demo then runs in the **foreground**; stop it with `Ctrl+C`. There is no PID file, no
+background mode and no log rotation.
+
+Artifact verification has three tiers. A normal start checks existence, regular-file type
+and **exact byte size** (a `stat` per file, no hashing of ~832 MB); `setup_demo.sh` and
+`--verify` additionally compute full SHA-256; and the runtime's own checkpoint digest check
+remains authoritative inside the application.
+
+The accepted digests are recorded in `config/demo_runtime_artifacts.json` (metadata only —
+the artifacts themselves stay git-ignored). Inspect it with:
+
+```bash
+.venv/bin/python -m recommendation.local_demo manifest-verify
+```
+
+---
+
+## Running the Web Demo
+
+The launcher above is the recommended path. The underlying entry point is unchanged and can
+still be run directly:
+
+```bash
 .venv/bin/python -m recommendation.api.app --host 127.0.0.1 --port 8000
 ```
 
@@ -111,10 +175,22 @@ CLI flags (verified in the argparse definition):
 | `--host` | bind host | `AGENTRECX_HOST` or `127.0.0.1` |
 | `--port` | bind port | `AGENTRECX_PORT` or `8000` |
 | `--device` | `cpu` / `cuda` / `cuda:0` | `AGENTRECX_DEVICE` or `cpu` |
-| `--checkpoint` | override checkpoint path | `AGENTRECX_CHECKPOINT_PATH` |
-| `--mappings` | override mappings path | `AGENTRECX_MAPPINGS_PATH` |
-| `--manifest` | override manifest path | `AGENTRECX_MANIFEST_PATH` |
+| `--checkpoint` | override checkpoint path — **see the warning below** | `AGENTRECX_CHECKPOINT_PATH` |
+| `--mappings` | override mappings path — **see the warning below** | `AGENTRECX_MAPPINGS_PATH` |
+| `--manifest` | override manifest path — **see the warning below** | `AGENTRECX_MANIFEST_PATH` |
 | `--reload` | uvicorn auto-reload (development) | off |
+
+> **Known defect (out of scope for M11.5).** `--checkpoint`, `--mappings` and `--manifest`
+> are currently **silently ignored**. `main()` applies them to a local settings object and
+> then calls `uvicorn.run("recommendation.api.app:app", ...)`; the server process re-imports
+> that module string, and the module-level `app` re-reads configuration from the
+> environment, so the CLI values never reach it. `--host`, `--port` and `--device` do work.
+> Until this is fixed, override those three paths with the environment variables:
+>
+> ```bash
+> AGENTRECX_CHECKPOINT_PATH=/models/other.pt \
+>   .venv/bin/python -m recommendation.api.app --host 127.0.0.1 --port 8000
+> ```
 
 To bind a different port, or to keep the demo's memory database out of the repository:
 
@@ -382,13 +458,14 @@ candidate count where relevant.
 | `experiments.reranking_evaluation_smoke` | M10C | policy diagnostics; `--cohort --device --k --json --skip-real` |
 | `experiments.agent_reranking_smoke` | M10D | agent + reranking; `--query --device --k --json` |
 | `experiments.web_demo_smoke` | M11 | full demo over HTTP; `--device --k --json` |
+| `experiments.local_demo_launch_smoke` | M11.5 | launcher over a real Uvicorn process and socket; `--port --json` |
 
 Run the three most informative ones:
 
 ```bash
-.venv/bin/python -m experiments.web_demo_smoke             # M11, real HTTP, 39 gates
+.venv/bin/python -m experiments.web_demo_smoke             # M11, 39 gates over HTTP
+.venv/bin/python -m experiments.local_demo_launch_smoke    # M11.5, launcher + real socket
 .venv/bin/python -m experiments.agent_reranking_smoke      # M10D, real chain
-.venv/bin/python -m experiments.reranking_evaluation_smoke # M10C, policy diagnostics
 ```
 
 Other real-chain smokes:

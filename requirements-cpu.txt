@@ -1,0 +1,33 @@
+# CPU-only PyTorch for the AgentRec-X local demo (Milestone 11.5).
+#
+#   .venv/bin/python -m pip install -r requirements-cpu.txt
+#
+# Why this file exists
+# --------------------
+# `requirements.txt` deliberately does NOT list PyTorch: the recommendation library
+# needs it, but the accepted CUDA/PyTorch stack is environment-specific and must not
+# be reinstalled or upgraded casually (see AGENTS.md section 10 and the header of
+# requirements.txt).  That distinction is intentional and is preserved here.
+#
+# This file is the ONE sanctioned way to obtain PyTorch for a fresh CPU-only
+# environment (Windows + WSL2, no GPU, no CUDA runtime).
+#
+# Do NOT run a plain `pip install torch`
+# --------------------------------------
+# An unqualified `pip install torch` resolves against PyPI, whose default Linux
+# wheels declare `nvidia-*` runtime packages (cuDNN, cuBLAS, cuSPARSE, NCCL, ...) as
+# hard install requirements.  That pulls several gigabytes of CUDA userspace onto a
+# machine with no GPU, violates the project's CPU-only dependency contract, and can
+# also silently upgrade an environment that is supposed to stay pinned.  The CPU
+# wheel index below serves the `+cpu` build, which has no NVIDIA dependency at all
+# and reports `torch.version.cuda is None`.
+#
+# Verified on this project: torch 2.1.2+cpu, `torch.cuda.is_available() is False`,
+# `torch.version.cuda is None`, and no `nvidia/` directory in site-packages.
+
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+# Accepted CPU build.  The `+cpu` local version suffix is what keeps this CPU-only;
+# it only exists on the dedicated CPU wheel index.
+torch==2.1.2+cpu

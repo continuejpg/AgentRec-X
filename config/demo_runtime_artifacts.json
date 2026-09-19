@@ -1,0 +1,53 @@
+{
+  "format": "agentrecx.demo_runtime_artifacts.v1",
+  "category": "Sports_and_Outdoors",
+  "note": [
+    "Metadata only. This manifest describes the five runtime artifacts the local demo",
+    "requires; it never contains the artifacts themselves, which stay git-ignored.",
+    "Paths are relative to the repository root so the manifest is relocatable.",
+    "sizes and digests were measured on the accepted artifacts and are recorded here",
+    "so the launcher can fail fast (size) or fail hard (SHA-256) before serving."
+  ],
+  "artifacts": [
+    {
+      "role": "checkpoint",
+      "path": "runs/sasrec_canonical_2026/best.pt",
+      "description": "Accepted SASRec checkpoint (served by SASRecInferenceEngine)",
+      "size_bytes": 121675470,
+      "sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912",
+      "verified_at_runtime": true
+    },
+    {
+      "role": "manifest",
+      "path": "runs/sasrec_canonical_2026/run.json",
+      "description": "Formal training run manifest, cross-checked against the checkpoint",
+      "size_bytes": 6469,
+      "sha256": "e3549049f955bb0540444c221523444b2a333e8df5eac6b97984342e40c6e2c7",
+      "verified_at_runtime": false
+    },
+    {
+      "role": "mappings",
+      "path": "data/processed/Sports_and_Outdoors_mappings.json",
+      "description": "parent_asin <-> integer item id mappings (semantically validated)",
+      "size_bytes": 39670810,
+      "sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912",
+      "verified_at_runtime": false
+    },
+    {
+      "role": "catalog",
+      "path": "data/processed/Sports_and_Outdoors_products.jsonl",
+      "description": "Normalized catalogue metadata consumed by the M8 enrichment index",
+      "size_bytes": 307500147,
+      "sha256": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd",
+      "verified_at_runtime": false
+    },
+    {
+      "role": "sequences",
+      "path": "data/processed/Sports_and_Outdoors_sequences.json",
+      "description": "Processed interaction sequences; the demo profile source",
+      "size_bytes": 348683134,
+      "sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
+      "verified_at_runtime": false
+    }
+  ]
+}

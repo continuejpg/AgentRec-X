@@ -253,25 +253,48 @@ Walkthrough: [`docs/USAGE.md`](docs/USAGE.md).
 ## Quick Start
 
 Uses the **already accepted artifacts**; nothing is retrained and no accepted artifact is
-written.
+written. Setup and start are deliberately separate: a normal start never installs anything.
+
+**Windows 11 + WSL2 (one click).** Open the repository folder in Explorer, for example
+`\\wsl.localhost\Ubuntu-22.04\home\<you>\AgentRec-X`, and double-click
+`start-agentrecx.cmd`. It opens a console, invokes WSL automatically, runs the same Linux
+launcher below, and (after `/health` answers) opens the default browser at the demo page.
+The console stays in the foreground for the server log, and one `Ctrl+C` stops the demo.
+
+No configuration is needed. The `.cmd` is only a shim: it derives the Linux path from its
+own location (never the current directory — a UNC working directory is illegal in
+`cmd.exe`) and hands over to `scripts/windows/start_agentrecx.ps1`, which asks WSL which
+distributions actually exist (`wsl.exe --list --quiet`) and verifies
+`<repo>/scripts/start_demo.sh` inside the selected one before anything is launched. A
+distribution name is never guessed, and no username is hardcoded. Use
+`--self-test` to resolve and verify without starting anything, and `AGENTRECX_PORT`,
+`AGENTRECX_DISTRO` or `AGENTRECX_REPO` to override; `start-agentrecx.local.cmd.example`
+shows how to run it from outside the repository.
+
+**Linux / WSL shell.**
 
 ```bash
-cd /root/AgentRec-X
-
-.venv/bin/python -m pip check                              # dependency check
-.venv/bin/python -m recommendation.api.app --host 127.0.0.1 --port 8000
+./scripts/setup_demo.sh     # once: create .venv, install CPU-only deps, verify artifacts
+./scripts/start_demo.sh     # every time: read-only preflight, then foreground Uvicorn
 
 # then open:  http://127.0.0.1:8000/demo/   and   http://127.0.0.1:8000/docs
 ```
 
+`setup_demo.sh` installs PyTorch from the official CPU wheel index
+(`requirements-cpu.txt`) rather than running a plain `pip install torch`, which would pull
+CUDA/NVIDIA packages onto a machine with no GPU. `start_demo.sh` works from any directory,
+never installs anything, and never stops a process it did not start: if the port is already
+serving AgentRec-X it says so and exits, and if a foreign process holds the port it refuses
+to start rather than killing it. Stop the demo with `Ctrl+C`.
+
 The server refuses to start if an accepted artifact is missing, rather than failing on the
-first browser request. Host and port default to `127.0.0.1:8000`.
+first browser request. Host and port default to `127.0.0.1:8000`
+(`./scripts/start_demo.sh --port 8011` to change it, `--doctor` to check the environment and
+the five accepted artifacts).
 
-Optional end-to-end sanity check over real HTTP:
-
-```bash
-.venv/bin/python -m experiments.web_demo_smoke
-```
+Optional sanity checks: `.venv/bin/python -m experiments.web_demo_smoke` (accepted M11
+behaviour over HTTP) and `.venv/bin/python -m experiments.local_demo_launch_smoke` (the
+launcher over a real Uvicorn socket and process).
 
 ---
 

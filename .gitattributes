@@ -1,0 +1,15 @@
+# Normalize line endings in the repository.
+#
+# Windows batch files must keep CRLF: cmd.exe parses multi-line IF/FOR blocks far
+# more reliably with it, and a `git checkout` on a machine with core.autocrlf=false
+# would otherwise leave the one-click launcher with bare LF.
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# PowerShell runs fine on either, but CRLF matches the Windows tooling that edits it.
+*.ps1 text eol=crlf
+
+# Everything else keeps LF.
+*.sh text eol=lf
+*.py text eol=lf

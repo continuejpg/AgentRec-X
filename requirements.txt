@@ -4,9 +4,18 @@
 #   .venv/bin/python -m pip install -r requirements.txt
 #
 # The recommendation library itself (preprocessing, evaluation, baselines, datasets,
-# models, training, inference, tools) imports only the standard library plus PyTorch,
-# which is provided by the environment -- see AGENTS.md: do not reinstall or upgrade
-# the CUDA/PyTorch stack.
+# models, training, inference, tools) imports the standard library, NumPy and PyTorch.
+# NumPy is a *direct* import on the served path (recommendation/inference/ranking.py),
+# so it is pinned below rather than left to resolve transitively through PyTorch.
+#
+# PyTorch is intentionally NOT listed here: it is environment-specific, and AGENTS.md
+# says do not reinstall or upgrade the CUDA/PyTorch stack.  For a fresh CPU-only
+# environment use the dedicated, index-pinned file instead:
+#
+#   .venv/bin/python -m pip install -r requirements-cpu.txt
+#
+# A plain `pip install torch` is NOT equivalent -- it pulls the PyPI CUDA wheel and
+# its `nvidia-*` dependencies onto a machine with no GPU.  See requirements-cpu.txt.
 #
 # NOTE: pytest-asyncio lives in requirements-dev.txt; the API tests use FastAPI's
 # synchronous TestClient, which needs httpx (already present).
@@ -17,6 +26,11 @@
 # --- Milestone 6: HTTP recommendation service --------------------------------- #
 fastapi>=0.110,<1.0
 uvicorn>=0.27,<1.0
+
+# NumPy is imported directly by the serving ranking code (see the header note).  The
+# acceptance-pinned version is listed explicitly so the ranking contract cannot drift
+# with whatever NumPy a future PyTorch happens to require.
+numpy==1.26.4
 
 # Pydantic is FastAPI's validation core; it is pinned here indirectly but listed
 # explicitly so the served contract does not drift silently.

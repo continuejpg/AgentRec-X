@@ -1,0 +1,35 @@
+@echo off
+REM ===========================================================================
+REM  AgentRec-X - OPTIONAL machine-specific configuration (example)
+REM
+REM  You do NOT need this file for the normal one-click flow. Double-clicking
+REM  start-agentrecx.cmd from inside the repository works with zero
+REM  configuration: the .cmd derives the Linux path from its own location and the
+REM  PowerShell helper finds the distro by asking WSL which ones exist.
+REM
+REM  You only need this if you copied start-agentrecx.cmd OUTSIDE the repository
+REM  (for example onto the Windows Desktop). In that case:
+REM
+REM    1. copy this file next to your copied launcher as
+REM           start-agentrecx.local.cmd
+REM    2. edit the two values below
+REM    3. double-click start-agentrecx.local.cmd instead
+REM
+REM  Both values are still VERIFIED by the helper: the distro must appear in
+REM  wsl.exe --list --quiet, and the repository must contain an executable
+REM  scripts/start_demo.sh. A wrong value fails loudly instead of launching.
+REM
+REM  This file is deliberately NOT auto-loaded by start-agentrecx.cmd: a silently
+REM  executed config file would be an unclear trust boundary. The copy is
+REM  explicit and visible.
+REM ===========================================================================
+
+REM --- the WSL distro that contains the repository --------------------------
+set "AGENTRECX_DISTRO=Ubuntu-22.04"
+
+REM --- the repository path INSIDE that distro (a Linux path) ----------------
+set "AGENTRECX_REPO=/home/CHANGE_ME/AgentRec-X"
+
+REM Hand over to the real launcher. Change this path if you keep the wrapper
+REM somewhere other than next to this file.
+call "%~dp0start-agentrecx.cmd" %*
