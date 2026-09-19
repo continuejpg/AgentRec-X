@@ -414,6 +414,13 @@ def test_normalise_omp_num_threads_libgomp_values_are_safe() -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skipif(
+    not local_demo.environment_info().venv_exists,
+    reason=(
+        "this checkout has no project virtualenv; run ./scripts/setup_demo.sh first "
+        "(a fresh clone has no .venv, and this test describes the venv's stack)"
+    ),
+)
 def test_environment_info_reports_the_accepted_cpu_stack() -> None:
     env = local_demo.environment_info()
     assert env.python_supported is True
