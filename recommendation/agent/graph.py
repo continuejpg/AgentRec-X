@@ -105,6 +105,26 @@ from .decision import (
     build_decision_messages,
     parse_agent_decision,
 )
+from .rendering import (
+    FIELD_LABELS,
+
+    NO_CANDIDATES_TEXT,
+    RERANK_FOOTER,
+    RERANK_HEADER,
+    SCORE_DISCLAIMER,
+    active_preference_lines,
+    alignment_pairs,
+    build_grounded_response,
+    build_recommendation_response,
+    build_reranked_response,
+    evidence_line,
+    memory_context,
+    movement_line,
+    preference_block,
+    preference_block_for_reranking,
+    shorten,
+)
+from .pipeline import finalize_stage, persist_memory_stage
 from .state import (
     AgentGraphState,
     AgentInput,
@@ -188,33 +208,14 @@ class ProductEnricherLike(Protocol):
 
 #: Text used when the recommender legitimately has no eligible candidate left.
 #: Candidate exhaustion is a normal outcome, never turned into an error or padded
-#: with fabricated items.
-_NO_CANDIDATES_TEXT = (
-    "No unseen product is left to recommend from this interaction history, so "
-    "there are no candidates to show."
-)
+#: with fabricated items.  Defined once, in :mod:`recommendation.agent.rendering`, and
+#: re-exported here because the DAG and the 2.0-alpha loop must render identically.
+_NO_CANDIDATES_TEXT = NO_CANDIDATES_TEXT
 
-#: Footer that stops raw model scores from being read as product evidence.  The
-#: recommender's scores order candidates; they say nothing about a product.
-_SCORE_DISCLAIMER = (
-    "Note: these are raw sequential-model ranking scores used only to order the "
-    "candidates. They are not probabilities or confidence values, and they are not "
-    "evidence about a product's attributes, quality or availability."
-)
-
-#: Provenance root of the catalogue metadata used by the Milestone 8 enricher.
-_METADATA_PROVENANCE_ROOT = "amazon_reviews_2023:meta_categories"
-
-#: Field labels used when rendering grounded metadata facts.
-_FIELD_LABELS: dict[str, str] = {
-    "title": "Title",
-    "store": "Store",
-    "main_category": "Main category",
-    "categories": "Category",
-    "features": "Feature",
-    "description": "Description",
-    "details": "Detail",
-}
+#: Backwards-compatible private alias.  The implementation (and its behaviour) moved to
+#: :mod:`recommendation.agent.rendering` so the DAG and the 2.0-alpha loop share one
+#: presentation layer; the name is kept because an existing test imports it from here.
+_memory_context = memory_context
 
 
 @runtime_checkable
@@ -272,296 +273,6 @@ class PreferenceRerankerLike(Protocol):
     def rerank(self, report: Any) -> Any:
         """Return the reranked view of an M10A evidence report."""
         ...
-
-
-def _active_preference_lines(snapshot: Any) -> list[str]:
-    """Render a preference snapshot as short, attributed constraint lines."""
-    if snapshot is None:
-        return []
-    lines: list[str] = []
-    for entry in snapshot.active_entries:
-        marker = "prefers" if entry.polarity.value == "prefer" else "avoids"
-        lines.append(f"{entry.kind.value}: {marker} {entry.value}")
-    return lines
-
-
-def _memory_context(query: str, snapshot: Any) -> str:
-    """Augment a retrieval query with active explicit preferences.
-
-    Format is explicit and documented rather than implicit::
-
-        <user query>
-        preferences:
-        - <kind>: <prefer|avoid> <value>
-        - ...
-
-    This only changes *which evidence fragments* are selected from the metadata of
-    the already-fixed candidate set.  It cannot add, drop or reorder a candidate, and
-    it never touches trusted interaction history.
-    """
-    lines = _active_preference_lines(snapshot)
-    if not lines:
-        return query
-    return "\n".join([query, "preferences:", *[f"- {line}" for line in lines]])
-
-
-def _preference_block(preferences: Any) -> list[str]:
-    """Render the user's stored preferences as an honest, clearly-labelled block.
-
-    The block states what the user said.  It deliberately contains **no match score,
-    no "perfectly matches" claim and no ranking hint** -- Milestone 9 has no
-    preference-to-product scoring, and presenting one would be fabrication.
-    """
-    lines = _active_preference_lines(preferences)
-    if not lines:
-        return []
-    return [
-        "Your stated preferences (stored from your own messages; not used to rank "
-        "these candidates):",
-        *[f"- {line}" for line in lines],
-        "",
-    ]
-
-
-def _build_recommendation_response(result: Any, preferences: Any = None) -> str:
-    """Render a Tool result as candidate lines plus an honest score disclaimer."""
-    if not result.recommendations:
-        return _NO_CANDIDATES_TEXT
-
-    lines = [
-        f"Top {result.returned_k} candidate(s) from the sequential recommender:",
-        "",
-        *_preference_block(preferences),
-    ]
-    lines.extend(
-        f"{item.rank}. {item.parent_asin} (score {item.score:+.4f})"
-        for item in result.recommendations
-    )
-    if result.returned_k < result.requested_k:
-        lines.extend(
-            [
-                "",
-                f"Only {result.returned_k} of {result.requested_k} requested candidates "
-                "were available after excluding items already in the history.",
-            ]
-        )
-    lines.extend(["", _SCORE_DISCLAIMER])
-    return "\n".join(lines)
-
-
-def _shorten(text: str, limit: int = 240) -> str:
-    """Trim a rendered fact for display, marking the elision explicitly.
-
-    Only presentation is shortened; the structured evidence keeps the full verbatim
-    text, so nothing is lost from the grounding record.
-    """
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1].rstrip() + "…"
-
-
-def _build_grounded_response(enrichment: Any, preferences: Any = None) -> str:
-    """Render enriched candidates with attributed catalogue facts.
-
-    Milestone 8 is the first point where product attribute claims may appear, and
-    only facts actually present in normalized metadata are printed.  A candidate the
-    source does not cover is shown with its identity and an explicit
-    "metadata unavailable" note rather than an invented description.  The raw SASRec
-    score is labelled as a ranking score, never as a probability or a rating.
-    """
-    if not enrichment.items:
-        return _NO_CANDIDATES_TEXT
-
-    lines = [
-        f"Top {enrichment.returned_k} candidate(s) from the sequential recommender, "
-        "with catalogue facts where available:",
-        "",
-        *_preference_block(preferences),
-    ]
-
-    for item in enrichment.items:
-        lines.extend(
-            ["", f"{item.rank}. {item.parent_asin} (ranking score {item.score:+.4f})"]
-        )
-        if item.metadata_status == "missing":
-            lines.append("   metadata unavailable for this item")
-            continue
-        if not item.evidence:
-            reason = item.fallback_reason or "no_evidence"
-            lines.append(f"   no matching catalogue detail retrieved ({reason})")
-            continue
-        for evidence in item.evidence:
-            label = _FIELD_LABELS.get(evidence.field, evidence.field)
-            if evidence.detail_key:
-                label = evidence.detail_key
-            lines.append(f"   {label}: {_shorten(evidence.text)}")
-
-    lines.extend(
-        [
-            "",
-            "Facts above are quoted from Amazon Reviews 2023 product metadata for the "
-            "listed item and are not present for every item.",
-            _SCORE_DISCLAIMER,
-            "Evidence is selected only from these candidates; the ranking itself comes "
-            "from the sequential recommender.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-#: Header for the final response when M10D reranking is active.  It names the policy
-#: and nothing else: no "best", no "relevant", no quality word.
-_RERANK_HEADER = (
-    "candidate(s) from the sequential recommender, ordered by the configured "
-    "explicit-preference policy (fewer supported violations first, then more supported "
-    "preference matches, then the original ranking order), with catalogue facts where "
-    "available:"
-)
-
-#: Footer clauses for the reranked response.  Each is a statement about *policy
-#: adherence*, never about product quality or relevance.
-_RERANK_FOOTER = (
-    "Original SASRec ranks are shown so the upstream order stays auditable; the "
-    "recommendation itself always comes from the sequential recommender.",
-    "A preference match or violation describes what this candidate's catalogue "
-    "metadata says about your stored explicit preferences. It is not a product-quality "
-    "judgement, and policy adherence is not a relevance or satisfaction measure.",
-)
-
-
-def _preference_block_for_reranking(preferences: Any) -> list[str]:
-    """Render the stored preferences that the reranking policy consumed.
-
-    Unlike :func:`_preference_block` this says the preferences **were** used, because
-    with M10D active they are exactly what the matching node evaluated.  It still makes
-    no claim that a candidate satisfies them; that claim appears per candidate, and only
-    where M10A produced it.
-    """
-    lines = _active_preference_lines(preferences)
-    if not lines:
-        return []
-    return [
-        "Your stated preferences (stored from your own messages; evaluated as explicit "
-        "preference evidence by the reranking policy):",
-        *[f"- {line}" for line in lines],
-        "",
-    ]
-
-
-def _aligned_candidates(reranking: Any, enrichment: Any) -> list[tuple[Any, Any]]:
-    """Pair each reranked candidate with the enriched candidate of the same identity.
-
-    Alignment is by ``(parent_asin, item_id)``, never by position, so a reranked order
-    of ``C, A, B`` prints ``C``'s metadata next to ``C`` rather than whatever metadata
-    happened to sit at that index.  Any mismatch is a hard error: the graph must not
-    print one product's facts beside another product's identity, and it must not paper
-    over a reranker that changed the candidate set.
-    """
-    if len(reranking.candidates) != len(enrichment.items):
-        raise AgentGraphError(
-            "reranking changed the candidate count "
-            f"({len(reranking.candidates)} != {len(enrichment.items)})"
-        )
-
-    by_identity = {
-        (item.parent_asin, item.recommendation.item_id): item for item in enrichment.items
-    }
-    if len(by_identity) != len(enrichment.items):  # pragma: no cover - defensive
-        raise AgentGraphError("the enriched candidate set contains a duplicate identity")
-
-    pairs: list[tuple[Any, Any]] = []
-    for candidate in reranking.candidates:
-        item = by_identity.get((candidate.parent_asin, candidate.item_id))
-        if item is None:
-            raise AgentGraphError(
-                "reranking produced a candidate that is not in the enriched candidate set"
-            )
-        pairs.append((candidate, item))
-    return pairs
-
-
-def _movement_line(candidate: Any) -> str | None:
-    """Describe a rank movement using only directly supported facts.
-
-    Deliberately does **not** use the M10B ``rerank_reason`` label: Milestone 10C
-    established that its tail ``DETERMINISTIC_TIE_BREAK`` wording can be imprecise (the
-    candidate actually lost on the original-rank key), so it is not used as a
-    user-facing explanation.  Only ``original_rank``/``reranked_rank`` -- facts the
-    reranker really produced -- are stated.
-    """
-    if not candidate.moved:
-        return None
-    return (
-        f"   moved from rank {candidate.original_rank} to rank {candidate.reranked_rank} "
-        "under the configured explicit-preference policy"
-    )
-
-
-def _evidence_line(candidate: Any) -> str:
-    """The per-candidate M10A evidence counts, stated as counts only."""
-    return (
-        f"   preference evidence: {candidate.match_count} supported match(es), "
-        f"{candidate.violation_count} supported violation(s), "
-        f"{candidate.unknown_count} unknown"
-    )
-
-
-def _build_reranked_response(reranking: Any, enrichment: Any, preferences: Any = None) -> str:
-    """Render the recommendation in **reranked** order, grounded and auditable.
-
-    The candidate sequence follows ``reranking.candidates``; the catalogue facts come
-    from each candidate's *own* enriched record, matched by identity.  No metadata is
-    looked up again and no ranked value is recomputed -- this function only decides
-    presentation.
-    """
-    if not reranking.candidates:
-        return _NO_CANDIDATES_TEXT
-
-    pairs = _aligned_candidates(reranking, enrichment)
-
-    lines = [
-        f"Top {len(pairs)} {_RERANK_HEADER}",
-        "",
-        *_preference_block_for_reranking(preferences),
-    ]
-
-    for candidate, item in pairs:
-        lines.extend(
-            [
-                "",
-                f"{candidate.reranked_rank}. {candidate.parent_asin} "
-                f"(original SASRec rank {candidate.original_rank}, "
-                f"ranking score {candidate.sasrec_score:+.4f})",
-                _evidence_line(candidate),
-            ]
-        )
-        movement = _movement_line(candidate)
-        if movement is not None:
-            lines.append(movement)
-
-        if item.metadata_status == "missing":
-            lines.append("   metadata unavailable for this item")
-            continue
-        if not item.evidence:
-            reason = item.fallback_reason or "no_evidence"
-            lines.append(f"   no matching catalogue detail retrieved ({reason})")
-            continue
-        for evidence in item.evidence:
-            label = _FIELD_LABELS.get(evidence.field, evidence.field)
-            if evidence.detail_key:
-                label = evidence.detail_key
-            lines.append(f"   {label}: {_shorten(evidence.text)}")
-
-    lines.extend(
-        [
-            "",
-            "Facts above are quoted from Amazon Reviews 2023 product metadata for the "
-            "listed item and are not present for every item.",
-            *_RERANK_FOOTER,
-            _SCORE_DISCLAIMER,
-        ]
-    )
-    return "\n".join(lines)
 
 
 class AgentGraph:
@@ -817,40 +528,17 @@ class AgentGraph:
     def _persist_memory_node(self, state: AgentGraphState) -> dict[str, Any]:
         """Extract and persist explicit preferences from the user's own message.
 
-        Only ``user_message`` is passed, because only user-authored text is eligible
-        for extraction.  The node writes conversational preference memory and returns
-        nothing that could influence candidates.
+        Delegates to :func:`~recommendation.agent.pipeline.persist_memory_stage`, which is
+        the accepted Milestone 9 semantics and is now the single implementation shared
+        with the 2.0-alpha loop.  Only ``user_message`` is passed, because only
+        user-authored text is eligible for extraction; the write happens after the
+        response exists and never influences this turn's candidates.
         """
-        if self._memory_service is None or self._user_key is None:  # pragma: no cover
-            return {}
-
-        user_message = state.get("user_message")
-        if not isinstance(user_message, str) or not user_message.strip():
-            return {}
-
-        turn_id = state.get("turn_id")
-        if not isinstance(turn_id, str) or not turn_id.strip():
-            # Idempotency needs a turn identity; without one a stable per-message id
-            # is derived so re-processing the same text is still deduplicated.
-            turn_id = f"auto-{abs(hash(user_message)) % (10 ** 12)}"
-
-        result = self._memory_service.process_turn(
+        return persist_memory_stage(
+            state,
+            memory_service=self._memory_service,
             user_key=self._user_key,
-            user_message=user_message,
-            turn_id=turn_id,
         )
-        # Writes happen after the response has been produced, and this node does not
-        # rewrite ``preference_snapshot``.  Consequences, all deliberate:
-        #
-        #   * the retrieval query and the rendered preference block are built from the
-        #     snapshot loaded at the start of the turn, so a preference stated in *this*
-        #     message takes effect from the next turn;
-        #   * a turn can therefore never appear to have let its own statement influence
-        #     the candidates it returned;
-        #   * candidate identity, count, rank and score are untouched either way.
-        #
-        # The write is persisted before the run ends, so nothing is lost.
-        return {"memory_update": result}
 
     def _decide_node(self, state: AgentGraphState) -> dict[str, Any]:
         """Ask the decision model which route to take.
@@ -923,7 +611,7 @@ class AgentGraph:
         user_message = state.get("user_message")
         query = user_message if isinstance(user_message, str) else ""
         if self.augments_query_with_preferences:
-            query = _memory_context(query, state.get("preference_snapshot"))
+            query = memory_context(query, state.get("preference_snapshot"))
         return {"enrichment": self._product_enricher.enrich(result, query)}
 
     def _match_preferences_node(self, state: AgentGraphState) -> dict[str, Any]:
@@ -989,8 +677,10 @@ class AgentGraph:
     def _finalize_node(self, state: AgentGraphState) -> dict[str, Any]:
         """Produce the run's final text and route tag.
 
-        The presentation branch is chosen by **which structured stage actually ran**,
-        in order of derivation:
+        Delegates to :func:`~recommendation.agent.pipeline.finalize_stage`, which is the
+        accepted presentation logic and is now the single implementation shared with the
+        2.0-alpha loop.  The presentation branch is chosen by **which structured stage
+        actually ran**, in order of derivation:
 
         1. ``reranking`` present -- render the M10B order (Milestone 10D);
         2. else ``enrichment`` present -- render the M8 order (Milestone 8);
@@ -999,48 +689,7 @@ class AgentGraph:
         It is deliberately not a string check: a candidate list is presented in the
         reranked order only when a real ``RerankingReport`` exists.
         """
-        decision = state.get("decision")
-        if not isinstance(decision, AgentDecision):
-            raise MalformedDecision("no decision is present in the graph state")
-
-        if decision.needs_recommendation:
-            # Re-validate the application-owned history here too: the finalize step
-            # must never emit a recommendation for a run that had no trusted history.
-            read_trusted_history(state)
-            result = state.get("tool_result")
-            if result is None:
-                raise AgentGraphError("the recommend route produced no Tool result")
-            reranking = state.get("reranking")
-            if reranking is not None:
-                enrichment = state.get("enrichment")
-                if enrichment is None:
-                    raise AgentGraphError(
-                        "reranking is present but the enriched candidate set is missing"
-                    )
-                return {
-                    "route": ROUTE_RECOMMEND,
-                    "final_response": _build_reranked_response(
-                        reranking, enrichment, state.get("preference_snapshot")
-                    ),
-                }
-            enrichment = state.get("enrichment")
-            if enrichment is not None:
-                return {
-                    "route": ROUTE_RECOMMEND,
-                    "final_response": _build_grounded_response(
-                        enrichment, state.get("preference_snapshot")
-                    ),
-                }
-            return {
-                "route": ROUTE_RECOMMEND,
-                "final_response": _build_recommendation_response(
-                    result, state.get("preference_snapshot")
-                ),
-            }
-        return {
-            "route": ROUTE_DIRECT,
-            "final_response": decision.direct_response or "",
-        }
+        return finalize_stage(state)
 
     # -- invocation -------------------------------------------------------- #
 

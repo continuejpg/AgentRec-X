@@ -143,7 +143,7 @@ while keeping `original_rank` auditable.
 
 ---
 
-## 6. Product metadata and candidate-scoped RAG
+## 7. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -170,7 +170,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 7. Preference memory
+## 8. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -196,7 +196,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 8. Preference evidence
+## 9. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -224,7 +224,7 @@ drops or reorders anything.
 
 ---
 
-## 9. Deterministic reranking
+## 10. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -263,7 +263,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 10. Web / session layer
+## 11. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -301,7 +301,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 11. State ownership
+## 12. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -320,7 +320,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 12. Trust boundaries
+## 13. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -358,7 +358,7 @@ flowchart TD
 
 ---
 
-## 13. Failure behaviour
+## 14. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -379,7 +379,7 @@ fallback anywhere.
 
 ---
 
-## 14. Determinism and reproducibility
+## 15. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -400,7 +400,7 @@ fallback anywhere.
 
 ---
 
-## 15. Dependency lifecycle / heavy-object reuse
+## 16. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -432,7 +432,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 16. Known limitations
+## 17. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value

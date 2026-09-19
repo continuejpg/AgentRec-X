@@ -530,6 +530,17 @@ stage should need to change.
 
 ---
 
+## Control Plane (2.0-alpha)
+
+`recommendation/control/` adds an **opt-in** bounded agent loop beside the accepted DAG:
+a policy proposes one action (`RECOMMEND_FROM_HISTORY` or `FINISH`), the controller
+validates and stamps it, the accepted pipeline executes it, and control returns to the
+policy with a verified observation. Recommend, render and memory semantics are reused
+unchanged; the default stays the accepted DAG. Enable it with
+`AGENTRECX_CONTROL_PLANE=loop`, and verify it with
+`.venv/bin/python -m experiments.control_plane_smoke`. Topology, authority split and
+budgets: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Documentation
 
 | Document | Contents |

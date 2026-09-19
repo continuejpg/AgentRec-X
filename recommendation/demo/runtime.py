@@ -66,6 +66,13 @@ from recommendation.rag import ProductEnricher
 from recommendation.reranking import PreferenceReranker
 from recommendation.tools import RecommendationTool
 
+from .control_plane import (
+    CONTROL_PLANE_GRAPH,
+    DEFAULT_CONTROL_PLANE,
+    DEFAULT_LOOP_LIMITS,
+    DemoLoopRunner,
+    resolve_control_plane,
+)
 from .decision import DEFAULT_DEMO_K, DemoDecisionModel
 from .profiles import DEFAULT_DEMO_PROFILE_COUNT, DemoProfile, build_demo_profiles
 from .sessions import DEFAULT_MAX_SESSIONS, DemoSessionManager
@@ -130,7 +137,10 @@ class DemoRuntime:
     metadata_artifact: Path | None = None
     memory_artifact: Path | None = None
     max_cached_graphs: int = MAX_CACHED_GRAPHS
+    #: Which control plane serves a turn: the accepted DAG (default) or the 2.0-alpha loop.
+    control_plane: str = DEFAULT_CONTROL_PLANE
     _graphs: dict[tuple[int, str], AgentGraph] = field(default_factory=dict, repr=False)
+    _loops: dict[tuple[int, str], DemoLoopRunner] = field(default_factory=dict, repr=False)
     _graph_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # -- readiness --------------------------------------------------------- #
@@ -192,13 +202,64 @@ class DemoRuntime:
             self._graphs[cache_key] = graph
             return graph
 
+    def loop_for(self, k: int = DEFAULT_DEMO_K, *, user_key: str) -> DemoLoopRunner:
+        """Return the 2.0-alpha loop runner for one ``(k, user_key)`` pair.
+
+        Cached exactly like :meth:`graph_for`, and for the same reasons: the loop binds a
+        memory namespace and a request-scoped ``k`` at construction, and compiling one is
+        pure Python over the same process-scoped collaborators.  No model, index or service
+        is ever rebuilt.
+        """
+        cache_key = (k, user_key)
+        with self._graph_lock:
+            existing = self._loops.get(cache_key)
+            if existing is not None:
+                return existing
+        runner = DemoLoopRunner(
+            decision_model=self.decision_model_factory(k),
+            tool=self.tool,
+            enricher=self.enricher,
+            matcher=self.matcher,
+            reranker=self.reranker,
+            memory_service=self.memory_service,
+            user_key=user_key,
+            limits=DEFAULT_LOOP_LIMITS,
+        )
+        with self._graph_lock:
+            duplicate = self._loops.get(cache_key)
+            if duplicate is not None:
+                return duplicate
+            if len(self._loops) >= self.max_cached_graphs:
+                oldest = next(iter(self._loops))
+                self._loops.pop(oldest, None)
+            self._loops[cache_key] = runner
+            return runner
+
+    def runner_for(self, k: int = DEFAULT_DEMO_K, *, user_key: str) -> Any:
+        """Return the runnable for the configured control plane.
+
+        Both runnables accept an :class:`~recommendation.agent.state.AgentInput` and return
+        the accepted :class:`~recommendation.agent.state.AgentGraphState`, which is what lets
+        the HTTP layer stay control-plane agnostic.
+        """
+        if self.control_plane == "loop":
+            return self.loop_for(k, user_key=user_key)
+        return self.graph_for(k, user_key=user_key)
+
+    def turn(self, k: int, *, user_key: str, agent_input: Any) -> Any:
+        """Run one turn on the configured control plane and return its state."""
+        return self.runner_for(k, user_key=user_key).invoke(agent_input)
+
     def release_user_key(self, user_key: str) -> int:
-        """Drop every cached graph bound to a memory namespace; returns how many."""
+        """Drop every cached graph and loop bound to a namespace; returns how many."""
         with self._graph_lock:
             stale = [key for key in self._graphs if key[1] == user_key]
             for key in stale:
                 self._graphs.pop(key, None)
-            return len(stale)
+            stale_loops = [key for key in self._loops if key[1] == user_key]
+            for key in stale_loops:
+                self._loops.pop(key, None)
+            return len(stale) + len(stale_loops)
 
     @property
     def compiled_graph_count(self) -> int:
@@ -227,6 +288,7 @@ class DemoRuntime:
             "profile_ids": tuple(self.profiles),
             "metadata_records": getattr(self.metadata, "size", None),
             "compiled_graph_count": self.compiled_graph_count,
+            "control_plane": self.control_plane,
         }
 
     def close(self) -> None:
@@ -252,6 +314,7 @@ class DemoRuntime:
         ttl_seconds: float | None = None,
         clock: Callable[[], float] = time.time,
         memory_db: Path | None = None,
+        control_plane: str | None = None,
     ) -> DemoRuntime:
         """Compose the demo runtime from ``AGENTRECX_*`` configuration.
 
@@ -269,6 +332,7 @@ class DemoRuntime:
             ttl_seconds=ttl_seconds,
             clock=clock,
             memory_db=memory_db,
+            control_plane=control_plane,
         )
 
 
@@ -286,6 +350,7 @@ def build_demo_runtime(
     ttl_seconds: float | None = None,
     clock: Callable[[], float] = time.time,
     memory_db: Path | None = None,
+    control_plane: str | None = None,
 ) -> DemoRuntime:
     """Compose the demo runtime, constructing heavy objects once.
 
@@ -358,4 +423,5 @@ def build_demo_runtime(
         decision_model_factory=decision_model_factory,
         metadata_artifact=artifact,
         memory_artifact=resolved_db,
+        control_plane=resolve_control_plane(control_plane),
     )

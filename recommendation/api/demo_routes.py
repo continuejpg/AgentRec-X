@@ -256,9 +256,14 @@ def build_demo_router() -> APIRouter:
         try:
             with runtime.sessions.turn(session_id) as allocation:
                 session = allocation.session
-                graph = runtime.graph_for(payload.k, user_key=session.user_key)
-                state = graph.invoke(
-                    _agent_input(payload.message, session.trusted_user_history, allocation.turn_id)
+                # The runtime owns which control plane serves the turn.  Both return the
+                # accepted AgentGraphState, so this controller stays control-plane agnostic.
+                state = runtime.turn(
+                    payload.k,
+                    user_key=session.user_key,
+                    agent_input=_agent_input(
+                        payload.message, session.trusted_user_history, allocation.turn_id
+                    ),
                 )
                 return build_chat_response(
                     state,
