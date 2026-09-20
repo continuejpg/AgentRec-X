@@ -37,6 +37,7 @@ from .rendering import (
     build_grounded_response,
     build_recommendation_response,
     build_reranked_response,
+    build_source_response,
 )
 from .state import AgentGraphState, read_trusted_history
 
@@ -146,6 +147,16 @@ def finalize_stage(state: AgentGraphState) -> dict[str, Any]:
                 "route": ROUTE_RECOMMEND,
                 "final_response": build_grounded_response(
                     enrichment, state.get("preference_snapshot")
+                ),
+            }
+        # A candidate set produced by a non-history trusted source must not be described as if
+        # the sequential recommender produced it, and its scores are not that model's scores.
+        source = state.get("candidate_source")
+        if isinstance(source, str) and source and source != "history":
+            return {
+                "route": ROUTE_RECOMMEND,
+                "final_response": build_source_response(
+                    result, source, state.get("preference_snapshot")
                 ),
             }
         return {

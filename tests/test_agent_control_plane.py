@@ -148,6 +148,11 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         "hard_constraint_count",
         "inferred_constraint_count",
         "awaiting_user",
+        # Stage 4 adds the identities of the run's *grounded* candidates, so a policy can name
+        # products in the read-only reasoning actions.  It is a deliberate, bounded widening:
+        # every identity was produced by a trusted tool and confirmed by the grounding
+        # verifier, and only read-only actions accept one.
+        "grounded_parent_asins",
     }
     assert set(vars(context)) == allowed
 
@@ -170,11 +175,14 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
             assert all(isinstance(item, str) for item in value), name
         else:
             assert isinstance(value, (str, int, bool)), name
-    # None of those fields may name a product or carry a key.
+    # None of those fields may carry a key.
     projected = repr(context.task_constraints)
-    for row in CANDIDATE_ROWS:
-        assert row[0] not in projected
     assert "user_key" not in projected
+
+    # The grounded identities are exactly the run's verified candidates - candidates the
+    # policy may *refer to*, never ones it may add.  Every one is a real fixture candidate.
+    known = {row[0] for row in CANDIDATE_ROWS}
+    assert set(context.grounded_parent_asins) <= known
     assert not hasattr(context, "tool")
     assert not hasattr(context, "engine")
     assert not hasattr(context, "preference_snapshot")
@@ -182,8 +190,13 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
     serialised = repr(context) + str(context.summary())
     for asin in HISTORY:
         assert asin not in serialised, "trusted history leaked into the policy's view"
+
+    # Candidate identity reaches the policy through exactly one channel, and only grounded
+    # identities do.  The trajectory summary is a *different* boundary and must carry no
+    # identity at all, so the audit record cannot become a copy of the candidate set.
+    summary = str(context.summary())
     for row in CANDIDATE_ROWS:
-        assert row[0] not in serialised, "candidate identity leaked into the policy's view"
+        assert row[0] not in summary, "candidate identity leaked into the trajectory summary"
 
 
 def test_policy_cannot_supply_candidate_ids_or_history() -> None:

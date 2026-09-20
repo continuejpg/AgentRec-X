@@ -721,6 +721,22 @@ class RecommendationDomainResult(DomainResult):
     #: assertable statement of the boundary rather than an implicit convention.
     policy_visible: Literal[False] = False
 
+    # -- Stage 2 candidate-plane payload ------------------------------------ #
+    #: The **grounded** identities this result contributes, in the source's own order.  Only
+    #: identities confirmed by the grounding verifier appear here; the ledger's ungrounded
+    #: audit entries never do.
+    grounded_parent_asins: tuple[str, ...] = ()
+    #: Trusted identity -> model item id, from the item mapping.  Used to give an adopted
+    #: candidate set a rendering shape; it is never derived from a source's own claim.
+    item_ids: dict[str, int] = Field(default_factory=dict)
+    #: Which trusted source produced this result, when it was not the history recommender.
+    source: str | None = None
+    #: How many identities the source returned that the trusted side did not know.  A finding
+    #: about the source, surfaced rather than hidden.
+    ungrounded_count: int = Field(default=0, ge=0)
+    #: The provenance summary for the trajectory: one record per grounded identity.
+    provenance: tuple[dict[str, Any], ...] = ()
+
 
 class DetailObservation(Observation):
     """Stage 4: grounded facts for candidates the run already holds.

@@ -206,23 +206,53 @@ def build_control_harness(
     rows: Any = CANDIDATE_ROWS,
     engine_error: Exception | None = None,
     k: int = 3,
+    catalog_rows: Any = None,
 ) -> ControlHarness:
-    """Compose a full control plane over the real accepted pipeline."""
+    """Compose a full control plane over the real accepted pipeline.
+
+    ``rows`` controls what the *history engine* returns; ``catalog_rows`` controls what the
+    catalogue contains.  They are separable because a test needs to model "history knows
+    nothing, the catalogue knows plenty" - the situation that makes adaptive retrieval
+    observable.  Defaulting ``catalog_rows`` to ``rows`` keeps the common case unchanged.
+    """
+    from tests.agent_reranking_fixture import build_index as _build_index
+
     capability, engine, parts = build_full_capability(
         rows=rows,
         engine_error=engine_error,
-        with_enricher=with_enricher,
+        with_enricher=False if catalog_rows is not None else with_enricher,
         with_preferences=with_preferences,
     )
+    if catalog_rows is not None:
+        enricher = ProductEnricher(_build_index(row[0] for row in catalog_rows))
+        parts = dict(parts)
+        parts["enricher"] = enricher
+        capability, engine, parts = build_full_capability(
+            rows=rows,
+            engine_error=engine_error,
+            with_enricher=True,
+            with_preferences=with_preferences,
+        )
+        # Rebuild the capability over the widened catalogue so enrichment and the plane see
+        # the same records.
+        from recommendation.control import RecommendFromHistoryCapability as _Cap
+
+        capability = _Cap(
+            parts["tool"],
+            product_enricher=enricher,
+            preference_matcher=parts["matcher"],
+            preference_reranker=parts["reranker"],
+        )
+        parts["enricher"] = enricher
     resolved_policy = policy or RecordingPolicy(k=k)
     memory_service = make_service() if with_memory else None
     controller = LoopController(
         resolved_policy,
         capability,
+        driver=driver,
         memory_service=memory_service,
         user_key="control-test-user" if with_memory else None,
         limits=limits or LoopLimits(),
-        driver=driver,
     )
     return ControlHarness(
         capability=capability,

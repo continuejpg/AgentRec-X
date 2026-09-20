@@ -81,16 +81,43 @@ QUERY = "RedWidget BlueWidget BlackWidget GreenWidget"
 _RENDERED_LINE = re.compile(r"^(\d+)\. (B[0-9A-Za-z]+|cand-[a-z]+) \(", re.MULTILINE)
 
 
+#: Per-candidate weight, so Stage 4 hard constraints are genuinely checkable in tests.
+#: Two are light, two are heavy: a ``weight_max`` constraint therefore has a real
+#: satisfied / violated split rather than being unverifiable everywhere.
+CANDIDATE_WEIGHTS_KG: dict[str, str] = {
+    "cand-red": "0.8 Kilograms",
+    "cand-blue": "1.1 Kilograms",
+    "cand-black": "3.4 Kilograms",
+    "cand-green": "4.2 Kilograms",
+}
+
+#: Per-candidate price, for deterministic budget constraints.
+CANDIDATE_PRICES: dict[str, str] = {
+    "cand-red": "25.0",
+    "cand-blue": "40.0",
+    "cand-black": "15.0",
+    "cand-green": "60.0",
+}
+
+
 def build_metadata(row: tuple[Any, ...]) -> ProductMetadata:
     """Normalise one candidate row into real M8 ``ProductMetadata``."""
     parent_asin, _item_id, _score, colour, title, store = row
+    details: dict[str, str] = {"Color": colour}
+    weight = CANDIDATE_WEIGHTS_KG.get(parent_asin)
+    if weight is not None:
+        details["Item Weight"] = weight
     record: dict[str, Any] = {
         "parent_asin": parent_asin,
         "title": title,
-        "details": {"Color": colour},
+        "details": details,
     }
     if store is not None:
         record["store"] = store
+    price = CANDIDATE_PRICES.get(parent_asin)
+    if price is not None:
+        # The normaliser reads the source ``price`` field and renders canonical text.
+        record["price"] = price
     return normalize_product_record(record)
 
 

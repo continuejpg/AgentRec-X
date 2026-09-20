@@ -122,6 +122,19 @@ class PolicyContext:
     #: True when the task is suspended awaiting a user answer, so a policy knows why it is
     #: being asked to decide again.
     awaiting_user: bool = False
+    #: The identities of the run's **grounded** candidates, in the run's own order.
+    #:
+    #: Stage 4 requires this: ``GET_DETAILS``, ``COMPARE``, ``TRADE_OFF``,
+    #: ``CHECK_COMPATIBILITY`` and ``BUNDLE`` all name the products they reason about, and a
+    #: policy cannot name a product it cannot see.  Exposing them does not widen the candidate
+    #: set, because every identity here was already produced by a trusted tool and confirmed
+    #: by the :class:`~recommendation.control.grounding.GroundingVerifier`; the policy can only
+    #: *refer* to them, and only read-only actions accept them.
+    #:
+    #: What is deliberately excluded: the ledger's ``UNGROUNDED`` audit entries.  Those are a
+    #: finding about a misbehaving source, not candidates, and a policy must never be able to
+    #: ask about one as though it were real.
+    grounded_parent_asins: tuple[str, ...] = ()
 
     def action_available(self, action: ActionKind) -> bool:
         """True when the system currently permits ``action``."""

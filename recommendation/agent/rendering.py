@@ -28,6 +28,7 @@ from typing import Any
 
 __all__ = [
     "NO_CANDIDATES_TEXT",
+    "SOURCE_LABELS",
     "SCORE_DISCLAIMER",
     "FIELD_LABELS",
     "RERANK_HEADER",
@@ -37,6 +38,7 @@ __all__ = [
     "alignment_pairs",
     "build_grounded_response",
     "build_recommendation_response",
+    "build_source_response",
     "build_reranked_response",
     "evidence_line",
     "field_label",
@@ -188,6 +190,49 @@ def build_recommendation_response(result: Any, preferences: Any = None) -> str:
             ]
         )
     lines.extend(["", SCORE_DISCLAIMER])
+    return "\n".join(lines)
+
+
+#: Human labels for the trusted candidate sources, so a response names the source that
+#: actually produced the candidates instead of implying the sequential recommender did.
+SOURCE_LABELS: dict[str, str] = {
+    "history": "the sequential recommender",
+    "catalog_search": "a catalogue text search",
+    "similar_item": "an item-similarity search",
+}
+
+
+def build_source_response(
+    result: Any, source: str, preferences: Any = None
+) -> str:
+    """Render a candidate list from a **non-history** trusted source.
+
+    The accepted history renderer says "from the sequential recommender", which is true of the
+    SASRec path and false of every other source.  This renderer states the source it actually
+    came from, and it deliberately reports **no score**: a lexical BM25 value or a similarity
+    value is not a SASRec score, and printing one in a score column would present two
+    incomparable numbers as though they were the same quantity.
+    """
+    if not result.recommendations:
+        return NO_CANDIDATES_TEXT
+
+    label = SOURCE_LABELS.get(source, f"the '{source}' source")
+    lines = [
+        f"Top {result.returned_k} candidate(s) from {label}:",
+        "",
+        *preference_block(preferences),
+    ]
+    lines.extend(
+        f"{item.rank}. {item.parent_asin}" for item in result.recommendations
+    )
+    lines.extend(
+        [
+            "",
+            "These candidates were found by a trusted candidate source other than the "
+            "sequential recommender, so no sequential-model score is shown for them: scores "
+            "from different sources are not comparable and are not presented as if they were.",
+        ]
+    )
     return "\n".join(lines)
 
 

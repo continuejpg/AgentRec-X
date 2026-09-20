@@ -478,7 +478,77 @@ completion, and a test asserts it exposes no such surface.
 
 ---
 
-## 10. Product metadata and candidate-scoped RAG
+## 10. Evaluation planes (Stage 6, IMPLEMENTED)
+
+Three planes, deliberately **not** collapsed into one score.
+
+| Plane | Question | Where |
+| --- | --- | --- |
+| Recommender | where does the target item land in a full-catalogue ranking? | `recommendation/evaluation/metrics.py` (unchanged) |
+| Shopping quality | does the final set respect stated preferences and constraints? | `recommendation/control/grounded_reasoning.py` verdicts |
+| **Agent / trajectory** | did the run choose sensible actions, respect its budgets, recover, and terminate for a defensible reason? | `recommendation/evaluation/agent/` |
+
+The separation matters because the metrics are not interchangeable. NDCG measures ranking
+position and says nothing about whether an agent asked a useful question or recovered from an
+empty retrieval; a trajectory metric says nothing about recommendation accuracy. Nothing in
+`recommendation/evaluation/agent/` reuses an NDCG number, and no metric here claims relevance.
+
+### Trajectory
+
+`AgentTrajectory` is the evaluation-facing projection of a run: per-step proposed action,
+whether it was authorised, the refusal code if not, the observation kind/status, candidate and
+ungrounded counts, whether the step consumed a tool call, and the terminal outcome. It is
+versioned and **payload-free** - no trusted history, no memory key, no entry id - and a test
+asserts it.
+
+### Cases
+
+Eleven inspectable cases covering the ten required categories. Each declares more than a final
+answer: required / acceptable / forbidden actions, expected sources, hard constraints, expected
+memory effect, allowed terminal states and budgets. A run that reaches the right answer by way
+of a forbidden action or an unperformed check fails.
+
+### Metrics and attribution
+
+`TrajectoryMetrics` reports each dimension separately and has **no ``score`` field**.
+`FailureAttribution` maps every failure dimension onto the owning component
+(`candidate_grounding`, `policy_selection`, `sequencing`, `completion`, `memory_scope`,
+`constraint_verification`, ...), and a test asserts the mapping is total - so a new metric cannot
+be added without deciding who owns it, and an unattributable failure is reported as a protocol
+finding rather than dropped. `SuiteReport` reports `failures_by_component`, never one number.
+
+Two measurements are kept separate on purpose: **checked** vs **enforced**. A run can obtain a
+deterministic verdict for every candidate and still present a violating product.
+
+### Ablation
+
+Variants are **policy injection, not runtime flags**, so no unsafe switch enters production:
+`adaptive` (the policy may react to its observation) versus `decide_once` (one decision, then
+wrap up). The decisive comparison is on `empty-source-recovery-required`, where the history
+source returns nothing:
+
+```text
+adaptive      PASS  recommend_from_history -> search_catalog -> finish
+decide_once   FAIL  recommend_from_history -> finish -> finish
+```
+
+That is `Action -> Observation -> Policy` versus `Decide Once -> Fixed Workflow`, measured.
+
+Run it with `.venv/bin/python -m experiments.agent_evaluation_smoke`.
+
+### Not implemented (documented, not claimed)
+
+* **No published benchmark numbers.** The cases are inspectable fixtures, not a leaderboard.
+* **No clarification-quality metric.** Whether a question was *good* is not measured, only
+  whether one was asked when the case required it.
+* **No token or cost accounting.** Tool calls and steps are counted; token usage is not measured
+  because no LLM is in the loop.
+* **No candidate-narrowing metric**, because the loop cannot yet narrow a presented set (see
+  section 9).
+
+---
+
+## 11. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -505,7 +575,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 11. Preference memory
+## 12. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -531,7 +601,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 12. Preference evidence
+## 13. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -559,7 +629,7 @@ drops or reorders anything.
 
 ---
 
-## 13. Deterministic reranking
+## 14. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -598,7 +668,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 14. Web / session layer
+## 15. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -636,7 +706,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 15. State ownership
+## 16. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -655,7 +725,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 16. Trust boundaries
+## 17. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -693,7 +763,7 @@ flowchart TD
 
 ---
 
-## 17. Failure behaviour
+## 18. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -714,7 +784,7 @@ fallback anywhere.
 
 ---
 
-## 18. Determinism and reproducibility
+## 19. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -735,7 +805,7 @@ fallback anywhere.
 
 ---
 
-## 19. Dependency lifecycle / heavy-object reuse
+## 20. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -767,7 +837,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 20. Known limitations
+## 21. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value

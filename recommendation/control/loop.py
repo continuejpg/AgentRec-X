@@ -43,10 +43,13 @@ from recommendation.agent.pipeline import (
 )
 from recommendation.agent.rendering import NO_CANDIDATES_TEXT
 from recommendation.agent.state import AgentGraphState, AgentInput, TrustedHistory
+from recommendation.tools.schemas import RecommendationToolResult, ToolRecommendation
 
 from .capability import RecommendFromHistoryCapability
 from .completion import CompletionGuard
 from .context import CandidateState, PolicyContext, project_constraints, project_intent
+from langgraph.errors import GraphRecursionError
+
 from .schemas import (
     CANDIDATE_ACTIONS,
     READ_ONLY_ACTIONS,
@@ -212,6 +215,7 @@ class _LoopEngine:
         run_id: str,
         task_state: TaskState | None = None,
         reasoning_executor: Any = None,
+        candidate_plane: Any = None,
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -256,6 +260,10 @@ class _LoopEngine:
         #: no catalogue reasoning.  Validation already refused a reasoning action that was
         #: not offered; the executor is what makes the offered ones executable.
         self.reasoning = reasoning_executor
+        #: Stage 2 multi-source candidate plane, or ``None`` for the Stage 1 single-source
+        #: fast path.  When configured, the additional trusted sources become actions the
+        #: controller offers the policy.
+        self.candidate_plane = candidate_plane
 
         self.last_observation: Any = None
         self.last_verification: VerificationResult | None = None
@@ -346,6 +354,7 @@ class _LoopEngine:
             run_status=self.control.status,
             last_proposal_rejected=self.last_proposal_rejected,
             task_intent=project_intent(self.task_state),
+            grounded_parent_asins=self.grounded_identities(),
             task_constraints=constraints,
             hard_constraint_count=hard_count,
             inferred_constraint_count=inferred_count,
@@ -364,6 +373,11 @@ class _LoopEngine:
         actions: list[ActionKind] = []
         if self.control.tool_calls_remaining > 0:
             actions.append(ActionKind.RECOMMEND_FROM_HISTORY)
+            # Stage 2: the extra candidate sources, offered only when the deployment
+            # configures a plane that can execute them.  A source this process does not run
+            # is absent from the menu, never offered and then substituted.
+            if self.candidate_plane is not None:
+                actions.extend(self._plane_candidate_actions())
         # Clarification is offered only while the task has not already asked something.
         # A suspended task is resumed by the *next* turn, so asking twice in one run would
         # make the loop an interrogation rather than a control loop.
@@ -376,6 +390,36 @@ class _LoopEngine:
             actions.extend(self.reasoning.available_actions())
         actions.append(ActionKind.FINISH)
         return tuple(actions)
+
+    def _plane_candidate_actions(self) -> tuple[ActionKind, ...]:
+        """The candidate actions the configured plane can actually execute.
+
+        Derived from the plane's registered sources rather than from the action enum, so the
+        menu never advertises a source the deployment does not run.
+        """
+        from .arguments import CandidateSource
+
+        offered: list[ActionKind] = []
+        if self.candidate_plane.has_source(CandidateSource.CATALOG_SEARCH):
+            offered.append(ActionKind.SEARCH_CATALOG)
+        if self.candidate_plane.has_source(CandidateSource.SIMILAR_ITEM):
+            offered.append(ActionKind.FIND_SIMILAR)
+            offered.append(ActionKind.SELECT_SOURCE)
+        return tuple(offered)
+
+    def grounded_identities(self) -> tuple[str, ...]:
+        """Return the identities of the run's grounded candidates, in order.
+
+        Read from the **verified** candidate set the run holds, never from a request and never
+        from the ledger's ungrounded audit entries.  A policy uses these to *refer* to products
+        in read-only reasoning actions; it cannot add one.
+        """
+        tool_result = self.state.get("tool_result")
+        if tool_result is None:
+            return ()
+        return tuple(
+            item.parent_asin for item in getattr(tool_result, "recommendations", ()) or ()
+        )
 
     def candidate_state(self) -> CandidateState:
         """Project the trusted candidate state into the policy-visible summary.
@@ -494,6 +538,35 @@ class _LoopEngine:
 
     # -- dispatch ---------------------------------------------------------- #
 
+    def _is_plane_step(self) -> bool:
+        """True when the current action was executed by the multi-source candidate plane."""
+        return self.validated is not None and self.validated.action in (
+            ActionKind.SEARCH_CATALOG,
+            ActionKind.FIND_SIMILAR,
+            ActionKind.SELECT_SOURCE,
+        )
+
+    def _self_verified_step(self) -> bool:
+        """True when this step's phase already produced its own verification and observation.
+
+        Three phases do: **reasoning** (grounded facts, no raw payload), **candidate-plane
+        execution** (the plane grounds and records, so there is nothing left to re-verify) and
+        **clarification** (nothing executes).  The generic verify/observe phases must skip
+        them, or they would re-verify a result that does not have the shape
+        :class:`~recommendation.control.verification.ResultVerifier` expects - which is exactly
+        how the candidate plane first broke: the plane's result carries no history-Tool payload,
+        the verifier correctly refused it, and a successful retrieval was reported as a failure.
+        """
+        if self.validated is None:
+            return False
+        if self.validated.action in READ_ONLY_ACTIONS:
+            return True
+        return self.validated.action in (
+            ActionKind.SEARCH_CATALOG,
+            ActionKind.FIND_SIMILAR,
+            ActionKind.SELECT_SOURCE,
+        )
+
     def has_current_action(self) -> bool:
         """True when a validated action exists **for the step in progress**.
 
@@ -570,6 +643,15 @@ class _LoopEngine:
         """
         if not self.has_current_action():
             return StepOutcome.proceed()
+        # Stage 2: an action that consults a *non-history* candidate source goes through the
+        # plane, which grounds every identity before the ledger records it.  The history
+        # action keeps using the accepted capability so the Stage 1 path is untouched.
+        if self.candidate_plane is not None and self.validated.action in (
+            ActionKind.SEARCH_CATALOG,
+            ActionKind.FIND_SIMILAR,
+            ActionKind.SELECT_SOURCE,
+        ):
+            return self._execute_via_plane()
         try:
             self.domain_result = self.capability.execute(
                 self.validated,
@@ -597,6 +679,97 @@ class _LoopEngine:
             )
         return StepOutcome.proceed()
 
+    def _execute_via_plane(self) -> StepOutcome:
+        """Execute one non-history candidate action through the multi-source plane.
+
+        The plane grounds identities and records provenance; this phase then builds the
+        minimised observation the policy sees.  Tool-call accounting is unchanged: this is
+        still a candidate-producing action and still consumes one call.
+        """
+        assert self.validated is not None
+        try:
+            result = self.candidate_plane.execute(
+                self.validated,
+                read_trusted_history=lambda: tuple(
+                    self.state.get("trusted_user_history", ())
+                ),
+                step_index=self.control.step_count,
+            )
+        except Exception as exc:  # noqa: BLE001 - normalised into an observation
+            self.domain_result = None
+            self.verification = VerificationResult(
+                verified=False,
+                code="candidate_source_failed",
+                detail=f"the candidate plane raised {type(exc).__name__}",
+                checks=("execution",),
+            )
+            self.observation = self.observation_adapter.failed_observation(
+                action_id=self.validated.action_id,
+                step_index=self.control.step_count,
+                action=self.validated.action,
+                code=_error_code(exc),
+                requested_k=self.validated.k,
+            )
+            return StepOutcome.proceed()
+
+        # Adopt the plane's candidate set into the run's trusted state so the accepted
+        # renderer can present it.  The plane returned grounded identities only, so this is
+        # the same "verified candidates only" rule the history path follows.
+        self.domain_result = result
+        self.verification = VerificationResult(
+            verified=True,
+            code="candidates_grounded",
+            detail=None,
+            checks=("candidate_identity", "provenance_recorded"),
+        )
+        source = getattr(result, "source", "") or self.validated.action.value
+        self.observation = self.candidate_plane.observe(
+            action=self.validated,
+            source=_source_for(self.validated.action, result),
+            requested_k=result.requested_k,
+            returned_k=result.returned_k,
+            ungrounded_count=int(getattr(result, "ungrounded_count", 0) or 0),
+            step_index=self.control.step_count,
+            candidate_set_ref=result.candidate_set_ref,
+        )
+        self._adopt_plane_candidates(result)
+        return StepOutcome.proceed()
+
+    def _adopt_plane_candidates(self, result: Any) -> None:
+        """Record a plane's grounded candidate set in the run's trusted state.
+
+        The plane returns candidate identities; the run's state needs a rendering shape.  Only
+        grounded identities are adopted, and the provenance stays in the ledger, so the
+        renderer can present them while the audit trail remains in one place.
+        """
+        identities = tuple(getattr(result, "grounded_parent_asins", ()) or ())
+        if not identities:
+            return
+        item_ids = dict(getattr(result, "item_ids", {}) or {})
+        recommendations = tuple(
+            ToolRecommendation(
+                rank=position,
+                parent_asin=parent_asin,
+                item_id=item_ids.get(parent_asin, position),
+                # No score: a lexical or similarity source's score is not a SASRec score, and
+                # presenting one as though it were would misrepresent the source.
+                score=0.0,
+            )
+            for position, parent_asin in enumerate(identities, start=1)
+        )
+        # Record which trusted source produced this candidate set, so the renderer can name it
+        # instead of implying the sequential recommender.
+        self.state["candidate_source"] = str(getattr(result, "source", "") or "")
+        self.state["tool_result"] = RecommendationToolResult(
+            recommendations=list(recommendations),
+            requested_k=result.requested_k,
+            returned_k=len(recommendations),
+            history_length=len(tuple(self.state.get("trusted_user_history", ()))),
+            effective_history_length=0,
+            history_truncated=False,
+            eligible_candidates=0,
+        )
+
     # -- verify ------------------------------------------------------------ #
 
     def verify(self) -> StepOutcome:
@@ -607,7 +780,7 @@ class _LoopEngine:
         """
         if not self.has_current_action():
             return StepOutcome.proceed()
-        if self.validated is not None and self.validated.action in READ_ONLY_ACTIONS:
+        if self._self_verified_step():
             return StepOutcome.proceed()
         if self.domain_result is None:
             return StepOutcome.proceed()
@@ -628,7 +801,7 @@ class _LoopEngine:
         """
         if not self.has_current_action():
             return StepOutcome.proceed()
-        if self.validated is not None and self.validated.action in READ_ONLY_ACTIONS:
+        if self._self_verified_step():
             return StepOutcome.proceed()
         if self.domain_result is None or self.verification is None:
             return StepOutcome.proceed()
@@ -662,7 +835,11 @@ class _LoopEngine:
         if self.verification.verified and self.domain_result is not None and not is_reasoning:
             self.produced_recommendation = True
             self.candidates_grounded = self.domain_result.returned_k > 0
-            self._adopt_candidates(self.domain_result)
+            # A plane step adopted its candidates at execution time (the plane returns
+            # identities, not a history-Tool payload), so adopting again here would overwrite
+            # them with ``None`` fields.
+            if not self._is_plane_step():
+                self._adopt_candidates(self.domain_result)
         elif is_reasoning:
             # Reasoning adds no candidates and removes none: the candidate state is left
             # exactly as it was, which is what keeps "reasoning cannot widen the candidate
@@ -1127,6 +1304,7 @@ class LoopController:
         limits: LoopLimits | None = None,
         driver: str = "graph",
         reasoning_executor: Any = None,
+        candidate_plane: Any = None,
     ) -> None:
         if not callable(getattr(policy, "choose", None)):
             raise PolicyActionError("policy must provide a callable choose(context) method")
@@ -1159,6 +1337,7 @@ class LoopController:
         self._limits = limits or LoopLimits()
         self._driver = driver
         self._reasoning = reasoning_executor
+        self._candidate_plane = candidate_plane
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -1186,6 +1365,16 @@ class LoopController:
     def reasoning_executor(self) -> Any:
         """The Stage 4 read-only reasoning executor, or ``None`` when not configured."""
         return self._reasoning
+
+    @property
+    def candidate_plane(self) -> Any:
+        """The Stage 2 multi-source candidate plane, or ``None`` for the single-source path."""
+        return self._candidate_plane
+
+    @property
+    def offers_multiple_sources(self) -> bool:
+        """True when this deployment can execute more than the history source."""
+        return self._candidate_plane is not None
 
     @property
     def offers_reasoning(self) -> bool:
@@ -1252,6 +1441,7 @@ class LoopController:
         *,
         run_id: str | None = None,
         task_state: TaskState | None = None,
+        candidate_plane: Any = None,
     ) -> _LoopEngine:
         """Build an engine for one run.
 
@@ -1278,6 +1468,9 @@ class LoopController:
             run_id=run_id or build_run_id(),
             task_state=task_state,
             reasoning_executor=self._reasoning,
+            candidate_plane=(
+                candidate_plane if candidate_plane is not None else self._candidate_plane
+            ),
         )
 
     def _run(
@@ -1360,10 +1553,22 @@ class LoopController:
         from .topology import build_loop_graph
 
         graph = build_loop_graph()
-        graph.invoke(
-            {"engine": engine, "step": 0},
-            config={"recursion_limit": recursion_limit(self._limits)},
-        )
+        try:
+            graph.invoke(
+                {"engine": engine, "step": 0},
+                config={"recursion_limit": recursion_limit(self._limits)},
+            )
+        except GraphRecursionError:
+            # The framework backstop fired.  The controller still owns the verdict: report the
+            # budget termination it would have reached, rather than letting a topology fault
+            # surface as an exception.  A test asserts a runaway loop ends this way.
+            engine.check_limits()
+            if not engine.control.is_terminal:
+                engine._terminate(  # noqa: SLF001 - the engine owns its control state
+                    RunStatus.ABORTED,
+                    TerminationReason.MAX_STEPS,
+                    "the loop graph reached its recursion limit",
+                )
 
         if engine.control.status is RunStatus.RUNNING:  # pragma: no cover - safety net
             return engine.result(
@@ -1390,9 +1595,14 @@ def recursion_limit(limits: LoopLimits) -> int:
     decision into a framework crash; the limit is now sized so the controller always
     reaches its own verdict first.
     """
-    per_step = 8
+    per_step = 12
     retry_headroom = 2 * (limits.max_retries + 1)
-    return per_step * (limits.max_steps + 1) + retry_headroom + 16
+    # A generous multiplier on purpose.  LangGraph's limit is a *backstop*; the controller's
+    # own budgets are the authoritative boundary, and a framework limit that fires first turns
+    # a deterministic controller decision into a framework crash.  The graph driver also
+    # survives a recursion stop by reporting MAX_STEPS, so reaching it is never fatal - but it
+    # should not be reached in normal operation.
+    return per_step * (limits.max_steps + 1) + retry_headroom + 32
 
 
 def _error_code(exc: BaseException) -> str:
@@ -1405,3 +1615,18 @@ def _error_code(exc: BaseException) -> str:
     if isinstance(code, str) and code:
         return code
     return type(exc).__name__
+
+
+def _source_for(action: ActionKind, result: Any) -> Any:
+    """Return the candidate source a plane result came from."""
+    from .arguments import CandidateSource
+
+    mapping = {
+        ActionKind.SEARCH_CATALOG: CandidateSource.CATALOG_SEARCH,
+        ActionKind.FIND_SIMILAR: CandidateSource.SIMILAR_ITEM,
+        ActionKind.SELECT_SOURCE: CandidateSource.CATALOG_SEARCH,
+    }
+    declared = getattr(result, "source", None)
+    if isinstance(declared, CandidateSource):
+        return declared
+    return mapping.get(action, CandidateSource.CATALOG_SEARCH)

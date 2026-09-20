@@ -295,6 +295,18 @@ class ObservationAdapter:
         """
         tool_result = result.tool_result
         returned_k = result.returned_k
+        # A candidate-producing action that returned no history-Tool payload cannot be
+        # described by this observation, whose ``source`` names a recommender.  Report it as a
+        # refusal instead of raising from inside an adapter: the loop must normalise failures,
+        # not crash on them.
+        if tool_result is None and not verification.verified:
+            return self.failed_observation(
+                action_id=result.action_id,
+                step_index=step_index,
+                action=action,
+                code=verification.code,
+                requested_k=result.requested_k,
+            )
         has_candidates = bool(tool_result is not None and returned_k > 0)
 
         if verification.verified:
@@ -311,7 +323,11 @@ class ObservationAdapter:
             step_index=step_index,
             action=action,
             verification_status="verified" if verification.verified else "refused",
-            source=result.source,
+            # ``source`` labels which trusted source produced the candidates.  A result that
+            # does not declare one is reported as the accepted history source, which is what
+            # the Stage 1 capability always is - and the field stays a string so the
+            # observation can never be constructed with a missing label.
+            source=result.source or "recommend_from_history",
             status=status,
             requested_k=result.requested_k,
             returned_k=returned_k,

@@ -399,6 +399,9 @@ class CandidatePlane:
         candidate_set_ref = (
             f"{source.value}:{action.action_id}:{len(grounded_candidates)}"
         )
+        grounded_identities = tuple(
+            parent_asin for parent_asin, _, _ in grounded_candidates
+        )
         return RecommendationDomainResult(
             action_id=action.action_id,
             status="empty" if not grounded_candidates else "ok",
@@ -406,6 +409,20 @@ class CandidatePlane:
             requested_k=limit,
             returned_k=len(grounded_candidates),
             candidate_set_ref=candidate_set_ref,
+            grounded_parent_asins=grounded_identities,
+            item_ids=dict(report.item_ids),
+            source=source.value,
+            ungrounded_count=report.ungrounded_count,
+            provenance=tuple(
+                {
+                    "parent_asin": parent_asin,
+                    "source": source.value,
+                    "rank": rank,
+                    "score": score,
+                    "score_kind": tool.score_kind,
+                }
+                for parent_asin, rank, score in grounded_candidates
+            ),
         )
 
     # -- observation ------------------------------------------------------- #
