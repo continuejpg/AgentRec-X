@@ -248,6 +248,11 @@ class ReasoningExecutor:
         requirement = CompatibilityRequirement(name.strip() or attribute, value.strip())
         verdict = self._reasoner.check_compatibility(known, requirement=requirement)
         performed = self._checks_performed(requirement)
+        # The aggregate verdict alone cannot say *which* candidate failed, so the
+        # per-candidate reports it was derived from are carried through instead of being
+        # discarded.  Empty when the requirement maps onto no deterministic check, which is
+        # the honest answer rather than a fabricated per-candidate verdict.
+        assessments = self._assessments(known, requirement)
         return CompatibilityObservation(
             action_id=action.action_id,
             step_index=action.step_index,
@@ -259,6 +264,7 @@ class ReasoningExecutor:
             requirement_value=requirement.value,
             members=known,
             checks_performed=performed,
+            assessments=assessments,
             verification_note=(
                 "no check could be performed against this catalogue"
                 if verdict is CompatibilityVerdict.UNKNOWN
@@ -266,6 +272,45 @@ class ReasoningExecutor:
                 + (f"; {len(unknown)} identity/identities not in the catalogue" if unknown else "")
             ),
         )
+
+    def _assessments(
+        self, known: tuple[str, ...], requirement: CompatibilityRequirement
+    ) -> tuple[dict[str, Any], ...]:
+        """Per-candidate verdicts behind a compatibility aggregate, in ``known`` order.
+
+        Reuses the reasoner's own constraint check, so the per-candidate verdict and the
+        aggregate can never disagree: the aggregate is defined as the fold of exactly these
+        verdicts.  A requirement naming a dimension this catalogue cannot check yields no
+        per-candidate entries - there is no verdict to report, and inventing ``satisfied``
+        for one would be the fabrication the reasoning plane exists to prevent.
+        """
+        kind = self._constraint_kind(requirement.attribute)
+        if kind is None:
+            return ()
+        return tuple(
+            self._reasoner.check_constraint(
+                parent_asin, kind=kind, expected=requirement.value
+            ).as_dict()
+            for parent_asin in known
+        )
+
+    @staticmethod
+    def _constraint_kind(attribute: str) -> Any:
+        """The constraint dimension a compatibility attribute names, or ``None``.
+
+        Mirrors the mapping :meth:`GroundedReasoner.check_compatibility` uses, kept explicit
+        so a newly checkable dimension cannot silently produce an aggregate without a
+        per-candidate breakdown.
+        """
+        from .grounded_reasoning import ConstraintKind
+
+        return {
+            "brand": ConstraintKind.BRAND,
+            "category": ConstraintKind.CATEGORY,
+            "categories": ConstraintKind.CATEGORY,
+            "color": ConstraintKind.COLOR,
+            "colour": ConstraintKind.COLOR,
+        }.get(attribute.strip().casefold())
 
     def _checks_performed(self, requirement: CompatibilityRequirement) -> tuple[str, ...]:
         """Return which deterministic checks the catalogue can actually support.

@@ -71,6 +71,11 @@ ATTRIBUTION_COMPONENTS: dict[str, AttributionComponent] = {
     "retrieval_empty": AttributionComponent.CANDIDATE_RETRIEVAL,
     "protocol_violation": AttributionComponent.PROTOCOL,
     "constraint_violated": AttributionComponent.CONSTRAINT_VERIFICATION,
+    # Phase 2: a candidate whose declared hard constraint could not be decided reached the
+    # output. It is owned by constraint verification - the component that was supposed to
+    # decide it - rather than by completion, because the defect is an unresolved verdict
+    # being presented as a compliant match.
+    "constraint_unresolved": AttributionComponent.CONSTRAINT_VERIFICATION,
 }
 
 

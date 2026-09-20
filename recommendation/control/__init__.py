@@ -72,6 +72,19 @@ from .catalog_search import (
     CatalogSearchSource,
 )
 from .completion import CompletionGuard
+from .constraint_eligibility import (
+    CONSTRAINT_ELIGIBILITY_VERSION,
+    CandidateConstraintAssessment,
+    CandidateEligibility,
+    CandidateEligibilityEvaluator,
+    ConstraintRequirement,
+    FeasibilityProjection,
+    FeasibleCandidateView,
+    candidate_eligibility,
+    candidate_feasibility_projection,
+    constraint_kind_for,
+    constraints_from_task_state,
+)
 from .context import (
     CandidateState,
     PolicyContext,
@@ -221,7 +234,18 @@ __all__ = [
     "CompatibilityRequirement",
     "CompatibilityVerdict",
     "ConstraintKind",
+    "CONSTRAINT_ELIGIBILITY_VERSION",
+    "CandidateConstraintAssessment",
+    "CandidateEligibility",
+    "CandidateEligibilityEvaluator",
     "ConstraintReport",
+    "ConstraintRequirement",
+    "FeasibilityProjection",
+    "FeasibleCandidateView",
+    "candidate_eligibility",
+    "candidate_feasibility_projection",
+    "constraint_kind_for",
+    "constraints_from_task_state",
     "ConstraintVerdict",
     "CatalogSearchHit",
     "CatalogSearchResult",

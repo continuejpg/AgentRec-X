@@ -40,6 +40,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from recommendation.control import (  # noqa: E402
+    CandidateEligibilityEvaluator,
     CandidateLedger,
     CandidatePlane,
     CatalogSearchSource,
@@ -94,8 +95,18 @@ def _reasoner() -> GroundedReasoner:
     )
 
 
-def _factory(case: EvaluationCase, policy: Any, limits: Any) -> Any:
-    """Compose a control plane for one case, with a widened catalogue."""
+def _factory(
+    case: EvaluationCase,
+    policy: Any,
+    limits: Any,
+    task_state: Any = None,
+) -> Any:
+    """Compose a control plane for one case, with a widened catalogue.
+
+    ``task_state`` is the case's declared hard constraints, so a case that asserts enforcement
+    runs against a constraint that is genuinely active.  It is supplied by the runner at run
+    time, so the factory only has to accept it.
+    """
     empty_history = "recovery-required" in case.case_id
     harness = build_control_harness(
         policy=policy,
@@ -107,7 +118,11 @@ def _factory(case: EvaluationCase, policy: Any, limits: Any) -> Any:
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    harness.controller._reasoning = ReasoningExecutor(GroundedReasoner(metadata))  # noqa: SLF001
+    reasoner = GroundedReasoner(metadata)
+    harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001
+    # Phase 2: the same reasoner drives task-scoped constraint eligibility, so a case that
+    # declares a hard constraint is run *and measured* against one enforced constraint set.
+    harness.controller._eligibility = CandidateEligibilityEvaluator(reasoner)  # noqa: SLF001
     harness.controller._candidate_plane = CandidatePlane(  # noqa: SLF001
         ledger=CandidateLedger(),
         grounding=GroundingVerifier(_Map(), metadata),
@@ -157,6 +172,15 @@ def run(*, json_path: Path | None = None) -> int:
                 f"tools={outcome.trajectory.tool_calls} steps={outcome.trajectory.steps} "
                 f"policy={policies}"
             )
+            # Phase 2: state the two constraint questions separately, because reporting one
+            # number would make "checked and compliant" look like "never checked".
+            if case.hard_constraints:
+                checked = ",".join(outcome.metrics.constraint_checked) or "none"
+                print(
+                    f"          constraints checked={checked} "
+                    f"enforced={not outcome.metrics.constraint_not_enforced} "
+                    f"unresolved_in_output={outcome.metrics.constraint_unresolved_in_output}"
+                )
             print(f"          {actions}")
             if not outcome.passed:
                 for name, owner in outcome.attribution.attributed.items():
@@ -182,6 +206,12 @@ def run(*, json_path: Path | None = None) -> int:
                     "terminal": outcome.trajectory.terminal.value,
                     "actions": list(outcome.trajectory.action_sequence()),
                     "policies": list(outcome.trajectory.policy_names()),
+                    "constraint_checked": list(outcome.metrics.constraint_checked),
+                    "constraint_enforced": not outcome.metrics.constraint_not_enforced,
+                    "constraint_violations": list(outcome.metrics.constraint_violations),
+                    "constraint_unresolved_in_output": (
+                        outcome.metrics.constraint_unresolved_in_output
+                    ),
                     "failures": list(outcome.metrics.failures()),
                     "attributed": outcome.attribution.attributed,
                 }

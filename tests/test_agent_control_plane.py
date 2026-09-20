@@ -153,6 +153,17 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         # every identity was produced by a trusted tool and confirmed by the grounding
         # verifier, and only read-only actions accept one.
         "grounded_parent_asins",
+        # Phase 2 adds the task-scoped feasibility projection: three counts, the constraint
+        # labels that are active, and the *narrowed* allowlist.  Every identity here was
+        # already reachable through ``grounded_parent_asins`` - narrowing an allowlist is not
+        # a new channel - and the labels name a constraint dimension plus the user's own
+        # stated value, never a product fact.  Constraint verdicts the policy is not shown
+        # (the observed values behind them) stay in the trusted record.
+        "verified_eligible_count",
+        "ineligible_count",
+        "unresolved_count",
+        "feasible_parent_asins",
+        "active_constraints",
     }
     assert set(vars(context)) == allowed
 
@@ -197,6 +208,18 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
     summary = str(context.summary())
     for row in CANDIDATE_ROWS:
         assert row[0] not in summary, "candidate identity leaked into the trajectory summary"
+
+    # Phase 2's projection is a *narrowing* of that one channel, not a second one: the
+    # feasible set is always a subset of the grounded set, and with no constraint active it
+    # is empty rather than equal to it - "nothing was constrained" must not read as
+    # "everything was verified compliant".
+    assert set(context.feasible_parent_asins) <= set(context.grounded_parent_asins)
+    assert context.active_constraints == ()
+    assert context.feasible_parent_asins == ()
+    assert (
+        context.verified_eligible_count + context.ineligible_count + context.unresolved_count
+        == 0
+    )
 
 
 def test_policy_cannot_supply_candidate_ids_or_history() -> None:

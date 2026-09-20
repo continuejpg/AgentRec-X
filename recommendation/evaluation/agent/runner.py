@@ -40,6 +40,9 @@ from recommendation.control import (
     TerminationReason,
 )
 from recommendation.control.grounded_reasoning import ConstraintKind
+from recommendation.control.constraint_eligibility import ConstraintRequirement
+from recommendation.control.task_state import ConstraintOrigin, TaskConstraint, TaskState
+from recommendation.memory.schemas import PreferenceKind
 from recommendation.control.arguments import (
     AskClarificationArguments,
     CheckCompatibilityArguments,
@@ -62,8 +65,11 @@ __all__ = [
     "DecidingOncePolicy",
     "SuiteReport",
     "build_adaptive_policy",
+    "case_constraint_requirements",
+    "constraint_task_state",
     "run_case",
     "run_suite",
+    "task_state_from_case",
 ]
 
 #: The observation-conditioned variant.
@@ -73,6 +79,117 @@ ABLATION_DECIDE_ONCE = "decide_once"
 #: Phase 1: a model-driven next-action policy, supplied by the caller as a scripted model so
 #: the comparison stays offline and reproducible.
 ABLATION_MODEL_POLICY = "model_policy"
+
+
+# --------------------------------------------------------------------------- #
+# Case declarations -> real task constraints (Phase 2)
+# --------------------------------------------------------------------------- #
+
+#: Case constraint declarations are ``dimension=value`` strings in the reasoner's own
+#: vocabulary (``price_max=120``, ``color=red``).  The map is explicit rather than derived so
+#: a declaration the runtime cannot enforce fails loudly in ``task_state_from_case`` instead
+#: of silently becoming an unconstrained run that the metric would then report as a failure
+#: of the wrong component.
+_CASE_CONSTRAINT_KINDS: dict[str, ConstraintKind] = {
+    ConstraintKind.PRICE_MAX.value: ConstraintKind.PRICE_MAX,
+    ConstraintKind.PRICE_MIN.value: ConstraintKind.PRICE_MIN,
+    ConstraintKind.CATEGORY.value: ConstraintKind.CATEGORY,
+    ConstraintKind.BRAND.value: ConstraintKind.BRAND,
+    ConstraintKind.COLOR.value: ConstraintKind.COLOR,
+    ConstraintKind.WEIGHT_MAX.value: ConstraintKind.WEIGHT_MAX,
+}
+
+
+#: The inverse of the case-declaration map: a constraint dimension a task state can express.
+_PREFERENCE_KIND_BY_CONSTRAINT: dict[ConstraintKind, PreferenceKind] = {
+    ConstraintKind.PRICE_MAX: PreferenceKind.PRICE_MAX,
+    ConstraintKind.PRICE_MIN: PreferenceKind.PRICE_MIN,
+    ConstraintKind.CATEGORY: PreferenceKind.CATEGORY,
+    ConstraintKind.BRAND: PreferenceKind.BRAND,
+    ConstraintKind.COLOR: PreferenceKind.COLOR,
+}
+
+
+def _presented_tool_result(result: LoopResult) -> Any:
+    """The candidate set the response was built from, after constraint narrowing.
+
+    The loop records its constraint projection on the state when it narrowed membership, so
+    the evaluator reads the same artifact the renderer did.  Without a projection the retrieved
+    set *is* the presented set, and the function returns it unchanged.
+    """
+    projection = result.state.get("constraint_projection")
+    if projection is not None:
+        return projection.tool_result
+    return result.state.get("tool_result")
+
+
+class CaseConstraintDeclarationError(ValueError):
+    """A case declared a hard constraint the runtime cannot be given as an active one."""
+
+
+def case_constraint_requirements(
+    case: EvaluationCase,
+) -> tuple[ConstraintRequirement, ...]:
+    """Parse a case's ``hard_constraints`` into active constraint requirements.
+
+    The case vocabulary and the reasoner vocabulary are the same strings, so this is a
+    structural translation rather than an interpretation: an unrecognised dimension raises
+    instead of being skipped, because skipping it would leave the run unconstrained while the
+    metric still checked the declared constraint - reporting a runtime defect as a policy one.
+    """
+    requirements: list[ConstraintRequirement] = []
+    for declaration in case.hard_constraints:
+        name, separator, expected = declaration.partition("=")
+        if not separator:
+            raise CaseConstraintDeclarationError(
+                f"case {case.case_id!r} declares {declaration!r} without '='"
+            )
+        kind = _CASE_CONSTRAINT_KINDS.get(name.strip().casefold())
+        if kind is None:
+            raise CaseConstraintDeclarationError(
+                f"case {case.case_id!r} declares unknown constraint dimension "
+                f"{name.strip()!r}; known: {', '.join(sorted(_CASE_CONSTRAINT_KINDS))}"
+            )
+        requirements.append(
+            ConstraintRequirement(kind=kind, expected=expected.strip(), source_text=declaration)
+        )
+    return tuple(requirements)
+
+
+def constraint_task_state(case: EvaluationCase) -> TaskState:
+    """Build the task state that makes a case's declared constraints real.
+
+    Constraints are ``CURRENT_TURN`` and explicit, which is exactly the condition
+    ``TaskState.hard_constraints`` requires - so a case declaration takes effect as a genuine
+    hard constraint and soft/inferred signals are structurally unable to narrow anything.
+    """
+    requirements = case_constraint_requirements(case)
+    if not requirements:
+        return TaskState()
+    state = TaskState()
+    for requirement in requirements:
+        preference_kind = _PREFERENCE_KIND_BY_CONSTRAINT.get(requirement.kind)
+        if preference_kind is None:
+            raise CaseConstraintDeclarationError(
+                f"case {case.case_id!r} declares {requirement.label!r}, which has no task-state "
+                f"preference kind"
+            )
+        state = state.with_constraint(
+            TaskConstraint(
+                kind=preference_kind,
+                value=requirement.expected,
+                origin=ConstraintOrigin.CURRENT_TURN,
+                source_text=requirement.source_text,
+            )
+        )
+    return state
+
+
+def task_state_from_case(case: EvaluationCase) -> TaskState:
+    """The task state a case should be run under, or an empty one when it declares none."""
+    return constraint_task_state(case)
+
+
 
 
 # --------------------------------------------------------------------------- #
@@ -356,8 +473,22 @@ def build_adaptive_policy(case: EvaluationCase) -> Any:
         return _SearchCatalogFirst(("redwidget",))
     if case.case_id == "missing-requirement":
         return _AskWhenUnspecified()
-    if case.case_id == "hard-constraint":
-        return _ConstraintFilteringPolicy("weight_max: 2 Kilograms")
+    if case.hard_constraints:
+        # Any case that declares a hard constraint is driven by the policy that checks it -
+        # and the requirement comes from the **case**, so the check and the measurement cannot
+        # drift apart.  They had: the case asserted ``color=red`` while the policy verified a
+        # weight ceiling, which meant the metric graded a constraint the run had never been
+        # asked about.
+        #
+        # Checking is all this policy does.  It has no way to narrow the presented set - that
+        # is the loop's projection, driven by the same deterministic verdicts - which is why a
+        # policy is not where enforcement lives.
+        requirement = next(iter(case_constraint_requirements(case)), None)
+        if requirement is None:  # pragma: no cover - guarded by the branch condition
+            raise CaseConstraintDeclarationError(
+                f"case {case.case_id!r} declares constraints but none parsed"
+            )
+        return _ConstraintFilteringPolicy(f"{requirement.kind.value}: {requirement.expected}")
     if case.case_id == "complex-multi-step":
         return _RecommendThenCompare()
     if case.case_id in ("empty-source-recovery", "empty-source-recovery-required"):
@@ -444,7 +575,7 @@ class CaseRunner:
 
     def __init__(
         self,
-        controller_factory: Callable[[EvaluationCase, Any, LoopLimits], Any],
+        controller_factory: Callable[..., Any],
         *,
         variant: str = ABLATION_ADAPTIVE,
         identities_provider: Callable[[Any], tuple[str, ...]] | None = None,
@@ -487,12 +618,28 @@ class CaseRunner:
             max_tool_calls=max(1, case.max_tool_calls),
             max_retries=1,
         )
-        controller = self._factory(case, chosen, limits)
-        result = controller.run(case.message, _HISTORY, turn_id=f"eval-{case.case_id}")
+        # Phase 2: the case's declared hard constraints become the run's **real** active
+        # constraints, so a case that asserts enforcement is measured against a run that
+        # actually enforced.  Before this, the declaration was only a measurement input: the
+        # metric checked the final set while the runtime had no constraint to enforce, which
+        # is precisely the gap this phase closes.
+        task_state = task_state_from_case(case)
+        controller = self._factory(case, chosen, limits, task_state)
+        result = controller.run(
+            case.message, _HISTORY, turn_id=f"eval-{case.case_id}", task_state=task_state
+        )
 
         trajectory = self._project(case, result, controller)
-        report = self._check_constraints(case, result, reasoner)
-        metrics = compute_metrics(trajectory, case, constraint_report=report)
+        # Two reports from one evaluation: what the run checked, and what it presented.  The
+        # difference between them *is* enforcement.
+        checked = self._check_constraints(case, result, reasoner)
+        presented = self._check_constraints(case, result, reasoner, presented=True)
+        metrics = compute_metrics(
+            trajectory,
+            case,
+            constraint_report=checked,
+            presented_constraint_report=presented,
+        )
         return CaseOutcome(
             case=case,
             trajectory=trajectory,
@@ -501,9 +648,25 @@ class CaseRunner:
         )
 
     def _check_constraints(
-        self, case: EvaluationCase, result: LoopResult, reasoner: Any | None
+        self,
+        case: EvaluationCase,
+        result: LoopResult,
+        reasoner: Any | None,
+        *,
+        presented: bool = False,
     ) -> tuple[Any, ...]:
-        """Check the case's hard constraints against the run's **final** candidate set.
+        """Check the case's hard constraints against one of the run's candidate sets.
+
+        ``presented=False`` measures the **retrieved** set, which is what "was the constraint
+        checked" means: a run that narrowed its answer still did the checking, and reporting it
+        as an unverified completion would punish correct behaviour.
+
+        ``presented=True`` measures the set the response was built from, which is what
+        "was the constraint enforced" means: a candidate the run retrieved but excluded is not
+        a claim of compliance, so it cannot be an enforcement failure.
+
+        The trusted record keeps the full retrieved set either way, so nothing about
+        provenance is lost - the constraint projection is simply what the response used.
 
         Returns an empty tuple when the case declares no constraints or no reasoner was
         supplied.  An empty tuple is the honest answer in that situation: it means *nothing was
@@ -512,7 +675,7 @@ class CaseRunner:
         """
         if not case.hard_constraints or reasoner is None:
             return ()
-        tool_result = result.state.get("tool_result")
+        tool_result = _presented_tool_result(result) if presented else result.state.get("tool_result")
         if tool_result is None:
             return ()
         identities = [item.parent_asin for item in tool_result.recommendations]

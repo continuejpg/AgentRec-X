@@ -184,14 +184,15 @@ EVALUATION_CASES: tuple[EvaluationCase, ...] = (
         required_actions=("recommend_from_history",),
         acceptable_actions=("recommend_from_history", "verify", "compare", "finish"),
         hard_constraints=("color=red",),
-        constraint_enforced=False,
+        constraint_enforced=True,
         constraint_note=(
-            "Checked deterministically against the catalogue. A candidate whose colour the "
-            "catalogue does not carry is UNKNOWN: not compliant, and not a violation either. "
-            "Weight is deliberately not used here because CHECK_COMPATIBILITY verifies "
-            "brand / category / colour requirements; a numeric weight ceiling is a feasibility "
-            "constraint, checked through the reasoner's constraint API, not a compatibility "
-            "requirement."
+            "Checked deterministically against the catalogue and **enforced**: the declared "
+            "constraint becomes the run's real active hard constraint, so a candidate the "
+            "catalogue proves is not red is excluded from the presented set. A candidate whose "
+            "colour the catalogue does not carry is UNKNOWN: not compliant, and not a "
+            "violation either. The metric re-checks the presented set independently, so a run "
+            "that narrowed nothing fails the case rather than being credited for having "
+            "checked."
         ),
         expected_memory_effect="none",
         # One recommendation, then one verification per candidate so the verdict is per
@@ -199,13 +200,11 @@ EVALUATION_CASES: tuple[EvaluationCase, ...] = (
         max_tool_calls=2,
         max_steps=8,
         notes=(
-            "The constraint is verifiable, so it must be enforced rather than described. "
-            "Per-candidate verification is what makes 'which ones comply' answerable. This "
-            "case requires the check to be PERFORMED and the verdicts to be grounded; it does "
-            "not yet require the final set to be narrowed, because the bounded loop has no "
-            "candidate-narrowing mechanism (documented as a Stage 4 limitation). The reasoner's "
-            "constraint API can enforce a numeric ceiling, but no action maps a narrowed set "
-            "back into the presented candidates."
+            "The constraint is verifiable, so it is enforced rather than described: the "
+            "eligible candidate remains in the ledger, the violating ones keep their "
+            "provenance and their verdicts, and only the eligible candidate reaches the "
+            "presented set. This is the case the Phase 2 narrowing mechanism exists for; the "
+            "Stage 4 limitation it used to document is closed."
         ),
     ),
     _case(
@@ -360,6 +359,74 @@ EVALUATION_CASES: tuple[EvaluationCase, ...] = (
         notes=(
             "Must stay inside its budget. The case does not require a specific ordering "
             "algorithm, only that any ordering it reports is grounded."
+        ),
+    ),
+    _case(
+        case_id="unresolved-constraint",
+        category="11_unresolved_hard_constraint",
+        purpose=(
+            "A hard constraint the catalogue cannot decide must make the run unresolved "
+            "rather than compliant."
+        ),
+        message="Only show me options in the widget category.",
+        required_actions=("recommend_from_history",),
+        acceptable_actions=("recommend_from_history", "get_details", "verify", "finish"),
+        hard_constraints=("category=widget",),
+        constraint_enforced=True,
+        constraint_note=(
+            "The category dimension is real and checkable, but this fixture catalogue carries "
+            "no category for any candidate, so every verdict is UNKNOWN. UNKNOWN is not a pass "
+            "and not a violation: the candidate must not be presented as a verified compliant "
+            "match, and it must not be reported as a violation either."
+        ),
+        expected_memory_effect="none",
+        # One step per candidate for the check, one for the recommendation, and the finish
+        # attempt the guard refuses.  The budget must accommodate *checking every candidate*,
+        # which is what makes the unresolved verdicts observable rather than assumed.
+        max_tool_calls=2,
+        max_steps=14,
+        # A refused completion is the honest ending here: the constraint cannot be resolved
+        # from this catalogue, so the guard is right to refuse a claim of compliance, and the
+        # run stops rather than looping.  Presenting nothing is also expected.
+        allowed_terminal=(TerminalOutcome.COMPLETED, TerminalOutcome.COMPLETION_REFUSED),
+        notes=(
+            "This is the case that proves UNKNOWN stays first-class end to end. The retrieved "
+            "candidates remain in the ledger with their provenance; the presented set is empty "
+            "because nothing was proved compliant; and the constraint is reported as "
+            "unresolved rather than as satisfied or violated. A run that invented category "
+            "data to resolve it would be fabricating evidence, so the honest unresolved "
+            "outcome is the passing one."
+        ),
+    ),
+    _case(
+        case_id="no-feasible-candidate",
+        category="12_empty_feasible_set",
+        purpose=(
+            "When every candidate is proved infeasible, the run must not present the "
+            "least-bad violator as a compliant recommendation."
+        ),
+        message="Show me the purple option only.",
+        required_actions=("recommend_from_history",),
+        acceptable_actions=("recommend_from_history", "verify", "finish"),
+        # The fixture candidate colours are red / blue / black / green, so no candidate is
+        # purple and every verdict is a proved violation rather than an unknown - which is what
+        # separates this case from ``unresolved-constraint``.
+        hard_constraints=("color=purple",),
+        constraint_enforced=True,
+        constraint_note=(
+            "Every candidate is proved not to satisfy the constraint, so the feasible set is "
+            "empty. The correct answer is an honest empty presentation, not the closest "
+            "match: substituting a violating candidate would present a known violation as a "
+            "compliant recommendation."
+        ),
+        expected_memory_effect="none",
+        max_tool_calls=2,
+        max_steps=14,
+        notes=(
+            "The complement of ``hard-constraint``: there the constraint narrows a mixed set, "
+            "here it removes all of it. Both cases keep every retrieved candidate in the "
+            "ledger, and both are measured against the presented set rather than the retrieved "
+            "one."
         ),
     ),
 )

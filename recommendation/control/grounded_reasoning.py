@@ -373,7 +373,16 @@ class ComparisonResult:
 
 
 class ConstraintKind(str, Enum):
-    """The constraint kinds the catalogue can check deterministically."""
+    """The constraint kinds the catalogue can check deterministically.
+
+    :attr:`UNVERIFIABLE` is the explicit "no deterministic check exists for this dimension"
+    member.  It exists because a hard constraint the user really stated (``waterproof``,
+    ``leather``, an interface or fitment requirement) must not be silently dropped just
+    because no catalogue attribute can decide it: dropping it would let a candidate be
+    presented as compliant with a constraint that was never tested.  Every check against it
+    is ``UNKNOWN``, which keeps such a candidate out of the verified feasible set while
+    making the reason for that visible.
+    """
 
     PRICE_MAX = "price_max"
     PRICE_MIN = "price_min"
@@ -382,6 +391,9 @@ class ConstraintKind(str, Enum):
     COLOR = "color"
     #: Weight ceiling, used for portability constraints.
     WEIGHT_MAX = "weight_max"
+    #: A stated constraint this catalogue carries no attribute for.  Never satisfiable and
+    #: never a violation: it resolves to ``UNKNOWN`` by construction.
+    UNVERIFIABLE = "unverifiable"
 
 
 class ConstraintVerdict(str, Enum):
@@ -699,6 +711,16 @@ class GroundedReasoner:
         violated.  That three-state result is what lets the completion guard refuse to certify
         a run whose constraints were never actually verified.
         """
+        if kind is ConstraintKind.UNVERIFIABLE:
+            # Not a missing *value* but a missing *dimension*: the catalogue carries no
+            # attribute that could decide this, so no amount of looking will resolve it.
+            return ConstraintReport(
+                parent_asin=parent_asin,
+                kind=kind,
+                expected=expected,
+                verdict=ConstraintVerdict.UNKNOWN,
+                observed=None,
+            )
         profile = self.facts(parent_asin)
         if profile is None:
             return ConstraintReport(

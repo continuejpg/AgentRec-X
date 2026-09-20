@@ -28,6 +28,8 @@ if str(REPO_ROOT) not in sys.path:
 from recommendation.control import (  # noqa: E402
     ActionKind,
     ActionProposal,
+    CandidateEligibilityEvaluator,
+    GroundedReasoner,
     LoopController,
     LoopLimits,
     PolicyActionError,
@@ -207,6 +209,8 @@ def build_control_harness(
     engine_error: Exception | None = None,
     k: int = 3,
     catalog_rows: Any = None,
+    with_eligibility: bool = False,
+    task_state: Any = None,
 ) -> ControlHarness:
     """Compose a full control plane over the real accepted pipeline.
 
@@ -214,6 +218,12 @@ def build_control_harness(
     catalogue contains.  They are separable because a test needs to model "history knows
     nothing, the catalogue knows plenty" - the situation that makes adaptive retrieval
     observable.  Defaulting ``catalog_rows`` to ``rows`` keeps the common case unchanged.
+
+    ``with_eligibility`` wires Phase 2 task-scoped constraint eligibility over the same
+    catalogue, and ``task_state`` supplies the run's active constraints.  Both are opt-in so
+    every pre-Phase-2 test keeps running against exactly the plane it was written for -
+    without a reasoner there is nothing to evaluate, and the controller correctly reports
+    "not evaluated" rather than inventing a verdict.
     """
     from tests.agent_reranking_fixture import build_index as _build_index
 
@@ -246,6 +256,11 @@ def build_control_harness(
         parts["enricher"] = enricher
     resolved_policy = policy or RecordingPolicy(k=k)
     memory_service = make_service() if with_memory else None
+    # Phase 2: the evaluator is built over the *resolved* catalogue metadata, so a case that
+    # widens the catalogue is evaluated against the catalogue the run actually retrieved from.
+    evaluator = None
+    if with_eligibility:
+        evaluator = CandidateEligibilityEvaluator(GroundedReasoner(parts["enricher"].metadata))
     controller = LoopController(
         resolved_policy,
         capability,
@@ -253,6 +268,7 @@ def build_control_harness(
         memory_service=memory_service,
         user_key="control-test-user" if with_memory else None,
         limits=limits or LoopLimits(),
+        eligibility_evaluator=evaluator,
     )
     return ControlHarness(
         capability=capability,

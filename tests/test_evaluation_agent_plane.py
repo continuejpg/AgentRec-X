@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from recommendation.control import (  # noqa: E402
+    CandidateEligibilityEvaluator,
     CandidateLedger,
     CandidatePlane,
     CatalogSearchSource,
@@ -89,7 +90,12 @@ def build_reasoner() -> GroundedReasoner:
     return GroundedReasoner(build_control_harness(catalog_rows=CANDIDATE_ROWS).parts["enricher"].metadata)
 
 
-def suite_factory(case: EvaluationCase, policy: object, limits: object) -> object:
+def suite_factory(
+    case: EvaluationCase,
+    policy: object,
+    limits: object,
+    task_state: object = None,
+) -> object:  # noqa: ARG001 - signature matches the runner's factory contract
     """Compose a real control plane for one case.
 
     Two case declarations change the fixture, and both are read from the case rather than matched
@@ -113,9 +119,13 @@ def suite_factory(case: EvaluationCase, policy: object, limits: object) -> objec
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    harness.controller._reasoning = ReasoningExecutor(  # noqa: SLF001 - deliberate wiring
-        GroundedReasoner(metadata)
-    )
+    reasoner = GroundedReasoner(metadata)
+    harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001 - deliberate wiring
+    # Phase 2: the same reasoner drives task-scoped eligibility, so a case that declares a hard
+    # constraint is run *and measured* against one enforced constraint set.
+    # The runner supplies the case's task state to ``controller.run`` itself, so the factory
+    # only has to make the evaluator available.
+    harness.controller._eligibility = CandidateEligibilityEvaluator(reasoner)  # noqa: SLF001
     harness.controller._candidate_plane = CandidatePlane(  # noqa: SLF001
         ledger=CandidateLedger(),
         grounding=GroundingVerifier(_Map(), metadata),
@@ -190,11 +200,52 @@ def test_the_case_set_covers_the_ten_required_categories() -> None:
     """Each category the stage names exists as an inspectable case.
 
     The set may contain **more** than the ten required categories: a later phase adds cases for
-    behaviour the original ten did not measure (guarded completion recovery).  The requirement is
-    coverage, not an exact count.
+    behaviour the original ten did not measure (guarded completion recovery, unresolved hard
+    constraints, an empty feasible set).  The requirement is coverage, not an exact count.
     """
     categories = {case.category.split("_", 1)[0] for case in load_cases()}
     assert {str(number) for number in range(1, 11)} <= categories
+
+
+def test_phase_two_cases_declare_real_enforceable_constraints() -> None:
+    """Every case that asserts enforcement declares a constraint the runtime can enforce.
+
+    A case could otherwise assert narrowing while the run had no active constraint at all,
+    which would grade the metric against a run that was never asked to comply.
+    """
+    from recommendation.evaluation.agent.runner import case_constraint_requirements
+
+    enforcing = [case for case in load_cases() if case.constraint_enforced]
+    assert {case.case_id for case in enforcing} == {
+        "hard-constraint",
+        "unresolved-constraint",
+        "no-feasible-candidate",
+    }
+    for case in enforcing:
+        requirements = case_constraint_requirements(case)
+        assert requirements, f"{case.case_id} asserts enforcement but declares no constraint"
+        assert all(r.expected for r in requirements), case.case_id
+
+
+def test_an_unrecognised_constraint_declaration_fails_loudly() -> None:
+    """A declaration the runtime cannot enforce is an error, not a silently skipped check.
+
+    Skipping it would leave the run unconstrained while the metric still graded the declared
+    constraint, reporting a harness defect as a policy failure.
+    """
+    from recommendation.evaluation.agent.runner import (
+        CaseConstraintDeclarationError,
+        case_constraint_requirements,
+    )
+
+    broken = case_by_id("history-driven").model_copy(
+        update={"hard_constraints": ("unobtainium=5",)}
+    )
+    with pytest.raises(CaseConstraintDeclarationError):
+        case_constraint_requirements(broken)
+    malformed = case_by_id("history-driven").model_copy(update={"hard_constraints": ("price_max",)})
+    with pytest.raises(CaseConstraintDeclarationError):
+        case_constraint_requirements(malformed)
 
 
 def test_every_case_declares_more_than_a_final_answer() -> None:
@@ -333,15 +384,85 @@ def test_hallucinated_candidates_are_a_grounding_failure() -> None:
 
 
 def test_constraint_checked_is_separate_from_constraint_enforced() -> None:
-    """Checking a constraint and respecting it are different measurements."""
+    """Checking a constraint and respecting it are different measurements.
+
+    Phase 2 makes the case assert **both**, which is what makes the pair meaningful: a run
+    that checks every candidate and presents a violating one still fails, and a run that
+    presents nothing (because nothing complied) is not credited with compliance either.
+    """
     case = case_by_id("hard-constraint")
-    # The case requires the check, not (yet) the narrowing.
-    assert case.constraint_enforced is False
+    # The case now requires the narrowing, not merely the check.
+    assert case.constraint_enforced is True
     # With no constraint report the constraint counts as unverified, not as compliant.
     metrics = compute_metrics(_trajectory(), case)
     assert metrics.constraint_checked == ()
     assert metrics.unverified_completion is True
     assert "completion" in metrics.failures()
+
+
+def test_a_satisfied_verdict_counts_as_checked() -> None:
+    """A compliant run is "checked and satisfied", not "never checked".
+
+    Regression: ``checked`` used to be folded from violations and unknowns only, so a run
+    whose every candidate complied was reported as an unverified completion - the metric
+    could not tell "we checked and it passed" from "we never looked".
+    """
+    from recommendation.control.grounded_reasoning import (
+        ConstraintKind,
+        ConstraintReport,
+        ConstraintVerdict,
+    )
+
+    case = case_by_id("hard-constraint")
+    satisfied = tuple(
+        ConstraintReport(
+            parent_asin="cand-red",
+            kind=ConstraintKind.COLOR,
+            expected="red",
+            verdict=ConstraintVerdict.SATISFIED,
+            observed="red",
+        )
+        for _ in range(1)
+    )
+    metrics = compute_metrics(_trajectory(), case, constraint_report=satisfied)
+    assert metrics.constraint_checked == ("color",)
+    assert metrics.constraint_violations == ()
+    assert metrics.constraint_unresolved_in_output is False
+    assert metrics.unverified_completion is False
+    # The synthetic trajectory carries no actions, so it fails tool selection for unrelated
+    # reasons; what this asserts is that no *constraint* dimension failed.
+    assert not [f for f in metrics.failures() if f.startswith("constraint_")]
+
+
+def test_an_unresolved_verdict_in_the_output_is_its_own_failure() -> None:
+    """Presenting an undecided candidate is not the same as presenting a violation.
+
+    Both must fail, but they are attributed to the same owner and reported under different
+    names, because "we could not tell" and "we proved it wrong" call for different responses.
+    """
+    from recommendation.control.grounded_reasoning import (
+        ConstraintKind,
+        ConstraintReport,
+        ConstraintVerdict,
+    )
+
+    case = case_by_id("hard-constraint")
+    unresolved = (
+        ConstraintReport(
+            parent_asin="cand-red",
+            kind=ConstraintKind.COLOR,
+            expected="red",
+            verdict=ConstraintVerdict.UNKNOWN,
+            observed=None,
+        ),
+    )
+    metrics = compute_metrics(
+        _trajectory(), case, presented_constraint_report=unresolved
+    )
+    assert metrics.constraint_unresolved_in_output is True
+    assert "constraint_unresolved" in metrics.failures()
+    attribution = attribute(case.case_id, ABLATION_ADAPTIVE, metrics.failures())
+    assert "constraint_unresolved" in attribution.attributed
 
 
 def test_memory_effect_is_measured_against_the_case() -> None:
@@ -518,9 +639,18 @@ def test_every_implemented_stage_is_documented_and_marked() -> None:
         "## 8. Interaction and personalization plane (Stage 3, IMPLEMENTED)",
         "## 9. Reasoning plane (Stage 4, IMPLEMENTED)",
         "## 10. Model-driven policy (Phase 1, IMPLEMENTED)",
-        "## 11. Evaluation planes (Stage 6, IMPLEMENTED)",
+        "## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)",
+        "## 12. Evaluation planes (Stage 6, IMPLEMENTED)",
     ):
         assert marker in text, f"architecture doc is missing {marker!r}"
+    # The Phase-2 section must state the distinction the phase exists to make, and its own
+    # limits, rather than implying that every constraint is resolvable.
+    for statement in (
+        "CandidateLedger != FeasibleCandidateView",
+        "provenance is preserved; eligibility is constrained.",
+        "Not implemented (documented, not claimed)",
+    ):
+        assert statement in text, f"architecture doc does not state {statement!r}"
     # The model-policy section must state its own limits rather than implying a live provider call.
     for limit in ("Not implemented", "constraint narrowing"):
         assert limit in text, f"architecture doc does not state the limit {limit!r}"
@@ -676,3 +806,120 @@ def test_the_model_policy_prompt_carries_no_product_identity() -> None:
         for row in CANDIDATE_ROWS:
             assert row[0] not in blob, "a product identity reached the model's prompt"
     assert model.call_count == 0
+
+
+# =========================================================================== #
+# H. Phase 2 enforcement cases
+# =========================================================================== #
+
+
+def _enforced_run(case_id: str) -> tuple[object, dict[str, object]]:
+    """Run one constraint case and return ``(outcome, state)`` for the same run.
+
+    The state is the engine's trusted state after the run, which is what lets a test assert
+    both halves of the phase at once: what was **retrieved** and what was **presented**.
+    """
+    case = case_by_id(case_id)
+    captured: dict[str, object] = {}
+
+    def factory(c: object, p: object, l: object, t: object = None) -> object:
+        controller = suite_factory(c, p, l, t)
+        original = controller.new_engine  # type: ignore[attr-defined]
+
+        def capturing_new_engine(*args: object, **kwargs: object) -> object:
+            engine = original(*args, **kwargs)
+            captured["engine"] = engine
+            return engine
+
+        controller.new_engine = capturing_new_engine  # type: ignore[attr-defined]
+        return controller
+
+    outcome = CaseRunner(factory, variant=ABLATION_ADAPTIVE).run(
+        case, policy=build_adaptive_policy(case), reasoner=build_reasoner()
+    )
+    return outcome, captured["engine"].state  # type: ignore[union-attr,index]
+
+
+def test_a_mixed_constraint_case_narrows_what_it_presents() -> None:
+    """Checked and enforced: the violating candidates are excluded from the answer.
+
+    ``hard-constraint`` asserts ``color=red``, and the fixture has exactly one red candidate,
+    so a run that enforces presents one while a run that merely checks presents four.  Both
+    halves are asserted from the same run, which is what makes this a test of enforcement
+    rather than of the metric alone.
+    """
+    outcome, state = _enforced_run("hard-constraint")
+    assert outcome.passed is True, outcome.metrics.failures()
+    assert outcome.metrics.constraint_checked == ("color",)
+    assert outcome.metrics.constraint_violations == ()
+    assert outcome.metrics.constraint_not_enforced is False
+
+    # Retrieved: everything the run found, untouched.
+    retrieved = [item.parent_asin for item in state["tool_result"].recommendations]
+    assert set(retrieved) == {"cand-red", "cand-blue", "cand-black", "cand-green"}
+
+    # Presented: only the candidate proved compliant.
+    projection = state["constraint_projection"]
+    presented = [item.parent_asin for item in projection.tool_result.recommendations]
+    assert presented == ["cand-red"]
+    assert set(projection.excluded_identities) == {"cand-blue", "cand-black", "cand-green"}
+
+    # And the rendered answer says the same thing the projection does.
+    response = state["final_response"]
+    assert "cand-red" in response
+    for excluded in ("cand-blue", "cand-black", "cand-green"):
+        assert excluded not in response
+
+
+def test_an_unresolved_constraint_is_never_reported_as_compliance() -> None:
+    """UNKNOWN stays first-class end to end.
+
+    The catalogue carries no category for any fixture candidate, so every verdict is UNKNOWN.
+    The run must not present a candidate as a verified compliant match, and must not report a
+    violation either.
+    """
+    outcome, state = _enforced_run("unresolved-constraint")
+    assert outcome.passed is True, outcome.metrics.failures()
+    assert outcome.metrics.constraint_violations == ()
+    view = state["candidate_eligibility"]
+    assert view.unresolved_count == 4
+    assert view.ineligible_count == 0
+    projection = state["constraint_projection"]
+    assert projection.presented_identities == ()
+    assert projection.tool_result.recommendations == []
+
+
+def test_an_all_violating_case_presents_nothing_rather_than_the_least_bad() -> None:
+    """No candidate is green, so the feasible set is empty and the answer is empty."""
+    outcome, state = _enforced_run("no-feasible-candidate")
+    assert outcome.passed is True, outcome.metrics.failures()
+    assert outcome.metrics.constraint_violations == ()
+    projection = state["constraint_projection"]
+    assert projection.is_empty is True
+    assert projection.tool_result.recommendations == []
+    # The retrieved set is still complete, so the emptiness is a decision rather than a
+    # retrieval failure.
+    assert len(state["tool_result"].recommendations) == len(CANDIDATE_ROWS)
+
+
+def test_the_enforcement_plane_keeps_the_retrieved_set_for_the_audit_trail() -> None:
+    """The run that narrowed its answer still holds everything it retrieved, and why.
+
+    Enforcement changes eligibility, not provenance: the infeasible candidates are still
+    named, with the observed value that excluded them.
+    """
+    outcome, state = _enforced_run("hard-constraint")
+    assert outcome.passed is True
+    view = state["candidate_eligibility"]
+    assert view.ineligible_count == 3
+    assert view.verified_eligible_count == 1
+    assert {a.parent_asin for a in view.assessments} == {
+        "cand-red",
+        "cand-blue",
+        "cand-black",
+        "cand-green",
+    }
+    blue = view.assessment_for("cand-blue")
+    assert blue is not None
+    assert blue.eligibility.value == "ineligible"
+    assert blue.violated and blue.violated[0].observed is not None

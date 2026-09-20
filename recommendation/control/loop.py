@@ -47,6 +47,10 @@ from recommendation.tools.schemas import RecommendationToolResult, ToolRecommend
 
 from .capability import RecommendFromHistoryCapability
 from .completion import CompletionGuard
+from .constraint_eligibility import (
+    candidate_feasibility_projection,
+    constraints_from_task_state,
+)
 from .context import CandidateState, PolicyContext, project_constraints, project_intent
 from langgraph.errors import GraphRecursionError
 
@@ -216,6 +220,7 @@ class _LoopEngine:
         task_state: TaskState | None = None,
         reasoning_executor: Any = None,
         candidate_plane: Any = None,
+        eligibility_evaluator: Any = None,
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -267,6 +272,19 @@ class _LoopEngine:
         #: fast path.  When configured, the additional trusted sources become actions the
         #: controller offers the policy.
         self.candidate_plane = candidate_plane
+        #: Phase 2 task-scoped eligibility evaluator, or ``None`` when the deployment
+        #: configures no catalogue reasoning.  Enforcement *is derived from grounded facts*,
+        #: so it is available exactly when facts are: without a reasoner there is nothing to
+        #: evaluate, and this stays ``None`` rather than inventing verdicts.
+        self.eligibility = eligibility_evaluator
+        #: The active hard constraints, read from task state at construction.  A constraint
+        #: set that changes mid-run rebuilds task state, and the feasibility view is
+        #: recomputed from that state on the next step, so no stale eligibility survives here.
+        self.constraint_requirements: tuple[Any, ...] = ()
+        #: The most recent task-scoped feasibility view, or ``None`` before any candidate set
+        #: has been evaluated.  Derived, never authoritative on its own: it is always rebuilt
+        #: from the current constraints and facts.
+        self.feasibility: Any = None
 
         self.last_observation: Any = None
         self.last_verification: VerificationResult | None = None
@@ -278,6 +296,14 @@ class _LoopEngine:
         #: interaction and never persisted.  Seeded from the application-supplied task
         #: context so a resumed run continues the same task.
         self.task_state: TaskState = task_state or TaskState()
+        #: The active hard constraints, already narrowed to dimensions the evaluator can
+        #: address.  Read from task state **here, once per run**, because a changed constraint
+        #: set arrives as a new task state for a new run: nothing mutates task state in place,
+        #: so a run cannot hold eligibility computed against a superseded constraint set.
+        if self.eligibility is not None:
+            self.constraint_requirements = tuple(
+                constraints_from_task_state(self.task_state)
+            )
         #: The clarification observation produced by an ``ASK_CLARIFICATION`` action, kept so
         #: finalization can render the question.
         self.clarification: ClarificationObservation | None = None
@@ -363,6 +389,25 @@ class _LoopEngine:
             hard_constraint_count=hard_count,
             inferred_constraint_count=inferred_count,
             awaiting_user=self.task_state.is_waiting_for_user,
+            # Phase 2: the bounded three-state feasibility summary, so a policy can tell
+            # "nothing is verified yet, gather evidence" from "everything is compliant".
+            # Counts plus the narrowed allowlist - never the catalogue facts behind a verdict
+            # and never an identity that was not already grounded.
+            verified_eligible_count=(
+                0 if self.feasibility is None else self.feasibility.verified_eligible_count
+            ),
+            ineligible_count=(
+                0 if self.feasibility is None else self.feasibility.ineligible_count
+            ),
+            unresolved_count=(
+                0 if self.feasibility is None else self.feasibility.unresolved_count
+            ),
+            feasible_parent_asins=(
+                () if self.feasibility is None else self.feasibility.feasible_identities
+            ),
+            active_constraints=tuple(
+                requirement.label for requirement in self.constraint_requirements
+            ),
         )
 
     def available_actions(self) -> tuple[ActionKind, ...]:
@@ -772,6 +817,10 @@ class _LoopEngine:
             candidate_set_ref=result.candidate_set_ref,
         )
         self._adopt_plane_candidates(result)
+        # A plane step adopts its candidates *here* rather than in ``update_state``, so the
+        # feasibility view has to be refreshed here too - otherwise the eligibility of a
+        # multi-source run would lag one step behind its candidate set.
+        self.refresh_feasibility()
         return StepOutcome.proceed()
 
     def _adopt_plane_candidates(self, result: Any) -> None:
@@ -887,6 +936,13 @@ class _LoopEngine:
         else:
             self.produced_recommendation = False
             self.candidates_grounded = False
+
+        # Phase 2: re-derive task feasibility from the current candidates and the current
+        # facts.  Runs on every completed step - a candidate set that just changed, and a
+        # reasoning step that just grounded a new fact, are exactly the two events that can
+        # change a verdict.  A policy cannot skip it, and it consumes no tool budget because
+        # it is deterministic local computation over already-grounded facts.
+        self.refresh_feasibility()
 
         self.trajectory.record(
             step_index=self.validated.step_index,
@@ -1089,6 +1145,15 @@ class _LoopEngine:
             execution_failed=(
                 self.last_verification is not None and not self.last_verification.verified
             ),
+            # Phase 2: the guard is told what the eligibility layer decided, never asked to
+            # decide it.  It sees counts only, so constraint truth stays in one owner.
+            constraints_active=bool(self.constraint_requirements),
+            feasible_candidate_count=(
+                0 if self.feasibility is None else self.feasibility.verified_eligible_count
+            ),
+            unresolved_candidate_count=(
+                0 if self.feasibility is None else self.feasibility.unresolved_count
+            ),
         )
         return StepOutcome.proceed()
 
@@ -1257,6 +1322,79 @@ class _LoopEngine:
         if result.reranking is not None:
             self.state["reranking"] = result.reranking
 
+    # -- Phase 2: task-scoped constraint feasibility ------------------------ #
+
+    def refresh_feasibility(self) -> None:
+        """Recompute which grounded candidates are feasible for the current task.
+
+        This is the enforcement point, and it is deliberately **not** a policy choice: it
+        runs after every step that can change the candidate set or the evidence behind a
+        verdict, so a policy cannot retrieve its way around a hard constraint and a model
+        cannot decide that a violation is acceptable.
+
+        Two properties matter:
+
+        * **The candidate universe is untouched.**  This reads the run's grounded candidates
+          and writes a derived view; it never adds, removes or reorders a ledger entry.  An
+          ineligible candidate stays in the ledger, keeps every provenance record and stays
+          readable by a reasoning action - it is only excluded from the feasible projection
+          a compliant recommendation may be built from.
+        * **Nothing is cached across facts.**  The view is rebuilt from the current active
+          constraints and the catalogue's current facts, so a constraint change or a newly
+          grounded fact cannot leave a stale verdict in force.  The work is one fact lookup
+          per candidate per constraint over the run's own grounded set - never a catalogue
+          scan.
+
+        With no evaluator configured there is nothing to evaluate and the view stays ``None``,
+        which is the honest state: "not evaluated" is not the same as "verified feasible".
+        Likewise with **no active hard constraint** nothing is recorded at all, so an
+        unconstrained run carries no feasibility artifact and renders exactly as it did
+        before this phase.
+        """
+        if self.eligibility is None or not self.constraint_requirements:
+            return
+        identities = self.grounded_identities()
+        if not identities:
+            self.feasibility = None
+            self.state.pop("candidate_eligibility", None)
+            self.state.pop("constraint_projection", None)
+            return
+        self.feasibility = self.eligibility.assess(
+            identities, requirements=self.constraint_requirements
+        )
+        # The trajectory's inspectable record.  ``as_dict`` is counts plus per-candidate
+        # verdicts and observed values - no catalogue payload, no raw score.
+        self.state["candidate_eligibility"] = self.feasibility
+        # The narrowed view of what may be presented, derived here rather than at render time.
+        # Building it now means every consumer reads one definition of "the presented set" -
+        # the renderer, the response layer and the evaluator - instead of each deciding for
+        # itself, and it means the narrowed set exists even on a run that ends without
+        # rendering (a refused completion, an exhausted budget).  Those runs are still graded
+        # against what they would have shown rather than against everything they retrieved.
+        self.state["constraint_projection"] = candidate_feasibility_projection(
+            self.feasibility,
+            self.state.get("tool_result"),
+            self.state.get("enrichment"),
+            self.state.get("reranking"),
+        )
+
+    def _constraint_projection(self) -> Any:
+        """The stored feasible projection, or ``None`` when nothing was constrained.
+
+        A reader, not a builder: :meth:`refresh_feasibility` derives the projection whenever
+        the eligibility view is refreshed, so this and the renderer and the evaluator all see
+        exactly one narrowing.  Two cases:
+
+        * no hard constraint is active - no projection, so an unconstrained run renders
+          exactly as it did before this phase;
+        * constraints are active - the stored projection is narrowed to the candidates
+          **proved** to satisfy every one of them.  When nothing is proved feasible it is
+          empty, so the renderer presents no compliant candidate rather than the least-bad
+          violator.  An active constraint the catalogue cannot decide at all also yields an
+          empty projection: no candidate is *verified*, so none may be presented as compliant.
+        """
+        return self.state.get("constraint_projection")
+
     def _finalize_response(self) -> None:
         """Render with the accepted renderer, driven by what the policy decided.
 
@@ -1294,7 +1432,32 @@ class _LoopEngine:
             self.state["decision"] = AgentDecision(
                 action="direct_response", direct_response=NO_CANDIDATES_TEXT
             )
-        self.state.update(finalize_stage(self.state))
+        self.state.update(finalize_stage(self._render_state()))
+
+    def _render_state(self) -> Any:
+        """The state the renderer reads: the trusted state, with membership constrained.
+
+        Constraint enforcement is applied here, at the one point where the presented set is
+        decided, and it narrows a **copy** of the three renderer-facing artifacts.  The state
+        the rest of the system holds keeps the full retrieved, enriched and reranked set, so
+        the ledger story stays intact and an evaluator can still see that an infeasible
+        candidate was retrieved and why it was excluded.
+
+        With no active hard constraint - or an evaluator this deployment did not configure -
+        the trusted state is returned unchanged, so an unconstrained run is byte-for-byte the
+        run it was before this phase.
+        """
+        projection = self._constraint_projection()
+        if projection is None:
+            return self.state
+        narrowed = dict(self.state)
+        if projection.tool_result is not None:
+            narrowed["tool_result"] = projection.tool_result
+        if projection.enrichment is not None:
+            narrowed["enrichment"] = projection.enrichment
+        if projection.reranking is not None:
+            narrowed["reranking"] = projection.reranking
+        return narrowed
 
     def _commit_memory(self) -> None:
         """Commit this turn's user-authored preferences through the accepted stage."""
@@ -1349,6 +1512,7 @@ class LoopController:
         driver: str = "graph",
         reasoning_executor: Any = None,
         candidate_plane: Any = None,
+        eligibility_evaluator: Any = None,
     ) -> None:
         if not callable(getattr(policy, "choose", None)):
             raise PolicyActionError("policy must provide a callable choose(context) method")
@@ -1382,6 +1546,7 @@ class LoopController:
         self._driver = driver
         self._reasoning = reasoning_executor
         self._candidate_plane = candidate_plane
+        self._eligibility = eligibility_evaluator
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -1515,6 +1680,7 @@ class LoopController:
             candidate_plane=(
                 candidate_plane if candidate_plane is not None else self._candidate_plane
             ),
+            eligibility_evaluator=self._eligibility,
         )
 
     def _run(

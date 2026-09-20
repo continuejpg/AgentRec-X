@@ -54,6 +54,9 @@ class CompletionGuard:
         produced_recommendation: bool = False,
         candidates_grounded: bool = False,
         execution_failed: bool = False,
+        constraints_active: bool = False,
+        feasible_candidate_count: int = 0,
+        unresolved_candidate_count: int = 0,
     ) -> VerificationResult:
         """Return the completion verdict for ``action``.
 
@@ -75,6 +78,19 @@ class CompletionGuard:
         execution_failed:
             True when the most recent execution failed.  A failed run may not be reported
             as a completed one.
+        constraints_active:
+            True when at least one hard constraint is in force for this task.  The guard does
+            **not** evaluate constraints - the eligibility layer owns that - it only refuses
+            to certify a *compliant* recommendation when that layer reports nothing was
+            proved compliant.
+        feasible_candidate_count:
+            How many of the run's candidates the eligibility layer proved to satisfy every
+            active hard constraint.  Consulted only when ``constraints_active`` is true.
+        unresolved_candidate_count:
+            How many candidates are neither proved nor disproved.  This is the difference
+            between "we cannot answer yet" and "there is no compliant answer": a candidate
+            that is merely undecided may still become compliant once its missing fact is
+            read, so ending early is premature.  A candidate already *disproved* cannot.
 
         Returns
         -------
@@ -134,6 +150,45 @@ class CompletionGuard:
             )
         if produced_recommendation:
             checks.extend(("grounded_candidates", "recommendation_pipeline_complete"))
+
+        # Phase 2: a run may not present a *compliant* recommendation it cannot prove is
+        # compliant.  The eligibility layer decides which candidates are feasible; the guard
+        # only refuses to certify the ending when nothing is proved compliant **and something
+        # is still resolvable**.  Three distinct situations, deliberately separated:
+        #
+        # * at least one candidate is proved compliant - end normally;
+        # * nothing is proved compliant but a candidate is still undecided - refuse, because a
+        #   fact the run has not read yet could still make it compliant, and finishing now
+        #   would abandon the question rather than answer it;
+        # * nothing is proved compliant and every candidate is disproved - this is an honest
+        #   "no compliant match exists".  The guard does **not** refuse it and it does **not**
+        #   substitute the least-bad violator: the projection presents an empty set, so the
+        #   response reports that nothing satisfied the constraints.  Refusing here would
+        #   force the run to loop until its budget ran out over a question that is already
+        #   settled.
+        #
+        # The check is not reached when no hard constraint is active, so an unconstrained run
+        # is unaffected, and it is not a candidate filter - narrowing the presented set
+        # belongs to the projection, not here.  The guard answers "is ending here defensible".
+        if (
+            constraints_active
+            and produced_recommendation
+            and candidates_grounded
+            and feasible_candidate_count <= 0
+            and unresolved_candidate_count > 0
+        ):
+            return VerificationResult(
+                verified=False,
+                code="no_verified_compliant_candidate",
+                detail=(
+                    "active hard constraints are in force, no candidate was proved to "
+                    "satisfy them, and at least one candidate is still undecided - so "
+                    "completing now would present an unverified set as compliant"
+                ),
+                checks=(*checks, "constraint_eligibility"),
+            )
+        if constraints_active:
+            checks.append("constraint_eligibility")
 
         if last_verification is not None and not last_verification.verified:
             return VerificationResult(

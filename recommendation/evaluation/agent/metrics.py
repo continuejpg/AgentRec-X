@@ -84,9 +84,21 @@ class TrajectoryMetrics(BaseModel):
     #: The constraints for which a deterministic verdict was actually obtained.  This is
     #: "was the hard constraint checked", which is separable from whether the final set
     #: respects it.
+    #:
+    #: A constraint that was checked and *satisfied* counts here: before Phase 2 only
+    #: violations and unknowns were folded in, so a run whose candidates all complied was
+    #: reported as an unverified completion - which made "checked and compliant"
+    #: indistinguishable from "never checked".
     constraint_checked: tuple[str, ...] = ()
-    #: True when the case requires the final set to respect its constraints and it does not.
+    #: True when the case requires the final set to respect its constraints and it does not:
+    #: a **verified violation reached the presented set**.  This is measured from the candidates
+    #: that were actually presented, not from whether an action ran, so it detects the
+    #: enforcement gap directly.
     constraint_not_enforced: bool = False
+    #: True when the run presented a candidate whose declared hard constraint could not be
+    #: decided.  Unresolved is not a violation, but presenting it as a compliant match would
+    #: claim a check that never happened, so it is measured separately.
+    constraint_unresolved_in_output: bool = False
     #: True when the run completed while a declared hard constraint was neither verified nor
     #: reported as unresolved.
     unverified_completion: bool = False
@@ -122,6 +134,8 @@ class TrajectoryMetrics(BaseModel):
             failed.append("candidate_grounding")
         if self.constraint_violations and self.constraint_not_enforced:
             failed.append("constraint_violated")
+        if self.constraint_unresolved_in_output:
+            failed.append("constraint_unresolved")
         if self.unverified_completion:
             failed.append("completion")
         if not self.memory_effect_correct:
@@ -150,6 +164,7 @@ def compute_metrics(
     memory_effect: str | None = None,
     required_actions_verified: tuple[str, ...] | None = None,
     constraint_report: tuple[Any, ...] = (),
+    presented_constraint_report: tuple[Any, ...] = (),
 ) -> TrajectoryMetrics:
     """Measure one trajectory against its case.
 
@@ -168,6 +183,14 @@ def compute_metrics(
         missing-fact cases), the actions that genuinely exercised the behaviour.  When
         supplied, requirements are checked against this list instead of the raw action
         sequence, so a run cannot satisfy "verify" by proposing it and never reading a fact.
+    constraint_report:
+        Verdicts for every candidate the run **evaluated**.  Drives ``constraint_checked``, so
+        a run that narrowed its answer is still credited with having done the checking.
+    presented_constraint_report:
+        Verdicts for the candidates the run **presented**.  Drives ``constraint_violations``,
+        ``constraint_unresolved_in_output`` and ``constraint_not_enforced``, because only a
+        presented candidate is a claim of compliance.  Empty for a run that presented nothing,
+        which is why an empty feasible set is not reported as an enforcement failure.
     """
     executed = trajectory.action_sequence()
     considered = executed if required_actions_verified is None else required_actions_verified
@@ -182,22 +205,41 @@ def compute_metrics(
     # catalogue, not against whether some action ran.  A run can hold every fact and still
     # never compare one against the limit, so "did an action run" would credit a check that
     # never happened.
-    violations: list[str] = []
-    unresolved: list[str] = []
+    # Two different questions, kept apart on purpose:
+    #
+    # * **checked** - was a deterministic verdict obtained at all?  Measured over everything
+    #   the run evaluated, because a run that narrowed its answer still *did* the checking,
+    #   and reporting it as an unverified completion would punish correct behaviour.
+    # * **enforced** - did a violation reach the presented set?  Measured over the candidates
+    #   the response was built from, because only those are a claim of compliance.
+    #
+    # Before Phase 2 there was one report and one question, which made "checked and compliant"
+    # indistinguishable from "never checked", and made "excluded the violation" look identical
+    # to "presented it".
+    checked_labels: list[str] = []
     for report in constraint_report:
+        if getattr(getattr(report, "verdict", None), "value", None) is not None:
+            label = f"{getattr(getattr(report, 'kind', None), 'value', '?')}="
+            checked_labels.append(label + str(getattr(report, "expected", "")))
+
+    presented_violations: list[str] = []
+    presented_unresolved: list[str] = []
+    for report in presented_constraint_report:
         verdict = getattr(getattr(report, "verdict", None), "value", None)
         label = f"{getattr(getattr(report, 'kind', None), 'value', '?')}="
         label += str(getattr(report, "expected", ""))
         if verdict == "violated":
-            violations.append(label)
+            presented_violations.append(label)
         elif verdict == "unknown":
-            unresolved.append(label)
+            presented_unresolved.append(label)
 
-    checked = tuple(sorted({f.split("=", 1)[0] for f in (*violations, *unresolved)}))
+    checked = tuple(sorted({f.split("=", 1)[0] for f in checked_labels}))
     declared = tuple(sorted({c.split("=", 1)[0] for c in case.hard_constraints}))
-    constraint_not_enforced = bool(
-        case.constraint_enforced and violations and case.hard_constraints
-    )
+    constraint_not_enforced = bool(presented_violations and case.hard_constraints)
+    constraint_unresolved_in_output = bool(presented_unresolved and case.hard_constraints)
+    # Reported from the presented set: these describe what the answer claimed.
+    violations = presented_violations
+    unresolved = presented_unresolved
 
     # A completion is "unverified" when the run completed with a declared hard constraint that
     # neither a violation nor an unresolved result accounts for - i.e. the constraint was
@@ -230,6 +272,7 @@ def compute_metrics(
         constraint_unresolved=tuple(unresolved),
         constraint_checked=checked,
         constraint_not_enforced=constraint_not_enforced,
+        constraint_unresolved_in_output=constraint_unresolved_in_output,
         unverified_completion=unverified_completion,
         memory_effect=observed_memory,
         memory_effect_correct=observed_memory == case.expected_memory_effect,

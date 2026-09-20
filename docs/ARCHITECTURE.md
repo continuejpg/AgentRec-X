@@ -583,12 +583,159 @@ is implemented, tested with a stub transport, and configurable through `AGENTREC
   deterministic double, so it measures the *runtime*, not a model's competence.
 * **No model-driven planning or subgoal generation** - one next action per step, as before.
 * **No fine-tuning, RL or reward model.**
-* **Hard-constraint narrowing is still not implemented** (section 9), and the model is not used
-  to hide that: the metric continues to report *checked* separately from *enforced*.
+* **Hard-constraint narrowing was not implemented in this phase** - the model is not used to
+  hide that, and the model policy cannot remove a candidate. Narrowing arrived in Phase 2
+  (section 11) and is owned by trusted code, not by a policy.
 
 ---
 
-## 11. Evaluation planes (Stage 6, IMPLEMENTED)
+## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)
+
+`CandidateLedger != FeasibleCandidateView`
+------------------------------------------
+Before this phase the repository could **check** a hard constraint and could not **enforce**
+one. The trusted `GroundedReasoner` already produced a per-candidate three-state verdict, but
+nothing turned that verdict into task eligibility: the ledger is a provenance record with no
+notion of feasibility, the candidate plane built its result from raw tool output filtered only
+by grounding, and every renderer iterated whatever the candidate set held. A product the
+catalogue proved violated the budget could therefore be presented as a recommendation, and the
+evaluation plane could only *report* that it had been.
+
+The two questions are now answered by two different components, and must stay apart:
+
+| | Question | Owner |
+| --- | --- | --- |
+| `CandidateLedger` | did this product ever enter the candidate universe, from which source, at what rank, was its identity grounded? | `recommendation/control/candidate_ledger.py` |
+| `FeasibleCandidateView` | for the constraints active **on this task, right now**, is this candidate feasible? | `recommendation/control/constraint_eligibility.py` |
+
+```
+CandidateLedger              complete audit universe - never filtered, never rewritten
+      |
+Constraint evaluation        GroundedReasoner.check_constraint  (deterministic, per candidate)
+      |
+Task eligibility             CandidateConstraintAssessment -> CandidateEligibility
+      |
+FeasibleCandidateView        verified_eligible / ineligible / unresolved  + full detail
+      |
+FeasibilityProjection        the renderer-facing artifacts, narrowed to verified feasible
+      |
+Ranking / finalization       accepted renderer, unchanged
+```
+
+```text
+provenance is preserved; eligibility is constrained.
+```
+
+### Three-state semantics
+
+The per-constraint verdicts are the accepted ones and are kept in full; the eligibility layer
+only *derives* from them.
+
+| Verdict | Meaning | Effect on task eligibility |
+| --- | --- | --- |
+| `SATISFIED` | grounded evidence proves the constraint holds | stays eligible with respect to that constraint |
+| `VIOLATED` | grounded evidence proves it does not hold | candidate becomes `INELIGIBLE` |
+| `UNKNOWN` | trusted evidence is insufficient | candidate becomes `UNRESOLVED` - neither pass nor fail |
+
+```text
+if ANY active hard constraint == VIOLATED:  INELIGIBLE
+elif ANY == UNKNOWN:                        UNRESOLVED
+else:                                       VERIFIED_ELIGIBLE
+```
+
+A proved violation **outranks** an unresolved constraint: excluding a candidate already
+disproved needs no further evidence, and calling it merely unresolved would leave a known-bad
+candidate inside the feasible view. `CandidateConstraintAssessment` keeps every individual
+verdict, with its observed value, so "why was this product excluded" is answerable from the
+trajectory rather than inferred from a boolean.
+
+### Enforcement is not the model's
+
+`CandidateEligibilityEvaluator` takes a `GroundedReasoner` and nothing else - no policy, no
+model, no memory. It is stateless. A model policy and `RuleBasedPolicy` therefore receive
+**identical** eligibility for identical grounded facts; they may take different trajectories,
+but they cannot disagree about truth. A model cannot remove a candidate, and a model that
+declares a violating candidate acceptable changes nothing, because the projection is built from
+the deterministic verdicts.
+
+### Task scope, and no stale verdicts
+
+Eligibility is a statement about the current constraint set, not a permanent property of a
+product: the same product is `INELIGIBLE` under `price_max=120` and `VERIFIED_ELIGIBLE` under
+`price_max=200`. The evaluator holds **no cache at all** - every view is recomputed from the
+current active constraints and the current grounded facts - which is the simplest design that
+cannot produce stale eligibility. The cost is one fact lookup per candidate per constraint over
+the run's own grounded set: never a catalogue scan.
+
+Only `TaskState.hard_constraints()` is consulted, so the pre-existing hardness rule decides
+feasibility. An explicit constraint from this turn or this session qualifies; an inferred or
+memory-derived signal does not, and soft preferences keep ordering candidates **inside** the
+feasible domain rather than shrinking it.
+
+A stated constraint the catalogue carries no attribute for is mapped to
+`ConstraintKind.UNVERIFIABLE` rather than dropped. Dropping it would present a candidate as
+compliant with a constraint that was never tested; keeping it makes every candidate
+`UNRESOLVED`, which is the honest answer.
+
+### What the policy is shown
+
+`PolicyContext` gains `verified_eligible_count`, `ineligible_count`, `unresolved_count`,
+`feasible_parent_asins` and `active_constraints`. These are counts, constraint `kind<=value`
+labels, and a **narrowing** of the allowlist the policy already had - never the catalogue facts
+behind a verdict, and never an identity that was not already grounded. Excluded identities stay
+out of the prompt; the policy is told *that* something was excluded and *which constraint*
+excluded it.
+
+That bounded summary is what makes `UNKNOWN` useful rather than merely honest: a policy can see
+that a candidate is unresolved and spend a step reading the missing fact, which is a legal next
+action it could not previously identify.
+
+### Completion
+
+`CompletionGuard` gained one input pair and one refusal code. It does **not** evaluate
+constraints - the eligibility layer owns that - it only refuses to certify a claim of compliance
+nothing supports:
+
+* at least one candidate proved compliant -> end normally;
+* nothing proved compliant but something still undecided -> `no_verified_compliant_candidate`,
+  retryable, so the policy can gather the missing evidence;
+* nothing proved compliant and everything disproved -> an honest "no compliant match". The
+  projection presents an empty set, so nothing violating is shown, and the guard does not refuse:
+  spinning until the budget expired would settle nothing that is not already settled.
+
+### Evaluation
+
+The plane measures **checked** and **enforced** as separate questions over separate sets:
+
+| Metric | Set | Question |
+| --- | --- | --- |
+| `constraint_checked` | everything the run evaluated | was a deterministic verdict obtained? |
+| `constraint_violations` | what the response was built from | did a proved violation reach the answer? |
+| `constraint_unresolved_in_output` | what the response was built from | was an undecided candidate presented as compliant? |
+| `constraint_not_enforced` | what the response was built from | did a violating candidate reach the answer? |
+
+They were one question over one set, which made "checked and compliant" indistinguishable from
+"never checked" and made "excluded the violation" look identical to "presented it". A case's
+declared `hard_constraints` now become the run's **real** active constraints, so a case that
+asserts enforcement is measured against a run that actually enforced.
+
+### Not implemented (documented, not claimed)
+
+* **No candidate narrowing metric.** `constraint_not_enforced` detects a violation reaching the
+  answer; it does not score *how well* a set was narrowed.
+* **No ordering interaction with the reranker.** The accepted reranker still orders the same
+  candidate set (section 15); it is simply handed the feasible one, so it cannot resurrect an
+  ineligible candidate. No fused or learned ranker is introduced here.
+* **Unmappable constraints are unresolved, not resolved.** A `feature` or `material` hard
+  constraint has no deterministic catalogue dimension, so it makes every candidate `UNRESOLVED`
+  rather than being decided. That is deliberate and is not worked around by inventing data.
+* **The evaluator is not a service.** It is a pure function over the run's own grounded
+  candidates; there is no incremental or index-backed eligibility structure, because a bounded
+  per-turn set does not need one.
+
+---
+
+## 12. Evaluation planes (Stage 6, IMPLEMENTED)
 
 Three planes, deliberately **not** collapsed into one score.
 
@@ -663,14 +810,15 @@ Run it with `.venv/bin/python -m experiments.agent_evaluation_smoke`.
   whether one was asked when the case required it.
 * **No token or cost accounting.** Tool calls and steps are counted; token usage is not measured
   because no LLM is in the loop.
-* **No candidate-narrowing metric**, because the loop cannot yet narrow a presented set (see
-  section 9).
+* **No candidate-narrowing *score*.** The loop now narrows a presented set (section 11), and
+  the plane detects a violation reaching the answer, but it does not score how well a set was
+  narrowed.
 * **The model variant is driven by a double, not a model.** It measures the runtime seam and the
   authority boundary, not a model's competence (section 10).
 
 ---
 
-## 12. Product metadata and candidate-scoped RAG
+## 13. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -693,11 +841,11 @@ The boundary is the point:
 
 Every fragment is verbatim, attributed and provenance-labelled. Missing metadata is
 reported as unavailable rather than filled with generated text. Any reordering is a
-*separate later stage* (section 9) with its own frozen policy.
+*separate later stage* (section 16) with its own frozen policy.
 
 ---
 
-## 13. Preference memory
+## 14. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -723,7 +871,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 14. Preference evidence
+## 15. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -751,7 +899,7 @@ drops or reorders anything.
 
 ---
 
-## 15. Deterministic reranking
+## 16. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -790,7 +938,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 16. Web / session layer
+## 17. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -828,7 +976,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 17. State ownership
+## 18. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -847,7 +995,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 18. Trust boundaries
+## 19. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -885,7 +1033,7 @@ flowchart TD
 
 ---
 
-## 19. Failure behaviour
+## 20. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -906,7 +1054,7 @@ fallback anywhere.
 
 ---
 
-## 20. Determinism and reproducibility
+## 21. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -927,7 +1075,7 @@ fallback anywhere.
 
 ---
 
-## 21. Dependency lifecycle / heavy-object reuse
+## 22. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -959,7 +1107,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 22. Known limitations
+## 23. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value
@@ -977,3 +1125,13 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 * **The M10B tail reason label can be imprecise** for the last candidate; ordering is
   unaffected and the label is not user-facing.
 * **ItemCF is not comparable** to the accepted full-data SASRec benchmark.
+* **Hard-constraint enforcement is catalogue-bound.** A stated constraint with no
+  deterministic catalogue dimension (`feature`, `material`, a free-form constraint) makes every
+  candidate `unresolved`; it is never silently satisfied and never fabricated, so such a run
+  presents nothing rather than guessing. Enriching the catalogue is the fix, not weakening the
+  semantics.
+* **Eligibility is recomputed per turn, not indexed.** It is a pure function over the run's own
+  grounded candidates, which is correct and cheap at this scale but is not an incremental
+  constraint index.
+* **No real provider has been called.** The model policy is exercised through a deterministic
+  double (section 10); no claim is made about a real model's constraint behaviour.

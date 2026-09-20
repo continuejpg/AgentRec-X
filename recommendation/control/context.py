@@ -136,6 +136,33 @@ class PolicyContext:
     #: ask about one as though it were real.
     grounded_parent_asins: tuple[str, ...] = ()
 
+    # -- Phase 2: task-scoped feasibility ---------------------------------- #
+    #: How many of the run's grounded candidates are **proved** to satisfy every active hard
+    #: constraint.  Counts only: a policy needs to know whether anything compliant exists in
+    #: order to decide between finishing, gathering evidence and retrieving more, and it does
+    #: not need the identities to make that decision.
+    verified_eligible_count: int = 0
+    #: How many are proved to violate at least one active hard constraint.  These candidates
+    #: remain in the ledger for audit and remain readable by a reasoning action; they are
+    #: simply not eligible to be presented as a compliant recommendation.
+    ineligible_count: int = 0
+    #: How many have no violation but at least one constraint the trusted catalogue could not
+    #: decide.  Non-zero is the signal that gathering the missing fact is worth a step, and
+    #: it is deliberately *not* reported as either compliance or violation.
+    unresolved_count: int = 0
+    #: The feasible subset of :attr:`grounded_parent_asins`, in the run's own order.
+    #:
+    #: This is a **narrowing of an allowlist the policy already has**, never a new source of
+    #: identity: every member was already grounded, and a policy still cannot name an identity
+    #: that is not in one of these two tuples.  It is exposed because a compliant
+    #: recommendation can only be built from these candidates, so a policy reasoning about
+    #: *what it may present* needs to distinguish them from the excluded ones.
+    feasible_parent_asins: tuple[str, ...] = ()
+    #: Short ``kind<=expected`` labels for the active hard constraints, so a policy can tell
+    #: which dimension is unresolved.  A constraint dimension and the user's own stated value
+    #: - never a product fact, and never a soft preference.
+    active_constraints: tuple[str, ...] = ()
+
     def action_available(self, action: ActionKind) -> bool:
         """True when the system currently permits ``action``."""
         return action in self.available_actions
@@ -167,6 +194,10 @@ class PolicyContext:
             "hard_constraint_count": self.hard_constraint_count,
             "inferred_constraint_count": self.inferred_constraint_count,
             "awaiting_user": self.awaiting_user,
+            "verified_eligible_count": self.verified_eligible_count,
+            "ineligible_count": self.ineligible_count,
+            "unresolved_count": self.unresolved_count,
+            "active_constraint_count": len(self.active_constraints),
         }
 
 

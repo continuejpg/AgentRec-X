@@ -180,6 +180,19 @@ def build_policy_context_payload(context: PolicyContext) -> dict[str, Any]:
             "count": context.candidate_state.candidate_count,
             "verification_status": context.candidate_state.verification_status,
         },
+        # Phase 2: the three-state feasibility split, as **counts plus constraint labels**.
+        # This is what makes an unresolved candidate actionable: without it the model can tell
+        # that candidates exist but not that some are only partly decided, so it cannot know
+        # whether reading a missing fact would change the eligible set.  The excluded identities
+        # are deliberately absent - the model learns *that* something was excluded and *which
+        # constraint* excluded it, which is what choosing a next action needs, and it still
+        # cannot name a product outside the grounded allowlist.
+        "constraint_feasibility": {
+            "active_constraints": list(context.active_constraints),
+            "verified_eligible_count": context.verified_eligible_count,
+            "ineligible_count": context.ineligible_count,
+            "unresolved_count": context.unresolved_count,
+        },
         "budget": {
             "step_index": context.step_index,
             "remaining_steps": context.remaining_steps,

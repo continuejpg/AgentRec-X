@@ -805,6 +805,14 @@ class CompatibilityObservation(Observation):
     ``unknown`` is a first-class outcome.  This catalogue carries no interface or fitment
     semantics, so a requirement naming one is unresolved rather than compatible - the
     observation never upgrades "we could not check" into "it fits".
+
+    The single :attr:`verdict` is the **aggregate** over :attr:`members`; on its own it
+    cannot say *which* candidate failed, which is why a policy could previously check a
+    constraint and still be unable to tell a mixed pass/violation set from a uniform one.
+    :attr:`assessments` therefore carries the per-candidate verdicts the aggregate was
+    derived from, so the detail is not discarded at return.  Each entry is a
+    :class:`~recommendation.control.grounded_reasoning.ConstraintReport` dumped to a mapping:
+    identity, constraint kind, expected value, verdict and the observed value.
     """
 
     kind: str = "compatibility"
@@ -814,7 +822,38 @@ class CompatibilityObservation(Observation):
     requirement_value: str = ""
     members: tuple[str, ...] = ()
     checks_performed: tuple[str, ...] = ()
+    #: Per-candidate verdicts behind :attr:`verdict`, in ``members`` order.  Empty when the
+    #: requirement could not be mapped onto a deterministic catalogue check at all, which is
+    #: itself the honest answer rather than a fabricated per-candidate verdict.
+    assessments: tuple[dict[str, Any], ...] = ()
     verification_note: str | None = Field(default=None, max_length=280)
+
+    @property
+    def violated_members(self) -> tuple[str, ...]:
+        """The members proved to fail the requirement.  Never includes an unknown."""
+        return tuple(
+            str(entry.get("parent_asin", ""))
+            for entry in self.assessments
+            if entry.get("verdict") == "violated"
+        )
+
+    @property
+    def unresolved_members(self) -> tuple[str, ...]:
+        """The members the trusted catalogue could not decide for."""
+        return tuple(
+            str(entry.get("parent_asin", ""))
+            for entry in self.assessments
+            if entry.get("verdict") == "unknown"
+        )
+
+    @property
+    def satisfied_members(self) -> tuple[str, ...]:
+        """The members proved to satisfy the requirement."""
+        return tuple(
+            str(entry.get("parent_asin", ""))
+            for entry in self.assessments
+            if entry.get("verdict") == "satisfied"
+        )
 
 
 class BundleObservation(Observation):
