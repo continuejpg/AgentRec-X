@@ -18,15 +18,25 @@ proposal is even constructed.  What the design buys:
   id allowed to be compared - is decided at the trusted boundary by
   :class:`~recommendation.control.validation.ActionValidator` and by the capability that
   executes the action.  Shape validation is not authorisation.
-* **No free-form channel.**  There is deliberately no ``query: str``, no ``sql``, no
-  ``item_ids`` and no ``parent_asins`` field anywhere in this module.  A policy composes a
-  *structured* request (terms, sources, limits) and never a product identity.
+* **No free-form channel.**  There is deliberately no ``query: str`` and no ``sql``.  A
+  policy composes *structured* requests (terms, sources, limits, requirements), never a raw
+  expression, and no argument model has a field a tool would execute verbatim.
 
-The single exception worth naming is
-:class:`CompareArguments`.  Comparing products requires naming them, so it accepts
-``parent_asins``.  That is not a candidate-generation channel: the capability only compares
-products it can ground in the trusted catalogue, and the comparison result carries no
-candidate provenance into the ledger.  It cannot add a product to the candidate set.
+Several models do accept ``parent_asins`` - :class:`GetDetailsArguments`,
+:class:`CompareArguments`, :class:`TradeOffArguments`,
+:class:`CheckCompatibilityArguments` and :class:`BundleArguments` - because inspecting and
+comparing products requires naming them.  The action kind decides who validates it:
+
+* a **candidate-producing** action has no identity field at all, which is what keeps
+  identity introduction in the hands of trusted candidate sources;
+* a **reasoning** action may name identities, and every one of them must be a member of the
+  run's own grounded candidate set.  That membership check is enforced by
+  :class:`~recommendation.control.reasoning_executor.ReasoningExecutor` *before* the
+  catalogue is consulted, so naming a product the run does not hold fails closed.  Catalogue
+  existence is necessary for grounding and is never sufficient for authority.
+
+Reasoning results carry no candidate provenance into the ledger, so no argument model here
+is a candidate-generation channel.
 """
 
 from __future__ import annotations
@@ -163,10 +173,11 @@ class SearchCatalogArguments(BaseModel):
 class GetDetailsArguments(BaseModel):
     """Arguments for ``GET_DETAILS``: which already-grounded candidates to expand.
 
-    ``parent_asins`` must name products that are already in the candidate ledger.  This
-    action exists to fetch *more evidence about candidates the run already has*, not to
-    introduce new ones; the capability refuses an unknown identity rather than looking it
-    up in the catalogue.
+    ``parent_asins`` must name products that are already grounded candidates of the current
+    run - not merely products that exist in the catalogue.  This action exists to fetch *more
+    evidence about candidates the run already has*, not to introduce or browse new ones, and
+    the trusted executor enforces that literally: a non-member identity is refused before any
+    catalogue lookup happens, so this cannot become a catalogue browser.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -177,11 +188,16 @@ class GetDetailsArguments(BaseModel):
 class CompareArguments(BaseModel):
     """Arguments for ``COMPARE``: which grounded candidates to compare.
 
-    Naming products is necessary to compare them, so this is the one action that accepts
-    ``parent_asins``.  It is still not a candidate-generation channel: comparison reads
-    facts about products the run already holds, and its result carries no candidate
-    provenance.  The capability grounds every identity against the trusted catalogue and
-    reports ``UNKNOWN`` for any fact the catalogue does not contain.
+    Naming products is necessary to compare them.  It is still not a candidate-generation
+    channel: comparison reads facts about candidates the run already holds, and its result
+    carries no candidate provenance.
+
+    **Every** named identity is checked against the run's grounded allowlist, and the check is
+    all-or-nothing: a comparison naming one candidate the run holds and one it does not is
+    refused whole, rather than answered partially.  A partial answer would leak which of the
+    named identities the run happens to hold, and would answer a question about a product the
+    run has no authority over.  Within the run, a comparison also reports ``UNKNOWN`` for any
+    attribute the catalogue does not contain.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

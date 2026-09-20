@@ -782,16 +782,21 @@ def test_the_variant_label_matches_the_policy_that_actually_decided() -> None:
     assert outcome.trajectory.action_sequence() == ("search_catalog", "finish")
 
 
-def test_the_model_policy_prompt_carries_no_product_identity() -> None:
-    """The variant's own boundary check: the prompt payload names no candidate.
+def test_the_model_policy_prompt_carries_only_grounded_run_identities() -> None:
+    """The reference boundary, restated for Phase 2.1.
 
-    The model double needs identities to propose a facts question, and the adapter supplies them
-    out of band precisely so the *prompt* stays free of them.  This asserts that separation.
+    The old version of this test asserted that no product identity reached the prompt at all.
+    That is no longer the contract, and hiding identities was never the real guarantee: the
+    binding layer supplied the double with the run's identities out of band, so the model could
+    emit them anyway - it just could not *choose* among them, and a binder effectively chose the
+    target for it.
+
+    The guarantee that replaces it is the one the executor now enforces: the prompt carries the
+    run's own grounded candidates (so the model can select a target) and nothing else - no
+    identity the run does not hold, no catalogue facts, no scores.
     """
     case = case_by_id("missing-fact")
-    model = ObservationReactiveModel()
     policy = build_model_policy_factory()(case)
-    # Reach into the adapter's model to inspect the requests it recorded.
     inner = policy.model  # type: ignore[attr-defined]
     assert isinstance(inner, ObservationReactiveModel)
 
@@ -801,11 +806,19 @@ def test_the_model_policy_prompt_carries_no_product_identity() -> None:
     controller.run(case.message, ("B1", "B2", "B3"), turn_id="t")
 
     assert inner.requests, "the model was asked at least once"
+    grounded = {row[0] for row in CANDIDATE_ROWS}
     for request in inner.requests:
-        blob = str(request.context_payload) + request.system_prompt
-        for row in CANDIDATE_ROWS:
-            assert row[0] not in blob, "a product identity reached the model's prompt"
-    assert model.call_count == 0
+        payload = request.context_payload
+        for entry in payload["candidates"]["candidate_refs"]:
+            assert entry["parent_asin"] in grounded
+            # A reference is identity plus reasoning position - never a catalogue value.
+            assert set(entry) == {"parent_asin", "eligibility", "evidence"}
+        blob = str(payload) + request.system_prompt
+        # No catalogue fact, no score, no trusted history.
+        for forbidden in ("weight_text", "price_text", "RedWidget", "sasrec", "trusted_user_history"):
+            assert forbidden not in blob, f"{forbidden!r} reached the model's view"
+    assert inner.offered_refs, "the model was offered legal targets"
+    assert set(inner.offered_refs) <= grounded
 
 
 # =========================================================================== #

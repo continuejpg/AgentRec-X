@@ -86,6 +86,8 @@ from .constraint_eligibility import (
     constraints_from_task_state,
 )
 from .context import (
+    DEFAULT_CANDIDATE_REFERENCE_LIMIT,
+    CandidateReference,
     CandidateState,
     PolicyContext,
     project_constraints,
@@ -236,10 +238,12 @@ __all__ = [
     "ConstraintKind",
     "CONSTRAINT_ELIGIBILITY_VERSION",
     "CandidateConstraintAssessment",
+    "CandidateReference",
     "CandidateEligibility",
     "CandidateEligibilityEvaluator",
     "ConstraintReport",
     "ConstraintRequirement",
+    "DEFAULT_CANDIDATE_REFERENCE_LIMIT",
     "FeasibilityProjection",
     "FeasibleCandidateView",
     "candidate_eligibility",

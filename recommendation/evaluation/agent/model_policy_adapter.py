@@ -52,8 +52,11 @@ class ObservationReactiveModel:
     * facts read and a comparison is offered and useful -> compare;
     * candidates grounded and the request answered -> finish.
 
-    It never emits a product identity, a catalogue fact or an unsupported action, because those
-    are exactly what the trust boundary refuses - and one test asserts each refusal.
+    It never invents a product identity: the identities it may target come from
+    ``candidates.candidate_refs`` in the request payload, and it chooses among them the way a
+    real model would.  It selects the target itself - the binding policy no longer picks for it
+    - and it never emits a catalogue fact or an unsupported action.  Tests assert both the legal
+    selection and the refusals.
     """
 
     #: One synthetic query term suffices for the suite catalogue; a real model would derive terms
@@ -64,17 +67,20 @@ class ObservationReactiveModel:
         self,
         *,
         terms: tuple[str, ...] | None = None,
-        identities: tuple[str, ...] = (),
     ) -> None:
         self._terms = terms or self.DEFAULT_TERMS
-        #: The grounded identities the *runtime* holds, used when a read-only reasoning action
-        #: needs to name products.  A real model would be given these by the same projection;
-        #: they are supplied out of band here purely so the double can bind them, and one test
-        #: asserts that no product identity appears in the prompt payload.
-        self._identities = tuple(identities)
-        #: Case-derived expectations injected by the binding policy.
+        #: Case-derived expectations injected by the binding policy.  These describe the *task*
+        #: (does it need a catalogue search? does it need evidence?), never an identity: the
+        #: candidate identities this double may target come from the payload, exactly as they
+        #: would for a real model.
         self._hints: dict[str, Any] = {}
         self.requests: list[ModelRequest] = []
+        #: The candidate references the last request offered, so a test can assert the double
+        #: chose among the ones it was actually given.
+        self.offered_refs: tuple[str, ...] = ()
+        #: The references from the most recent payload, for target ordering.
+        self.context_refs: tuple[str, ...] = ()
+        self._last_payload: dict[str, Any] = {}
 
     @property
     def call_count(self) -> int:
@@ -90,7 +96,16 @@ class ObservationReactiveModel:
         self.requests.append(request)
         offered = {entry["action"] for entry in request.action_schema}
         payload = dict(request.context_payload)
+        # The legal targets come from the payload, exactly as they would for a real model.  The
+        # double is *told the task shape* through hints; it is never told an identity out of band.
+        self.offered_refs = tuple(
+            str(entry.get("parent_asin", ""))
+            for entry in payload.get("candidates", {}).get("candidate_refs", [])
+            if entry.get("parent_asin")
+        )
+        self.context_refs = self.offered_refs
         payload.update(self._hints)
+        self._last_payload = payload
         action = self._decide(payload, offered)
         return ModelResponse(
             text=json.dumps(action, sort_keys=True),
@@ -163,22 +178,44 @@ class ObservationReactiveModel:
                 "rationale": "candidates are grounded and the request is simple",
             }
         kind = observation.get("kind") if isinstance(observation, dict) else None
-        names = list(self._identities)
+        # Target selection is the model's own decision, made from the bounded reference list it
+        # was offered.  A candidate whose evidence is unsettled is the informative one to read,
+        # so it is preferred; the choice is still expressed as a normal reasoning argument.
+        names = self._target_order()
         if kind not in ("details", "comparison") and "get_details" in offered and names:
             return {
                 "action": "get_details",
-                "arguments": {"parent_asins": list(names)},
-                "rationale": "read the grounded facts before answering",
+                "arguments": {"parent_asins": [names[0]]},
+                "rationale": f"read the grounded facts for {names[0]}",
             }
         if kind == "details" and "compare" in offered and len(names) >= 2:
             return {
                 "action": "compare",
-                "arguments": {"parent_asins": list(names), "attributes": ["weight_text"]},
-                "rationale": "compare the grounded attributes",
+                "arguments": {"parent_asins": names[:2], "attributes": ["weight_text"]},
+                "rationale": f"compare {names[0]} with {names[1]}",
             }
         return {"action": "finish", "rationale": "the candidates answer the request"}
 
     # -- helpers ----------------------------------------------------------- #
+
+    def _target_order(self) -> list[str]:
+        """The offered references, most-informative-first.
+
+        Orders the *legal* targets - it never adds one - so the double behaves like a competent
+        model: read a candidate whose evidence is unsettled before one already settled.  The
+        identity set is exactly what the payload offered, which is what makes the resulting
+        action a legal reference rather than a manufactured one.
+        """
+        refs = self.context_refs or self.offered_refs
+        payload = self._last_payload or {}
+        by_identity = {
+            str(entry.get("parent_asin", "")): str(entry.get("evidence", "unconstrained"))
+            for entry in payload.get("candidates", {}).get("candidate_refs", [])
+        }
+        return sorted(
+            refs,
+            key=lambda identity: (by_identity.get(identity) != "attention", refs.index(identity)),
+        )
 
     @staticmethod
     def _underspecified(payload: dict[str, Any]) -> bool:
@@ -248,9 +285,15 @@ class _IdentityBindingPolicy(LLMAgentPolicy):
         self._hints = dict(hints or {})
 
     def choose(self, context: Any) -> Any:
-        """Bind the run's grounded identities and the case hints, then delegate."""
+        """Bind the case hints and delegate.
+
+        It deliberately does **not** bind identities.  The double used to be handed the run's
+        grounded set out of band, which meant a model could only ever emit "all of them" and
+        trusted code effectively chose the target.  Legal targets now travel through the same
+        payload a real model would read, so the model's choice is a real choice - and the
+        executor refuses any identity that is not in the run's allowlist whatever the source.
+        """
         model = self._model
         if isinstance(model, ObservationReactiveModel):
-            model._identities = tuple(context.grounded_parent_asins)  # noqa: SLF001
             model._hints = dict(self._hints)  # noqa: SLF001
         return super().choose(context)

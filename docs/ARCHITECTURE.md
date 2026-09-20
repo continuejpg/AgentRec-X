@@ -462,6 +462,37 @@ transaction concept anywhere in the result.
 The reasoner is **read-only**. It cannot add a candidate, reorder the ledger or approve a
 completion, and a test asserts it exposes no such surface.
 
+### Which identities a reasoning action may name (Phase 2.1, IMPLEMENTED)
+
+Read-only is necessary and was not sufficient. Until Phase 2.1 the executor asked the catalogue
+whether an identity existed and treated "yes" as authorisation, so a reasoning action could name
+**any product the catalogue contained** even when the run had never retrieved it. Membership
+never changed, but the boundary the docstrings claimed — *facts about candidates the run already
+holds* — was not the boundary the code enforced.
+
+The enforced rule is now:
+
+```text
+candidate-producing actions   may introduce identity, through trusted sources only
+reasoning actions             may only REFERENCE identity the current run already holds
+```
+
+`ReasoningExecutor.execute` takes the run's live grounded allowlist and checks every named
+identity against it **before** the catalogue is consulted, so an unauthorised reference never
+causes a read and never produces an observation. The check is all-or-nothing: `COMPARE(A, X)`
+with `X` outside the run is refused whole rather than answered partially, because a partial
+answer would leak which of the named identities the run holds.
+
+`PolicyContext.grounded_candidates` is the bounded reference projection a policy chooses
+targets from — identity plus reasoning position, capped at the largest identity list any
+argument model accepts. It narrows the allowlist the context already exposed and adds no
+identity; a reference carries no catalogue value, so choosing a target never means reading one.
+
+Reasoning authority is deliberately **not** recommendation membership (section 11): an
+`ineligible` or `unresolved` grounded candidate remains a legal reasoning target, which is what
+lets an agent explain an exclusion or gather the fact that would resolve it. Inspecting such a
+candidate changes no verdict and cannot return it to the recommendation set.
+
 ### Not implemented (documented, not claimed)
 
 * **No `CHECK_COMPATIBILITY` semantics for interfaces or fitment**, because the catalogue has
@@ -470,11 +501,8 @@ completion, and a test asserts it exposes no such surface.
 * **No semantic reasoning over requirements.** A requirement is matched against catalogue
   wording deterministically; there is no interpretation of an open-ended natural-language
   requirement.
-* **The reasoning capabilities are not yet wired as loop actions.** The reasoner is a trusted,
-  tested component and the `ActionKind` members (`GET_DETAILS`, `COMPARE`, `TRADE_OFF`,
-  `CHECK_COMPATIBILITY`, `BUNDLE`, `VERIFY`) and their argument contracts exist, but no executor
-  maps an action onto the reasoner yet, so a proposal naming one is still refused.
-* **Stage 6 (evaluation plane) is not implemented.**
+* **No catalogue browsing.** A later phase might add a trusted candidate-producing lookup
+  capability; reasoning actions will not become one.
 
 ---
 
@@ -688,7 +716,8 @@ excluded it.
 
 That bounded summary is what makes `UNKNOWN` useful rather than merely honest: a policy can see
 that a candidate is unresolved and spend a step reading the missing fact, which is a legal next
-action it could not previously identify.
+action it could not previously identify. *Which* candidate that step may name is enforced
+separately — see the reference boundary in section 9.
 
 ### Completion
 
@@ -1133,5 +1162,14 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 * **Eligibility is recomputed per turn, not indexed.** It is a pure function over the run's own
   grounded candidates, which is correct and cheap at this scale but is not an incremental
   constraint index.
+* **A reasoning refusal reports one code for both "not in this run" and "not in the catalogue".**
+  The architecture distinguishes the two internally — membership is a refusal, a missing fact is
+  `UNKNOWN` — but the primary check is membership, so an identity that is in neither fails on
+  membership. Refining the message would tell a caller with no authority over a product whether
+  that product exists.
+* **The reference layer uses grounded identities, not opaque handles.** A handle table would add
+  a resolution step without removing any exposure, because the identity is what the argument
+  model is keyed by and every reference is re-validated against live run state anyway. If a
+  future client needs identity-free prompts the projection is the single place to change.
 * **No real provider has been called.** The model policy is exercised through a deterministic
   double (section 10); no claim is made about a real model's constraint behaviour.

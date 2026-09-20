@@ -164,6 +164,12 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         "unresolved_count",
         "feasible_parent_asins",
         "active_constraints",
+        # Phase 2.1 adds the bounded reference layer: per-candidate identity plus the reasoning
+        # position, so a policy can choose *which* grounded candidate to inspect.  Every
+        # identity here is one ``grounded_parent_asins`` already carried - this narrows and
+        # annotates that allowlist, it does not widen it - and the projection is capped, so the
+        # policy's view cannot grow with the candidate set.
+        "grounded_candidates",
     }
     assert set(vars(context)) == allowed
 
@@ -220,6 +226,21 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         context.verified_eligible_count + context.ineligible_count + context.unresolved_count
         == 0
     )
+
+    # Phase 2.1's reference layer is likewise a projection of the same one channel: it invents
+    # no identity, and it is capped so the policy's view cannot scale with the candidate set.
+    from recommendation.control.context import DEFAULT_CANDIDATE_REFERENCE_LIMIT
+
+    targets = context.reasoning_targets()
+    assert set(targets) <= set(context.grounded_parent_asins)
+    assert targets == context.grounded_parent_asins[:DEFAULT_CANDIDATE_REFERENCE_LIMIT]
+    assert len(context.grounded_candidates) <= DEFAULT_CANDIDATE_REFERENCE_LIMIT
+    # A reference carries the reasoning position and no catalogue value.
+    for reference in context.grounded_candidates:
+        assert set(vars(reference)) == {"parent_asin", "eligibility", "evidence"}
+        assert reference.is_reasoning_target is True
+    # A reference that was never offered is not resolvable.
+    assert context.candidate_reference("cand-not-offered") is None
 
 
 def test_policy_cannot_supply_candidate_ids_or_history() -> None:

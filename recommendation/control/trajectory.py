@@ -42,7 +42,24 @@ from .schemas import (
     VerificationResult,
 )
 
-__all__ = ["TrajectoryRecorder"]
+__all__ = [
+    "TrajectoryRecorder",
+    "arguments_view",
+]
+
+
+def arguments_view(arguments: Any) -> dict[str, Any] | None:
+    """Dump a validated action's arguments to plain, JSON-safe data, or ``None``.
+
+    Wrapped rather than inlined so every call site dumps arguments the same way, and so a future
+    argument model cannot be recorded in a half-serialised form by accident.
+    """
+    if arguments is None:
+        return None
+    dump = getattr(arguments, "model_dump", None)
+    if callable(dump):
+        return dict(dump(mode="json"))
+    return None
 
 
 class TrajectoryRecorder:
@@ -106,6 +123,13 @@ class TrajectoryRecorder:
                     "k": action_proposal.k,
                     "rationale": action_proposal.rationale,
                     "version": action_proposal.version,
+                    # The proposed arguments, dumped to plain data.  Recorded because a
+                    # reasoning action's *target* is the part of the proposal that can violate
+                    # the run-scoped identity boundary, and a trajectory that showed only the
+                    # action name could not distinguish "read the candidate I was offered" from
+                    # "read a catalogue product I invented".  These are the policy's own
+                    # arguments - shape-validated, but neither authorised nor grounded yet.
+                    "arguments": arguments_view(action_proposal.arguments),
                 }
             ),
             validation_result=validation_result,

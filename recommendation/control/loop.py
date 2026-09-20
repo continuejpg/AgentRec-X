@@ -408,7 +408,53 @@ class _LoopEngine:
             active_constraints=tuple(
                 requirement.label for requirement in self.constraint_requirements
             ),
+            # Phase 2.1: the bounded legal reasoning targets.  Every entry is a grounded run
+            # candidate plus the eligibility and evidence position Phase 2 already computed, so
+            # a policy can choose *which* candidate to inspect without being able to name one
+            # the run does not hold.  Bounded here rather than in the prompt, so no consumer can
+            # accidentally unbound it.
+            grounded_candidates=self.candidate_references(),
         )
+
+    def candidate_references(self) -> tuple[Any, ...]:
+        """Project the run's grounded candidates into bounded legal reasoning targets.
+
+        The identity set is :meth:`grounded_identities` - the run's own verified candidates -
+        so this adds no identity that was not already reachable.  What it adds is the *reasoning
+        position*: whether the candidate is eligible, ineligible or unresolved, and whether its
+        evidence is settled.  That is what turns "here are some identities" into "here is which
+        one is worth reading", which is the decision a target-selecting policy has to make.
+
+        A no-constraint run still gets references (with ``eligibility='unknown'``), because
+        target selection matters independently of constraint enforcement: a policy may need to
+        read facts about a candidate in any run.
+        """
+        from .context import DEFAULT_CANDIDATE_REFERENCE_LIMIT, CandidateReference
+
+        references: list[Any] = []
+        for parent_asin in self.grounded_identities()[:DEFAULT_CANDIDATE_REFERENCE_LIMIT]:
+            eligibility = "unknown"
+            evidence = "unconstrained"
+            if self.feasibility is not None:
+                state = self.feasibility.eligibility_of(parent_asin)
+                if state is not None:
+                    eligibility = state.value
+                    assessment = self.feasibility.assessment_for(parent_asin)
+                    if assessment is not None and assessment.is_assessed:
+                        # Coarse on purpose: a policy needs to know whether the evidence is
+                        # settled, not what the observed values are - reading them is the action
+                        # it is about to propose.
+                        evidence = (
+                            "attention"
+                            if assessment.unresolved
+                            else "satisfied"
+                        )
+            references.append(
+                CandidateReference(
+                    parent_asin=parent_asin, eligibility=eligibility, evidence=evidence
+                )
+            )
+        return tuple(references)
 
     def available_actions(self) -> tuple[ActionKind, ...]:
         """Compute the action space the **system** currently offers.
@@ -1022,7 +1068,15 @@ class _LoopEngine:
             # The reasoning result *is* the observation: unlike a candidate action there is no
             # raw domain payload to minimise, because the reasoner already returns only
             # whitelisted, grounded facts.  Nothing is adopted into the candidate state.
-            self.observation = self.reasoning.execute(self.validated)
+            #
+            # Phase 2.1: the run's own grounded set is handed to the executor as the identity
+            # allowlist, so a reasoning action can only name a candidate this run holds.  The
+            # allowlist is read here, from trusted state, on every step - it is never cached on
+            # the executor, so a candidate set that changes mid-run cannot leave a stale
+            # authority behind.
+            self.observation = self.reasoning.execute(
+                self.validated, authorized_candidates=self.grounded_identities()
+            )
             self.verification = VerificationResult(
                 verified=True,
                 code="reasoning_completed",
@@ -1729,6 +1783,15 @@ class LoopController:
                 engine.observe()
                 outcome = engine.update_state()
                 if not outcome.continue_loop:  # pragma: no cover - defensive
+                    return engine.result(outcome)
+                # Re-test the step budget before consulting the policy again.  Reasoning is not
+                # a tool call, but it *is* a step, and this branch used to loop back to
+                # ``choose`` directly - so a run that only chose reasoning actions never
+                # re-tested ``max_steps``.  The check is the same one the top of the loop runs;
+                # running it here keeps the direct driver's step accounting identical to the
+                # graph driver's, whose ``_reason`` node now re-enters ``check_limits``.
+                outcome = engine.check_limits()
+                if not outcome.continue_loop:
                     return engine.result(outcome)
                 continue
             if target == "clarify":

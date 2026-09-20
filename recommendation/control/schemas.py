@@ -128,7 +128,18 @@ class PolicyActionError(Exception):
     Raised instead of defaulting to an action, exactly as
     :class:`~recommendation.agent.decision.MalformedDecision` is raised instead of
     defaulting to a route.
+
+    ``code`` is an optional **stable** machine-readable class, so a failure that a policy can
+    act on reaches it as a code rather than as a message.  It exists because a trust-boundary
+    refusal and an execution failure call for different recoveries, and a policy that only saw
+    "something failed" could not tell them apart.  The message may name internals; the code
+    must not.
     """
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        #: Stable failure class, or ``None`` for a generic protocol violation.
+        self.code = code
 
 
 # --------------------------------------------------------------------------- #

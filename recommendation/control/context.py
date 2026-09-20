@@ -37,7 +37,79 @@ from typing import Any
 
 from .schemas import ActionKind, Observation, RunStatus
 
-__all__ = ["CandidateState", "PolicyContext", "project_constraints", "project_intent"]
+__all__ = [
+    "CandidateReference",
+    "CandidateState",
+    "DEFAULT_CANDIDATE_REFERENCE_LIMIT",
+    "PolicyContext",
+    "project_constraints",
+    "project_intent",
+]
+
+#: How many candidate references a policy may be shown in one context.
+#:
+#: Bounded deliberately, and equal to the largest identity list any reasoning action accepts
+#: (``MAX_COMPARE_ITEMS``), so the projection can never be larger than the action it feeds.  A
+#: context whose size tracked the candidate set would let a broad retrieval turn into an
+#: unbounded prompt.
+DEFAULT_CANDIDATE_REFERENCE_LIMIT = 6
+
+
+@dataclass(frozen=True)
+class CandidateReference:
+    """One **legal reasoning target**: a grounded run candidate a policy may name.
+
+    This is the reference layer, and it is deliberately thin.  The reference *is* the trusted
+    identity - the run's own ``parent_asin`` - rather than an opaque handle, because the
+    repository already carried these identities in a single bounded projection and an alias
+    table would add a resolution step without removing any exposure.  What matters is not the
+    spelling of the reference but **who validates it**: every one of these was produced by a
+    trusted candidate source, confirmed by the grounding verifier, and is re-checked against
+    the run's live allowlist at execution time.
+
+    What a reference carries, and why:
+
+    * ``parent_asin`` - the identity a reasoning action may name.  Necessary, because the
+      action's own argument model is keyed by it.
+    * ``eligibility`` - Phase 2's task-scoped state, so a policy can tell a candidate it may
+      present from one that is only inspectable.  This is what makes evidence acquisition
+      targetable: an ``unresolved`` candidate is exactly the one worth reading.
+    * ``evidence`` - a coarse three-way summary of the constraint/evidence position
+      (``unconstrained`` / ``satisfied`` / ``attention``), so a policy can prefer a candidate
+      whose facts are missing without being handed catalogue values.
+
+    What a reference deliberately does **not** carry: product titles, prices, weights, feature
+    text, catalogue records, raw retrieval scores, or provenance objects.  A policy choosing a
+    target needs to know *which candidate* and *what is known*, never *what the catalogue says*
+    - reading the catalogue is the action it is about to propose.
+    """
+
+    #: The run's grounded identity for this candidate.  Valid only within the run that
+    #: produced it: a new run builds its own allowlist from its own candidate set.
+    parent_asin: str
+    #: Phase 2 task-scoped state: ``verified_eligible`` / ``ineligible`` / ``unresolved``, or
+    #: ``unknown`` when no constraint is active or the candidate was not assessed.
+    eligibility: str = "unknown"
+    #: Coarse evidence position, so a policy can prefer an under-evidenced candidate.
+    evidence: str = "unconstrained"
+
+    @property
+    def is_reasoning_target(self) -> bool:
+        """True for every reference: a reference exists only because it is inspectable.
+
+        An ineligible candidate is still a legal reasoning target - explaining "why was this
+        excluded" requires reading it - but it is never a legal *recommendation*, which
+        separates reasoning authority from recommendation membership.
+        """
+        return True
+
+    def as_dict(self) -> dict[str, str]:
+        """Return the compact, catalogue-free view a prompt payload carries."""
+        return {
+            "parent_asin": self.parent_asin,
+            "eligibility": self.eligibility,
+            "evidence": self.evidence,
+        }
 
 
 @dataclass(frozen=True)
@@ -163,6 +235,36 @@ class PolicyContext:
     #: - never a product fact, and never a soft preference.
     active_constraints: tuple[str, ...] = ()
 
+    #: Phase 2.1: the bounded set of **legal reasoning targets**.
+    #:
+    #: This is the reference layer the reasoning actions are validated against.  Every entry is
+    #: a candidate the run actually holds - produced by a trusted source and confirmed by the
+    #: grounding verifier - so a policy can *choose which* candidate to inspect without being
+    #: able to name one the run does not have.  It is a narrowing of
+    #: :attr:`grounded_parent_asins` plus Phase-2 eligibility, never a second source of
+    #: identity, and it is bounded by :data:`DEFAULT_CANDIDATE_REFERENCE_LIMIT`.
+    #:
+    #: An ineligible candidate appears here on purpose: it is a legal *reasoning* target even
+    #: though it is not a legal recommendation, which is what lets an agent explain an
+    #: exclusion.  It cannot re-enter the recommendation set by being inspected.
+    grounded_candidates: tuple[CandidateReference, ...] = ()
+
+    def reasoning_targets(self) -> tuple[str, ...]:
+        """The identities a reasoning action may legally name, in the run's own order.
+
+        The one function a policy needs to build a legal reference.  Kept separate from
+        :attr:`feasible_parent_asins` because the two answer different questions: this is
+        "what may I inspect", that is "what may I present".
+        """
+        return tuple(reference.parent_asin for reference in self.grounded_candidates)
+
+    def candidate_reference(self, parent_asin: str) -> CandidateReference | None:
+        """The reference for one identity, or ``None`` when it is not a legal target."""
+        for reference in self.grounded_candidates:
+            if reference.parent_asin == parent_asin:
+                return reference
+        return None
+
     def action_available(self, action: ActionKind) -> bool:
         """True when the system currently permits ``action``."""
         return action in self.available_actions
@@ -198,6 +300,9 @@ class PolicyContext:
             "ineligible_count": self.ineligible_count,
             "unresolved_count": self.unresolved_count,
             "active_constraint_count": len(self.active_constraints),
+            # The summary carries the *count* of legal reasoning targets, never the identities:
+            # the trajectory record is a different boundary from the policy's own view.
+            "reasoning_target_count": len(self.grounded_candidates),
         }
 
 

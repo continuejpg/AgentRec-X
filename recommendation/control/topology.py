@@ -253,14 +253,23 @@ def _reason(state: LoopGraphState) -> Command:
     """Execute one read-only reasoning action and continue the loop.
 
     Reasoning runs no candidate source, so it is not a tool call and does not consume the
-    tool-call budget; control returns to the policy through the normal phases.
+    **tool-call** budget.  It does consume a *step*, and the step budget is what bounds it.
+
+    This node runs the whole tail of the cycle itself (verify, observe, update_state) and then
+    must re-enter through ``check_limits``, exactly as ``_update_state`` does.  It previously
+    jumped straight to the policy, which meant a run that only ever chose reasoning actions
+    never re-tested its step budget: a model repeating an invalid reasoning proposal looped far
+    past ``max_steps`` before anything stopped it.  The tool-call budget is still untouched -
+    only the step boundary moved back into the path.
     """
     engine = state["engine"]
     engine.reason()
     engine.verify()
     engine.observe()
     engine.update_state()
-    return Command(update=_advance(state), goto=END if engine.control.is_terminal else NODE_POLICY)
+    return Command(
+        update=_advance(state), goto=END if engine.control.is_terminal else NODE_CHECK_LIMITS
+    )
 
 
 def _clarify(state: LoopGraphState) -> Command:

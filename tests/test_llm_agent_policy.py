@@ -89,13 +89,25 @@ def context(
     remaining_tool_calls: int = 3,
     last_observation: object | None = None,
     awaiting_user: bool = False,
+    candidates: tuple[str, ...] = (),
 ) -> PolicyContext:
-    """Build a bounded policy context for a unit test."""
+    """Build a bounded policy context for a unit test.
+
+    ``candidates`` are the run's legal reasoning targets.  They are passed as plain identities
+    and projected into references by the context, exactly as the loop does, so a test exercises
+    the real projection rather than hand-building reference objects.
+    """
+    from recommendation.control.context import CandidateReference
+
     return PolicyContext(
         user_request=request,
         available_actions=available,
         has_trusted_history=True,
         candidate_state=CandidateState(grounded=grounded, candidate_count=count),
+        grounded_parent_asins=candidates,
+        grounded_candidates=tuple(
+            CandidateReference(parent_asin=identity) for identity in candidates
+        ),
         last_observation=last_observation,  # type: ignore[arg-type]
         remaining_steps=remaining_steps,
         remaining_tool_calls=remaining_tool_calls,
@@ -299,11 +311,15 @@ def test_only_read_only_actions_may_name_products_at_all() -> None:
         assert "parent_asins" not in ARGUMENTS_BY_ACTION[action].model_fields
 
 
-def test_an_invented_identity_never_reaches_the_candidate_ledger() -> None:
+def test_an_invented_identity_is_refused_rather_than_looked_up() -> None:
     """A loop-level attack: only trusted sources may create candidate identity.
 
     The model names a product that does not exist, in a read-only action where naming products
-    *is* legal.  The trusted side reports it as unknown, and it never becomes a candidate.
+    *is* legal.  Phase 2.1 tightened what happens next.  Before, the executor asked the
+    catalogue, found nothing, and reported the identity as ``unknown`` in an otherwise
+    successful observation - which meant a run-relevant fact question was answered by looking
+    up an identity no trusted source had ever produced.  Now the run-membership check runs
+    first and refuses the whole action, so the identity never reaches the catalogue at all.
     """
     harness, _policy, _client, ledger = loop_harness(
         {"action": "recommend_from_history", "k": 2},
@@ -313,12 +329,22 @@ def test_an_invented_identity_never_reaches_the_candidate_ledger() -> None:
     result = harness.controller.run("Recommend gear.", ("B1", "B2", "B3"), run_id="r")  # noqa: SLF001
     assert "FAKE-9" not in ledger
     assert "FAKE-9" not in ledger.grounded_parent_asins()
+
+    # The action was refused, and the refusal is a bounded, payload-free failure observation.
+    refusals = [
+        step for step in result.trajectory.steps
+        if step.observation and step.observation.get("status") == "failed"
+    ]
+    assert refusals, "an identity outside the run must produce a failed observation"
+    assert refusals[0].observation["verification_status"] == "refused"
+    # No detail observation was produced at all: the catalogue was never consulted, so the
+    # valid member of the pair was not silently answered either.
     details = [
         step.observation
         for step in result.trajectory.steps
         if step.observation and step.observation.get("kind") == "details"
     ]
-    assert details and "FAKE-9" in details[0]["unknown"]
+    assert details == [], "a partially-authorized action must not be partially answered"
 
 
 def test_the_policy_is_given_no_catalogue_or_history_channel() -> None:
@@ -453,6 +479,9 @@ def test_a_grounded_candidate_set_changes_what_the_model_is_told() -> None:
         "grounded": True,
         "count": 4,
         "verification_status": "unverified",
+        # Phase 2.1: the bounded reference list travels with the counts.  Empty here, because
+        # this context offers no legal target - the counts and the refs are independent.
+        "candidate_refs": [],
     }
     assert payload["budget"]["remaining_steps"] == 2
     assert payload["budget"]["remaining_tool_calls"] == 1
@@ -587,52 +616,107 @@ def test_the_policy_identity_is_recorded_in_the_trajectory() -> None:
 # ===========================================================================
 
 
-def test_full_model_driven_trajectory_offline() -> None:
-    """The phase's end-to-end trajectory: search, then reason, then finish.
+class _TargetSelectingModel:
+    """A model double that chooses its reasoning *targets* from the offered references.
 
-    A model chooses every action from its context; the trusted pipeline executes them and the
-    completion guard authorises the end. No network, no API key, no real model.
+    Phase 2.1's whole point is that the model, not a binder, picks which grounded candidate a
+    reasoning action names.  A fixed script cannot demonstrate that - it encodes the answer
+    ahead of time and would keep "working" if the binder overrode it.  This double instead
+    reads ``candidates.candidate_refs`` from each request and builds its arguments from what it
+    was actually offered, so the executed action proves the model's own selection reached the
+    executor.
     """
-    # The suite's synthetic catalogue indexes titles as single lowercase tokens
-    # (``redwidget``), so each query names one product.  On a real catalogue the same case uses
-    # ordinary product words; what is under test is model-driven *action selection*, not
-    # tokenisation.
-    harness, _policy, client, ledger = loop_harness(
-        {"action": "search_catalog", "arguments": {"terms": ["redwidget"], "limit": 2},
-         "rationale": "novel need, catalogue search is appropriate"},
-        {"action": "search_catalog", "arguments": {"terms": ["bluewidget"], "limit": 2},
-         "rationale": "a second candidate so the options can be compared"},
-        {"action": "get_details", "arguments": {"parent_asins": ["cand-red", "cand-blue"]},
-         "rationale": "read the grounded facts before comparing"},
-        {"action": "compare",
-         "arguments": {"parent_asins": ["cand-red", "cand-blue"], "attributes": ["weight_text"]},
-         "rationale": "compare the grounded attributes"},
-        {"action": "finish", "rationale": "the request is answered"},
+
+    def __init__(self) -> None:
+        self.requests: list[Any] = []
+        self.selected: list[tuple[str, ...]] = []
+
+    @property
+    def call_count(self) -> int:
+        return len(self.requests)
+
+    def complete(self, request: Any) -> Any:
+        import json
+
+        from recommendation.control.model_client import ModelResponse
+
+        self.requests.append(request)
+        offered = {entry["action"] for entry in request.action_schema}
+        refs = tuple(
+            str(entry.get("parent_asin", ""))
+            for entry in request.context_payload.get("candidates", {}).get("candidate_refs", [])
+            if entry.get("parent_asin")
+        )
+        kind = (request.context_payload.get("last_observation") or {}).get("kind")
+
+        if not refs:
+            action: dict[str, Any] = {
+                "action": "search_catalog",
+                # Each fixture title is one lowercase token, so one query grounds one candidate.
+                "arguments": {"terms": ["redwidget"], "limit": 3},
+                "rationale": "nothing grounded yet",
+            }
+        elif kind != "details":
+            # Read the candidate the model itself chooses first - not a target chosen for it.
+            self.selected.append((refs[0],))
+            action = {
+                "action": "get_details",
+                "arguments": {"parent_asins": [refs[0]]},
+                "rationale": f"read the grounded facts for {refs[0]}",
+            }
+        else:
+            action = {"action": "finish", "rationale": "the candidate is answered"}
+        return ModelResponse(text=json.dumps(action, sort_keys=True), model_id="target-selecting")
+
+
+def test_full_model_driven_trajectory_offline() -> None:
+    """The end-to-end trajectory: retrieve, let the model pick a target, reason, finish.
+
+    A model chooses every action *and* every reasoning target from its own context; the trusted
+    pipeline executes them and the completion guard authorises the end. No network, no API key,
+    no real model.
+    """
+    model = _TargetSelectingModel()
+    policy = LLMAgentPolicy(model)
+    harness = build_control_harness(
+        policy=policy,
+        limits=LoopLimits(max_steps=6, max_tool_calls=3),
+        rows=CANDIDATE_ROWS,
+        catalog_rows=CANDIDATE_ROWS,
     )
+    metadata = harness.parts["enricher"].metadata
+    ledger = CandidateLedger()
+    harness.controller._reasoning = ReasoningExecutor(GroundedReasoner(metadata))  # noqa: SLF001
+    harness.controller._candidate_plane = CandidatePlane(  # noqa: SLF001
+        ledger=ledger,
+        grounding=GroundingVerifier(_Map(), metadata),
+        catalog_search=CatalogSearchSource(metadata),
+    )
+
     result = harness.controller.run("Recommend gear.", ("B1", "B2", "B3"), run_id="r")  # noqa: SLF001
 
     assert result.status is RunStatus.FINISHED
     assert result.control.termination_reason is TerminationReason.COMPLETED
     assert result.trajectory.actions() == (
         "search_catalog",
-        "search_catalog",
         "get_details",
-        "compare",
         "finish",
     )
     assert result.route == "recommend"
-    assert client.call_count == 5
+    assert model.call_count == 3
 
     # Every action was chosen from the model's own context, one decision per step.
     for step in result.trajectory.steps:
         assert step.policy_metadata["policy"] == LLM_POLICY_NAME
-    # Only the two retrievals consume a tool call; reasoning reads facts and costs none.
-    assert result.control.tool_call_count == 2
-    # Candidate identity came from the trusted source, not the model.
-    # Identity, not order: each candidate is rank 1 in its own query, so the ledger's
-    # rank-fusion ties and breaks by identity.  Insertion order is not the contract.
-    assert set(ledger.grounded_parent_asins()) == {"cand-red", "cand-blue"}
-    assert result.control.step_count == 5
+    # Only the retrieval consumes a tool call; reasoning reads facts and costs none.
+    assert result.control.tool_call_count == 1
+    # The target the model selected was the one it was offered - and the executor accepted it
+    # because it is a grounded candidate of this run.
+    assert model.selected, "the model chose a reasoning target"
+    grounded = set(ledger.grounded_parent_asins())
+    for chosen in model.selected:
+        assert set(chosen) <= grounded, "the model targeted only offered candidates"
+    assert result.control.step_count == 3
     # And the response names the source that actually produced the candidates.
     assert "catalogue text search" in result.final_response
 

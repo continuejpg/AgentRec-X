@@ -28,15 +28,22 @@ construction rather than by review.
 
 Identity handling
 -----------------
-A reasoning action names ``parent_asins``.  The executor grounds every one against the
-catalogue and reports the ones it cannot find as ``unknown`` rather than silently dropping
-them: a policy that asked about a product needs to know the product was not found, and a
-dropped identity would look like a successful, complete comparison.
+A reasoning action names ``parent_asins``.  Before anything is read, the executor checks every
+one of them against the **run's grounded candidate allowlist**, which the loop supplies on each
+call.  An identity that is not a grounded candidate of this run is a refusal - not a lookup -
+and it fails the whole action rather than the individual identity, so a partially authorised
+request cannot be partially answered.
+
+That is the boundary this plane rests on, and it is the reason catalogue membership is not
+consulted first: *existing in the catalogue* is what makes a fact groundable, and it is not
+what makes a candidate the run's.  Only after membership is established does the reasoner
+ground each identity against the catalogue, where a candidate whose fact is absent reports
+``UNKNOWN`` rather than a fabricated value.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from .grounded_reasoning import (
     UNKNOWN,
@@ -91,6 +98,18 @@ class ReasoningExecutor:
         The :class:`~recommendation.control.grounded_reasoning.GroundedReasoner` over the
         trusted catalogue.  Required: without a catalogue there are no facts, and the executor
         will not answer a fact question from anywhere else.
+
+    Run-scoped identity authority
+    -----------------------------
+    Catalogue membership authorizes **grounding**, not **attention**.  A product existing in
+    the trusted catalogue says the system could read it; it says nothing about whether *this
+    run* retrieved it, and a reasoning action exists to inspect the run's own candidates.
+
+    :meth:`execute` therefore takes ``authorized_candidates`` - the run's live grounded
+    allowlist - and every identity a reasoning action names must be a member.  The check runs
+    **before** the catalogue is consulted, so an unauthorized reference never causes a read.
+    Catalogue membership is then applied as a *second*, narrower check inside the reasoner,
+    where a missing fact still reports ``UNKNOWN`` rather than being fabricated.
     """
 
     def __init__(self, reasoner: GroundedReasoner) -> None:
@@ -123,22 +142,40 @@ class ReasoningExecutor:
 
     # -- execution --------------------------------------------------------- #
 
-    def execute(self, action: ValidatedAction) -> Any:
+    def execute(
+        self, action: ValidatedAction, *, authorized_candidates: Sequence[str] | None = None
+    ) -> Any:
         """Run one reasoning action and return its observation.
+
+        Parameters
+        ----------
+        action:
+            The validated action to run.
+        authorized_candidates:
+            The identities this run may reason about - its live grounded allowlist.  **Mandatory
+            in practice**: the loop always supplies it, and passing ``None`` is only for a
+            caller that has no run to scope to (a direct executor test).  A caller that omits
+            it is asserting there is no run boundary to enforce, which is why the omission is
+            explicit rather than a permissive default.
 
         Raises
         ------
         PolicyActionError
-            The action is not a read-only reasoning action.  The executor refuses rather than
-            guessing, which is what keeps a candidate-producing action from being routed here.
+            The action is not a read-only reasoning action, or it names an identity that is not
+            a grounded candidate of this run.  Both are refusals rather than repairs: the
+            executor will not substitute an identity, look one up, or drop an unauthorized
+            member of a multi-identity action.
         """
         if action.action not in REASONING_ACTIONS:
             raise PolicyActionError(
                 f"'{action.action.value}' is not a read-only reasoning action; "
                 f"allowed: {', '.join(a.value for a in self.available_actions())}"
             )
-        self._executed += 1
         arguments = action.arguments
+        # Authority before evidence: the run-membership check happens first, so an
+        # unauthorized reference is refused without the catalogue ever being consulted for it.
+        self._require_run_membership(arguments, authorized_candidates)
+        self._executed += 1
 
         if action.action is ActionKind.GET_DETAILS:
             return self._details(action, arguments)
@@ -154,6 +191,55 @@ class ReasoningExecutor:
         return self._verify(action, arguments)
 
     # -- per-action implementations ---------------------------------------- #
+
+    def _require_run_membership(
+        self, arguments: Any, authorized_candidates: Sequence[str] | None
+    ) -> None:
+        """Refuse the whole action when any identity it names is not a run candidate.
+
+        The rule is all-or-nothing on purpose.  A ``COMPARE(A, X)`` where ``X`` is not in the
+        run is not "a comparison of A with something unknown" - it is a request the run has no
+        authority to answer, and answering it partially would leak which of the named
+        identities the run happens to hold.  Refusing the action also keeps the failure
+        recoverable: the policy gets a stable code and can propose a legal target next step.
+
+        When ``authorized_candidates`` is ``None`` the caller has asserted there is no run
+        scope to enforce, and this returns without checking.  The loop never does that.
+        """
+        if authorized_candidates is None:
+            return
+        allowed = frozenset(authorized_candidates)
+        if not allowed:
+            # An empty allowlist is a real state: a run that holds no grounded candidate.  Any
+            # identity is then unauthorized, and saying so is more honest than treating "no
+            # candidates yet" as "no restriction".
+            requested = self._requested_identities(arguments)
+            if requested:
+                raise PolicyActionError(
+                    "the action names an identity but this run holds no grounded candidate",
+                    code="candidate_not_in_run",
+                )
+            return
+        unauthorized = tuple(
+            identity
+            for identity in self._requested_identities(arguments)
+            if identity not in allowed
+        )
+        if unauthorized:
+            raise PolicyActionError(
+                f"{len(unauthorized)} requested identity/identities are not grounded "
+                f"candidates of this run",
+                code="candidate_not_in_run",
+            )
+
+    @staticmethod
+    def _requested_identities(arguments: Any) -> tuple[str, ...]:
+        """The identities an action's arguments name, preserving order and duplicates.
+
+        Read from the declared argument model rather than by guessing at attributes, so an
+        action that grows an identity field cannot slip past the membership check.
+        """
+        return tuple(str(a) for a in (getattr(arguments, "parent_asins", ()) or ()))
 
     def _requested(self, arguments: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Split requested identities into grounded and unknown, preserving order.

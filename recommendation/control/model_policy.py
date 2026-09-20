@@ -85,6 +85,12 @@ Rules:
 1. Use only actions in the offered list. Never invent an action.
 2. Never invent a product identity, price, weight, brand, availability or any catalogue fact.
    You do not have them. Facts come from tool observations only.
+2a. A reasoning action that names products (for example GET_DETAILS or COMPARE) may reference
+   ONLY identities listed in "candidates.candidate_refs". Those are the run's grounded
+   candidates. Any other identity is refused, so choose a listed one and read its facts
+   instead of guessing. You may choose which listed candidate to target.
+2b. "candidate_refs" tells you each candidate's eligibility and whether its evidence needs
+   attention. Prefer a candidate whose evidence is unsettled when you need more facts.
 3. An action's observation is the only evidence that it succeeded. Do not assume success.
 4. If a needed fact or product is missing, choose an action that retrieves or asks for it.
 5. Prefer the fewest steps that answer the request. Do not repeat an action whose observation
@@ -160,10 +166,20 @@ def build_policy_context_payload(context: PolicyContext) -> dict[str, Any]:
 
     Only what a next-action decision needs.  What is deliberately absent, and therefore cannot
     leak: trusted behavioural history, the memory store or its ``user_key``, the catalogue, the
-    candidate ledger, raw scores, product metadata, and the full trajectory.  Candidate
-    identities are **counts**, not lists - the model needs to know whether candidates exist and
-    how many, not which ones, because it can only refer to them through an action the validator
-    grounds.
+    candidate ledger, raw scores, product metadata, and the full trajectory.
+
+    Candidate identity, precisely scoped
+    ------------------------------------
+    The payload carries the run's **legal reasoning targets** - the bounded
+    :attr:`~recommendation.control.context.PolicyContext.grounded_candidates` projection - so a
+    model can choose *which* already-grounded candidate to inspect.  That is the difference
+    between a model that selects a target and a model that only selects an action while a
+    binder quietly picks the product for it.
+
+    What the payload still cannot carry: the catalogue, the ledger, any candidate the run did
+    not ground, any product fact (title, price, weight, features), any raw score, and any
+    unbounded list.  A reference is identity plus *reasoning position* - the same eligibility
+    and evidence summary the policy context already exposes - and nothing else.
     """
     observation = context.last_observation
     payload: dict[str, Any] = {
@@ -179,6 +195,10 @@ def build_policy_context_payload(context: PolicyContext) -> dict[str, Any]:
             "grounded": context.candidate_state.grounded,
             "count": context.candidate_state.candidate_count,
             "verification_status": context.candidate_state.verification_status,
+            # The bounded reference list: identity plus reasoning position, per candidate.
+            # Name the field "candidate_refs" because that is what the model treats them as -
+            # values it may *reference* in a reasoning action's arguments, never invent.
+            "candidate_refs": [ref.as_dict() for ref in context.grounded_candidates],
         },
         # Phase 2: the three-state feasibility split, as **counts plus constraint labels**.
         # This is what makes an unresolved candidate actionable: without it the model can tell
