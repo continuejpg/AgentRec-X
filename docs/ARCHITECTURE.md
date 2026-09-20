@@ -143,7 +143,272 @@ while keeping `original_rank` auditable.
 
 ---
 
-## 7. Product metadata and candidate-scoped RAG
+## 6. Control plane (AgentRec-X 2.0-alpha, IMPLEMENTED)
+
+The accepted `AgentGraph` (section 5) is a fixed DAG: one routing decision per run, and the
+sequence after it is static. `recommendation/control/` adds a second, **opt-in** control
+plane that decides the next action from an observation - a bounded agent loop. Its founding
+rule is that this changes *who decides the next step* and nothing about *how a
+recommendation is made*.
+
+```text
+PolicyContext --(AgentPolicy.choose)--> ActionProposal          untrusted
+                                              |
+                                    ActionValidator              controller-owned
+                                              |
+                                        ValidatedAction          stamped metadata
+                                              |
+                                  Trusted ActionExecutor         accepted pipeline
+                                              |
+                                    DomainResult                 NOT policy-visible
+                                              |
+                                     ResultVerifier              identity / counts / ranks
+                                              |
+                                      ObservationAdapter         minimised
+                                              |
+                                      Observation                what the policy may see
+                                              |
+                                       LoopController            owns the loop
+```
+
+Loop topology (`recommendation/control/topology.py`):
+
+```text
+initialize -> check_limits -> policy -> validate_action -> dispatch
+                   ^                                         |-- execute -> verify
+                   |                                         |             -> observe
+                   |                                         |             -> update_state
+                   +-----------------------------------------+----------------+
+                   `-- complete -> finalize / refuse / abort -> END
+```
+
+Nodes commit their routing through LangGraph `Command(goto=...)`, because a conditional edge
+is resolved from the state *before* its node runs and therefore cannot see a verdict
+produced inside that node.
+
+**Authority split.**
+
+| Component | Owns | Must never do |
+| --- | --- | --- |
+| `AgentPolicy` | `choose(PolicyContext) -> ActionProposal` | execute a tool, write state, count steps, touch trusted history, supply candidate ids, commit memory, validate its own output, mark the run finished |
+| `LoopController` | lifecycle, counters, `available_actions`, dispatch, budgets, termination, trajectory | score, rank, retrieve, interpret preferences, commit memory, render |
+| `ActionValidator` | availability, argument re-validation, stamping `action_id` / `step_index` / `run_id` / `turn_id` | repair a proposal into a different action |
+| `ResultVerifier` | Tool grounding, count and rank integrity, candidate identity, stage alignment | mutate, repair or fabricate a result |
+| `CompletionGuard` | whether `FINISH` is a legal end | certify a failed or ungrounded run |
+
+**Boundaries held as types**, not conventions: `ActionProposal != ValidatedAction`,
+`PolicyContext != AgentGraphState`, `DomainResult != Observation`, and `FINISH != finished`.
+A proposal has no field for history, a tool name, SQL or execution metadata; a
+`PolicyContext` has no field for trusted history, a memory key, a store, an engine or
+candidate ids; a `DomainResult` never reaches the policy.
+
+**Bounded execution.** `max_steps`, `max_tool_calls` and `max_retries` are controller
+configuration the policy cannot read or raise. Exhaustion terminates deterministically - the
+controller does not ask the policy whether it would like to continue. LangGraph's own
+`recursion_limit` is derived from the same budgets as a framework-level backstop.
+
+**Two drivers, one engine.** `LoopController(driver="graph")` runs the compiled cycle;
+`driver="direct"` runs the identical engine methods in Python, so a difference between them
+is a topology bug rather than a semantics bug.
+
+**Shared with the DAG.** `recommendation/agent/rendering.py` holds the presentation layer and
+`recommendation/agent/pipeline.py` the memory-commit and finalize stages, so both control
+planes render a run with one code path.
+
+**Enabling it.** The demo runs the accepted DAG by default:
+
+```text
+AGENTRECX_CONTROL_PLANE=graph   # default: the accepted M7B-10D DAG
+AGENTRECX_CONTROL_PLANE=loop    # 2.0-alpha bounded agent loop
+```
+
+---
+
+## 7. Candidate plane (Stage 2, IMPLEMENTED)
+
+Stage 1 allowed one candidate source. Stage 2 allows several, and this is the boundary that
+keeps that safe:
+
+```text
+AgentPolicy                     chooses WHICH source - nothing else
+    |
+CandidatePlane                  executes that source, grounds it, records it
+    |-- history        -> accepted RecommendationTool -> SASRec
+    |-- catalog_search -> CatalogSearchSource over the trusted catalogue
+    `-- similar_item   -> registered tool, or ABSENT
+    |
+GroundingVerifier               confirms every identity against trusted data
+    |
+CandidateLedger                 deduplicates identity, retains ALL provenance
+```
+
+**One action consults one source.** Adaptive retrieval is the point: a policy that wants two
+sources proposes two actions, sees the first observation, and may change its mind. There is
+deliberately no "call every source" method, because that would make fixed fan-out the easy
+path and adaptive retrieval the awkward one. The fast path survives - a single
+`RECOMMEND_FROM_HISTORY` action is one source and one tool call, exactly as in Stage 1.
+
+**`CandidateLedger`** is the run's record of candidate identity and provenance.
+
+* *Deduplicate identity, not evidence.* One entry per `parent_asin`; a later sighting
+  appends a `CandidateProvenance` record rather than replacing the earlier one.
+* *Never fuse heterogeneous raw scores.* `HISTORY` reports SASRec logits, `CATALOG_SEARCH`
+  reports BM25, `SIMILAR_ITEM` reports similarity. Each is stored under its own `score_kind`
+  and never summed or averaged. Cross-source ordering uses **reciprocal rank fusion** over
+  each source's own ranking - well-defined precisely because it uses only the *order* every
+  retriever can be trusted to mean.
+* *Original source ranks stay recoverable*, so a candidate's full provenance can be
+  reconstructed after the fact.
+* Candidates may only be added by `record_from_source`, which requires a declared trusted
+  source. A policy is nowhere in that call path.
+
+**`GroundingVerifier`** answers one question: is this identity one the trusted side knows? It
+checks the trusted item mapping and, when configured, the catalogue as well
+(`checks_catalog` reports which). It never scores, never selects, and reads no user data. It
+**fails closed**: an identity it cannot confirm is `UNGROUNDED`, retained purely as audit
+evidence so a drifting source is *visible*, and never presented as a candidate.
+
+**`CatalogSearchSource`** searches the whole catalogue lexically. It is deliberately separate
+from the Milestone 8 retriever rather than a flag on it: that retriever is *candidate-scoped*
+by design, which is exactly why RAG cannot widen a candidate set. Widening the scope is a
+capability a policy may select, and it happens only here. The tokenizer, BM25 constants and
+idf function are imported from `recommendation.rag.retrieval`, so the two retrievers cannot
+drift apart in how they score text; document scope and output type are what differ. A
+zero-hit search returns zero hits with `matched=False` - never an arbitrary catalogue slice.
+
+**Unavailable sources are absent, not faked.** `SIMILAR_ITEM` is not configured by default.
+
+### Not implemented (documented, not claimed)
+
+* **No item-item similarity index ships.** `SIMILAR_ITEM` needs a separate build step over
+  `Sports_and_Outdoors_sequences.json` (item co-occurrence) or item embeddings; neither is
+  generated today. The seam is implemented and tested with a registered tool, but the source
+  is unavailable unless one is explicitly registered.
+* **No reranking over the fused ledger.** The accepted M10B preference reranker still runs
+  over the history recommender's candidates only. Ledger-order reranking is not implemented.
+* **Stages 3, 4 and 6 are not implemented.** No clarification, no task/session state, no
+  memory-write proposal pipeline, no reasoning capabilities (`GET_DETAILS`, `COMPARE`,
+  `TRADE_OFF`, `CHECK_COMPATIBILITY`, `BUNDLE`, `VERIFY`) and no evaluation plane. Their
+  action enum members and argument contracts are declared so they can be added without
+  reshaping the protocol, but no capability executes them and a proposal naming one is
+  refused.
+
+---
+
+## 8. Interaction and personalization plane (Stage 3, IMPLEMENTED)
+
+### Three signal domains, kept apart
+
+The stage's central requirement is that user information is not collapsed into one profile
+string. Three domains exist and are owned by different components:
+
+| Domain | Owner | Mutability | Reaches the policy as |
+| --- | --- | --- | --- |
+| **A. Behavioural preference** | the host application | never written by the agent | a boolean (`has_trusted_history`) |
+| **B. Long-term explicit preference** | accepted `PreferenceMemoryService` | only via a validated proposal | attributed constraint text |
+| **C. Current task / session intent** | `TaskState` (this stage) | mutable during the interaction | attributed constraint text |
+
+Domain A is application-owned and untouchable by the agent; that invariant is unchanged from
+Milestone 7A.
+
+### Task state vs persistent memory
+
+Long-term memory deliberately takes effect **from the next turn** — the accepted Milestone 9
+semantics that stops a turn from appearing to have let its own statement influence the
+candidates it returned. But "not the red one *this time*" is about the current request, and
+waiting a turn to honour it would be wrong. So the same sentence can produce two things:
+
+```text
+"not red this time"   -> TaskState constraint (applies now), no memory write
+"never red again"     -> TaskState constraint (applies now)
+                      + MemoryWriteProposal (committed for future tasks)
+```
+
+`TaskState` is mutable during the interaction, never persisted, and **immediately usable in
+the turn that produced it**. A temporary override *suppresses* within the task and leaves
+stored state untouched: suppression is structurally not removal, because task constraints and
+memory entries are different objects.
+
+`PreferenceScope` (`SESSION` / `TASK` / `LONG_TERM`) carries that decision, and
+`PreferenceLifecycle` (`EXPLICIT` / `INFERRED_HYPOTHESIS` / `CONFIRMED` / `RETRACTED`) carries
+what kind of signal it is. Only `EXPLICIT` and `CONFIRMED` may become durable preferences:
+**an inference is evidence, never truth.**
+
+### Clarification as a first-class action
+
+`ASK_CLARIFICATION` suspends the run. It:
+
+* runs no tool and consumes no tool-call budget;
+* ends the run in `WAITING_FOR_USER` with `TerminationReason.AWAITING_USER` — neither
+  `FINISHED` nor `ABORTED`, and `CompletionGuard` is never consulted;
+* records a `ClarificationObservation` carrying the question, what it blocks and the offered
+  options, so the trajectory can explain why the run stopped mid-way;
+* is **resumable**: the next turn continues the same task by handing the suspended
+  `TaskState` back, and the answer reaches the policy as a task constraint;
+* is offered only while the task has not already asked, so one run cannot become an
+  interrogation.
+
+Whether clarification is *warranted* is a policy decision, not a framework rule. A policy
+asks when the missing information would materially change the candidate set, ranking or
+feasibility; a policy that never proposes it never enters the clarification branch.
+
+### The memory write pipeline
+
+```text
+user text
+  -> Preference Interpreter   (proposes; the accepted rule-based extractor works unchanged)
+  -> MemoryWriteProposal      (value/scope/lifecycle/supporting span/turn provenance)
+  -> MemoryValidator          (grounding, attribution, scope, lifecycle)
+  -> PreferenceMemoryService  (the accepted, already-trusted writer) -> commit / reject
+```
+
+**A proposal is not a commit.** Nothing in `recommendation/control/memory_proposal.py` can
+write the store: it holds no store handle and no `user_key`. Only a proposal the validator
+marked *approved* becomes a `PreferenceCandidate` for the accepted service.
+
+**An inference is not truth.** An `INFERRED_HYPOTHESIS` is validated as *soft evidence*
+(`SOFT_ONLY`) and refused a durable commit, so an inferred long-term preference cannot
+quietly become hard truth. It may still inform the current task through `TaskState`.
+
+Validation refusals carry stable codes: `missing_value`, `removal_carries_value`,
+`avoidance_expressed_as_removal`, `ungrounded_span`, `span_not_in_turn`,
+`ephemeral_scope_not_persisted`, `inferred_signal_is_soft_evidence`.
+
+The `avoidance_expressed_as_removal` check encodes the stage's explicit warning: **a negative
+preference is not a memory deletion.** "I don't like red" is an `ADD` of an `AVOID`-polarity
+value; only an explicit retraction is a `REMOVE`. The validator refuses to treat one as the
+other.
+
+### What the policy is shown
+
+`PolicyContext` gained a bounded projection, not the store:
+
+```text
+task_intent                 a small vocabulary; UNKNOWN is a legitimate value
+task_constraints            active, task-relevant constraint *descriptions*
+hard_constraint_count       how many define feasibility
+inferred_constraint_count   how many are soft evidence only
+awaiting_user               whether the task is suspended
+```
+
+Relevant-memory retrieval here is **evidence selection, not mutation authority**: it selects
+and bounds, and writes nothing. There is no `memory_id`, no `user_key`, no supersession chain
+and no store handle in the projection, and `PolicyContext.summary()` records only counts — so
+the trajectory cannot become a copy of the user's preferences.
+
+### Not implemented (documented, not claimed)
+
+* **No conflict-resolution algorithm across domains.** Scope and lifecycle *precedence rules*
+  are represented (`hard_constraints()` vs `soft_constraints()`), but nothing yet reconciles
+  a genuine contradiction between a task override and a stored preference by proposing
+  `ASK_CLARIFICATION`. That belongs with Stage 4.
+* **No LLM interpreter.** The accepted rule-based extractor is the only interpreter; the
+  proposal seam is what a future provider adapter would implement.
+* **Stages 4 and 6 are not implemented** — no reasoning capabilities and no evaluation plan.
+
+---
+
+## 9. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -170,7 +435,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 8. Preference memory
+## 10. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -196,7 +461,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 9. Preference evidence
+## 11. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -224,7 +489,7 @@ drops or reorders anything.
 
 ---
 
-## 10. Deterministic reranking
+## 12. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -263,7 +528,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 11. Web / session layer
+## 13. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -301,7 +566,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 12. State ownership
+## 14. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -320,7 +585,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 13. Trust boundaries
+## 15. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -358,7 +623,7 @@ flowchart TD
 
 ---
 
-## 14. Failure behaviour
+## 16. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -379,7 +644,7 @@ fallback anywhere.
 
 ---
 
-## 15. Determinism and reproducibility
+## 17. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -400,7 +665,7 @@ fallback anywhere.
 
 ---
 
-## 16. Dependency lifecycle / heavy-object reuse
+## 18. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -432,7 +697,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 17. Known limitations
+## 19. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value

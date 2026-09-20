@@ -37,7 +37,7 @@ from typing import Any
 
 from .schemas import ActionKind, Observation, RunStatus
 
-__all__ = ["CandidateState", "PolicyContext"]
+__all__ = ["CandidateState", "PolicyContext", "project_constraints", "project_intent"]
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,28 @@ class PolicyContext:
     #: to inspect the reason in detail.
     last_proposal_rejected: bool = False
 
+    # -- Stage 3: task and memory projection ------------------------------- #
+    #: What the user appears to want from this task.  A small vocabulary, and
+    #: ``UNKNOWN`` is a legitimate value rather than a failure.
+    task_intent: str = "unknown"
+    #: The constraints in force **for this task**, already filtered to those a policy may
+    #: act on, described as short attributed strings (``"color: avoids red"``).
+    #:
+    #: These are *not* the whole memory store and not raw memory entries: they are the
+    #: active, task-relevant projection.  A policy needs to know what the user wants now to
+    #: choose an action; it does not need stored ``memory_id`` values, supersession chains,
+    #: the owning ``user_key``, or preferences that this task has overridden.
+    task_constraints: tuple[str, ...] = ()
+    #: How many of the projected constraints are explicit and task-scoped, i.e. strong
+    #: enough to define feasibility.  A count, not the values.
+    hard_constraint_count: int = 0
+    #: How many came only from inference.  Soft evidence: it may inform a question or an
+    #: ordering and can never exclude a product.
+    inferred_constraint_count: int = 0
+    #: True when the task is suspended awaiting a user answer, so a policy knows why it is
+    #: being asked to decide again.
+    awaiting_user: bool = False
+
     def action_available(self, action: ActionKind) -> bool:
         """True when the system currently permits ``action``."""
         return action in self.available_actions
@@ -127,4 +149,61 @@ class PolicyContext:
             ),
             "last_proposal_rejected": self.last_proposal_rejected,
             "run_status": self.run_status.value,
+            "task_intent": self.task_intent,
+            "task_constraint_count": len(self.task_constraints),
+            "hard_constraint_count": self.hard_constraint_count,
+            "inferred_constraint_count": self.inferred_constraint_count,
+            "awaiting_user": self.awaiting_user,
         }
+
+
+def project_intent(task_state: Any) -> str:
+    """Return the task intent's value as a plain string, tolerating an absent state."""
+    intent = getattr(task_state, "intent", None)
+    if intent is None:
+        return "unknown"
+    return getattr(intent, "value", str(intent))
+
+
+def project_constraints(task_state: Any, *, limit: int = 12) -> tuple[tuple[str, ...], int, int]:
+    """Project task state and memory into bounded, policy-visible constraint strings.
+
+    Returns ``(descriptions, hard_count, inferred_count)``.
+
+    Selection rules, in the order they matter:
+
+    * **task-scoped explicit constraints come first** - they are what the user asked for
+      *now*, and they outrank a stored default for this task;
+    * then constraints read from validated persistent memory;
+    * inferred signals are included only as *soft* evidence, and are counted separately so a
+      policy can tell a stated preference from a guess.
+
+    The result is bounded by ``limit`` so a policy's context cannot grow without limit, and
+    it contains descriptions rather than entry objects: no ``memory_id``, no ``user_key``,
+    no supersession chain, no store handle.
+
+    This is **evidence selection, not memory mutation.**  Nothing here writes, retires or
+    reorders stored preferences; a task-scoped override suppresses within the task by not
+    being present in this list twice, and the stored entry is untouched.
+    """
+    if task_state is None:
+        return (), 0, 0
+
+    seen: set[str] = set()
+    hard: list[str] = []
+    soft: list[str] = []
+    inferred = 0
+
+    for constraint in getattr(task_state, "constraints", ()) or ():
+        described = constraint.describe()
+        if described in seen:
+            continue
+        seen.add(described)
+        if getattr(constraint, "is_soft", False):
+            soft.append(described)
+            inferred += 1
+        else:
+            hard.append(described)
+
+    ordered = (*hard, *soft)
+    return tuple(ordered[:limit]), min(len(hard), limit), min(inferred, limit)

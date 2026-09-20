@@ -46,11 +46,12 @@ from recommendation.agent.state import AgentGraphState, AgentInput, TrustedHisto
 
 from .capability import RecommendFromHistoryCapability
 from .completion import CompletionGuard
-from .context import CandidateState, PolicyContext
+from .context import CandidateState, PolicyContext, project_constraints, project_intent
 from .schemas import (
     ActionKind,
     ActionProposal,
     AgentPolicy,
+    ClarificationObservation,
     ControlState,
     LoopLimits,
     PolicyActionError,
@@ -62,6 +63,7 @@ from .schemas import (
     ValidatedAction,
     VerificationResult,
 )
+from .task_state import TaskState
 from .trajectory import TrajectoryRecorder
 from .validation import ActionValidator
 from .verification import ObservationAdapter, ResultVerifier
@@ -206,6 +208,7 @@ class _LoopEngine:
         trusted_history: TrustedHistory,
         turn_id: str | None,
         run_id: str,
+        task_state: TaskState | None = None,
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -251,6 +254,14 @@ class _LoopEngine:
         self.produced_recommendation = False
         self.candidates_grounded = False
         self.initialized = False
+
+        #: Stage 3 task state: what is true of **this task**.  Mutable during the
+        #: interaction and never persisted.  Seeded from the application-supplied task
+        #: context so a resumed run continues the same task.
+        self.task_state: TaskState = task_state or TaskState()
+        #: The clarification observation produced by an ``ASK_CLARIFICATION`` action, kept so
+        #: finalization can render the question.
+        self.clarification: ClarificationObservation | None = None
 
         #: Step index whose validation phase has already run.  ``-1`` means none.
         #:
@@ -312,6 +323,8 @@ class _LoopEngine:
         if snapshot is not None:
             active_count = len(getattr(snapshot, "active_entries", ()) or ())
 
+        constraints, hard_count, inferred_count = project_constraints(self.task_state)
+
         return PolicyContext(
             user_request=str(self.state.get("user_message", "")),
             available_actions=self.available_actions(),
@@ -324,6 +337,11 @@ class _LoopEngine:
             step_index=self.control.step_count,
             run_status=self.control.status,
             last_proposal_rejected=self.last_proposal_rejected,
+            task_intent=project_intent(self.task_state),
+            task_constraints=constraints,
+            hard_constraint_count=hard_count,
+            inferred_constraint_count=inferred_count,
+            awaiting_user=self.task_state.is_waiting_for_user,
         )
 
     def available_actions(self) -> tuple[ActionKind, ...]:
@@ -338,6 +356,11 @@ class _LoopEngine:
         actions: list[ActionKind] = []
         if self.control.tool_calls_remaining > 0:
             actions.append(ActionKind.RECOMMEND_FROM_HISTORY)
+        # Clarification is offered only while the task has not already asked something.
+        # A suspended task is resumed by the *next* turn, so asking twice in one run would
+        # make the loop an interrogation rather than a control loop.
+        if not self.task_state.is_waiting_for_user and self.clarification is None:
+            actions.append(ActionKind.ASK_CLARIFICATION)
         actions.append(ActionKind.FINISH)
         return tuple(actions)
 
@@ -487,6 +510,8 @@ class _LoopEngine:
             return "execute"
         if self.validated.action is ActionKind.FINISH:
             return "complete"
+        if self.validated.action is ActionKind.ASK_CLARIFICATION:
+            return "clarify"
         return "execute"
 
     # -- execute ----------------------------------------------------------- #
@@ -648,6 +673,90 @@ class _LoopEngine:
         )
         self.last_proposal_rejected = False
         return StepOutcome.proceed()
+
+    # -- clarification branch ---------------------------------------------- #
+
+    def finish_clarification(self) -> None:
+        """Render a suspended run's question through the accepted finalizer.
+
+        Called by the driver after ``ask_clarification`` has recorded the suspension, so the
+        response text and route are produced by the same code path every other run uses.
+        """
+        self._finalize_response()
+
+    def ask_clarification(self) -> StepOutcome:
+        """Suspend the run to ask the user a question.
+
+        Clarification is a **suspension**, not a completion and not a failure.  The run
+        records ``WAITING_FOR_USER`` with :attr:`TerminationReason.AWAITING_USER`, the task
+        state remembers the question, and the finalizer renders it.  The task is resumable:
+        the next turn continues the same task with the user's answer.
+
+        No tool runs, the candidate set is untouched, and nothing is written to persistent
+        memory.  A question is the *cheapest* possible action in terms of irreversible
+        effects, which is why it is safe to let a policy propose one.
+        """
+        if not self.has_current_action():  # pragma: no cover - see dispatch_target
+            return StepOutcome.proceed()
+        arguments = self.validated.arguments
+        question = str(getattr(arguments, "question", "") or "").strip()
+        if not question:
+            return self._terminate(
+                RunStatus.FAILED,
+                TerminationReason.INVALID_ACTION,
+                "ASK_CLARIFICATION carried no question",
+            )
+
+        blocks = str(getattr(arguments, "blocks", "candidate_set") or "candidate_set")
+        options = tuple(getattr(arguments, "options", ()) or ())
+        self.clarification = ClarificationObservation(
+            action_id=self.validated.action_id,
+            step_index=self.control.step_count,
+            action=self.validated.action,
+            question=question,
+            blocks=blocks,
+            options=options,
+            verification_note=(
+                f"clarification #{self.task_state.clarification_count + 1} for this task"
+            ),
+        )
+        # The task state records the suspension so a resumed run knows what it asked.
+        self.task_state = self.task_state.suspended(question)
+        self.state["clarification_question"] = question
+
+        self.trajectory.record(
+            step_index=self.validated.step_index,
+            action_id=self.validated.action_id,
+            policy_context_summary=self.build_context().summary(),
+            action_proposal=self.proposal,
+            validation_result=self.validation,
+            validated_action=self.validated,
+            verification_result=VerificationResult(
+                verified=True,
+                code="clarification_requested",
+                detail=None,
+                checks=("question_present", "not_a_completion"),
+            ),
+            observation=self.clarification,
+            state_delta=StateChange(
+                step_index=self.validated.step_index,
+                action=ActionKind.ASK_CLARIFICATION,
+                produced_candidates=False,
+                candidate_count=0,
+                run_status=RunStatus.WAITING_FOR_USER,
+            ),
+            note="run suspended awaiting a user answer",
+        )
+        self.control = self.control.advanced(
+            action=ActionKind.ASK_CLARIFICATION,
+            action_id=self.validated.action_id,
+            consumed_tool_call=False,
+        )
+        return self._terminate(
+            RunStatus.WAITING_FOR_USER,
+            TerminationReason.AWAITING_USER,
+            f"awaiting the user's answer to: {blocks}",
+        )
 
     # -- completion branch ------------------------------------------------- #
 
@@ -848,6 +957,16 @@ class _LoopEngine:
         equivalent of: an action that produced no candidates *and* carried no reply text
         (for example a test policy that only proposes FINISH).
         """
+        if self.clarification is not None and not self.produced_recommendation:
+            # A suspended run is not a direct turn: the response *is* the question.  It is
+            # rendered through the accepted finalizer as a direct response so the two control
+            # planes keep one presentation path, and the question text comes from the
+            # validated action rather than from a model string.
+            self.state["decision"] = AgentDecision(
+                action="direct_response", direct_response=self.clarification.question
+            )
+            self.state.update(finalize_stage(self.state))
+            return
         if self.produced_recommendation and self.state.get("tool_result") is not None:
             self.state["decision"] = AgentDecision(action="recommend")
         elif self.decision is not None and self.decision.direct_response is not None:
@@ -970,7 +1089,13 @@ class LoopController:
 
     # -- entry points ------------------------------------------------------ #
 
-    def invoke(self, agent_input: AgentInput, *, run_id: str | None = None) -> LoopResult:
+    def invoke(
+        self,
+        agent_input: AgentInput,
+        *,
+        run_id: str | None = None,
+        task_state: TaskState | None = None,
+    ) -> LoopResult:
         """Run the loop for one validated application input."""
         if not isinstance(agent_input, AgentInput):
             raise PolicyActionError(
@@ -981,6 +1106,7 @@ class LoopController:
             trusted_history=tuple(agent_input.trusted_user_history),
             turn_id=agent_input.turn_id,
             run_id=run_id or build_run_id(),
+            task_state=task_state,
         )
 
     def run(
@@ -990,8 +1116,14 @@ class LoopController:
         *,
         turn_id: str | None = None,
         run_id: str | None = None,
+        task_state: TaskState | None = None,
     ) -> LoopResult:
-        """Convenience wrapper around :meth:`invoke` with validated inputs."""
+        """Convenience wrapper around :meth:`invoke` with validated inputs.
+
+        ``task_state`` carries the current task's state, including any question a prior turn
+        left pending.  A suspended task is resumed by handing its state back in, which is how
+        a multi-turn interaction continues without the loop holding anything across runs.
+        """
         return self.invoke(
             AgentInput(
                 user_message=user_message,
@@ -999,6 +1131,7 @@ class LoopController:
                 turn_id=turn_id,
             ),
             run_id=run_id,
+            task_state=task_state,
         )
 
     # -- drivers ----------------------------------------------------------- #
@@ -1008,6 +1141,7 @@ class LoopController:
         agent_input: AgentInput,
         *,
         run_id: str | None = None,
+        task_state: TaskState | None = None,
     ) -> _LoopEngine:
         """Build an engine for one run.
 
@@ -1032,6 +1166,7 @@ class LoopController:
             trusted_history=tuple(agent_input.trusted_user_history),
             turn_id=agent_input.turn_id,
             run_id=run_id or build_run_id(),
+            task_state=task_state,
         )
 
     def _run(
@@ -1041,6 +1176,7 @@ class LoopController:
         trusted_history: TrustedHistory,
         turn_id: str | None,
         run_id: str,
+        task_state: TaskState | None = None,
     ) -> LoopResult:
         """Run one turn with the configured driver."""
         engine = self.new_engine(
@@ -1050,6 +1186,7 @@ class LoopController:
                 turn_id=turn_id,
             ),
             run_id=run_id,
+            task_state=task_state,
         )
         if self._driver == "graph":
             return self._run_graph_driver(engine)
@@ -1071,13 +1208,18 @@ class LoopController:
             if not outcome.continue_loop:
                 return engine.result(outcome)
 
-            if engine.dispatch_target() == "complete":
+            target = engine.dispatch_target()
+            if target == "clarify":
+                outcome = engine.ask_clarification()
+                engine.finish_clarification()
+                return engine.result(outcome)
+            if target == "complete":
                 engine.run_completion_guard()
-                target = engine.completion_target()
-                if target == "finalize":
+                verdict = engine.completion_target()
+                if verdict == "finalize":
                     engine.finalize()
                     return engine.terminal_result()
-                if target == "refuse":
+                if verdict == "refuse":
                     engine.refuse_completion()
                     continue
                 return engine.result(engine.abort_completion())

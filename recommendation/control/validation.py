@@ -24,6 +24,7 @@ write trusted state, and it cannot repair a proposal into a different action.
 from __future__ import annotations
 
 from .schemas import (
+    ARGUMENTS_BY_ACTION,
     ActionKind,
     ActionProposal,
     PolicyActionError,
@@ -111,6 +112,20 @@ class ActionValidator:
                 )
         else:
             resolved_k = 0
+            # A non-candidate action's result count is not a control parameter.  It keeps
+            # the schema minimum and nothing reads it; capabilities that return lists
+            # (reasoning actions) carry their own limits in their arguments.
+            arguments = proposal.arguments
+            if arguments is not None and not isinstance(arguments, ARGUMENTS_BY_ACTION[proposal.action]):
+                return None, VerificationResult(
+                    verified=False,
+                    code="invalid_arguments",
+                    detail=(
+                        f"'{proposal.action.value}' requires "
+                        f"{ARGUMENTS_BY_ACTION[proposal.action].__name__}"
+                    ),
+                    checks=("availability", "arguments"),
+                )
 
         validated = ValidatedAction(
             action=proposal.action,
@@ -124,6 +139,7 @@ class ActionValidator:
             # validated action keeps the schema's minimum and nothing ever reads it -
             # the capability refuses any action that is not RECOMMEND_FROM_HISTORY.
             k=resolved_k if proposal.action is ActionKind.RECOMMEND_FROM_HISTORY else MIN_K,
+            arguments=proposal.arguments,
             rationale=proposal.rationale,
         )
         return validated, VerificationResult(
@@ -133,6 +149,7 @@ class ActionValidator:
             checks=(
                 ("availability", "arguments")
                 if proposal.action is ActionKind.RECOMMEND_FROM_HISTORY
+                or proposal.arguments is not None
                 else ("availability",)
             ),
         )

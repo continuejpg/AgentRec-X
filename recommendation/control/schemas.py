@@ -50,8 +50,12 @@ Four separations do the work, and each is a type boundary rather than a conventi
     :class:`~recommendation.control.completion.CompletionGuard`; a policy can never mark
     a run complete by itself.
 
-Reserved for later stages (declared, not implemented): ``WAITING_FOR_USER`` and every
-action other than ``RECOMMEND_FROM_HISTORY`` / ``FINISH``.
+``WAITING_FOR_USER`` is a real status from Stage 3 onwards: a run that proposed
+``ASK_CLARIFICATION`` suspends rather than completing or failing, and is resumable.
+
+Every action in :class:`ActionKind` is declared; whether a capability is *configured* to
+execute it is a separate, deployment-level fact computed by the controller and offered to
+the policy through ``available_actions``.
 """
 
 from __future__ import annotations
@@ -63,14 +67,34 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from recommendation.tools.schemas import DEFAULT_K, MAX_K, MIN_K
 
+from .arguments import (
+    AskClarificationArguments,
+    BundleArguments,
+    CheckCompatibilityArguments,
+    CompareArguments,
+    EmptyArguments,
+    GetDetailsArguments,
+    SearchCatalogArguments,
+    SelectSourceArguments,
+    TradeOffArguments,
+)
+
+
 __all__ = [
+    "ARGUMENTS_BY_ACTION",
+    "CANDIDATE_ACTIONS",
     "CONTROL_PLANE_VERSION",
+    "NON_EXECUTING_ACTIONS",
+    "READ_ONLY_ACTIONS",
     "OBSERVATION_VERSION",
     "ActionKind",
     "ActionProposal",
     "AgentPolicy",
+    "CandidateSetObservation",
+    "ClarificationObservation",
     "ControlState",
     "DomainResult",
+    "FailureObservation",
     "LoopLimits",
     "Observation",
     "PolicyActionError",
@@ -108,23 +132,128 @@ class PolicyActionError(Exception):
 
 
 class ActionKind(str, Enum):
-    """The Stage 1 semantic action space.
+    """The semantic action space.
 
-    Two actions only.  ``SEARCH_CATALOG``, ``ASK_USER``, ``COMPARE``, ``GET_DETAILS``,
-    ``BUNDLE``, ``CHECKOUT`` and ``MEMORY_WRITE`` are explicitly **out of scope for
-    Stage 1** and are therefore not members of this enum - adding them later is a
-    deliberate control-plane version bump, not a policy decision.
+    Grouped by what an action is allowed to change.  Nothing in this enum executes a
+    commercial transaction: there is no cart, checkout, payment or order action, and no
+    later stage adds one.  The project's endpoint is a recommendation decision-support
+    agent.
+
+    **Stage 1 - control-plane proof.**
+
+    * ``RECOMMEND_FROM_HISTORY`` - candidates from the trusted history recommender;
+    * ``FINISH`` - propose ending the run (the CompletionGuard still authorises it).
+
+    **Stage 2 - multi-source candidate plane.**
+
+    * ``SELECT_SOURCE`` - consult one explicitly named trusted candidate source;
+    * ``SEARCH_CATALOG`` - full-catalogue lexical search (needs an explicit query);
+    * ``FIND_SIMILAR`` - similar-item retrieval from an item-item relationship index.
+
+    **Stage 3 - interaction / personalization.**
+
+    * ``ASK_CLARIFICATION`` - suspend the run and ask a question that would materially
+      change the outcome;
+    * ``PROPOSE_MEMORY_WRITE`` - propose a persistent-memory change for validation.
+
+    **Stage 4 - recommendation reasoning (all read-only over grounded facts).**
+
+    * ``GET_DETAILS`` - expand evidence for candidates the run already holds;
+    * ``COMPARE`` - structured comparison over grounded attributes;
+    * ``TRADE_OFF`` - comparison under a stated priority;
+    * ``CHECK_COMPATIBILITY`` - deterministic compatibility verdict against a requirement;
+    * ``BUNDLE`` - compositional reasoning over a set of grounded candidates;
+    * ``VERIFY`` - re-check the current candidate set against the active constraints.
+
+    ``CHECKOUT`` is deliberately absent and will not be added: recommendation decision
+    support stops here.
     """
 
+    # Stage 1
     RECOMMEND_FROM_HISTORY = "recommend_from_history"
     FINISH = "finish"
+    # Stage 2
+    SELECT_SOURCE = "select_source"
+    SEARCH_CATALOG = "search_catalog"
+    FIND_SIMILAR = "find_similar"
+    # Stage 3
+    ASK_CLARIFICATION = "ask_clarification"
+    PROPOSE_MEMORY_WRITE = "propose_memory_write"
+    # Stage 4
+    GET_DETAILS = "get_details"
+    COMPARE = "compare"
+    TRADE_OFF = "trade_off"
+    CHECK_COMPATIBILITY = "check_compatibility"
+    BUNDLE = "bundle"
+    VERIFY = "verify"
 
 
-#: The Stage 1 action space as an ordered tuple (declaration order is the documented
-#: preference order used by the stage-1 policies when both actions are available).
+#: The accepted Stage 1 action space.  Kept as a named constant because the Stage 1 policy
+#: and its tests depend on the *exact* Stage 1 menu, and because a Stage 2 deployment that
+#: configures no new source must behave identically to Stage 1.
 STAGE_1_ACTIONS: tuple[ActionKind, ...] = (
     ActionKind.RECOMMEND_FROM_HISTORY,
     ActionKind.FINISH,
+)
+
+#: Actions that may produce candidate identities.  Every one of them is executed by a
+#: trusted tool; a policy selects among them but never produces a candidate itself.
+CANDIDATE_ACTIONS: tuple[ActionKind, ...] = (
+    ActionKind.RECOMMEND_FROM_HISTORY,
+    ActionKind.SELECT_SOURCE,
+    ActionKind.SEARCH_CATALOG,
+    ActionKind.FIND_SIMILAR,
+)
+
+#: Actions that only read or reason over candidates the run already holds.  They can add
+#: evidence but never a candidate, which is what keeps "reasoning cannot widen the
+#: candidate set" true by construction.
+READ_ONLY_ACTIONS: tuple[ActionKind, ...] = (
+    ActionKind.GET_DETAILS,
+    ActionKind.COMPARE,
+    ActionKind.TRADE_OFF,
+    ActionKind.CHECK_COMPATIBILITY,
+    ActionKind.BUNDLE,
+    ActionKind.VERIFY,
+)
+
+#: Actions that do not execute anything and do not touch the candidate set.
+NON_EXECUTING_ACTIONS: tuple[ActionKind, ...] = (
+    ActionKind.FINISH,
+    ActionKind.ASK_CLARIFICATION,
+    ActionKind.PROPOSE_MEMORY_WRITE,
+)
+
+#: The argument contract for **every** action, in one place.
+#:
+#: The mapping is total on purpose: a new action cannot be added without declaring its
+#: arguments here, and :meth:`ActionProposal.model_post_init` refuses a proposal whose
+#: arguments do not have the declared type.  That is what stops one action from carrying
+#: another action's arguments.
+ARGUMENTS_BY_ACTION: dict[ActionKind, type[BaseModel]] = {
+    ActionKind.RECOMMEND_FROM_HISTORY: EmptyArguments,
+    ActionKind.FINISH: EmptyArguments,
+    ActionKind.SELECT_SOURCE: SelectSourceArguments,
+    ActionKind.SEARCH_CATALOG: SearchCatalogArguments,
+    ActionKind.FIND_SIMILAR: SelectSourceArguments,
+    ActionKind.ASK_CLARIFICATION: AskClarificationArguments,
+    ActionKind.PROPOSE_MEMORY_WRITE: EmptyArguments,
+    ActionKind.GET_DETAILS: GetDetailsArguments,
+    ActionKind.COMPARE: CompareArguments,
+    ActionKind.TRADE_OFF: TradeOffArguments,
+    ActionKind.CHECK_COMPATIBILITY: CheckCompatibilityArguments,
+    ActionKind.BUNDLE: BundleArguments,
+    ActionKind.VERIFY: EmptyArguments,
+}
+
+
+#: Actions that accept no domain arguments at all.
+_ARGUMENTLESS_ACTIONS: frozenset[ActionKind] = frozenset(
+    {
+        ActionKind.FINISH,
+        ActionKind.RECOMMEND_FROM_HISTORY,
+        ActionKind.VERIFY,
+    }
 )
 
 
@@ -135,16 +264,22 @@ class ActionProposal(BaseModel):
 
     * ``action_id`` / ``step_index`` / ``turn_id`` / ``run_id`` - controller-owned
       execution metadata;
-    * ``tool`` / ``tool_name`` / ``sql`` / ``candidates`` / ``item_ids`` /
-      ``parent_asins`` - there is no channel through which a policy could name a tool,
-      supply a query, or hand over candidate identities;
+    * ``tool`` / ``tool_name`` / ``sql`` - there is no channel through which a policy could
+      name a tool or supply a query in a language the trusted side executes;
     * ``history`` / ``trusted_user_history`` - a proposal cannot carry or forge
       behavioural history;
     * ``finished`` / ``status`` / ``termination_reason`` - a proposal can never mark a
       run complete.
 
-    A proposal is only ever *proposed*: :class:`~recommendation.control.validation.ActionValidator`
-    turns it into a :class:`ValidatedAction` or refuses it.
+    ``arguments`` carries **typed, per-action** arguments (see
+    :mod:`recommendation.control.arguments`).  Two of the reasoning actions accept
+    ``parent_asins`` because comparing products requires naming them; those actions are
+    read-only over candidates the run already holds and can never add one.  No action
+    accepts a way to *invent* a candidate identity.
+
+    A proposal is only ever *proposed*:
+    :class:`~recommendation.control.validation.ActionValidator` turns it into a
+    :class:`ValidatedAction` or refuses it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -152,10 +287,13 @@ class ActionProposal(BaseModel):
     action: ActionKind
     version: int = CONTROL_PLANE_VERSION
 
-    #: Requested number of candidates.  Only meaningful for
-    #: ``RECOMMEND_FROM_HISTORY``; the Tool's own range is reused rather than restated,
-    #: and the validator re-checks it at the trusted boundary.
+    #: Requested number of candidates, for the actions whose result *is* a candidate list.
+    #: The Tool's own range is reused rather than restated, and the validator re-checks it
+    #: at the trusted boundary.
     k: int | None = Field(default=None, ge=MIN_K, le=MAX_K)
+
+    #: Action-specific arguments.  ``None`` for an action that takes none.
+    arguments: Any = None
 
     #: Short, non-authoritative explanation of *why* the policy chose this action.  It is
     #: recorded in the trajectory and is never used as a control signal, a tool argument
@@ -164,12 +302,41 @@ class ActionProposal(BaseModel):
     rationale: str | None = Field(default=None, max_length=280)
 
     def model_post_init(self, __context: Any) -> None:
-        """Enforce the cross-field rules the per-field schema cannot express."""
+        """Enforce the cross-field rules the per-field schema cannot express.
+
+        Every argument model is frozen with ``extra="forbid"``, so this hook is what stops
+        one action from carrying another action's arguments: the shape is checked against
+        the action kind, not against a union of plausible fields.
+        """
         if self.action is ActionKind.RECOMMEND_FROM_HISTORY:
             if self.k is None:
                 raise ValueError("k is required when action is 'recommend_from_history'")
         elif self.k is not None:
-            raise ValueError("k must be omitted when action is 'finish'")
+            raise ValueError(f"k must be omitted when action is '{self.action.value}'")
+
+        expected = ARGUMENTS_BY_ACTION.get(self.action)
+        if expected is None:
+            raise ValueError(f"no argument contract is declared for '{self.action.value}'")
+        if self.action in _ARGUMENTLESS_ACTIONS:
+            if self.arguments is not None:
+                raise ValueError(
+                    f"action '{self.action.value}' takes no arguments"
+                )
+            return
+        if self.arguments is None:
+            raise ValueError(
+                f"action '{self.action.value}' requires {expected.__name__} arguments"
+            )
+        if isinstance(self.arguments, expected):
+            return
+        if isinstance(self.arguments, BaseModel):
+            raise ValueError(
+                f"action '{self.action.value}' requires {expected.__name__}, got "
+                f"{type(self.arguments).__name__}"
+            )
+        # Validate a mapping into the declared model, so a caller may build a proposal
+        # from plain data without importing the argument type.
+        object.__setattr__(self, "arguments", expected.model_validate(self.arguments))
 
     @property
     def requested_k(self) -> int:
@@ -177,6 +344,21 @@ class ActionProposal(BaseModel):
         if self.action is not ActionKind.RECOMMEND_FROM_HISTORY:
             raise PolicyActionError("requested_k is only defined for 'recommend_from_history'")
         return DEFAULT_K if self.k is None else self.k
+
+    @property
+    def is_candidate_action(self) -> bool:
+        """True when executing this action may produce candidate identities."""
+        return self.action in CANDIDATE_ACTIONS
+
+    @property
+    def is_read_only(self) -> bool:
+        """True when this action may only read candidates the run already holds."""
+        return self.action in READ_ONLY_ACTIONS
+
+    @property
+    def is_non_executing(self) -> bool:
+        """True when this action neither executes a tool nor touches the candidate set."""
+        return self.action in NON_EXECUTING_ACTIONS
 
 
 class ValidatedAction(BaseModel):
@@ -204,6 +386,15 @@ class ValidatedAction(BaseModel):
     turn_id: str | None = None
 
     k: int = Field(..., ge=MIN_K, le=MAX_K)
+
+    #: The **validated** action arguments, carried through from the proposal.
+    #:
+    #: The validator guarantees the type matches ``ARGUMENTS_BY_ACTION[action]`` before this
+    #: is populated, so an executor can rely on the shape.  Shape is not authorisation: a
+    #: capability must still check that the values are permitted - is this source
+    #: registered, is this identity grounded - because validation authorises an action
+    #: kind, never a payload.
+    arguments: Any = None
 
     #: The proposal's rationale, carried through for trajectory purposes only.
     rationale: str | None = None
@@ -267,6 +458,10 @@ class TerminationReason(str, Enum):
     NO_AVAILABLE_ACTION = "no_available_action"
     #: A capability or verifier raised a terminal failure.
     EXECUTION_FAILED = "execution_failed"
+    #: Stage 3: the run suspended itself to ask the user a question.  This is neither a
+    #: success nor a failure - the task is resumable, and the status is
+    #: :attr:`RunStatus.WAITING_FOR_USER` rather than ``FINISHED`` or ``ABORTED``.
+    AWAITING_USER = "awaiting_user"
 
 
 class ControlState(BaseModel):
@@ -383,6 +578,89 @@ class RecommendationObservation(Observation):
     candidate_set_ref: str
     #: Short, non-authoritative summary of what verification checked.  It never carries
     #: a product fact or a score.
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class CandidateSetObservation(Observation):
+    """Stage 2: what a **candidate-producing** action returned, minimised.
+
+    A policy that may choose between candidate sources has to be able to see whether the
+    source it chose actually helped - otherwise "Observation can change the next action"
+    is not achievable, and adaptive retrieval degenerates into fixed fan-out.  What it is
+    told is therefore exactly the *control-relevant* summary:
+
+    * how many candidates this source contributed;
+    * whether that was zero (the signal to try a different source);
+    * how many of the run's candidates are now supported by more than one source, which is
+      the ledger's agreement signal;
+    * whether any identity the source returned could **not** be grounded - a finding about
+      the source, surfaced rather than hidden;
+    * an opaque reference to the verified set.
+
+    What it is **not** told: any ``parent_asin``, any item id, any raw score, any product
+    title or attribute, and any per-candidate ranking.  The counts are the whole channel.
+    ``source`` names the trusted source, which is a fact about the system rather than about
+    a product.
+    """
+
+    kind: str = "candidate_set"
+    source: str
+    status: Literal["ok", "empty", "failed"]
+    requested_k: int = Field(..., ge=0)
+    returned_k: int = Field(..., ge=0)
+    has_candidates: bool
+    candidate_set_ref: str
+    #: How many candidate sources have contributed to this run so far.
+    sources_used: int = Field(default=0, ge=0)
+    #: How many of the run's grounded candidates are supported by more than one source.
+    multi_source_count: int = Field(default=0, ge=0)
+    #: How many identities the source returned that the trusted mapping does not know.
+    #: Non-zero means the source drifted or hallucinated; it is never a candidate.
+    ungrounded_count: int = Field(default=0, ge=0)
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class ClarificationObservation(Observation):
+    """Stage 3: the run suspended itself to ask a question.
+
+    An ``ASK_CLARIFICATION`` action is not a failure and not a completion: it is a
+    *suspension*.  This observation records that the run is now waiting for a user answer,
+    what the question was, and which decision the answer is expected to change, so a
+    resumed run can pick up with the same state and the trajectory can show why the run
+    stopped mid-way.
+    """
+
+    kind: str = "clarification"
+    status: Literal["waiting_for_user"] = "waiting_for_user"
+    #: The question actually put to the user.  It is the policy's own text, echoed back
+    #: for the trajectory and for the response layer; it never becomes a product claim.
+    question: str = Field(..., max_length=400)
+    #: The decision the policy claims the answer would change.
+    blocks: str = Field(default="candidate_set", max_length=40)
+    options: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class FailureObservation(Observation):
+    """A structured failure a policy can act on, with its recovery class.
+
+    The distinction that matters is :attr:`recoverable`.  A recoverable failure is a
+    legitimate reason to try a different action; an unrecoverable one is a trust or
+    integrity failure that must abort rather than be worked around.  The policy chooses
+    only among the actions the deterministic recovery rules permit
+    (:attr:`permitted_actions`), so recovery is bounded and auditable rather than a free
+    choice.
+    """
+
+    kind: str = "failure"
+    status: Literal["failed"] = "failed"
+    #: Stable machine-readable failure class, e.g. ``no_candidates``,
+    #: ``invalid_product_id``, ``missing_required_fact``.
+    code: str
+    recoverable: bool = True
+    #: The recovery actions the controller permits for this failure class.  A policy may
+    #: choose among these and nothing else.
+    permitted_actions: tuple[str, ...] = ()
     verification_note: str | None = Field(default=None, max_length=280)
 
 

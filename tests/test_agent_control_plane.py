@@ -141,6 +141,13 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         "step_index",
         "run_status",
         "last_proposal_rejected",
+        # Stage 3 adds a task/memory projection.  Every one of these is a scalar or a
+        # tuple of short description strings: no identity, no key, no store, no entry.
+        "task_intent",
+        "task_constraints",
+        "hard_constraint_count",
+        "inferred_constraint_count",
+        "awaiting_user",
     }
     assert set(vars(context)) == allowed
 
@@ -148,6 +155,26 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
     assert context.has_trusted_history is True
     assert not hasattr(context, "trusted_user_history")
     assert not hasattr(context, "user_key")
+
+    # Stage 3 additions must not have opened a new channel: every projected value is a
+    # scalar or a tuple of strings.
+    for name in (
+        "task_intent",
+        "task_constraints",
+        "hard_constraint_count",
+        "inferred_constraint_count",
+        "awaiting_user",
+    ):
+        value = getattr(context, name)
+        if isinstance(value, tuple):
+            assert all(isinstance(item, str) for item in value), name
+        else:
+            assert isinstance(value, (str, int, bool)), name
+    # None of those fields may name a product or carry a key.
+    projected = repr(context.task_constraints)
+    for row in CANDIDATE_ROWS:
+        assert row[0] not in projected
+    assert "user_key" not in projected
     assert not hasattr(context, "tool")
     assert not hasattr(context, "engine")
     assert not hasattr(context, "preference_snapshot")
