@@ -35,7 +35,10 @@ __all__ = [
 
 #: Version of the evaluation-plane contract.  Bumped when the trajectory or case shape changes,
 #: so a stored report can be read against the schema that produced it.
-EVALUATION_PLANE_VERSION = 1
+#:
+#: 2: records carry ``policy_name``, so a report states which policy actually decided rather than
+#:    trusting the variant label it was filed under.
+EVALUATION_PLANE_VERSION = 2
 
 
 class TerminalOutcome(str, Enum):
@@ -72,6 +75,10 @@ class TrajectoryRecord(BaseModel):
 
     step_index: int = Field(..., ge=0)
     action_id: str
+    #: Name of the policy that produced this step's proposal, taken from the runtime's own policy
+    #: metadata.  Recorded because a variant *label* is a claim about which policy ran, and a
+    #: report that only carried the label could not tell a model-driven run from a fallback.
+    policy_name: str | None = Field(default=None, max_length=64)
     #: The action the policy proposed, or ``None`` when it proposed nothing.
     proposed_action: str | None = None
     #: True when the validator authorised the proposal.
@@ -144,6 +151,18 @@ class AgentTrajectory(BaseModel):
     def used_action(self, action: str) -> bool:
         """True when ``action`` executed at least once."""
         return action in self.action_sequence()
+
+    def policy_names(self) -> tuple[str, ...]:
+        """The distinct policy names recorded, in first-seen order.
+
+        An empty tuple means the run recorded no policy provenance at all - which is a finding in
+        itself for a run that claims to be model-driven.
+        """
+        seen: list[str] = []
+        for record in self.records:
+            if record.policy_name and record.policy_name not in seen:
+                seen.append(record.policy_name)
+        return tuple(seen)
 
     def executed_action_count(self, action: str) -> int:
         """How many times ``action`` executed."""

@@ -82,12 +82,39 @@ class EvaluationCase(BaseModel):
     max_steps: int = Field(default=6, ge=1)
     #: True when the case is specifically about recovery from an empty/failed source.
     recovery_case: bool = False
+    #: True when the case's fixture makes the history source **fail** rather than return nothing.
+    #: A failure is what lets ``CompletionGuard`` refuse a premature FINISH, so the case is how
+    #: the guard-rejection-and-recovery path is measured rather than merely asserted.
+    history_source_fails: bool = False
     #: Notes for a reader, including anything the case deliberately does not check.
     notes: str | None = None
 
     def allows(self, action: str) -> bool:
         """True when ``action`` is not forbidden for this case."""
         return action not in self.forbidden_actions
+
+    @property
+    def needs_reasoning(self) -> bool:
+        """True when the case expects a grounded reasoning step, not only retrieval.
+
+        Derived from the case's own declarations, so a policy can tell "answer as efficiently as
+        possible" from "gather evidence before answering" without the case growing another
+        hand-maintained flag.  A fast-path case forbids reasoning and requires none; an
+        evidence-gathering case requires one of the reasoning actions.
+        """
+        reasoning = {
+            "get_details",
+            "compare",
+            "trade_off",
+            "check_compatibility",
+            "bundle",
+            "verify",
+        }
+        if reasoning & set(self.forbidden_actions):
+            return False
+        return bool(reasoning & set(self.required_actions)) or bool(
+            reasoning & set(self.acceptable_actions)
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view."""
@@ -219,6 +246,32 @@ EVALUATION_CASES: tuple[EvaluationCase, ...] = (
         notes=(
             "The observation for an empty source must let the policy try another source; a "
             "run that ignores the empty observation and re-asks the same source fails."
+        ),
+    ),
+    _case(
+        case_id="premature-finish-recovery",
+        category="5a_guarded_completion",
+        purpose=(
+            "A FINISH proposed after a failed execution must be refused by CompletionGuard, and "
+            "the policy must recover from the refusal rather than the run simply ending."
+        ),
+        message="Recommend some gear.",
+        # The history source fails, so the model's first attempt leaves nothing grounded and its
+        # FINISH is refused with ``last_execution_failed``.  The recovery action is a different
+        # source; the run may only end once something is grounded.
+        history_source_fails=True,
+        required_actions=("search_catalog",),
+        acceptable_actions=("recommend_from_history", "search_catalog", "finish"),
+        forbidden_actions=(),
+        expected_sources=("catalog_search",),
+        expected_memory_effect="none",
+        recovery_case=True,
+        allowed_terminal=("completed",),
+        max_tool_calls=3,
+        max_steps=6,
+        notes=(
+            "Measures that a refused FINISH becomes an Observation the policy can act on, and "
+            "that completion is still authorised by the guard rather than by the model."
         ),
     ),
     _case(

@@ -102,6 +102,27 @@ from .grounding import (
 )
 from .loop import LOOP_CONTROLLER_VERSION, LoopController, LoopResult, build_run_id
 from .policy import RECOMMENDATION_FIRST, RuleBasedPolicy
+from .model_client import (
+    MODEL_SEAM_VERSION,
+    ModelCallError,
+    ModelRequest,
+    ModelResponse,
+    ScriptedModelClient,
+    StructuredModelClient,
+)
+from .model_policy import (
+    LLM_POLICY_NAME,
+    POLICY_PROMPT_VERSION,
+    LLMAgentPolicy,
+    build_action_schema,
+    build_policy_context_payload,
+    build_policy_system_prompt,
+)
+from .provider_adapter import (
+    OpenAICompatibleChatAdapter,
+    build_provider_client,
+    provider_configured,
+)
 from .reasoning_executor import REASONING_ACTIONS, ReasoningExecutor
 from .schemas import (
     ARGUMENTS_BY_ACTION,
@@ -217,17 +238,25 @@ __all__ = [
     "GroundingVerifier",
     "IdentityMapLike",
     "LedgerEntry",
+    "LLM_POLICY_NAME",
+    "MODEL_SEAM_VERSION",
+    "POLICY_PROMPT_VERSION",
     "GetDetailsArguments",
     "LedgerSourceError",
+    "LLMAgentPolicy",
     "LoopController",
     "LoopLimits",
     "LoopResult",
     "MappingOnlyCatalog",
+    "ModelCallError",
+    "ModelRequest",
+    "ModelResponse",
     "MemoryProposalValidator",
     "MemoryWriteOperation",
     "MemoryWriteProposal",
     "Observation",
     "ObservationAdapter",
+    "OpenAICompatibleChatAdapter",
     "PolicyActionError",
     "PolicyContext",
     "PreferenceLifecycle",
@@ -240,9 +269,11 @@ __all__ = [
     "ResultVerifier",
     "RuleBasedPolicy",
     "RunStatus",
+    "ScriptedModelClient",
     "SearchCatalogArguments",
     "SelectSourceArguments",
     "StateChange",
+    "StructuredModelClient",
     "TaskConstraint",
     "TaskIntent",
     "TaskState",
@@ -256,6 +287,11 @@ __all__ = [
     "ValidatedAction",
     "VerificationResult",
     "approved_candidates",
+    "build_action_schema",
+    "build_policy_context_payload",
+    "build_policy_system_prompt",
+    "build_provider_client",
+    "provider_configured",
     "build_run_id",
     "parse_dimensions_cm",
     "parse_price",

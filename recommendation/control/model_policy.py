@@ -1,0 +1,426 @@
+"""A model-driven next-action policy (Phase 1).
+
+`LLMAgentPolicy` replaces the *deciding* component of the bounded loop with a model, and
+changes nothing else.  It returns an untrusted
+:class:`~recommendation.control.schemas.ActionProposal`; the existing validator authorises it,
+the existing executor runs it, the existing verifier and completion guard judge it, and the
+existing controller bounds it.
+
+The authority rule this module is built around:
+
+    The model decides **what action to propose**.
+    Trusted code decides whether that action is legal, how it is executed, which product
+    identities exist, which catalogue facts are true, whether a hard constraint holds,
+    whether memory may be committed, and whether FINISH is permitted.
+
+Nothing here can weaken that, because the policy has no access to any of it.  It receives a
+:class:`~recommendation.control.context.PolicyContext` - a projection with no history, no
+catalogue, no store and no executor - and it returns a proposal.  It cannot run a tool, read a
+fact, write state or declare success.
+
+Structured output, not string matching
+--------------------------------------
+The model is asked for one JSON object and the answer is parsed into the repository's own
+:class:`~recommendation.control.schemas.ActionProposal`.  There is no ``if "search" in text``
+anywhere: a malformed answer, an unknown action, or arguments that do not match the action's
+declared model are all *rejections*, and the run's failure path is the controller's, not a
+guess.
+
+What the model is told
+----------------------
+A concise system prompt stating the policy contract, plus a bounded JSON payload: the user
+request, the offered actions **generated from the real argument models**, the task constraints,
+the candidate-state summary, the last observation summary, and the remaining budget.  The
+action list is derived from :data:`~recommendation.control.schemas.ARGUMENTS_BY_ACTION`, so a
+new action cannot be added to the enum without appearing in the prompt - and the prompt cannot
+describe an action that does not exist.
+
+Bounded failure
+---------------
+A model that answers badly is retried at most ``max_attempts`` times *within one policy call*,
+and each policy call is one controller step.  A model that never answers properly therefore
+ends the run through the controller's own budget, never through an unbounded loop.  Transport
+failures and unusable answers end as :class:`PolicyActionError`, which the controller already
+treats as a deterministic abort.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from .context import PolicyContext
+from .model_client import ModelCallError, ModelRequest, ModelResponse, StructuredModelClient
+from .schemas import (
+    ARGUMENTS_BY_ACTION,
+    CANDIDATE_ACTIONS,
+    ActionKind,
+    ActionProposal,
+    PolicyActionError,
+)
+
+__all__ = [
+    "LLM_POLICY_NAME",
+    "POLICY_PROMPT_VERSION",
+    "LLMAgentPolicy",
+    "build_action_schema",
+    "build_policy_context_payload",
+    "build_policy_system_prompt",
+]
+
+#: Stable policy identity, recorded so a trajectory says which policy decided.
+LLM_POLICY_NAME = "llm_agent_policy"
+
+#: Version of the prompt contract, bumped when the payload shape changes.
+POLICY_PROMPT_VERSION = 1
+
+#: The policy contract.  Deliberately short: the architecture document does not belong in a
+#: per-step prompt, and a long prompt is a brittle one.
+SYSTEM_PROMPT = """\
+You are the next-action policy of a bounded recommendation agent.
+
+Choose exactly ONE action from the offered actions, then stop.
+
+Rules:
+1. Use only actions in the offered list. Never invent an action.
+2. Never invent a product identity, price, weight, brand, availability or any catalogue fact.
+   You do not have them. Facts come from tool observations only.
+3. An action's observation is the only evidence that it succeeded. Do not assume success.
+4. If a needed fact or product is missing, choose an action that retrieves or asks for it.
+5. Prefer the fewest steps that answer the request. Do not repeat an action whose observation
+   already answered it.
+6. FINISH only ends the turn as a proposal; it is validated and may be refused.
+7. Respect the remaining budget. Do not plan more actions than remain.
+8. Output must be a single JSON object and nothing else:
+   {"action": "<one of the offered actions>", "arguments": {...}, "rationale": "<short>"}
+   Omit "arguments" for an action that takes none. "rationale" is optional and is never trusted.
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Prompt construction - derived from the real schemas, never duplicated
+# --------------------------------------------------------------------------- #
+
+
+def _json_type(annotation: Any) -> str:
+    """Return a short JSON-ish type name for a field annotation."""
+    text = str(annotation)
+    if "int" in text:
+        return "integer"
+    if "float" in text:
+        return "number"
+    if "bool" in text:
+        return "boolean"
+    if "tuple" in text or "list" in text:
+        return "array"
+    if "dict" in text:
+        return "object"
+    return "string"
+
+
+def build_action_schema(available: tuple[ActionKind, ...]) -> tuple[dict[str, Any], ...]:
+    """Describe each offered action and its arguments, from the declared argument models.
+
+    Generated rather than hand-written, so the prompt cannot claim an action exists that does
+    not, cannot omit a newly added action, and cannot describe arguments the validator would
+    reject.  Only the *offered* actions appear: a policy must choose from what the system
+    permits, and telling the model about actions it may not take would invite a refused
+    proposal.
+    """
+    schema: list[dict[str, Any]] = []
+    for action in available:
+        model = ARGUMENTS_BY_ACTION.get(action)
+        arguments: list[dict[str, Any]] = []
+        required: list[str] = []
+        if model is not None:
+            for name, field in model.model_fields.items():
+                arguments.append(
+                    {
+                        "name": name,
+                        "type": _json_type(field.annotation),
+                        "required": field.is_required(),
+                    }
+                )
+                if field.is_required():
+                    required.append(name)
+        entry: dict[str, Any] = {
+            "action": action.value,
+            "arguments": arguments,
+            "required_arguments": required,
+        }
+        if action in CANDIDATE_ACTIONS:
+            entry["produces_candidates"] = True
+        schema.append(entry)
+    return tuple(schema)
+
+
+
+def build_policy_context_payload(context: PolicyContext) -> dict[str, Any]:
+    """Build the bounded, structured view of the control state the model receives.
+
+    Only what a next-action decision needs.  What is deliberately absent, and therefore cannot
+    leak: trusted behavioural history, the memory store or its ``user_key``, the catalogue, the
+    candidate ledger, raw scores, product metadata, and the full trajectory.  Candidate
+    identities are **counts**, not lists - the model needs to know whether candidates exist and
+    how many, not which ones, because it can only refer to them through an action the validator
+    grounds.
+    """
+    observation = context.last_observation
+    payload: dict[str, Any] = {
+        "user_request": context.user_request,
+        "task_intent": context.task_intent,
+        "task_constraints": list(context.task_constraints),
+        "has_trusted_history": context.has_trusted_history,
+        "active_preference_count": context.active_preference_count,
+        "hard_constraint_count": context.hard_constraint_count,
+        "inferred_constraint_count": context.inferred_constraint_count,
+        "awaiting_user": context.awaiting_user,
+        "candidates": {
+            "grounded": context.candidate_state.grounded,
+            "count": context.candidate_state.candidate_count,
+            "verification_status": context.candidate_state.verification_status,
+        },
+        "budget": {
+            "step_index": context.step_index,
+            "remaining_steps": context.remaining_steps,
+            "remaining_tool_calls": context.remaining_tool_calls,
+        },
+        "previous_proposal_rejected": context.last_proposal_rejected,
+        "run_status": context.run_status.value,
+    }
+    if observation is not None:
+        payload["last_observation"] = _observation_summary(observation)
+    else:
+        payload["last_observation"] = None
+    return payload
+
+
+def _observation_summary(observation: Any) -> dict[str, Any]:
+    """Summarise an observation for the prompt, without its payload.
+
+    A reasoning observation's grounded *facts* are deliberately not copied in: the model does not
+    need them to choose the next action, and putting catalogue values into a prompt is how a
+    model starts treating them as things it may restate.  It learns *that* the facts were read,
+    not what they were.
+    """
+    summary: dict[str, Any] = {
+        "kind": getattr(observation, "kind", "unknown"),
+        "status": getattr(observation, "status", None),
+        "verification_status": getattr(observation, "verification_status", None),
+    }
+    for field in ("source", "returned_k", "has_candidates", "ungrounded_count"):
+        value = getattr(observation, field, None)
+        if value is not None:
+            summary[field] = value
+    # A refused completion or a failed action is the signal that should change the next action.
+    for field in ("code", "recoverable", "permitted_actions", "reason", "supported"):
+        value = getattr(observation, field, None)
+        if value is not None:
+            summary[field] = value
+    note = getattr(observation, "verification_note", None)
+    if note:
+        summary["note"] = str(note)[:200]
+    return summary
+
+
+def build_policy_system_prompt() -> str:
+    """Return the policy contract prompt."""
+    return SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------- #
+# The policy
+# --------------------------------------------------------------------------- #
+
+
+class LLMAgentPolicy:
+    """A next-action policy that asks a model, then parses its answer into a proposal.
+
+    Parameters
+    ----------
+    model:
+        Any :class:`~recommendation.control.model_client.StructuredModelClient`.  Injected, so
+        the test suite uses a scripted client and a deployment supplies a provider adapter.
+        The policy never constructs one.
+    max_attempts:
+        How many times one policy call may ask the model.  The default of two allows a single
+        correction after unusable output - valuable, because most malformed answers are one
+        formatting mistake - while keeping a policy call bounded.  Each call is one controller
+        step, so the run's own step budget bounds the total independently.
+    """
+
+    def __init__(
+        self,
+        model: StructuredModelClient,
+        *,
+        max_attempts: int = 2,
+        name: str = LLM_POLICY_NAME,
+    ) -> None:
+        if not callable(getattr(model, "complete", None)):
+            raise PolicyActionError(
+                "a model client must provide a callable complete(request) method"
+            )
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts < 1:
+            raise PolicyActionError("max_attempts must be a positive integer")
+        self._model = model
+        self._max_attempts = max_attempts
+        self._name = name
+        self._last_metadata: dict[str, Any] = {}
+
+    # -- metadata ---------------------------------------------------------- #
+
+    @property
+    def name(self) -> str:
+        """Stable policy identity, recorded in the trajectory."""
+        return self._name
+
+    @property
+    def model(self) -> StructuredModelClient:
+        """The injected model client (exposed for inspection and tests)."""
+        return self._model
+
+    @property
+    def max_attempts(self) -> int:
+        """How many model calls one policy decision may make."""
+        return self._max_attempts
+
+    @property
+    def last_metadata(self) -> dict[str, Any]:
+        """Safe diagnostics for the step just decided.
+
+        Answers *which policy decided, what it proposed, whether parsing succeeded, how many
+        model calls it took, and whether a correction was needed*.  Contains no prompt text, no
+        model chain-of-thought and no secrets: the rationale is truncated because it is
+        untrusted diagnostic prose, not reasoning truth.
+        """
+        return dict(self._last_metadata)
+
+    # -- the seam ---------------------------------------------------------- #
+
+    def choose(self, context: PolicyContext) -> ActionProposal:
+        """Ask the model for one action and return it as an untrusted proposal.
+
+        Raises
+        ------
+        PolicyActionError
+            The model could not produce a usable action within ``max_attempts``.  The controller
+            treats this as a deterministic abort with ``NO_AVAILABLE_ACTION`` rather than a
+            crash, which is the existing bounded-failure path.
+        """
+        self._last_metadata = {"policy": self._name, "model_calls": 0, "attempts": 0}
+        available = tuple(context.available_actions)
+        if not available:
+            raise PolicyActionError("the system offered no action for this control state")
+
+        action_schema = build_action_schema(available)
+        payload = build_policy_context_payload(context)
+        correction: str | None = None
+        failures: list[str] = []
+
+        for attempt in range(1, self._max_attempts + 1):
+            request = ModelRequest(
+                system_prompt=build_policy_system_prompt(),
+                context_payload=payload,
+                action_schema=action_schema,
+                correction=correction,
+            )
+            response = self._call_model(request)
+            self._last_metadata["model_calls"] += 1
+            self._last_metadata["attempts"] = attempt
+            if response.model_id is not None:
+                self._last_metadata["model_id"] = response.model_id
+
+            if response.is_empty:
+                failures.append("empty_response")
+                correction = "your answer was empty; return one JSON action object"
+                self._last_metadata["last_failure"] = "empty_response"
+                continue
+
+            proposal, error = self._parse(response, available)
+            if proposal is not None:
+                self._last_metadata["parse_ok"] = True
+                self._last_metadata["proposed_action"] = proposal.action.value
+                if proposal.rationale:
+                    self._last_metadata["rationale"] = proposal.rationale[:200]
+                if failures:
+                    self._last_metadata["recovered_after"] = tuple(failures)
+                return proposal
+
+            failures.append(error or "unparseable")
+            self._last_metadata["parse_ok"] = False
+            self._last_metadata["last_failure"] = error
+            correction = error
+
+        self._last_metadata["failures"] = tuple(failures)
+        raise PolicyActionError(
+            "the model did not produce a usable action within "
+            f"{self._max_attempts} attempt(s): {', '.join(failures)}"
+        )
+
+    # -- internals --------------------------------------------------------- #
+
+    def _call_model(self, request: ModelRequest) -> ModelResponse:
+        """Call the model, normalising a transport failure into the bounded failure path."""
+        try:
+            return self._model.complete(request)
+        except ModelCallError as exc:
+            self._last_metadata["model_calls"] = self._last_metadata.get("model_calls", 0) + 1
+            self._last_metadata["last_failure"] = exc.code
+            raise PolicyActionError(f"the model call failed: {exc.code}") from exc
+        except Exception as exc:  # noqa: BLE001 - a provider exception must not crash the loop
+            self._last_metadata["model_calls"] = self._last_metadata.get("model_calls", 0) + 1
+            self._last_metadata["last_failure"] = "provider_error"
+            raise PolicyActionError(
+                f"the model call failed: {type(exc).__name__}"
+            ) from exc
+
+    @staticmethod
+    def _parse(
+        response: ModelResponse, available: tuple[ActionKind, ...]
+    ) -> tuple[ActionProposal | None, str | None]:
+        """Parse a model answer into a proposal, or return why it could not.
+
+        The three rejection classes are deliberately distinct, because they mean different
+        things about the model and about the run:
+
+        * **not JSON** - a formatting failure;
+        * **unknown or unoffered action** - the model proposed something the system did not
+          permit, which is a protocol violation rather than a formatting slip;
+        * **invalid arguments** - the action is permitted but its arguments do not satisfy the
+          action's own declared model, which the construction of ``ActionProposal`` re-checks.
+
+        Returns ``(proposal, None)`` or ``(None, reason)``.  Never guesses a default action.
+        """
+        text = response.text.strip()
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            return None, "not_json"
+        if not isinstance(decoded, dict):
+            return None, "not_a_json_object"
+
+        raw_action = decoded.get("action")
+        if not isinstance(raw_action, str):
+            return None, "missing_action"
+        try:
+            action = ActionKind(raw_action)
+        except ValueError:
+            return None, f"unknown_action:{raw_action[:40]}"
+        if action not in available:
+            return None, f"action_not_offered:{action.value}"
+
+        # ``ActionProposal`` validates that the arguments match the action's declared model and
+        # rejects a foreign or malformed payload itself.  The policy adds no coercion: a
+        # near-miss is a rejection, not a repair.
+        fields: dict[str, Any] = {"action": action}
+        if "arguments" in decoded and decoded["arguments"] is not None:
+            fields["arguments"] = decoded["arguments"]
+        if action is ActionKind.RECOMMEND_FROM_HISTORY:
+            fields["k"] = decoded.get("k", 4)
+        rationale = decoded.get("rationale")
+        if isinstance(rationale, str) and rationale.strip():
+            fields["rationale"] = rationale.strip()[:280]
+        try:
+            return ActionProposal(**fields), None
+        except Exception:  # noqa: BLE001 - pydantic reports several error types
+            return None, f"invalid_arguments:{action.value}"

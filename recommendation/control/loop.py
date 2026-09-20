@@ -255,6 +255,9 @@ class _LoopEngine:
         self.completion: VerificationResult | None = None
         self.last_action_id = f"init:{run_id}"
         self.last_proposal_rejected = False
+        #: Diagnostics reported by the policy for the current step (empty for a deterministic
+        #: policy).  Safe, prompt-free and payload-free by contract.
+        self.policy_metadata: dict[str, Any] = {}
 
         #: Stage 4 read-only reasoning executor, or ``None`` when the deployment configures
         #: no catalogue reasoning.  Validation already refused a reasoning action that was
@@ -322,6 +325,7 @@ class _LoopEngine:
                 action_id=self.last_action_id,
                 policy_context_summary={},
                 note=f"step budget exhausted (max_steps={self.control.limits.max_steps})",
+                policy_metadata=self.policy_metadata,
             )
             return self._terminate(
                 RunStatus.ABORTED,
@@ -455,22 +459,29 @@ class _LoopEngine:
         try:
             self.proposal = self.policy.choose(context)
             self.decision = getattr(self.policy, "last_decision", None)
+            # A policy may report safe diagnostics about how it decided.  Recorded on the step
+            # that follows, so a refusal caused by a bad proposal still shows why.
+            self.policy_metadata = self._policy_metadata()
         except PolicyActionError as exc:
+            self.policy_metadata = self._policy_metadata()
             self.trajectory.record(
                 step_index=step_index,
                 action_id=self.last_action_id,
                 policy_context_summary=context.summary(),
                 note=f"policy raised PolicyActionError: {exc}",
+                policy_metadata=self.policy_metadata,
             )
             return self._terminate(
                 RunStatus.ABORTED, TerminationReason.NO_AVAILABLE_ACTION, str(exc)
             )
         except Exception as exc:  # noqa: BLE001 - a policy failure is normalised
+            self.policy_metadata = self._policy_metadata()
             self.trajectory.record(
                 step_index=step_index,
                 action_id=self.last_action_id,
                 policy_context_summary=context.summary(),
                 note=f"policy failed: {type(exc).__name__}",
+                policy_metadata=self.policy_metadata,
             )
             return self._terminate(
                 RunStatus.FAILED,
@@ -478,6 +489,21 @@ class _LoopEngine:
                 f"policy failed: {type(exc).__name__}",
             )
         return StepOutcome.proceed()
+
+    def _policy_metadata(self) -> dict[str, Any]:
+        """The policy's self-reported diagnostics, or its declared identity as a fallback.
+
+        A model-driven policy reports its own metadata (name, attempts, model calls).  Every other
+        policy is anonymous unless the loop names it, and an unnamed policy makes a run's
+        provenance unverifiable: an ablation arm could silently fall back to a different policy
+        while still being filed under the intended variant.  So the declared ``name`` is recorded
+        when no richer metadata exists - identity only, never a decision input.
+        """
+        reported = dict(getattr(self.policy, "last_metadata", {}) or {})
+        if reported:
+            return reported
+        declared = getattr(self.policy, "name", None) or type(self.policy).__name__
+        return {"policy": str(declared)}
 
     # -- validate_action --------------------------------------------------- #
 
@@ -487,7 +513,17 @@ class _LoopEngine:
         This phase owns the per-step action scratch: it clears the previous step's result
         itself and then decides the new one.  Nothing downstream depends on a *previous*
         phase having cleared it, which is what makes each phase safe to enter on its own.
+
+        A run the **policy phase already stopped** is left untouched.  A policy that raised
+        ``PolicyActionError`` terminates the run with ``NO_AVAILABLE_ACTION``, but a LangGraph
+        conditional edge is resolved from the pre-node snapshot, so this node can still be
+        reached on that terminal run.  Clearing the scratch here overwrote the controller's own
+        verdict and reported ``INVALID_ACTION`` - a misleading reason, since the policy's
+        failure was a legitimate abort rather than a malformed proposal.  Nothing has been
+        proposed in that case, so there is nothing to validate.
         """
+        if self.control.is_terminal:
+            return StepOutcome.proceed()
         self.validation = None
         self.validated = None
         self.completion = None
@@ -498,6 +534,7 @@ class _LoopEngine:
                 action_id=self.last_action_id,
                 policy_context_summary=self.build_context().summary(),
                 note="no proposal was produced for this step",
+                policy_metadata=self.policy_metadata,
             )
             return self._terminate(
                 RunStatus.FAILED,
@@ -526,6 +563,7 @@ class _LoopEngine:
                 action_proposal=self.proposal,
                 validation_result=validation,
                 note="proposal refused; terminating deterministically",
+                policy_metadata=self.policy_metadata,
             )
             return self._terminate(
                 RunStatus.FAILED,
@@ -626,6 +664,7 @@ class _LoopEngine:
                 "tool-call budget exhausted; terminating rather than executing "
                 f"(max_tool_calls={self.control.limits.max_tool_calls})"
             ),
+            policy_metadata=self.policy_metadata,
         )
         return self._terminate(
             RunStatus.ABORTED,
@@ -877,6 +916,7 @@ class _LoopEngine:
                 if self.verification.verified
                 else f"result refused: {self.verification.code}"
             ),
+            policy_metadata=self.policy_metadata,
         )
         # Only a *candidate-producing* action consumes a tool call.  Reasoning reads facts
         # about candidates the run already holds, and clarification runs nothing at all; if
@@ -1020,6 +1060,7 @@ class _LoopEngine:
                 run_status=RunStatus.WAITING_FOR_USER,
             ),
             note="run suspended awaiting a user answer",
+            policy_metadata=self.policy_metadata,
         )
         self.control = self.control.advanced(
             action=ActionKind.ASK_CLARIFICATION,
@@ -1082,6 +1123,7 @@ class _LoopEngine:
             validated_action=self.validated,
             verification_result=self.completion,
             note="completion refused; returning control to the policy",
+            policy_metadata=self.policy_metadata,
         )
         self.control = self.control.advanced(
             action=ActionKind.FINISH,
@@ -1123,6 +1165,7 @@ class _LoopEngine:
                 memory_write_attempted=self.memory_service is not None,
             ),
             note="completion accepted; run finished",
+            policy_metadata=self.policy_metadata,
         )
         self.control = self.control.advanced(
             action=ActionKind.FINISH,
@@ -1150,6 +1193,7 @@ class _LoopEngine:
             validated_action=self.validated,
             verification_result=self.completion,
             note="completion refused and not retryable; terminating",
+            policy_metadata=self.policy_metadata,
         )
         return self._terminate(
             self.completion_guard.terminal_status(self.completion),

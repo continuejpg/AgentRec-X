@@ -85,6 +85,7 @@ class TrajectoryRecorder:
         observation: Any = None,
         state_delta: StateChange | None = None,
         note: str | None = None,
+        policy_metadata: dict[str, Any] | None = None,
     ) -> TrajectoryStep:
         """Record one loop step and return the immutable record.
 
@@ -124,6 +125,7 @@ class TrajectoryRecorder:
             observation=(None if observation is None else observation.model_dump()),
             state_delta=state_delta,
             note=note,
+            policy_metadata=dict(policy_metadata or {}),
         )
         self._steps.append(step)
         return step

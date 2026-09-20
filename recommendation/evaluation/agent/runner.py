@@ -56,6 +56,7 @@ from .schemas import AgentTrajectory, TerminalOutcome, TrajectoryRecord
 __all__ = [
     "ABLATION_ADAPTIVE",
     "ABLATION_DECIDE_ONCE",
+    "ABLATION_MODEL_POLICY",
     "CaseOutcome",
     "CaseRunner",
     "DecidingOncePolicy",
@@ -69,6 +70,9 @@ __all__ = [
 ABLATION_ADAPTIVE = "adaptive"
 #: The decide-once baseline.
 ABLATION_DECIDE_ONCE = "decide_once"
+#: Phase 1: a model-driven next-action policy, supplied by the caller as a scripted model so
+#: the comparison stays offline and reproducible.
+ABLATION_MODEL_POLICY = "model_policy"
 
 
 # --------------------------------------------------------------------------- #
@@ -444,10 +448,15 @@ class CaseRunner:
         *,
         variant: str = ABLATION_ADAPTIVE,
         identities_provider: Callable[[Any], tuple[str, ...]] | None = None,
+        policy_factory: Callable[[EvaluationCase], Any] | None = None,
     ) -> None:
         self._factory = controller_factory
         self._variant = variant
         self._identities_provider = identities_provider
+        #: When set, the runner builds a fresh policy per case itself.  A variant is therefore
+        #: *a policy*, injected through the same seam as any other - which is what keeps the
+        #: production runtime free of ablation switches.
+        self._policy_factory = policy_factory
 
     @property
     def variant(self) -> str:
@@ -467,7 +476,12 @@ class CaseRunner:
         policy declares *how to decide*, and conflating the two would make the suite grade its
         own homework.
         """
-        chosen = policy if policy is not None else build_adaptive_policy(case)
+        if policy is not None:
+            chosen = policy
+        elif self._policy_factory is not None:
+            chosen = self._policy_factory(case)
+        else:
+            chosen = build_adaptive_policy(case)
         limits = LoopLimits(
             max_steps=case.max_steps,
             max_tool_calls=max(1, case.max_tool_calls),
@@ -534,6 +548,7 @@ class CaseRunner:
                 TrajectoryRecord(
                     step_index=step.step_index,
                     action_id=step.action_id,
+                    policy_name=step.policy_metadata.get("policy"),
                     proposed_action=proposal.get("action"),
                     authorised=validated.get("action") is not None,
                     refusal_code=verification.code if refused else None,
@@ -650,18 +665,26 @@ def run_suite(
     variant: str = ABLATION_ADAPTIVE,
     policy_factory: Callable[[EvaluationCase], Any] | None = None,
     reasoner_factory: Callable[[EvaluationCase], Any] | None = None,
+    model_policy_factory: Callable[[EvaluationCase], Any] | None = None,
 ) -> SuiteReport:
     """Run a case set under one variant and return the aggregated report.
+
+    ``model_policy_factory`` runs the set under a model-driven policy: it is called per case so
+    each case gets a fresh scripted model, and it takes precedence over ``policy_factory``.
 
     ``reasoner_factory`` is optional: without a catalogue reasoner the hard-constraint case
     reports its constraints as unverified rather than as satisfied, which is the honest
     outcome when nothing could check them.
     """
-    runner = CaseRunner(controller_factory, variant=variant)
+    runner = CaseRunner(
+        controller_factory,
+        variant=variant,
+        policy_factory=None if model_policy_factory is not None else policy_factory,
+    )
     outcomes = [
         runner.run(
             case,
-            policy=None if policy_factory is None else policy_factory(case),
+            policy=None if model_policy_factory is None else model_policy_factory(case),
             reasoner=None if reasoner_factory is None else reasoner_factory(case),
         )
         for case in cases

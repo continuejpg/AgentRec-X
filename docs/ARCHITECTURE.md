@@ -478,7 +478,117 @@ completion, and a test asserts it exposes no such surface.
 
 ---
 
-## 10. Evaluation planes (Stage 6, IMPLEMENTED)
+## 10. Model-driven policy (Phase 1, IMPLEMENTED)
+
+The bounded loop already let an Observation change the next action; the policy that made that
+choice was deterministic.  This phase adds a **model-driven** policy behind the same seam, and
+changes nothing else.
+
+```text
+AgentState
+    |
+PolicyContextBuilder            bounded projection - no history, catalogue, store or executor
+    |
+LLMAgentPolicy                  builds a prompt, parses the answer
+    |
+ActionProposal                  UNTRUSTED structured proposal
+    |
+ActionValidator                 owns legality: availability + declared argument model
+    |
+ValidatedAction -> Trusted ActionExecutor
+    |
+DomainResult -> ResultVerifier -> ObservationAdapter
+    |
+Observation -> State update
+    |
+LLMAgentPolicy again
+```
+
+### The authority split
+
+| The model decides | Trusted code decides |
+| --- | --- |
+| which action to propose, from `available_actions` | whether that action is legal (`ActionValidator`) |
+| which approved candidate source to consult | how the action executes (`CandidatePlane`, capabilities) |
+| whether to ask, retrieve facts, compare, or finish | which product identities exist (`CandidateLedger`, `GroundingVerifier`) |
+| a short non-authoritative rationale | which catalogue facts are true (`GroundedReasoner`) |
+| | whether behavioural history holds (application) |
+| | whether memory may be committed (`MemoryProposalValidator`) |
+| | whether a hard constraint holds (deterministic) |
+| | whether `FINISH` is permitted (`CompletionGuard`) |
+| | every budget and termination (`LoopController`) |
+
+`LLMAgentPolicy.choose(context)` returns an :class:`ActionProposal` and nothing else.  It has no
+access to a tool, a ledger, a store, a catalogue or an executor, so it cannot bypass one.  A
+`FINISH` proposal carries no completion signal; the guard still authorises it.
+
+### Structured output
+
+The model is asked for one JSON object and the answer is parsed into the repository's own
+`ActionProposal`.  There is no substring matching.  Three rejection classes, kept distinct
+because they mean different things:
+
+```text
+not JSON              -> a formatting failure, corrected once within the same policy call
+unknown / unoffered   -> a protocol violation, refused
+invalid arguments     -> the action is permitted but its arguments violate its declared model
+```
+
+The per-action argument models are the contract, and `ActionProposal.model_post_init` already
+enforced them before this phase; the policy adds no coercion, so a near-miss is a rejection
+rather than a repair.
+
+### What the model is shown
+
+A short policy-contract prompt plus a bounded JSON payload: the user request, task intent and
+constraints, whether trusted history exists, a **candidate count** (not the candidates), the
+previous observation *summarised* (kind, status, counts) and the remaining budget.  The offered
+actions and their arguments are **generated from `ARGUMENTS_BY_ACTION`**, so the prompt cannot
+describe an action that does not exist or omit one that does.
+
+Deliberately absent, and therefore unable to leak: trusted behavioural history, the memory
+`user_key`, the catalogue, the candidate ledger, raw scores, product metadata, grounded
+reasoning facts, and the full trajectory.  A reasoning observation contributes *that facts were
+read*, never the facts - a test asserts that a product title and weight from a detail
+observation do not appear in the prompt.
+
+### Provider independence
+
+`StructuredModelClient` is the whole seam: `complete(request) -> ModelResponse`.  A real
+provider is a small adapter
+(`recommendation/control/provider_adapter.py` ships the shape for any OpenAI-compatible chat
+endpoint, with an **injected** transport so no HTTP library is imported and no key is stored).
+Every test injects `ScriptedModelClient`, so the suite needs no network and no credential.
+
+### Bounded failure
+
+`max_attempts` bounds the model calls *within one policy decision*, and one decision is one
+controller step.  A model that never answers usefully therefore ends the run through
+`PolicyActionError` → `NO_AVAILABLE_ACTION`, not through an unbounded loop.  A provider
+exception or timeout is normalised the same way.  A single malformed answer is corrected once,
+with the parse error passed back as a hint.
+
+### Documentation of the seam, not of a provider
+
+The phase deliberately does **not** ship a live model call.  A live call requires an HTTP client
+the core does not depend on, and it would make the suite non-reproducible.  The adapter contract
+is implemented, tested with a stub transport, and configurable through `AGENTRECX_LLM_BASE_URL`,
+`AGENTRECX_LLM_MODEL` and `AGENTRECX_LLM_API_KEY`.
+
+### Not implemented (documented, not claimed)
+
+* **No live provider smoke was executed.** The adapter is tested against a stub transport; no
+  request has been made to a real endpoint from this repository.
+* **No prompt tuning or evaluation against a real model.** The model variant is driven by a
+  deterministic double, so it measures the *runtime*, not a model's competence.
+* **No model-driven planning or subgoal generation** - one next action per step, as before.
+* **No fine-tuning, RL or reward model.**
+* **Hard-constraint narrowing is still not implemented** (section 9), and the model is not used
+  to hide that: the metric continues to report *checked* separately from *enforced*.
+
+---
+
+## 11. Evaluation planes (Stage 6, IMPLEMENTED)
 
 Three planes, deliberately **not** collapsed into one score.
 
@@ -495,15 +605,23 @@ empty retrieval; a trajectory metric says nothing about recommendation accuracy.
 
 ### Trajectory
 
-`AgentTrajectory` is the evaluation-facing projection of a run: per-step proposed action,
-whether it was authorised, the refusal code if not, the observation kind/status, candidate and
-ungrounded counts, whether the step consumed a tool call, and the terminal outcome. It is
-versioned and **payload-free** - no trusted history, no memory key, no entry id - and a test
-asserts it.
+`AgentTrajectory` is the evaluation-facing projection of a run: per-step proposed action, whether
+it was authorised, the refusal code if not, the observation kind/status, candidate and ungrounded
+counts, whether the step consumed a tool call, the **policy that decided the step**, and the
+terminal outcome. It is versioned and **payload-free** - no trusted history, no memory key, no
+entry id - and a test asserts it.
+
+Every step carries `policy_name`, taken from the runtime's own policy metadata. The recorded name
+is identity only and never a decision input; a policy that reports no diagnostics still has its
+declared `name` recorded by the loop. This exists because a variant *label* is a claim, and a
+report that carried only the label could not distinguish a model-driven run from a silent fallback
+to the default policy. That is not hypothetical: an ablation arm once passed
+`policy_factory=None` and ran the deterministic stub while being filed as `model_policy`, which is
+why the label is now corroborated by the run and asserted by a regression test.
 
 ### Cases
 
-Eleven inspectable cases covering the ten required categories. Each declares more than a final
+Twelve inspectable cases covering the ten required categories. Each declares more than a final
 answer: required / acceptable / forbidden actions, expected sources, hard constraints, expected
 memory effect, allowed terminal states and budgets. A run that reaches the right answer by way
 of a forbidden action or an unperformed check fails.
@@ -523,13 +641,15 @@ deterministic verdict for every candidate and still present a violating product.
 ### Ablation
 
 Variants are **policy injection, not runtime flags**, so no unsafe switch enters production:
-`adaptive` (the policy may react to its observation) versus `decide_once` (one decision, then
-wrap up). The decisive comparison is on `empty-source-recovery-required`, where the history
-source returns nothing:
+`adaptive` (the policy may react to its observation), `decide_once` (one decision, then wrap up),
+and — Phase 1 — `model_policy` (a model-driven next-action policy over a deterministic
+observation-reactive double). The decisive comparison is on `empty-source-recovery-required`, where
+the history source returns nothing:
 
 ```text
 adaptive      PASS  recommend_from_history -> search_catalog -> finish
 decide_once   FAIL  recommend_from_history -> finish -> finish
+model_policy  PASS  search_catalog -> finish
 ```
 
 That is `Action -> Observation -> Policy` versus `Decide Once -> Fixed Workflow`, measured.
@@ -545,10 +665,12 @@ Run it with `.venv/bin/python -m experiments.agent_evaluation_smoke`.
   because no LLM is in the loop.
 * **No candidate-narrowing metric**, because the loop cannot yet narrow a presented set (see
   section 9).
+* **The model variant is driven by a double, not a model.** It measures the runtime seam and the
+  authority boundary, not a model's competence (section 10).
 
 ---
 
-## 11. Product metadata and candidate-scoped RAG
+## 12. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -575,7 +697,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 12. Preference memory
+## 13. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -601,7 +723,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 13. Preference evidence
+## 14. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -629,7 +751,7 @@ drops or reorders anything.
 
 ---
 
-## 14. Deterministic reranking
+## 15. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -668,7 +790,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 15. Web / session layer
+## 16. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -706,7 +828,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 16. State ownership
+## 17. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -725,7 +847,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 17. Trust boundaries
+## 18. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -763,7 +885,7 @@ flowchart TD
 
 ---
 
-## 18. Failure behaviour
+## 19. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -784,7 +906,7 @@ fallback anywhere.
 
 ---
 
-## 19. Determinism and reproducibility
+## 20. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -805,7 +927,7 @@ fallback anywhere.
 
 ---
 
-## 20. Dependency lifecycle / heavy-object reuse
+## 21. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -837,7 +959,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 21. Known limitations
+## 22. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value

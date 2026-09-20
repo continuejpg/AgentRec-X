@@ -50,10 +50,12 @@ from recommendation.control import (  # noqa: E402
 from recommendation.evaluation.agent import (  # noqa: E402
     ABLATION_ADAPTIVE,
     ABLATION_DECIDE_ONCE,
+    ABLATION_MODEL_POLICY,
     EVALUATION_CASES,
     CaseRunner,
     DecidingOncePolicy,
     EvaluationCase,
+    build_model_policy_factory,
     load_cases,
 )
 from recommendation.evaluation.agent.runner import build_adaptive_policy  # noqa: E402
@@ -81,7 +83,12 @@ class _Map:
 
 
 def _reasoner() -> GroundedReasoner:
-    """A reasoner over the suite catalogue."""
+    """A reasoner over the suite catalogue.
+
+    Built from a harness that is given ``catalog_rows``, because the default harness keyed its
+    catalogue to the same rows the *engine* returns - and several cases drive the engine with
+    nothing, which would otherwise leave the reasoner over an empty catalogue.
+    """
     return GroundedReasoner(
         build_control_harness(catalog_rows=CANDIDATE_ROWS).parts["enricher"].metadata
     )
@@ -95,6 +102,9 @@ def _factory(case: EvaluationCase, policy: Any, limits: Any) -> Any:
         limits=limits,
         rows=() if empty_history else CANDIDATE_ROWS,
         catalog_rows=CANDIDATE_ROWS,
+        engine_error=(
+            RuntimeError("history source unavailable") if case.history_source_fails else None
+        ),
     )
     metadata = harness.parts["enricher"].metadata
     harness.controller._reasoning = ReasoningExecutor(GroundedReasoner(metadata))  # noqa: SLF001
@@ -112,15 +122,26 @@ def run(*, json_path: Path | None = None) -> int:
     print(" AgentRec-X 2.0-alpha agent evaluation plane")
     print("=" * 78)
     print()
-    print(f" cases: {len(EVALUATION_CASES)}   variants: {ABLATION_ADAPTIVE}, {ABLATION_DECIDE_ONCE}")
+    print(
+        f" cases: {len(EVALUATION_CASES)}   variants: "
+        f"{ABLATION_ADAPTIVE}, {ABLATION_DECIDE_ONCE}, {ABLATION_MODEL_POLICY}"
+    )
     print()
 
     reports: dict[str, Any] = {}
-    for variant, policy_for in (
+    variants: tuple[tuple[str, Any], ...] = (
         (ABLATION_ADAPTIVE, build_adaptive_policy),
         (ABLATION_DECIDE_ONCE, lambda case: DecidingOncePolicy(build_adaptive_policy(case))),
-    ):
-        runner = CaseRunner(_factory, variant=variant)
+        # Phase 1: a model-driven policy, driven by a deterministic observation-reactive double so
+        # the comparison stays offline and reproducible.
+        (ABLATION_MODEL_POLICY, build_model_policy_factory()),
+    )
+    for variant, policy_for in variants:
+        # The policy is built per case and handed in explicitly.  Letting the runner build it
+        # instead would silently fall back to the adaptive default whenever a factory is not
+        # wired through, which would mislabel the run rather than fail it - so the smoke always
+        # passes the policy it means to measure.
+        runner = CaseRunner(_factory, variant=variant, policy_factory=None)
         print(f" {variant}")
         outcomes = []
         for case in load_cases():
@@ -128,9 +149,13 @@ def run(*, json_path: Path | None = None) -> int:
             outcomes.append(outcome)
             mark = "PASS" if outcome.passed else "FAIL"
             actions = " -> ".join(outcome.trajectory.action_sequence()) or "(none)"
+            # The policy that actually decided, read back from the run: a variant label is a
+            # claim, and printing the recorded policy is what makes the claim checkable.
+            policies = ",".join(outcome.trajectory.policy_names()) or "unrecorded"
             print(
                 f"   [{mark}] {case.case_id:32s} {outcome.trajectory.terminal.value:19s} "
-                f"tools={outcome.trajectory.tool_calls} steps={outcome.trajectory.steps}"
+                f"tools={outcome.trajectory.tool_calls} steps={outcome.trajectory.steps} "
+                f"policy={policies}"
             )
             print(f"          {actions}")
             if not outcome.passed:
@@ -156,6 +181,7 @@ def run(*, json_path: Path | None = None) -> int:
                     "passed": outcome.passed,
                     "terminal": outcome.trajectory.terminal.value,
                     "actions": list(outcome.trajectory.action_sequence()),
+                    "policies": list(outcome.trajectory.policy_names()),
                     "failures": list(outcome.metrics.failures()),
                     "attributed": outcome.attribution.attributed,
                 }

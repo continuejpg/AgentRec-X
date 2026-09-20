@@ -911,6 +911,15 @@ class TrajectoryStep(BaseModel):
     #: budget, refusal).  Kept short and payload-free.
     note: str | None = Field(default=None, max_length=280)
 
+    #: Safe diagnostics about *who decided* this step, when the policy reports any.
+    #:
+    #: A model-driven policy records which policy was used, which action it proposed, whether
+    #: parsing succeeded, how many model calls it took, and whether an answer needed
+    #: correction - enough to answer "was this a model decision, and did it go well?" without
+    #: putting a prompt, a model's chain-of-thought, or any product fact into the trajectory.
+    #: A deterministic policy reports nothing here, which is itself the signal.
+    policy_metadata: dict[str, Any] = Field(default_factory=dict)
+
 
 # --------------------------------------------------------------------------- #
 # Policy seam
