@@ -102,6 +102,7 @@ from .grounding import (
 )
 from .loop import LOOP_CONTROLLER_VERSION, LoopController, LoopResult, build_run_id
 from .policy import RECOMMENDATION_FIRST, RuleBasedPolicy
+from .reasoning_executor import REASONING_ACTIONS, ReasoningExecutor
 from .schemas import (
     ARGUMENTS_BY_ACTION,
     CANDIDATE_ACTIONS,
@@ -113,9 +114,13 @@ from .schemas import (
     ActionKind,
     ActionProposal,
     AgentPolicy,
+    BundleObservation,
     CandidateSetObservation,
     ClarificationObservation,
+    ComparisonObservation,
+    CompatibilityObservation,
     ControlState,
+    DetailObservation,
     DomainResult,
     FailureObservation,
     LoopLimits,
@@ -126,6 +131,7 @@ from .schemas import (
     RunStatus,
     StateChange,
     TerminationReason,
+    TradeOffObservation,
     TrajectoryStep,
     ValidatedAction,
     VerificationResult,
@@ -177,7 +183,14 @@ __all__ = [
     "CandidateLedger",
     "CandidatePlane",
     "CandidateProvenance",
+    "BundleObservation",
     "CandidateSetObservation",
+    "ComparisonObservation",
+    "CompatibilityObservation",
+    "DetailObservation",
+    "REASONING_ACTIONS",
+    "ReasoningExecutor",
+    "TradeOffObservation",
     "CandidateSource",
     "CandidateSourceTool",
     "CandidateSourceUnavailable",

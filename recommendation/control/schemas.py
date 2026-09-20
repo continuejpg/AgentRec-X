@@ -90,9 +90,13 @@ __all__ = [
     "ActionKind",
     "ActionProposal",
     "AgentPolicy",
+    "BundleObservation",
     "CandidateSetObservation",
     "ClarificationObservation",
+    "ComparisonObservation",
     "ControlState",
+    "CompatibilityObservation",
+    "DetailObservation",
     "DomainResult",
     "FailureObservation",
     "LoopLimits",
@@ -104,6 +108,7 @@ __all__ = [
     "STAGE_1_ACTIONS",
     "StateChange",
     "TerminationReason",
+    "TradeOffObservation",
     "TrajectoryStep",
     "ValidatedAction",
     "VerificationResult",
@@ -715,6 +720,103 @@ class RecommendationDomainResult(DomainResult):
     #: Always ``False``: a domain result is never policy-visible.  Present as an explicit,
     #: assertable statement of the boundary rather than an implicit convention.
     policy_visible: Literal[False] = False
+
+
+class DetailObservation(Observation):
+    """Stage 4: grounded facts for candidates the run already holds.
+
+    This is the one observation family that **does** carry product facts, and the reason is
+    that a reasoning action's whole purpose is to obtain them.  The boundary it respects is
+    different from the candidate boundary rather than looser than it:
+
+    * every value here was copied out of the normalized catalogue by the trusted reasoner;
+    * an attribute the catalogue does not contain appears as ``UNKNOWN``, never as an
+      approximation;
+    * nothing here can add, drop or reorder a candidate - the action is read-only, and the
+      observation carries no candidate-generation channel.
+
+    ``facts`` is keyed by ``parent_asin`` and holds only the whitelisted display attributes
+    the reasoner exposes.
+    """
+
+    kind: str = "details"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    facts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    requested: tuple[str, ...] = ()
+    unknown: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class ComparisonObservation(Observation):
+    """Stage 4: a side-by-side comparison over grounded attributes.
+
+    ``rows`` carries one entry per compared attribute with each product's value, using
+    ``"UNKNOWN"`` where the catalogue is silent.  A row whose values are all unknown is still
+    present: the absence of a shared fact is itself a finding.
+    """
+
+    kind: str = "comparison"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    compared: tuple[str, ...] = ()
+    rows: tuple[dict[str, Any], ...] = ()
+    unsupported_attributes: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class TradeOffObservation(Observation):
+    """Stage 4: an ordering by a stated priority, with every absence reported.
+
+    ``order`` contains only the products that actually carry the fact.  ``unknown`` names the
+    rest, so a policy can see that the ordering is partial rather than assuming it is total.
+    ``supported`` is false when the catalogue cannot ground the priority at all, in which case
+    ``order`` is empty and nothing was ordered.
+    """
+
+    kind: str = "trade_off"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    priority: str = ""
+    attribute: str | None = None
+    supported: bool = False
+    order: tuple[str, ...] = ()
+    unknown: tuple[str, ...] = ()
+    reason: str | None = Field(default=None, max_length=200)
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class CompatibilityObservation(Observation):
+    """Stage 4: a three-state compatibility verdict.
+
+    ``unknown`` is a first-class outcome.  This catalogue carries no interface or fitment
+    semantics, so a requirement naming one is unresolved rather than compatible - the
+    observation never upgrades "we could not check" into "it fits".
+    """
+
+    kind: str = "compatibility"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    verdict: Literal["compatible", "incompatible", "unknown"] = "unknown"
+    requirement_attribute: str = ""
+    requirement_value: str = ""
+    members: tuple[str, ...] = ()
+    checks_performed: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class BundleObservation(Observation):
+    """Stage 4: what a set of grounded products supports as a bundle.
+
+    Aggregates are reported with their own status: ``grounded`` only when every member carries
+    the fact, otherwise ``unknown`` with the blocking members named.  A partial sum is never
+    reported as the total, and no cart, order or transaction concept exists here.
+    """
+
+    kind: str = "bundle"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    members: tuple[str, ...] = ()
+    member_count: int = Field(default=0, ge=0)
+    total_price: dict[str, Any] = Field(default_factory=dict)
+    total_weight_kg: dict[str, Any] = Field(default_factory=dict)
+    shared_categories: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
 
 
 # --------------------------------------------------------------------------- #

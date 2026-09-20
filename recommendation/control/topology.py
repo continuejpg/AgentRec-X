@@ -68,6 +68,7 @@ __all__ = [
     "NODE_INITIALIZE",
     "NODE_OBSERVE",
     "NODE_POLICY",
+    "NODE_REASON",
     "NODE_REFUSE",
     "NODE_UPDATE_STATE",
     "NODE_VALIDATE_ACTION",
@@ -89,6 +90,7 @@ NODE_OBSERVE = "observe"
 NODE_UPDATE_STATE = "update_state"
 NODE_COMPLETE = "complete"
 NODE_CLARIFY = "clarify"
+NODE_REASON = "reason"
 NODE_FINALIZE = "finalize"
 NODE_REFUSE = "refuse"
 NODE_ABORT = "abort"
@@ -107,6 +109,7 @@ LOOP_NODE_NAMES: tuple[str, ...] = tuple(
             NODE_INITIALIZE,
             NODE_OBSERVE,
             NODE_POLICY,
+            NODE_REASON,
             NODE_REFUSE,
             NODE_UPDATE_STATE,
             NODE_VALIDATE_ACTION,
@@ -207,6 +210,8 @@ def _dispatch(state: LoopGraphState) -> Command:
         return Command(update=_advance(state), goto=NODE_COMPLETE)
     if target == "clarify":
         return Command(update=_advance(state), goto=NODE_CLARIFY)
+    if target == "reason":
+        return Command(update=_advance(state), goto=NODE_REASON)
     return Command(update=_advance(state), goto=NODE_EXECUTE)
 
 
@@ -242,6 +247,20 @@ def _update_state(state: LoopGraphState) -> Command:
     """
     state["engine"].update_state()
     return Command(update=_advance(state), goto=NODE_CHECK_LIMITS)
+
+
+def _reason(state: LoopGraphState) -> Command:
+    """Execute one read-only reasoning action and continue the loop.
+
+    Reasoning runs no candidate source, so it is not a tool call and does not consume the
+    tool-call budget; control returns to the policy through the normal phases.
+    """
+    engine = state["engine"]
+    engine.reason()
+    engine.verify()
+    engine.observe()
+    engine.update_state()
+    return Command(update=_advance(state), goto=END if engine.control.is_terminal else NODE_POLICY)
 
 
 def _clarify(state: LoopGraphState) -> Command:
@@ -318,6 +337,7 @@ def build_loop_graph() -> Any:
         (NODE_VERIFY, _verify),
         (NODE_OBSERVE, _observe),
         (NODE_UPDATE_STATE, _update_state),
+        (NODE_REASON, _reason),
         (NODE_CLARIFY, _clarify),
         (NODE_COMPLETE, _complete),
         (NODE_FINALIZE, _finalize),
@@ -350,6 +370,7 @@ DECLARED_CYCLE_EDGES: tuple[tuple[str, str], ...] = (
     # control returns to the policy.
     (NODE_UPDATE_STATE, NODE_CHECK_LIMITS),
     # The completion branch.
+    (NODE_DISPATCH, NODE_REASON),
     (NODE_DISPATCH, NODE_CLARIFY),
     (NODE_DISPATCH, NODE_COMPLETE),
     (NODE_COMPLETE, NODE_FINALIZE),

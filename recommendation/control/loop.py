@@ -48,6 +48,8 @@ from .capability import RecommendFromHistoryCapability
 from .completion import CompletionGuard
 from .context import CandidateState, PolicyContext, project_constraints, project_intent
 from .schemas import (
+    CANDIDATE_ACTIONS,
+    READ_ONLY_ACTIONS,
     ActionKind,
     ActionProposal,
     AgentPolicy,
@@ -209,6 +211,7 @@ class _LoopEngine:
         turn_id: str | None,
         run_id: str,
         task_state: TaskState | None = None,
+        reasoning_executor: Any = None,
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -248,6 +251,11 @@ class _LoopEngine:
         self.completion: VerificationResult | None = None
         self.last_action_id = f"init:{run_id}"
         self.last_proposal_rejected = False
+
+        #: Stage 4 read-only reasoning executor, or ``None`` when the deployment configures
+        #: no catalogue reasoning.  Validation already refused a reasoning action that was
+        #: not offered; the executor is what makes the offered ones executable.
+        self.reasoning = reasoning_executor
 
         self.last_observation: Any = None
         self.last_verification: VerificationResult | None = None
@@ -361,6 +369,11 @@ class _LoopEngine:
         # make the loop an interrogation rather than a control loop.
         if not self.task_state.is_waiting_for_user and self.clarification is None:
             actions.append(ActionKind.ASK_CLARIFICATION)
+        # Stage 4: read-only reasoning is offered only when an executor is configured, and
+        # only while there is a candidate to reason about.  Offering a facts question with
+        # nothing to ask about would invite a policy to burn the step budget.
+        if self.reasoning is not None and self.candidates_grounded:
+            actions.extend(self.reasoning.available_actions())
         actions.append(ActionKind.FINISH)
         return tuple(actions)
 
@@ -512,6 +525,8 @@ class _LoopEngine:
             return "complete"
         if self.validated.action is ActionKind.ASK_CLARIFICATION:
             return "clarify"
+        if self.validated.action in READ_ONLY_ACTIONS:
+            return "reason"
         return "execute"
 
     # -- execute ----------------------------------------------------------- #
@@ -585,8 +600,14 @@ class _LoopEngine:
     # -- verify ------------------------------------------------------------ #
 
     def verify(self) -> StepOutcome:
-        """Verify a raw domain result.  A result that already failed stays failed."""
+        """Verify a raw domain result.  A result that already failed stays failed.
+
+        A reasoning step set its own verdict in :meth:`reason` - there is no raw domain
+        payload to verify a second time - so this phase leaves it alone.
+        """
         if not self.has_current_action():
+            return StepOutcome.proceed()
+        if self.validated is not None and self.validated.action in READ_ONLY_ACTIONS:
             return StepOutcome.proceed()
         if self.domain_result is None:
             return StepOutcome.proceed()
@@ -600,8 +621,14 @@ class _LoopEngine:
     # -- observe ----------------------------------------------------------- #
 
     def observe(self) -> StepOutcome:
-        """Adapt the verified (or refused) result into the policy-visible observation."""
+        """Adapt the verified (or refused) result into the policy-visible observation.
+
+        A reasoning step already produced its observation in :meth:`reason`; adapting it again
+        would either duplicate it or overwrite grounded facts with a refusal.
+        """
         if not self.has_current_action():
+            return StepOutcome.proceed()
+        if self.validated is not None and self.validated.action in READ_ONLY_ACTIONS:
             return StepOutcome.proceed()
         if self.domain_result is None or self.verification is None:
             return StepOutcome.proceed()
@@ -629,10 +656,18 @@ class _LoopEngine:
         self.last_verification = self.verification
         self.last_observation = self.observation
 
-        if self.verification.verified and self.domain_result is not None:
+        is_reasoning = (
+            self.validated is not None and self.validated.action in READ_ONLY_ACTIONS
+        )
+        if self.verification.verified and self.domain_result is not None and not is_reasoning:
             self.produced_recommendation = True
             self.candidates_grounded = self.domain_result.returned_k > 0
             self._adopt_candidates(self.domain_result)
+        elif is_reasoning:
+            # Reasoning adds no candidates and removes none: the candidate state is left
+            # exactly as it was, which is what keeps "reasoning cannot widen the candidate
+            # set" true through the update phase as well as the execution phase.
+            pass
         else:
             self.produced_recommendation = False
             self.candidates_grounded = False
@@ -666,12 +701,74 @@ class _LoopEngine:
                 else f"result refused: {self.verification.code}"
             ),
         )
+        # Only a *candidate-producing* action consumes a tool call.  Reasoning reads facts
+        # about candidates the run already holds, and clarification runs nothing at all; if
+        # either were charged to the tool budget, a facts question would silently reduce the
+        # run's ability to retrieve, which is what the budget exists to bound.
         self.control = self.control.advanced(
             action=self.validated.action,
             action_id=self.validated.action_id,
-            consumed_tool_call=True,
+            consumed_tool_call=self.validated.action in CANDIDATE_ACTIONS,
         )
         self.last_proposal_rejected = False
+        return StepOutcome.proceed()
+
+    # -- reasoning branch -------------------------------------------------- #
+
+    def reason(self) -> StepOutcome:
+        """Execute one read-only reasoning action through the trusted executor.
+
+        Reasoning actions are read-only by contract: they read facts about candidates the run
+        already holds and can never add one.  This phase therefore runs **no** candidate
+        source, touches no ledger and consumes no tool-call budget - a question about facts is
+        not a retrieval.
+
+        A reasoning failure is normalised into a failed observation rather than crashing the
+        loop, exactly as a capability failure is.
+        """
+        if not self.has_current_action():  # pragma: no cover - see dispatch_target
+            return StepOutcome.proceed()
+        if self.reasoning is None:
+            # No catalogue reasoning is configured.  The action was offered only if an
+            # executor exists, so reaching here means the deployment changed mid-run; refuse
+            # rather than silently succeed.
+            self.verification = VerificationResult(
+                verified=False,
+                code="reasoning_unavailable",
+                detail="no reasoning executor is configured for this deployment",
+                checks=("reasoning_available",),
+            )
+            self.observation = self.observation_adapter.failed_observation(
+                action_id=self.validated.action_id,
+                step_index=self.control.step_count,
+                action=self.validated.action,
+                code="reasoning_unavailable",
+            )
+            return StepOutcome.proceed()
+        try:
+            # The reasoning result *is* the observation: unlike a candidate action there is no
+            # raw domain payload to minimise, because the reasoner already returns only
+            # whitelisted, grounded facts.  Nothing is adopted into the candidate state.
+            self.observation = self.reasoning.execute(self.validated)
+            self.verification = VerificationResult(
+                verified=True,
+                code="reasoning_completed",
+                detail=None,
+                checks=("grounded_facts_only", "read_only"),
+            )
+        except Exception as exc:  # noqa: BLE001 - normalised into an observation
+            self.verification = VerificationResult(
+                verified=False,
+                code="reasoning_failed",
+                detail=f"reasoning raised {type(exc).__name__}",
+                checks=("execution",),
+            )
+            self.observation = self.observation_adapter.failed_observation(
+                action_id=self.validated.action_id,
+                step_index=self.control.step_count,
+                action=self.validated.action,
+                code=_error_code(exc),
+            )
         return StepOutcome.proceed()
 
     # -- clarification branch ---------------------------------------------- #
@@ -842,9 +939,10 @@ class _LoopEngine:
                 step_index=self.validated.step_index,
                 action=ActionKind.FINISH,
                 produced_candidates=self.produced_recommendation,
-                candidate_count=(
-                    self.observation.returned_k if self.observation is not None else 0
-                ),
+                # Only a candidate-producing observation reports a candidate count.  A
+                # reasoning or clarification observation has no such field, and reading one
+                # unconditionally is how a facts question crashed finalization.
+                candidate_count=int(getattr(self.observation, "returned_k", 0) or 0),
                 memory_write_attempted=self.memory_service is not None,
             ),
             note="completion accepted; run finished",
@@ -1028,6 +1126,7 @@ class LoopController:
         user_key: str | None = None,
         limits: LoopLimits | None = None,
         driver: str = "graph",
+        reasoning_executor: Any = None,
     ) -> None:
         if not callable(getattr(policy, "choose", None)):
             raise PolicyActionError("policy must provide a callable choose(context) method")
@@ -1059,6 +1158,7 @@ class LoopController:
         self._user_key = user_key.strip() if isinstance(user_key, str) else None
         self._limits = limits or LoopLimits()
         self._driver = driver
+        self._reasoning = reasoning_executor
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -1081,6 +1181,16 @@ class LoopController:
     def driver(self) -> str:
         """Which driver runs the loop: ``"graph"`` or ``"direct"``."""
         return self._driver
+
+    @property
+    def reasoning_executor(self) -> Any:
+        """The Stage 4 read-only reasoning executor, or ``None`` when not configured."""
+        return self._reasoning
+
+    @property
+    def offers_reasoning(self) -> bool:
+        """True when this deployment can execute read-only reasoning actions."""
+        return self._reasoning is not None
 
     @property
     def uses_memory(self) -> bool:
@@ -1167,6 +1277,7 @@ class LoopController:
             turn_id=agent_input.turn_id,
             run_id=run_id or build_run_id(),
             task_state=task_state,
+            reasoning_executor=self._reasoning,
         )
 
     def _run(
@@ -1209,6 +1320,14 @@ class LoopController:
                 return engine.result(outcome)
 
             target = engine.dispatch_target()
+            if target == "reason":
+                engine.reason()
+                engine.verify()
+                engine.observe()
+                outcome = engine.update_state()
+                if not outcome.continue_loop:  # pragma: no cover - defensive
+                    return engine.result(outcome)
+                continue
             if target == "clarify":
                 outcome = engine.ask_clarification()
                 engine.finish_clarification()
