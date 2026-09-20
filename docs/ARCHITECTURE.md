@@ -408,7 +408,77 @@ the trajectory cannot become a copy of the user's preferences.
 
 ---
 
-## 9. Product metadata and candidate-scoped RAG
+## 9. Reasoning plane (Stage 4, IMPLEMENTED)
+
+> Reasoning may change a decision; reasoning may not change a fact.
+
+`recommendation/control/grounded_reasoning.py` reads only normalized catalogue records.
+Every conclusion traces back to an attribute the catalogue actually contains, and an absent
+attribute yields `UNKNOWN` rather than a plausible value. No model call is involved.
+
+What the shipped catalogue supports (measured on 20 000 records of the real artifact):
+
+| attribute | coverage | used for |
+| --- | --- | --- |
+| `Item Weight` (or `Package Weight`) | 96% | deterministic weight/portability constraints |
+| `Item Package Dimensions L x W x H` | 67% | deterministic dimension facts |
+| `price_text` | 77% | deterministic budget constraints |
+| `Color` | 74% | matching an explicit colour constraint |
+| `Brand Name` | 69% | matching an explicit brand constraint |
+| `Material` | 64% | comparison only |
+| categories / features | 96%+ | category constraints, comparison |
+
+**Facts.** `GroundedFacts` exposes each attribute verbatim, plus deterministic unit conversion
+for the loose human strings the artifact carries (`"1.2 Kilograms"` → 1.2 kg,
+`"4.49 x 4.49 x 1.5 inches"` → centimetres). An unreadable value yields `None`; the caller
+reports `UNKNOWN`. "Identity not in the catalogue" (`None`) and "in the catalogue with no
+attributes" (`UNKNOWN`) are different answers and are never conflated.
+
+**Hard constraints are three-state.** `SATISFIED` / `VIOLATED` / `UNKNOWN`, where `UNKNOWN` is
+neither a pass nor a failure. A constraint whose required fact is absent must not silently pass
+— that would fabricate compliance — and must not automatically fail — that would fabricate a
+violation. This is what lets `CompletionGuard` refuse to certify a run whose constraints were
+never actually verified. Kinds: `price_max`, `price_min`, `weight_max`, `category`, `brand`,
+`color`.
+
+**Comparison** emits a row even when every value is `UNKNOWN` (the absence of a shared fact is
+a finding) and reports an unsupported attribute request rather than ignoring it.
+
+**Trade-off** resolves a stated priority (`lighter` → weight, `cheaper` → price, `rating`) onto
+a catalogue attribute, orders only the products that carry the fact, and names the rest as
+unknown. It never places a product it cannot ground.
+
+**Compatibility is grounded or `UNKNOWN`.** This catalogue carries **no interface, fitment or
+model-version semantics**, so a requirement naming one of those returns `UNKNOWN` no matter how
+many products are supplied — the reasoner never manufactures a "these probably fit" verdict for
+a check it did not perform. Requirements it *can* ground (brand, category, colour) are answered
+from catalogue attributes, and a member lacking the attribute makes the whole check unresolved.
+
+**Bundles** emit an aggregate only when every member carries the fact; otherwise the blocking
+members are named and the aggregate is `UNKNOWN`. A partial sum is never presented as a total.
+A bundle is a *recommendation set under aggregate constraints*: there is no cart, order or
+transaction concept anywhere in the result.
+
+The reasoner is **read-only**. It cannot add a candidate, reorder the ledger or approve a
+completion, and a test asserts it exposes no such surface.
+
+### Not implemented (documented, not claimed)
+
+* **No `CHECK_COMPATIBILITY` semantics for interfaces or fitment**, because the catalogue has
+  none. The verdict is `UNKNOWN` by design; adding real fitment checks would require a
+  different data source.
+* **No semantic reasoning over requirements.** A requirement is matched against catalogue
+  wording deterministically; there is no interpretation of an open-ended natural-language
+  requirement.
+* **The reasoning capabilities are not yet wired as loop actions.** The reasoner is a trusted,
+  tested component and the `ActionKind` members (`GET_DETAILS`, `COMPARE`, `TRADE_OFF`,
+  `CHECK_COMPATIBILITY`, `BUNDLE`, `VERIFY`) and their argument contracts exist, but no executor
+  maps an action onto the reasoner yet, so a proposal naming one is still refused.
+* **Stage 6 (evaluation plane) is not implemented.**
+
+---
+
+## 10. Product metadata and candidate-scoped RAG
 
 Two stages, deliberately split:
 
@@ -435,7 +505,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 10. Preference memory
+## 11. Preference memory
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -461,7 +531,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 11. Preference evidence
+## 12. Preference evidence
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -489,7 +559,7 @@ drops or reorders anything.
 
 ---
 
-## 12. Deterministic reranking
+## 13. Deterministic reranking
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -528,7 +598,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 13. Web / session layer
+## 14. Web / session layer
 
 Three layers, each with a narrow job:
 
@@ -566,7 +636,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 14. State ownership
+## 15. State ownership
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -585,7 +655,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 15. Trust boundaries
+## 16. Trust boundaries
 
 ```mermaid
 flowchart TD
@@ -623,7 +693,7 @@ flowchart TD
 
 ---
 
-## 16. Failure behaviour
+## 17. Failure behaviour
 
 The system prefers explicit failure to plausible degradation.
 
@@ -644,7 +714,7 @@ fallback anywhere.
 
 ---
 
-## 17. Determinism and reproducibility
+## 18. Determinism and reproducibility
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -665,7 +735,7 @@ fallback anywhere.
 
 ---
 
-## 18. Dependency lifecycle / heavy-object reuse
+## 19. Dependency lifecycle / heavy-object reuse
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -697,7 +767,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 19. Known limitations
+## 20. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value
