@@ -44,9 +44,14 @@ from recommendation.control import (  # noqa: E402
     CandidateLedger,
     CandidatePlane,
     CatalogSearchSource,
+    EvidenceExecutor,
+    EvidenceStore,
     GroundedReasoner,
     GroundingVerifier,
+    LocalEvidenceArtifact,
     ReasoningExecutor,
+    SimilarItemSource,
+    build_similar_item_index,
 )
 from recommendation.evaluation.agent import (  # noqa: E402
     ABLATION_ADAPTIVE,
@@ -60,6 +65,7 @@ from recommendation.evaluation.agent import (  # noqa: E402
     load_cases,
 )
 from recommendation.evaluation.agent.runner import build_adaptive_policy  # noqa: E402
+from experiments._harness import EVIDENCE_ARTIFACT, evidence_enabled  # noqa: E402
 from tests.agent_reranking_fixture import CANDIDATE_ROWS  # noqa: E402
 from tests.control_fixture import build_control_harness  # noqa: E402
 
@@ -100,12 +106,14 @@ def _factory(
     policy: Any,
     limits: Any,
     task_state: Any = None,
+    reasoner: Any = None,
 ) -> Any:
     """Compose a control plane for one case, with a widened catalogue.
 
     ``task_state`` is the case's declared hard constraints, so a case that asserts enforcement
-    runs against a constraint that is genuinely active.  It is supplied by the runner at run
-    time, so the factory only has to accept it.
+    runs against a constraint that is genuinely active.  ``reasoner`` is handed in by the runner
+    when a reasoner factory was supplied: the run and the measurement must share one reasoner, or
+    a case that acquires evidence during its turn would be graded by a reasoner that never saw it.
     """
     empty_history = "recovery-required" in case.case_id
     harness = build_control_harness(
@@ -118,7 +126,15 @@ def _factory(
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    reasoner = GroundedReasoner(metadata)
+    # Phase 4: the evidence store is built before the reasoner because the reasoner consults it.
+    # Both are created only for the cases that opt in, so every pre-Phase-4 case keeps the runtime
+    # it was written for and the ablation stays honest.
+    wants_evidence = evidence_enabled(case)
+    store = EvidenceStore() if wants_evidence else None
+    if reasoner is None:
+        reasoner = GroundedReasoner(metadata, evidence=store)
+    elif wants_evidence and getattr(reasoner, "evidence", None) is None:
+        reasoner._evidence = store  # noqa: SLF001 - run and grader share one overlay
     harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001
     # Phase 2: the same reasoner drives task-scoped constraint eligibility, so a case that
     # declares a hard constraint is run *and measured* against one enforced constraint set.
@@ -127,7 +143,14 @@ def _factory(
         ledger=CandidateLedger(),
         grounding=GroundingVerifier(_Map(), metadata),
         catalog_search=CatalogSearchSource(metadata),
+        similar_item_tool=(
+            SimilarItemSource(build_similar_item_index(metadata)) if wants_evidence else None
+        ),
     )
+    if store is not None:
+        harness.controller._evidence = EvidenceExecutor(  # noqa: SLF001
+            [LocalEvidenceArtifact(EVIDENCE_ARTIFACT)], store
+        )
     return harness.controller
 
 
@@ -160,7 +183,13 @@ def run(*, json_path: Path | None = None) -> int:
         print(f" {variant}")
         outcomes = []
         for case in load_cases():
-            outcome = runner.run(case, policy=policy_for(case), reasoner=_reasoner())
+            # Passed as a *factory* so the runner hands the same reasoner to the controller and to
+            # the constraint measurement.  A case may acquire trusted evidence during its turn, and
+            # a grader holding a different reasoner would not see it - it would report a constraint
+            # the run just resolved as unresolved and fail a run that behaved correctly.
+            outcome = runner.run(
+                case, policy=policy_for(case), reasoner_factory=lambda _case: _reasoner()
+            )
             outcomes.append(outcome)
             mark = "PASS" if outcome.passed else "FAIL"
             actions = " -> ".join(outcome.trajectory.action_sequence()) or "(none)"
