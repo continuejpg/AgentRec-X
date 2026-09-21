@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments._harness import case_controller_factory, catalog_reasoner  # noqa: E402
+from experiments._harness import case_controller_factory, phase4_reasoner  # noqa: E402
 from recommendation.control.model_client import ModelCallError  # noqa: E402
 from recommendation.control.model_recorder import (  # noqa: E402
     DEFAULT_RECORDINGS_DIR,
@@ -107,6 +107,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help=f"recording file (default: {DEFAULT_RECORDINGS_DIR}/deepseek_agent_suite.jsonl)",
     )
     parser.add_argument("--output", default=None, help="write the JSON report to this path")
+    parser.add_argument(
+        "--only",
+        default=None,
+        help=(
+            "run a single case by id, for the minimal live smoke.  Any other value runs the whole "
+            "suite; the case set is never filtered when --only is absent, so a full run always "
+            "measures every case"
+        ),
+    )
     parser.add_argument("--max-attempts", type=int, default=2, help="model calls per decision")
     parser.add_argument(
         "--parse-protocol",
@@ -275,6 +284,7 @@ def run(
     parse_protocol_version: int | None = None,
     prompt_version: int | None = None,
     system_prompt: str | None = None,
+    only: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Run the suite and return ``(exit_code, report)``.
 
@@ -301,11 +311,27 @@ def run(
     # constraint as unchecked and marks a completed run as an ``unverified_completion``.  Phase 3
     # omitted it, so its report falsely failed ``hard-constraint``; the recording is unaffected
     # (the runtime does its own evaluation), only the measurement was wrong.
-    reasoner_factory = catalog_reasoner
+    # Passed as a factory, not a built reasoner: the runner then hands the same instance to the
+    # controller factory *and* uses it to grade, which is what lets a case that acquires trusted
+    # evidence during its turn be measured against the facts it acquired.  A pre-built reasoner
+    # would be a different object from the one the controller creates, and the evidence cases
+    # would be graded as unresolved.
+    reasoner_factory = phase4_reasoner
     outcomes: list[Any] = []
     started = time.monotonic()
-    for case in load_cases():
-        outcome = runner.run(case, policy=factory(case), reasoner=reasoner_factory())
+    cases = load_cases()
+    if only is not None:
+        selected = tuple(case for case in cases if case.case_id == only)
+        if not selected:
+            raise ModelCallError(
+                f"no case with id {only!r}; known: {', '.join(c.case_id for c in cases)}",
+                code="unknown_case",
+            )
+        cases = selected
+    for case in cases:
+        outcome = runner.run(
+            case, policy=factory(case), reasoner_factory=reasoner_factory
+        )
         outcomes.append(outcome)
         if on_case is not None:
             on_case(case, outcome)
@@ -398,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
             parse_protocol_version=args.parse_protocol,
             prompt_version=args.prompt_version,
             system_prompt=_prompt_for(args.prompt),
+            only=args.only,
         )
     except ModelCallError as exc:
         # A configuration or recording problem is reported as an actionable message, not a

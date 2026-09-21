@@ -1513,15 +1513,28 @@ EVIDENCE_ACTIONS`; reasoning remains budget-free.
 * **Evidence is a local artifact, not live retrieval.** Phase 4 acquires facts from a reproducible
   fixture. There is no external or web evidence source, so a constraint the artifact does not
   cover stays `UNKNOWN` — which is the honest outcome, not a gap the model can reason around.
-* **The Phase-4 capability has not been measured against the real provider yet — this is the
-  phase's outstanding step.** Everything offline is implemented and verified: the real
-  similar-item source, the trusted evidence source, the four new cases, and both deterministic
-  policies pass. What is missing is the Prompt-v2 re-run against DeepSeek to compare
-  before/after Phase 4 on task success, UNKNOWN resolution, repetition, tool calls, tokens and
-  latency. **No claim is made about the real model's behaviour with the new capability.** The
-  command is `.venv/bin/python -m experiments.live_agent_evaluation --mode record --confirm-live`
-  with the evidence and similar-item wiring enabled, and the changed variable is the capability —
-  the prompt is not to be tuned in the same experiment.
+* **The Phase-4 real-provider measurement exists, and its control is confounded.** Prompt v2
+  unchanged, DeepSeek `deepseek-flash`, 18 cases recorded live (77 calls, 129 267 tokens, 81 324 ms
+  model latency) and replayed exactly offline (77 replayed, 0 live, identical actions, terminals,
+  failures, constraint verdicts and attribution).
+
+  * **The capability works.** All three evidence cases passed against the real model, and it
+    actually used both new actions: `acquire_evidence` 13 times and `find_similar` 3 times across
+    the run. `evidence-satisfies` resolved `material` from `UNKNOWN` to a verdict and completed.
+  * **Task success is 10/18.** On the 14 cases shared with the Phase-3.1 run it is 7/14 against
+    the Phase-3.1 recording's 9/14 — but that comparison is **confounded** and should not be read
+    as a capability regression: the Phase-3.1 figure comes from *replaying an archived run* while
+    the Phase-4 figure is a *fresh live run*, so between-run model nondeterminism is mixed with
+    the capability change. Additionally the Phase-4 harness offers `find_similar`/`select_source`
+    for the Phase-4 cases, so the two arms do not see an identical action menu. A clean before/after
+    would need both arms run fresh under the same menu.
+  * **Retrieval is the model's weak point, not the source's.** `similar-item-recovery` failed
+    because the model retrieved from history instead of the catalogue, then called `find_similar`
+    three times on the same seed and asked a question — a policy-selection failure. Offline, the
+    same case passes both policies and the index expands 1 candidate to 4.
+  * **Every one of the 8 live failures is a policy-selection failure** — six over-clarifications
+    and two no-progress read repetitions. None was an evidence-capability failure, a retrieval
+    failure, or a runtime/trust-boundary failure.
 * **Evidence acquisition cannot resolve a constraint the artifact does not cover.** Adding the
   capability does not add facts: a candidate outside the evidence artifact stays `UNRESOLVED`, and
   the run ends in an honest refusal exactly as it did before. The four new cases show both the

@@ -49,6 +49,8 @@ from tests.control_fixture import build_control_harness  # noqa: E402
 
 __all__ = [
     "EVIDENCE_ARTIFACT",
+    "evidence_store_for",
+    "phase4_reasoner",
     "IdentityMap",
     "catalog_reasoner",
     "case_controller_factory",
@@ -102,11 +104,47 @@ def evidence_enabled(case: EvaluationCase) -> bool:
     return "evidence" in case.category or "similar" in case.category
 
 
+#: Per-case evidence stores, keyed by case id.  The controller factory and the reasoner factory
+#: must hand the *same* store to the run and to the constraint measurement: an evidence case
+#: acquires facts during its turn, and a grader whose reasoner held a different store would not
+#: see them, so it would report a constraint the run just resolved as unresolved.  Keyed by case
+#: because each case is an independent run, and two cases must never share acquired facts.
+_EVIDENCE_STORES: dict[str, EvidenceStore] = {}
+
+
+def evidence_store_for(case: EvaluationCase) -> EvidenceStore | None:
+    """The evidence store for one case, creating it on first request.
+
+    Returns ``None`` for a case that does not opt into Phase 4, so nothing is created for the
+    cases that must keep the pre-Phase-4 runtime.
+    """
+    if not evidence_enabled(case):
+        return None
+    store = _EVIDENCE_STORES.get(case.case_id)
+    if store is None:
+        store = EvidenceStore()
+        _EVIDENCE_STORES[case.case_id] = store
+    return store
+
+
+def phase4_reasoner(case: EvaluationCase) -> GroundedReasoner:
+    """A reasoner over the case's evidence store.
+
+    Used as the runner's ``reasoner_factory``: the runner builds it, hands it to the controller
+    factory, and grades with it, so both sides see one object and one overlay.
+    """
+    return GroundedReasoner(
+        build_control_harness(catalog_rows=CANDIDATE_ROWS).parts["enricher"].metadata,
+        evidence=evidence_store_for(case),
+    )
+
+
 def case_controller_factory(
     case: EvaluationCase,
     policy: Any,
     limits: Any,
     task_state: Any = None,
+    reasoner: Any = None,
 ) -> Any:
     """Compose the control plane for one case, with the real trusted components wired in.
 
@@ -124,11 +162,13 @@ def case_controller_factory(
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    # Phase 4: the evidence store is created before the reasoner because the reasoner consults it,
-    # and the two must be the *same* object - a store the reasoner did not see would record facts
-    # no verdict could ever use.
-    store = EvidenceStore() if evidence_enabled(case) else None
-    reasoner = GroundedReasoner(metadata, evidence=store)
+    # Phase 4: the store is the case-scoped one, so the reasoner the runner grades with and the
+    # reasoner driving the run consult a single overlay.  ``reasoner`` is normally handed in by
+    # the runner (which built it from ``phase4_reasoner``); the fallback keeps a direct caller -
+    # a test that builds the controller itself - working.
+    store = evidence_store_for(case)
+    if reasoner is None:
+        reasoner = GroundedReasoner(metadata, evidence=store)
     harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001 - deliberate wiring
     # Phase 2: the same reasoner drives task-scoped constraint eligibility, so a case that
     # declares a hard constraint is run *and measured* against one enforced constraint set.
