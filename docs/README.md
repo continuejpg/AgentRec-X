@@ -11,6 +11,7 @@ depth.
 | [USAGE.md](USAGE.md) | actually run the server, the demo, the API, the tests and the smokes — including troubleshooting |
 | [PROJECT_HISTORY.md](PROJECT_HISTORY.md) | see the milestone sequence, its commits, and the invariants that held across them |
 | [PHASE4_HANDOFF.md](PHASE4_HANDOFF.md) | pick up the current state: completed milestones, architectural invariants, measured results, remaining gaps, and what must not be reopened |
+| [TWOTOWER.md](TWOTOWER.md) | the post-Phase-5 Two-Tower retrieval baseline: architecture, objective, metrics, SASRec-vs-Two-Tower complementarity, and the frozen fusion ablation |
 | [PHASE5_HANDOFF.md](PHASE5_HANDOFF.md) | **current handoff**: the public-data recommendation benchmark — dataset and split, five comparable arms, Recall/NDCG/HR@10, the agent-selection ablation, leakage checks and limitations |
 
 Development instructions and engineering rules live in [AGENTS.md](../AGENTS.md).

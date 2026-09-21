@@ -95,6 +95,21 @@ ENV_AGENT_POLICY = "AGENTRECX_AGENT_POLICY"
 #: The policy name that opts into the real model.
 AGENT_POLICY_LLM = "llm"
 
+#: Opt-in switch for the Two-Tower candidate source (post-Phase-5 model expansion).
+#:
+#: Off by default, and separate from the model's presence on disk: a deployment that has
+#: trained a Two-Tower checkpoint must still say that it wants this run's candidate plane to
+#: consult it, so which sources a demo consults stays an explicit deployment decision.
+ENV_TWO_TOWER = "AGENTRECX_TWO_TOWER_CHECKPOINT"
+
+#: The id mapping that checkpoint was trained against.  Separate from ``AGENTRECX_MAPPINGS_PATH``
+#: because a Two-Tower model and the served demo engine can legitimately use different
+#: catalogues (the public benchmark catalogue versus the demo's small synthetic one), and
+#: reusing one mapping for both would either fail the cardinality check or silently resolve
+#: identities against the wrong catalogue.  Falls back to ``AGENTRECX_MAPPINGS_PATH`` when the
+#: two agree, which is the normal single-catalogue deployment.
+ENV_TWO_TOWER_MAPPINGS = "AGENTRECX_TWO_TOWER_MAPPINGS_PATH"
+
 #: Opt-in switch for real item-item retrieval.
 #:
 #: Building the TF-IDF index over the full 156 746-product catalogue was measured on this
@@ -161,6 +176,7 @@ class DemoAgentService:
         engine: Any,
         memory_service: Any = None,
         similar_item_tool: Any = None,
+        two_tower_tool: Any = None,
         policy_factory: Any = None,
         limits: LoopLimits = AGENT_LOOP_LIMITS,
         max_cached_controllers: int = DEFAULT_MAX_CACHED_CONTROLLERS,
@@ -173,6 +189,7 @@ class DemoAgentService:
         self._engine = engine
         self._memory_service = memory_service
         self._similar_item_tool = similar_item_tool
+        self._two_tower_tool = two_tower_tool
         #: Builds the run's policy.  Defaults to the deterministic, request-driven source plan;
         #: a deployment may inject the accepted model-driven policy instead.  Injection rather
         #: than a branch inside the loop is what keeps this endpoint's policy interchangeable.
@@ -207,6 +224,8 @@ class DemoAgentService:
                 kwargs["similar_item_tool"] = SimilarItemSource(
                     build_similar_item_index(metadata)
                 )
+        if kwargs.get("two_tower_tool") is None and _two_tower_enabled():
+            kwargs["two_tower_tool"] = _build_two_tower_tool()
         if kwargs.get("policy_factory") is None and llm_policy_selected():
             kwargs["policy_factory"] = _build_llm_policy_factory()
         return cls(**kwargs)
@@ -229,11 +248,28 @@ class DemoAgentService:
 
     @property
     def available_sources(self) -> tuple[str, ...]:
-        """The trusted candidate sources this deployment can actually consult."""
+        """The trusted candidate sources this deployment can actually consult.
+
+        This is the *reported* set, and it is reported honestly: a source appears only when its
+        tool is registered.  It can differ from what a policy is **offered**, which is the
+        controller's decision and is derived from the plane's registered tools - see
+        :attr:`consultable_note` for the one case where those differ today.
+        """
         sources = ["history", "catalog_search"]
         if self._similar_item_tool is not None:
             sources.append("similar_item")
+        if self._two_tower_tool is not None:
+            sources.append("two_tower")
         return tuple(sources)
+
+    @property
+    def consultable_note(self) -> str:
+        """A one-line statement of which actions the controller currently offers."""
+        return (
+            "history and catalog_search are reachable; a source registered without a "
+            "similar-item tool is reported as available but the controller does not yet offer "
+            "SELECT_SOURCE for it"
+        )
 
     def close(self) -> None:
         """Drop every cached controller.
@@ -302,6 +338,7 @@ class DemoAgentService:
             history_tool=self._tool,
             catalog_search=self._catalog_search,
             similar_item_tool=self._similar_item_tool,
+            two_tower_tool=self._two_tower_tool,
         )
         eligibility = CandidateEligibilityEvaluator(GroundedReasoner(self._metadata))
         policy = self._policy_factory(plan, k)
@@ -420,6 +457,36 @@ def _build_llm_policy_factory() -> Any:
         return LLMAgentPolicy(client, max_attempts=2)
 
     return factory
+
+
+def _two_tower_enabled() -> bool:
+    """True when the deployment named a Two-Tower checkpoint to consult as a source."""
+    return bool((os.environ.get(ENV_TWO_TOWER) or "").strip())
+
+
+def _build_two_tower_tool() -> Any:
+    """Compose the Two-Tower candidate source from the configured checkpoint.
+
+    The engine is built lazily here rather than at import time, so a deployment that does not
+    set the switch never loads the model or the id mapping.
+    """
+    from pathlib import Path as _Path
+
+    from recommendation.control.two_tower_source import TwoTowerSourceTool
+    from recommendation.inference import TwoTowerInferenceConfig, TwoTowerInferenceEngine
+
+    checkpoint = _Path((os.environ.get(ENV_TWO_TOWER) or "").strip())
+    mappings = os.environ.get(ENV_TWO_TOWER_MAPPINGS) or os.environ.get(
+        "AGENTRECX_MAPPINGS_PATH"
+    )
+    return TwoTowerSourceTool(
+        TwoTowerInferenceEngine(
+            TwoTowerInferenceConfig(
+                checkpoint_path=checkpoint,
+                mappings_path=_Path(mappings) if mappings else None,
+            )
+        )
+    )
 
 
 def _similar_items_enabled() -> bool:

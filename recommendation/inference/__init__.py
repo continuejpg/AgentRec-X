@@ -35,6 +35,11 @@ from .sasrec import (
     load_item_mapping,
     resolve_device,
 )
+from .twotower import (  # noqa: E402
+    TWO_TOWER_SCORE_KIND,
+    TwoTowerInferenceConfig,
+    TwoTowerInferenceEngine,
+)
 
 __all__ = [
     "PAD_ID",
@@ -47,6 +52,9 @@ __all__ = [
     "RecommendationResult",
     "RequestValidationError",
     "SASRecInferenceEngine",
+    "TWO_TOWER_SCORE_KIND",
+    "TwoTowerInferenceConfig",
+    "TwoTowerInferenceEngine",
     "UnknownItemError",
     "eligible_candidate_count",
     "load_item_mapping",

@@ -56,12 +56,16 @@ __all__ = ["SOURCE_PLANS", "DemoSourcePlanPolicy", "normalise_source_plan"]
 SOURCE_PLANS: dict[str, ActionKind] = {
     "history": ActionKind.RECOMMEND_FROM_HISTORY,
     "catalog_search": ActionKind.SEARCH_CATALOG,
+    # Two-Tower is consulted through ``SELECT_SOURCE``, the action that names one trusted
+    # source, because it is neither the accepted history recommender nor a lexical search.
+    "two_tower": ActionKind.SELECT_SOURCE,
 }
 
 #: The ``CandidateSource`` each plan name selects when consulted through the candidate plane.
 SOURCE_ARGUMENTS: dict[str, str] = {
     "history": "history",
     "catalog_search": "catalog_search",
+    "two_tower": "two_tower",
 }
 
 #: Default plan: the accepted history recommender alone.  That keeps the endpoint's default

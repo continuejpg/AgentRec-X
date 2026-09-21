@@ -86,6 +86,7 @@ __all__ = [
     "metadata_fused_heads",
     "arm_popularity",
     "arm_sasrec",
+    "arm_two_tower",
     "assert_protocol",
     "cohort_from_cases",
     "dataset_manifest",
@@ -99,6 +100,7 @@ __all__ = [
     "fusion_to_ranking",
     "popularity_rankings",
     "k_values",
+    "left_pad_histories",
     "leakage_checks",
     "ranking_batches",
     "ranking_batches_for",
@@ -907,22 +909,33 @@ def arm_fixed_fusion(
     num_items: int,
     source_rankings: dict[str, Sequence[Sequence[int]]],
     head: int = 1000,
+    sources: Sequence[str] | None = None,
 ) -> Callable[[Sequence[EvaluationCase], int], Iterable[Any]]:
-    """Fixed multi-source fusion: consult every source for every user, then RRF.
+    """Fixed multi-source fusion: consult every named source for every user, then RRF.
 
     This is the ablation's "fixed multi-source fusion" arm.  It is deliberately *not* adaptive: it
-    reads the same three sources for every user, in the same order, with the same rank-fusion
-    constant, and it has no signal it could use to behave differently.  The agent-selected arm is the
+    reads the same sources for every user, in the same order, with the same rank-fusion constant,
+    and it has no signal it could use to behave differently.  The agent-selected arm is the
     contrast, and the pair is what makes "does selection help?" an answerable question rather than an
     assertion.
 
     ``source_rankings`` maps a source name to its per-user ordered item-id head, aligned with the
     evaluated cohort.  Each source contributes only its own ordering; no source's score is compared
-    with another's.
+    with another's.  ``sources`` names which of them to fuse, in order; it defaults to the accepted
+    Phase-5 source set, so the accepted arm's behaviour is unchanged and a post-Phase-5 arm (for
+    example adding a Two-Tower source) is expressed as an explicit, additive choice.
     """
     for name, rankings in source_rankings.items():
         if len(rankings) != len(next(iter(source_rankings.values()))):
             raise ValueError(f"source {name!r} is not aligned with the cohort")
+    resolved_sources = tuple(sources) if sources is not None else FUSION_SOURCES
+    if not resolved_sources:
+        raise ValueError("a fusion needs at least one source")
+    missing = [name for name in resolved_sources if name not in source_rankings]
+    if missing:
+        raise ValueError(
+            "fusion names source(s) with no rankings supplied: " + ", ".join(missing)
+        )
 
     def batches(cases: Sequence[EvaluationCase], batch_size: int) -> Iterable[Any]:
         for start in range(0, len(cases), batch_size):
@@ -930,7 +943,7 @@ def arm_fixed_fusion(
             scores = torch.zeros((len(chunk), num_items + 1), dtype=torch.float32)
             for row, index in enumerate(range(start, start + len(chunk))):
                 head_ids = fused_head(
-                    [source_rankings[name][index] for name in FUSION_SOURCES], top_n=head
+                    [source_rankings[name][index] for name in resolved_sources], top_n=head
                 )
                 ordered = list(dict.fromkeys(head_ids))
                 scores[row, torch.tensor(ordered, dtype=torch.long)] = torch.arange(
@@ -952,6 +965,93 @@ def popularity_rankings(
     ranking = arm_popularity(cases, num_items=num_items)(cases)[0]
     head = list(ranking[:top_n])
     return [head for _ in cases]
+
+
+def left_pad_histories(
+    cases: Sequence[EvaluationCase], max_seq_len: int
+) -> Any:
+    """Return a ``[batch, max_seq_len]`` **left-padded** history window for the model arms.
+
+    Left-padding, not right-padding, is what both model arms require, and it is shared here
+    rather than written twice so the two arms cannot drift apart in the one detail that is
+    easiest to get silently wrong: both ``SASRec.full_catalog_scores`` and
+    ``TwoTower.encode_users`` read the representation at the **last real position**, so a
+    right-padded window would summarise a run of PAD rows and depress every metric.  Measured
+    while building the Phase-5 arms: right-padding cost ~20% of Recall@10 for SASRec
+    (0.010 85 vs 0.013 57 alongside the accepted full-cohort result).
+    """
+    import torch
+
+    histories = [list(case.test_history[-max_seq_len:]) for case in cases]
+    padded = torch.zeros((len(cases), max_seq_len), dtype=torch.long)
+    for row, history in enumerate(histories):
+        if history:
+            padded[row, max_seq_len - len(history) :] = torch.tensor(history, dtype=torch.long)
+    return padded
+
+
+def arm_two_tower(
+    *,
+    checkpoint: Path,
+    metadata_categories: Path | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    device: str = "cpu",
+) -> Callable[[Sequence[EvaluationCase]], Iterable[Any]]:
+    """The Two-Tower retrieval artifact, scored over the full catalogue.
+
+    Post-Phase-5 arm: the accepted five Phase-5 arms are untouched, and this one is scored by
+    the **same** evaluator over the **same** cohort, split, catalogue and ``k`` values, so the
+    comparison is controlled by construction.
+
+    The model returns a ``[batch, num_items + 1]`` matrix of exact dot products between the
+    user vector and every precomputed item vector.  Item vectors are computed once here and
+    reused for every batch, which is the property that makes this architecture a retrieval
+    baseline; ANN search is explicitly out of scope for this step.  As with SASRec, the model
+    performs **no** masking - the evaluator owns PAD exclusion, seen-item masking and ranking.
+    """
+    import torch
+
+    from recommendation.datasets.twotower import load_metadata_categories, metadata_tensor
+    from recommendation.models.twotower import TwoTower, TwoTowerConfig
+
+    payload = torch.load(checkpoint, map_location=device)
+    config = dict(payload["model_config"])
+    # ``TwoTowerConfig`` is a validating class rather than a dataclass, so the checkpoint's
+    # config is passed by name instead of being filtered through ``__dataclass_fields__``.  The
+    # constructor validates every field, which is what makes a checkpoint/config mismatch loud.
+    if "num_categories" in config:
+        config["num_categories"] = tuple(config["num_categories"])
+    model = TwoTower(TwoTowerConfig(**config))
+    model.load_state_dict(payload["model_state_dict"])
+    model.eval()
+
+    if model.config.num_metadata_fields:
+        artifact = metadata_categories
+        if artifact is None:
+            candidate = checkpoint.parent / "metadata_categories.json"
+            if not candidate.exists():
+                raise FileNotFoundError(
+                    "the two-tower checkpoint was trained with categorical metadata but "
+                    f"no category artifact was found next to it ({candidate})"
+                )
+            artifact = candidate
+        model.set_categories(metadata_tensor(load_metadata_categories(artifact)))
+
+    max_seq_len = model.config.max_seq_len
+
+    def score_batches(cases: Sequence[EvaluationCase]) -> Iterable[Any]:
+        item_embeddings = model.precompute_item_embeddings()
+        for start in range(0, len(cases), batch_size):
+            chunk = cases[start : start + batch_size]
+            padded = left_pad_histories(chunk, max_seq_len)
+            with torch.no_grad():
+                user = model.encode_users(padded)
+                scores = model.scores_from_embeddings(user, item_embeddings)
+            yield [tuple(case.test_history) for case in chunk], [
+                case.test_target for case in chunk
+            ], scores
+
+    return score_batches
 
 
 # --------------------------------------------------------------------------- #
@@ -1013,19 +1113,7 @@ def arm_sasrec(
     def score_batches(cases: Sequence[EvaluationCase]) -> Iterable[tuple[Any, Any, Any]]:
         for start in range(0, len(cases), batch_size):
             chunk = cases[start : start + batch_size]
-            # **Left**-pad, exactly as training does (``build_arrays``) and as the accepted inference
-            # engine does (``encode_history``).  This is not cosmetic: ``full_catalog_scores`` reads
-            # the hidden state at the *last valid position*, so right-padding would make the model
-            # summarise a run of PAD rows instead of the user's history and silently depress every
-            # metric.  Measured while building this phase: right-padding cost ~20% of Recall@10
-            # (0.010 85 vs 0.013 57 alongside the accepted full-cohort result).
-            histories = [list(case.test_history[-max_seq_len:]) for case in chunk]
-            padded = torch.zeros((len(chunk), max_seq_len), dtype=torch.long)
-            for row, history in enumerate(histories):
-                if history:
-                    padded[row, max_seq_len - len(history) :] = torch.tensor(
-                        history, dtype=torch.long
-                    )
+            padded = left_pad_histories(chunk, max_seq_len)
             with torch.no_grad():
                 scores = model.full_catalog_scores(padded)
             yield [tuple(case.test_history) for case in chunk], [

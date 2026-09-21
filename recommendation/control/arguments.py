@@ -92,6 +92,11 @@ class CandidateSource(str, Enum):
     CATALOG_SEARCH = "catalog_search"
     #: Similar-item retrieval from a precomputed item-item relationship index.
     SIMILAR_ITEM = "similar_item"
+    #: Two-Tower / DSSM dual-encoder retrieval (post-Phase-5 model expansion).  A distinct
+    #: member rather than a reuse of ``HISTORY`` because the two produce different score kinds
+    #: (a learned cosine versus a SASRec logit) and the ledger must be able to attribute a
+    #: candidate to the model that actually proposed it.
+    TWO_TOWER = "two_tower"
 
 
 #: Sources that produce candidate identities.  A source that is not listed here may still
@@ -100,6 +105,10 @@ CANDIDATE_PRODUCING_SOURCES: tuple[CandidateSource, ...] = (
     CandidateSource.HISTORY,
     CandidateSource.CATALOG_SEARCH,
     CandidateSource.SIMILAR_ITEM,
+    # Post-Phase-5 model expansion.  A source becomes "trusted" by being listed here *and* by
+    # having a registered tool that returns identities the grounding verifier confirms; the
+    # ledger refuses an unlisted source so a typo or a spoofed name cannot write provenance.
+    CandidateSource.TWO_TOWER,
 )
 
 

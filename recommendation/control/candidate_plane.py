@@ -246,8 +246,14 @@ class CandidatePlane:
         history_tool: RecommendationTool | None = None,
         catalog_search: CatalogSearchSource | None = None,
         similar_item_tool: CandidateSourceTool | None = None,
+        two_tower_tool: CandidateSourceTool | None = None,
     ) -> None:
-        if history_tool is None and catalog_search is None and similar_item_tool is None:
+        if (
+            history_tool is None
+            and catalog_search is None
+            and similar_item_tool is None
+            and two_tower_tool is None
+        ):
             raise PolicyActionError(
                 "a candidate plane needs at least one trusted candidate source"
             )
@@ -266,6 +272,12 @@ class CandidatePlane:
                     "similar_item_tool must declare source=CandidateSource.SIMILAR_ITEM"
                 )
             self._tools[CandidateSource.SIMILAR_ITEM] = similar_item_tool
+        if two_tower_tool is not None:
+            if two_tower_tool.source is not CandidateSource.TWO_TOWER:
+                raise PolicyActionError(
+                    "two_tower_tool must declare source=CandidateSource.TWO_TOWER"
+                )
+            self._tools[CandidateSource.TWO_TOWER] = two_tower_tool
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -367,7 +379,10 @@ class CandidatePlane:
 
         # -- execute the source -------------------------------------------- #
         try:
-            if source is CandidateSource.HISTORY:
+            if source in (CandidateSource.HISTORY, CandidateSource.TWO_TOWER):
+                # Identity-keyed sources are given the run's trusted history, which is the only
+                # channel through which behaviour reaches them.  A source never supplies its
+                # own history, so it cannot answer for a user it was not given.
                 history = tuple(read_trusted_history())
                 candidates = tool.propose(arguments=arguments, limit=limit, history=history)
             else:

@@ -313,6 +313,44 @@ Three things this table supports, and one it does not:
 
 `HR@10 == Recall@10` for every arm, as expected for single-positive leave-one-out evaluation.
 
+### 8.3 Post-Phase-5: Two-Tower retrieval, complementarity and a fusion ablation
+
+The Phase-5 rows above are unchanged and remain the accepted result. A **second model family**
+was then added as a new arm, trained and evaluated through the identical protocol (same dataset,
+mapping, split, 20 000-user cohort, full catalogue, `k`, evaluator semantics). Full detail,
+including the architecture, the objective and every reproduction command:
+[`TWOTOWER.md`](TWOTOWER.md).
+
+| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 |
+| --- | --- | --- | --- | --- | --- |
+| `two_tower` (new) | 0.00550 | 0.00965 | 0.01650 | 0.00482 | 0.00965 |
+| `sasrec_two_tower_metadata` (new fusion) | **0.00940** | **0.01610** | **0.02695** | **0.00846** | **0.01610** |
+| `fixed_fusion` (Phase-5, unchanged) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.01435 |
+| `sequential` (accepted SASRec) | 0.00820 | 0.01350 | 0.02070 | 0.00685 | 0.01350 |
+| `metadata_retrieval` (Phase-5) | 0.00505 | 0.00925 | 0.01485 | 0.00441 | 0.00925 |
+
+**The question was whether Two-Tower adds signal SASRec misses, not whether it wins alone.** Per-user
+hit analysis over each source's top-1000 head answers it:
+
+| Pair | hit by both | left only | right only | neither | union | Jaccard |
+| --- | --- | --- | --- | --- | --- | --- |
+| SASRec vs Two-Tower | 1 995 | 2 105 | **1 120** | 14 780 | **5 220** | 0.382 |
+| SASRec vs metadata | 407 | 3 693 | 1 227 | 14 673 | 5 327 | 0.076 |
+
+* Two-Tower retrieves the target for **1 120 users SASRec misses** at head-1000, and its top-10
+  head overlaps SASRec's by a mean Jaccard of only **0.101**. The two models are genuinely
+  different retrievers.
+* Consequently the three-source fusion including Two-Tower reaches Recall@10 **0.01610** against
+  the Phase-5 fusion's **0.01435** — a 12.2% relative gain, with the fusion rule, constant and
+  head size left at their codebase defaults and nothing tuned on the test split.
+* Two-Tower **alone is weaker than SASRec** (0.00965 vs 0.01350) and is under-trained at three
+  epochs. The honest summary is: complementary signal, weaker standalone model, fusion gain
+  measured but not attributable to Two-Tower alone (the new fusion also drops popularity).
+
+The comparison command re-ran the accepted arms and reproduced the stored Phase-5 values exactly
+(`sequential` 0.01350, `metadata_retrieval` 0.00925, `fixed_fusion` 0.01435), so the table is one
+process's output rather than a quotation.
+
 ---
 
 ## 9. Metadata Integration

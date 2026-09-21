@@ -331,6 +331,8 @@ PLACEHOLDER_MARKERS: tuple[str, ...] = (
     "PLACEHOLDER",
     "DUMMY",
     "REDACT",
+    "MUST-NOT-BE",
+    "MUST_NOT_BE",
     "NOTAREALKEY",
 )
 
