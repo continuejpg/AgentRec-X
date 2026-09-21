@@ -97,6 +97,27 @@ Notes:
 
 ## One-command local demo
 
+There are two paths. The **offline quick start** needs no artifacts and no credentials and is
+what a first-time reader should run; the **full demo** runs against the accepted training
+artifacts and is the measured configuration.
+
+### Offline quick start (recommended first)
+
+```bash
+./scripts/run_demo.sh            # creates .venv if needed, generates the demo catalogue,
+                                 # prints the canonical scenario, then serves on :8000
+docker compose up                # the same thing in a container (see DOCKER.md)
+```
+
+`run_demo.sh` builds the small synthetic demo catalogue and checkpoint in
+`recommendation/demo/artifacts/` + `runs/demo_catalog/`, runs the canonical scenario once so
+you can see the trajectory, and then starts the server. It reads no API key and makes no
+network call. **The demo checkpoint is randomly initialised** — it makes the pipeline, the
+trust boundaries and the HTTP contract runnable, and it says nothing about recommendation
+quality. Measured numbers come from the accepted artifacts (see `EXPERIMENTS.md`).
+
+### Full demo (accepted artifacts)
+
 Setup and start are **separate concepts**. Setup is the only mutating step; a normal start
 never runs `pip` and never changes the environment.
 
@@ -459,6 +480,7 @@ candidate count where relevant.
 | `experiments.agent_reranking_smoke` | M10D | agent + reranking; `--query --device --k --json` |
 | `experiments.web_demo_smoke` | M11 | full demo over HTTP; `--device --k --json` |
 | `experiments.local_demo_launch_smoke` | M11.5 | launcher over a real Uvicorn process and socket; `--port --json` |
+| `experiments.demo_scenario` | Packaging | canonical single-turn agent scenario over HTTP; `--json --configured` |
 
 Run the three most informative ones:
 

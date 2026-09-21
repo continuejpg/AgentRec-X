@@ -38,9 +38,12 @@ from fastapi import APIRouter, Request
 
 from recommendation.agent import AgentGraphError, MalformedDecision
 from recommendation.demo import (
+    AgentRecommendRequest,
+    AgentRecommendResponse,
     ChatRequest,
     ChatResponse,
     CreateSessionRequest,
+    DemoAgentError,
     DemoHealthResponse,
     DemoProfileView,
     DemoRuntime,
@@ -122,6 +125,7 @@ def map_demo_exception(exc: BaseException) -> DemoHTTPError:
     RecommendationTool failure                  502     ``recommendation_failed``
     preference matching / reranking failure     502     ``preference_stage_failed``
     agent orchestration failure                 502     ``agent_failed``
+    unsupported candidate-source plan            422     ``unsupported_source_plan``
     anything else                               502     ``demo_backend_failed``
     ==========================================  ======  ==========================
 
@@ -137,6 +141,11 @@ def map_demo_exception(exc: BaseException) -> DemoHTTPError:
         return DemoHTTPError(503, "session_capacity_exceeded", CAPACITY_DETAIL)
     if isinstance(exc, DemoRuntimeError):
         return DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
+    if isinstance(exc, DemoAgentError):
+        # The agent service already wrote a client-safe detail; its code decides the status.
+        if exc.code == "unsupported_source_plan":
+            return DemoHTTPError(422, "unsupported_source_plan", str(exc))
+        return DemoHTTPError(502, "agent_failed", "the agent could not complete this request")
     if isinstance(exc, MalformedDecision):
         return DemoHTTPError(
             502, "agent_failed", "the agent could not produce a well-formed recommendation plan"
@@ -271,6 +280,29 @@ def build_demo_router() -> APIRouter:
                     turn_id=allocation.turn_id,
                     turn_number=allocation.turn_number,
                 )
+        except Exception as exc:  # noqa: BLE001 - mapped, never leaked
+            raise map_demo_exception(exc) from exc
+
+    @router.post("/agent/recommend", response_model=AgentRecommendResponse)
+    def agent_recommend(
+        payload: AgentRecommendRequest, request: Request
+    ) -> AgentRecommendResponse:
+        """Run one stateless agent turn through the existing control plane.
+
+        This endpoint adds no agent behaviour: it composes the runtime's existing engine,
+        catalogue, tool and memory service with the accepted bounded loop and multi-source
+        candidate plane, then projects the result.  It creates no session, so the caller
+        supplies its own history and the request is the only channel history can arrive
+        through - exactly as the accepted ``POST /v1/recommend`` does for the model path.
+
+        Preference memory is touched only when ``user_key`` is supplied; without it the run
+        neither reads nor writes memory, which is what makes the offline demo reproducible.
+        """
+        runtime = _runtime(request)
+        if not runtime.ready:
+            raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
+        try:
+            return runtime.agent_service().run(payload)
         except Exception as exc:  # noqa: BLE001 - mapped, never leaked
             raise map_demo_exception(exc) from exc
 

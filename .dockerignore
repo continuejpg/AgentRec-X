@@ -1,0 +1,54 @@
+# Build context exclusions for the AgentRec-X demo image.
+#
+# The context is what the Docker daemon uploads before the build starts, so excluding the
+# large local trees here is both a correctness measure (they must not enter the image) and a
+# speed measure.
+
+# Version control and local metadata
+.git
+.gitattributes
+.gitignore
+.github
+
+# Python build/test residue
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local data and generated artifacts: the raw Amazon corpus is multi-GB and the accepted
+# checkpoints/catalogues are hundreds of MB. The image generates its own small demo catalog.
+data/
+runs/
+artifacts/
+logs/
+outputs/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Secrets: never in a build context, so a stray local file cannot be COPYed in.
+.env
+.env.*
+*.key
+*.pem
+
+# Documentation and tests are not needed at run time. `requirements-dev.txt` is copied
+# explicitly by the Dockerfile because the CI container smoke installs from it.
+docs/
+tests/
+*.md
+!requirements-dev.txt

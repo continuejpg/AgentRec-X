@@ -12,6 +12,9 @@ venv/
 # Secrets
 .env
 .env.*
+# The committed example holds no credential and documents the opt-in switches; without this
+# exception the `.env.*` rule would hide it, and a real `.env` still stays ignored.
+!.env.example
 *.key
 
 # Data

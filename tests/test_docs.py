@@ -88,6 +88,7 @@ DOCUMENTED_SMOKES = (
     "experiments.reranking_evaluation_smoke",
     "experiments.agent_reranking_smoke",
     "experiments.web_demo_smoke",
+    "experiments.demo_scenario",
 )
 
 

@@ -41,6 +41,29 @@ from .profiles import (
     build_demo_profiles,
     demo_profiles_from_artifact,
 )
+from .agent_policy import (
+    DEFAULT_SOURCE_PLAN,
+    SOURCE_PLANS,
+    DemoSourcePlanPolicy,
+    normalise_source_plan,
+)
+from .agent_schemas import (
+    AGENT_API_VERSION,
+    MAX_CONSTRAINTS,
+    MAX_HISTORY_ITEMS,
+    AgentCandidateView,
+    AgentConstraintItem,
+    AgentEligibilityView,
+    AgentRecommendRequest,
+    AgentRecommendResponse,
+    AgentRecommendationView,
+    AgentTerminalView,
+    AgentTimingView,
+    GroundedCandidateView,
+    TrajectoryStepView,
+    TrajectorySummaryView,
+)
+from .agent_service import DemoAgentError, DemoAgentService
 from .runtime import (
     DEFAULT_DEMO_MEMORY_DB,
     DemoRuntime,
@@ -89,17 +112,32 @@ from .sessions import (
 )
 
 __all__ = [
+    "AGENT_API_VERSION",
     "DEFAULT_DEMO_K",
     "DEFAULT_DEMO_MEMORY_DB",
     "DEFAULT_DEMO_PROFILE_COUNT",
     "DEFAULT_MAX_SESSIONS",
+    "DEFAULT_SOURCE_PLAN",
     "DEMO_API_VERSION",
+    "MAX_CONSTRAINTS",
+    "MAX_HISTORY_ITEMS",
     "MAX_MESSAGE_LENGTH",
+    "SOURCE_PLANS",
     "ActivePreferenceView",
+    "AgentCandidateView",
+    "AgentConstraintItem",
+    "AgentEligibilityView",
+    "AgentRecommendRequest",
+    "AgentRecommendResponse",
+    "AgentRecommendationView",
+    "AgentTerminalView",
+    "AgentTimingView",
     "AuditView",
     "ChatRequest",
     "ChatResponse",
     "CreateSessionRequest",
+    "DemoAgentError",
+    "DemoAgentService",
     "DemoDecisionModel",
     "DemoError",
     "DemoHealthResponse",
@@ -109,7 +147,9 @@ __all__ = [
     "DemoRuntimeError",
     "DemoSession",
     "DemoSessionManager",
+    "DemoSourcePlanPolicy",
     "EvidenceView",
+    "GroundedCandidateView",
     "MemoryUpdateView",
     "PreferenceMutationView",
     "ProductMetadataView",
@@ -119,6 +159,8 @@ __all__ = [
     "SessionCapacityExceeded",
     "SessionResponse",
     "SessionStateResponse",
+    "TrajectoryStepView",
+    "TrajectorySummaryView",
     "TurnAllocation",
     "UnknownProfile",
     "UnknownSession",
@@ -134,6 +176,7 @@ __all__ = [
     "memory_database_path",
     "memory_update_view",
     "movement_summary",
+    "normalise_source_plan",
 ]
 
 __version__ = "1.0.0"

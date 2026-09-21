@@ -1,0 +1,73 @@
+# AgentRec-X - one-command local stack (packaging phase).
+#
+#   docker compose up
+#
+# then open:
+#
+#   http://127.0.0.1:8000/demo/      browser demo (multi-turn session UI)
+#   http://127.0.0.1:8000/docs       OpenAPI docs, including POST /v1/demo/agent/recommend
+#   http://127.0.0.1:8000/health     readiness: "ok" only when the model actually loaded
+#
+# What runs by default
+# --------------------
+# The **offline** configuration: the image's small synthetic demo catalogue, a randomly
+# initialised checkpoint, the deterministic request-driven agent policy, and no provider
+# configuration at all.  No API key is read, no network call is made, and the ranking carries
+# no quality claim - it exists so the pipeline, the trust boundaries and the HTTP contract are
+# runnable and inspectable.  Measured numbers live in docs/EXPERIMENTS.md and
+# docs/PHASE5_HANDOFF.md and come from the accepted artifacts on the public dataset.
+#
+# Real-provider (DeepSeek) mode - explicit opt-in
+# -----------------------------------------------
+# Copy `.env.example` to `.env` (git-ignored, `*.env`/`.env*` are excluded) and set:
+#
+#   AGENTRECX_AGENT_POLICY=llm
+#   AGENTRECX_LLM_BASE_URL=https://api.deepseek.com/v1
+#   AGENTRECX_LLM_MODEL=deepseek-flash
+#   AGENTRECX_LLM_API_KEY=...        # never commit this
+#
+# The entrypoint refuses to start in `llm` mode without a base URL and a model, and it prints
+# no secret value.  Without `AGENTRECX_AGENT_POLICY=llm` the entrypoint unsets every
+# `AGENTRECX_LLM_*` variable, so an inherited credential cannot silently start billed calls.
+#
+# Why the accepted artifacts are not mounted here
+# ----------------------------------------------
+# They total ~832 MB and are not in Git.  Mounting them is supported - see DOCKER.md - but the
+# default must be a command that works on a fresh clone with no downloads.
+
+services:
+  agentrecx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentrecx:demo
+    container_name: agentrecx-demo
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # --- offline defaults, stated explicitly so the run is self-describing ------------
+      AGENTRECX_DEVICE: cpu
+      AGENTRECX_HOST: 0.0.0.0
+      AGENTRECX_PORT: "8000"
+      AGENTRECX_AGENT_POLICY: deterministic
+      # Keep one thread: the container is CPU-only and a bounded thread count makes the
+      # demo's latency reproducible on a shared laptop.
+      OMP_NUM_THREADS: "1"
+      # --- real-provider opt-in ---------------------------------------------------------
+      # All four come from the environment/.env only; none has a default, so an unset key
+      # stays unset rather than becoming an empty credential.
+      AGENTRECX_LLM_BASE_URL: ${AGENTRECX_LLM_BASE_URL:-}
+      AGENTRECX_LLM_MODEL: ${AGENTRECX_LLM_MODEL:-}
+      AGENTRECX_LLM_API_KEY: ${AGENTRECX_LLM_API_KEY:-}
+      AGENTRECX_LLM_PROFILE: ${AGENTRECX_LLM_PROFILE:-}
+    volumes:
+      # Persist the generated demo checkpoint and the preference-memory database across
+      # restarts. The image already contains a generated copy; the volume wins when present.
+      - demo_artifacts:/app/runs
+    # The service performs CPU inference; a runaway request should be visible rather than
+    # silently exhausting the host.
+    stop_grace_period: 10s
+    restart: unless-stopped
+
+volumes:
+  demo_artifacts:

@@ -15,9 +15,9 @@ not measured, this README says so.
 
 ## What AgentRec-X Is
 
-It answers one question end to end: *can a sequential recommender be handed to a
-conversational agent without giving the agent the ability to corrupt what the recommender
-knows, while still letting the conversation influence what the user sees?*
+It answers one question end to end: *can a sequential recommender be handed to a conversational
+agent without giving the agent the ability to corrupt what the recommender knows, while still
+letting the conversation influence what the user sees?*
 
 | Layer | Component |
 | --- | --- |
@@ -29,9 +29,9 @@ knows, while still letting the conversation influence what the user sees?*
 | Orchestration | **AgentGraph** (LangGraph, injected decision seam) |
 | Serving | **FastAPI** (M6 + M11 endpoints) with a plain HTML/CSS/JS browser demo |
 
-It is **not** a fully LLM-powered recommender. The candidate pool is produced by SASRec,
-not by retrieval or generation, and the formal decision seam is deterministic and offline.
-See [What Is Learned vs Rule-Based](#what-is-learned-vs-rule-based).
+It is **not** a fully LLM-powered recommender: the candidate pool comes from SASRec, not from
+retrieval or generation, and the formal decision seam is deterministic and offline (see
+[What Is Learned vs Rule-Based](#what-is-learned-vs-rule-based)).
 
 ---
 
@@ -73,14 +73,13 @@ The recommendation route inside `AgentGraph`:
 
 ```mermaid
 flowchart LR
-    A["trusted interaction history<br/>application-owned"] --> B["RecommendationTool"]
-    B --> C["SASRec candidates<br/>original rank + raw score"]
+    A["trusted history<br/>app-owned"] --> B["RecommendationTool"]
+    B --> C["SASRec candidates<br/>rank + raw score"]
     C --> D["metadata enrichment M8"]
-    D --> E["candidate-scoped evidence<br/>retrieval within candidates"]
-    E --> F["active preference snapshot<br/>loaded at turn start M9"]
-    F --> G["preference evidence<br/>MATCH / VIOLATION / UNKNOWN M10A"]
-    G --> H["deterministic reranking<br/>M10B frozen policy"]
-    H --> I["grounded structured response<br/>original rank + reranked rank"]
+    D --> E["preference snapshot<br/>loaded at turn start M9"]
+    E --> F["evidence<br/>MATCH / VIOLATION / UNKNOWN M10A"]
+    F --> G["deterministic reranking<br/>M10B frozen policy"]
+    G --> H["grounded response<br/>original + reranked rank"]
 ```
 
 The `DIRECT` route performs **zero** recommendation, metadata, matching or reranking work;
@@ -163,20 +162,16 @@ seed 2026), exact as stored.
 
 HR and Recall coincide because the protocol has a single positive target per case.
 
-* **Best epoch 6**, selected on validation NDCG@10 (`0.007913`); **17 epochs completed**
-  (`MAX_EPOCHS = 200`, `PATIENCE = 10`, *patience exhausted*); 27,404 global steps; train
-  time 1,627.66 s; peak GPU memory 4,997,753,344 bytes.
-* **Model:** SASRec, `hidden 64`, `blocks 2`, `heads 2`, `dropout 0.2`, `gelu`, pre-norm,
-  FF×4, `init_range 0.02`, `ln_eps 1e-8`, `max_seq_len 50`, `padding_idx 0`.
-  **Optimizer:** AdamW, `lr 0.001`, `batch 256`, `weight_decay 0.0`, `grad_norm 5.0`,
-  `seed 2026`, fp32.
-* `max_seq_len = 50` was the smallest window retaining ≥95 % of raw transitions (0.98234 at
-  50; 0.92314 at 20; 0.995259 at 100; 0.998949 at 200).
+* **Best epoch 6** (validation NDCG@10 `0.007913`); 17 epochs, patience exhausted; 27,404
+  global steps; 1,627.66 s train; peak GPU memory 4,997,753,344 bytes.
+* **Model:** SASRec `hidden 64 / blocks 2 / heads 2 / dropout 0.2`, pre-norm, FF×4,
+  `max_seq_len 50` (smallest window retaining ≥95 % of raw transitions); AdamW `lr 0.001`,
+  `batch 256`, `grad_norm 5.0`, seed 2026, fp32.
 
 **No ItemCF comparison exists.** `run.json` records
-`itemcf_comparison = "PENDING (no same-artifact full-data ItemCF benchmark exists)"`. The
-ItemCF code in `recommendation/baselines/` is an engineering baseline over the small
-integration sample and must not be compared against the numbers above.
+`itemcf_comparison = "PENDING (no same-artifact full-data ItemCF benchmark exists)"`; the
+ItemCF code is an engineering baseline over the small integration sample and must not be
+compared against the numbers above.
 
 ---
 
@@ -216,27 +211,6 @@ filters a candidate and never modifies the raw SASRec score.
 
 ## Multi-turn Web Demo
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant P as Browser page
-    participant A as FastAPI demo API
-    participant S as DemoSessionManager
-    participant G as AgentGraph
-
-    U->>P: Recommend some products.
-    P->>A: POST /v1/demo/sessions/{id}/chat
-    A->>S: allocate server-owned turn id
-    S->>G: invoke with session history + turn id
-    G-->>P: grounded text + structured cards
-    U->>P: I don't want red.
-    P->>A: same endpoint
-    A-->>P: memory_update: added avoid red
-    Note over P,A: this turn ranked with the pre-turn snapshot
-    U->>P: Recommend again.
-    A-->>P: reranked cards, ranked_with: avoid red
-```
-
 The demo runs in the same FastAPI process as the Milestone 6 API. Each session gets an
 opaque UUID4 `session_id`, a **session-derived** preference-memory `user_key`, a demo
 profile's application-owned trusted history, and its own turn lock. Two sessions on the same
@@ -252,24 +226,36 @@ Walkthrough: [`docs/USAGE.md`](docs/USAGE.md).
 
 ## Quick Start
 
+Two paths. The first needs no artifacts, dataset or credentials; the second is the measured
+configuration.
+
+### Offline one command
+
+```bash
+./scripts/run_demo.sh        # native: venv, demo catalogue, one trajectory, then serve
+docker compose up            # the same thing in a container (see DOCKER.md)
+```
+
+Both generate a small **synthetic demo catalogue** and checkpoint, print one full agent
+trajectory, then serve `:8000/demo/`, `:8000/docs` and `:8000/health` (readiness: `ok` only
+when the model loaded). The checkpoint is **randomly initialised** — it demonstrates the
+pipeline and its trust boundaries, not recommendation quality. Real-provider mode is an
+explicit opt-in (`AGENTRECX_AGENT_POLICY=llm` plus `AGENTRECX_LLM_*`); with it unset, no
+provider is configured and no network call is made. See [`DOCKER.md`](DOCKER.md).
+
+### Full demo (accepted artifacts)
+
 Uses the **already accepted artifacts**; nothing is retrained and no accepted artifact is
-written. Setup and start are deliberately separate: a normal start never installs anything.
+written. Setup and start are separate: a normal start never installs anything.
 
-**Windows 11 + WSL2 (one click).** Open the repository folder in Explorer, for example
-`\\wsl.localhost\Ubuntu-22.04\home\<you>\AgentRec-X`, and double-click
-`start-agentrecx.cmd`. It opens a console, invokes WSL automatically, runs the same Linux
-launcher below, and (after `/health` answers) opens the default browser at the demo page.
-The console stays in the foreground for the server log, and one `Ctrl+C` stops the demo.
-
-No configuration is needed. The `.cmd` is only a shim: it derives the Linux path from its
-own location (never the current directory — a UNC working directory is illegal in
-`cmd.exe`) and hands over to `scripts/windows/start_agentrecx.ps1`, which asks WSL which
-distributions actually exist (`wsl.exe --list --quiet`) and verifies
-`<repo>/scripts/start_demo.sh` inside the selected one before anything is launched. A
-distribution name is never guessed, and no username is hardcoded. Use
-`--self-test` to resolve and verify without starting anything, and `AGENTRECX_PORT`,
-`AGENTRECX_DISTRO` or `AGENTRECX_REPO` to override; `start-agentrecx.local.cmd.example`
-shows how to run it from outside the repository.
+**Windows 11 + WSL2 (one click).** Double-click `start-agentrecx.cmd` from the repository
+folder over the WSL share (for example
+`\\wsl.localhost\Ubuntu-22.04\home\<you>\AgentRec-X`). It invokes WSL, runs the same Linux
+launcher below, and opens the browser at the demo page once `/health` answers; `Ctrl+C` stops
+it. No configuration is needed — the shim derives the Linux path from its own location and
+asks WSL which distributions exist rather than guessing, and a distribution name is never
+hardcoded. Override with `AGENTRECX_PORT`, `AGENTRECX_DISTRO` or `AGENTRECX_REPO`, or use
+`--self-test` to verify without starting; details in [`docs/USAGE.md`](docs/USAGE.md).
 
 **Linux / WSL shell.**
 
@@ -280,21 +266,17 @@ shows how to run it from outside the repository.
 # then open:  http://127.0.0.1:8000/demo/   and   http://127.0.0.1:8000/docs
 ```
 
-`setup_demo.sh` installs PyTorch from the official CPU wheel index
-(`requirements-cpu.txt`) rather than running a plain `pip install torch`, which would pull
-CUDA/NVIDIA packages onto a machine with no GPU. `start_demo.sh` works from any directory,
-never installs anything, and never stops a process it did not start: if the port is already
-serving AgentRec-X it says so and exits, and if a foreign process holds the port it refuses
-to start rather than killing it. Stop the demo with `Ctrl+C`.
-
-The server refuses to start if an accepted artifact is missing, rather than failing on the
-first browser request. Host and port default to `127.0.0.1:8000`
-(`./scripts/start_demo.sh --port 8011` to change it, `--doctor` to check the environment and
-the five accepted artifacts).
+`setup_demo.sh` installs PyTorch from the official CPU wheel index (`requirements-cpu.txt`)
+rather than running a plain `pip install torch`, which would pull CUDA/NVIDIA packages onto a
+machine with no GPU. `start_demo.sh` works from any directory, installs nothing, and never
+stops a process it did not start: a busy port is reported, never reclaimed. The server
+refuses to start when an accepted artifact is missing, rather than failing on the first
+browser request. Host/port default to `127.0.0.1:8000` (`--port 8011` to change,
+`--doctor` to check the environment and the five accepted artifacts).
 
 Optional sanity checks: `.venv/bin/python -m experiments.web_demo_smoke` (accepted M11
-behaviour over HTTP) and `.venv/bin/python -m experiments.local_demo_launch_smoke` (the
-launcher over a real Uvicorn socket and process).
+behaviour over HTTP) and `.venv/bin/python -m experiments.local_demo_launch_smoke` (launcher
+over a real Uvicorn socket).
 
 ---
 
@@ -345,12 +327,12 @@ Schemas, error codes and the full recipe list: [`docs/USAGE.md`](docs/USAGE.md).
 ```
 
 **Test counts are a snapshot of a commit, not a permanent property of the project.** At the
-last milestone commit (`c7c3bf5`) the suite contained **1315 passed, 2 skipped** (1317
-collected across 35 test files). This documentation pack adds **57 documentation-verification
-tests** (`tests/test_docs.py`, which checks that documented links, HTTP paths, smoke module
-names and code fences are real), bringing the working tree to **1372 passed, 2 skipped**.
-Suites that need the accepted checkpoint or the 300 MB metadata artifact skip cleanly when
-those git-ignored files are absent.
+packaging commit the offline suite is **1956 passed, 33 skipped**. `tests/test_docs.py`
+verifies documented links, HTTP paths, smoke module names and code fences; `tests/test_packaging.py`
+covers the one-command path, the demo artifacts and the no-committed-credential guard. Suites
+needing the accepted checkpoint, the 300 MB metadata artifact or an archived Phase-3 recording
+skip cleanly when those git-ignored files are absent (CI holds no credential and calls no
+provider).
 
 Smoke tests live in `experiments/` and print explicit PASS/FAIL gates:
 
@@ -411,14 +393,13 @@ package has its own README with its internal contract and boundary. Package over
 **Three different things are never conflated:**
 
 ```mermaid
-flowchart TD
+flowchart LR
     CHAT["chat text"]
-    H["Trusted interaction history<br/>application-owned chronological parent_asin sequence"]
-    P["Preference Memory<br/>explicit conversational preferences, per user_key"]
-    T["Browser transcript<br/>display history in the page only"]
-    S["SASRec / RecommendationTool"]
-    R["preference evidence + reranking"]
-
+    H["Trusted history<br/>app-owned parent_asin sequence"]
+    P["Preference Memory<br/>explicit prefs, per user_key"]
+    T["Browser transcript<br/>page state only"]
+    S["SASRec / Tool"]
+    R["evidence + reranking"]
     CHAT -. "blocked" .-> H
     CHAT --> P
     CHAT --> T
@@ -426,18 +407,15 @@ flowchart TD
     P --> R
 ```
 
-* **Trusted interaction history** is application-owned and reaches the recommender only
-  through `RecommendationContext`. **No conversational text can append to it**: telling the
-  demo *"I bought B0BX5QFWQN yesterday."* creates no interaction event — asserted at the
-  API level.
-* **Preference Memory** holds explicit conversational preferences only, scoped per user key,
-  with full provenance; it never stores inferred behaviour.
+* **Trusted interaction history** reaches the recommender only through
+  `RecommendationContext`. **No conversational text can append to it**: telling the demo
+  *"I bought B0BX5QFWQN yesterday."* creates no interaction event — asserted at the API level.
+* **Preference Memory** holds explicit conversational preferences only, per user key, with
+  full provenance; it never stores inferred behaviour.
 * **The browser transcript** is display state in the page, not persisted server-side.
-
-**Candidate-scoped RAG cannot widen the candidate set**: SASRec chooses the candidate
-universe first, and retrieval selects supporting metadata evidence only *inside* those
-candidates. RAG cannot introduce a candidate, replace candidate generation, or reorder
-candidates by itself — reordering is a later stage with its own frozen policy.
+* **Candidate-scoped RAG cannot widen the candidate set**: SASRec chooses the universe first
+  and retrieval selects evidence only *inside* those candidates, so RAG can neither introduce
+  nor reorder a candidate.
 
 ---
 
@@ -445,6 +423,19 @@ candidates by itself — reordering is a later stage with its own frozen policy.
 
 Three categories of evidence are kept separate; they are **not** one "model performance"
 table.
+
+> **Recommendation quality and agent decision quality are measured separately, by different
+> instruments, and neither implies the other.**
+>
+> * **Recommendation quality** — Recall / NDCG / HR at k, full-catalogue ranking on a real
+>   public dataset: the [SASRec benchmark](#sasrec-benchmark) and the five-arm Phase-5
+>   comparison in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) §8.2 (best measured arm: fixed
+>   multi-source fusion, Recall@10 `0.01435`).
+> * **Agent decision quality** — whether the run chose a legal next action, stayed inside its
+>   budgets and terminated honestly: the real-DeepSeek evaluation in
+>   [`docs/PHASE4_HANDOFF.md`](docs/PHASE4_HANDOFF.md) §3. The Phase-5 `agent_selected`
+>   ablation is a **deterministic rule stand-in**, not a language model, and it measured
+>   *worse* than fusing every source — never cite it as evidence about LLM policy quality.
 
 **A. Recommendation benchmark** — full-catalogue SASRec metrics, see
 [SASRec Benchmark](#sasrec-benchmark).
@@ -475,7 +466,7 @@ satisfaction claim is made for reranking anywhere in this repository.
 
 | Metric | Value |
 | --- | --- |
-| Test suite (milestone commit `c7c3bf5` / with this documentation pack) | 1315 / 1372 passed, 2 skipped |
+| Offline test suite (packaging commit) | **1956 passed, 33 skipped** |
 | M10D M10A matcher / M10B reranker latency (p50) | ~0.46 ms / ~0.11 ms |
 | M10D added reranking overhead (p50) | ~0.58 ms |
 | M10D total graph latency (one request, CPU) | ~55 ms |
@@ -521,34 +512,32 @@ Scope and design boundaries, not defects.
 
 The next research track is a **Semantic ID / RQ-VAE backbone**: replacing item-ID SASRec
 candidate generation with a semantic-ID representation and re-testing the pipeline. It is
-**not implemented**.
-
-A future backbone should reuse the existing contracts where they permit:
-`RecommendationTool`, M8 metadata/RAG, M9 Preference Memory, M10A Preference Evidence,
-M10B deterministic reranking, `AgentGraph` and the web demo. Only the candidate-generation
-stage should need to change.
+**not implemented**, and it should reuse the existing contracts (`RecommendationTool`, M8
+metadata/RAG, M9 memory, M10A evidence, M10B reranking, `AgentGraph`, the web demo) so that
+only candidate generation changes.
 
 ---
 
 ## Control Plane (2.0-alpha)
 
-`recommendation/control/` adds an **opt-in** bounded agent loop beside the accepted DAG:
-a policy proposes one action (`RECOMMEND_FROM_HISTORY` or `FINISH`), the controller
-validates and stamps it, the accepted pipeline executes it, and control returns to the
-policy with a verified observation. Recommend, render and memory semantics are reused
-unchanged; the default stays the accepted DAG. Enable it with
-`AGENTRECX_CONTROL_PLANE=loop`, and verify it with
-`.venv/bin/python -m experiments.control_plane_smoke`. Topology, authority split and
-budgets: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+`recommendation/control/` adds an **opt-in** bounded agent loop beside the accepted DAG: a
+policy proposes one action, the controller validates and stamps it, the accepted pipeline
+executes it, and control returns with a verified observation. Recommend, render and memory
+semantics are reused unchanged, and the default stays the accepted DAG. Enable with
+`AGENTRECX_CONTROL_PLANE=loop`; verify with
+`.venv/bin/python -m experiments.control_plane_smoke`. Topology, authority split and budgets:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The packaging phase's single-turn
+single-turn agent endpoint runs on this loop and exposes its trajectory.
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | goals, component map, state ownership, trust boundaries, failure behaviour, determinism, reuse |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | component map, state ownership, trust boundaries, failure behaviour, determinism, reuse |
 | [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | research questions, dataset, protocol, model, training, accepted results, diagnostics, reproducibility, validity threats |
-| [`docs/USAGE.md`](docs/USAGE.md) | environment, artifacts, env vars, server, browser walkthrough, API recipes, tests, smokes, troubleshooting |
+| [`docs/USAGE.md`](docs/USAGE.md) | environment, artifacts, env vars, server, API recipes, tests, smokes, troubleshooting |
 | [`docs/PROJECT_HISTORY.md`](docs/PROJECT_HISTORY.md) | milestone-by-milestone history with commit hashes |
+| [`DOCKER.md`](DOCKER.md) | the container path: offline default, provider opt-in, artifact mounting, troubleshooting |
 | [`docs/README.md`](docs/README.md) | documentation index, including the current Phase-5 handoff |
 | [`AGENTS.md`](AGENTS.md) | development instructions and engineering rules |
 

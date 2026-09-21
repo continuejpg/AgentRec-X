@@ -104,11 +104,25 @@ class ServiceSettings:
 
     @classmethod
     def from_env(cls) -> ServiceSettings:
-        """Build settings from ``AGENTRECX_*`` environment variables."""
+        """Build settings from ``AGENTRECX_*`` environment variables.
+
+        ``AGENTRECX_MANIFEST_PATH`` unset keeps the accepted run manifest (which cross-checks
+        the served checkpoint against the accepted training run).  Setting it to an explicit
+        "none" value - ``0``, ``none``, ``off`` or ``false`` - disables the cross-check, which
+        is what a deployment serving a **different** checkpoint needs: with the accepted
+        manifest still in force, a demo checkpoint would be rejected for disagreeing with a
+        training run it was never part of.  Same shape as the existing
+        ``AGENTRECX_VERIFY_CHECKPOINT`` switch.
+        """
         manifest = os.environ.get("AGENTRECX_MANIFEST_PATH")
+        manifest_disabled = (manifest or "").strip().lower() in ("0", "none", "off", "false")
         return cls(
             checkpoint_path=Path(os.environ.get("AGENTRECX_CHECKPOINT_PATH", DEFAULT_CHECKPOINT)),
-            manifest_path=Path(manifest) if manifest else DEFAULT_MANIFEST,
+            manifest_path=(
+                DEFAULT_MANIFEST
+                if manifest is None
+                else (None if manifest_disabled else Path(manifest))
+            ),
             mappings_path=Path(os.environ.get("AGENTRECX_MAPPINGS_PATH", DEFAULT_MAPPINGS)),
             device=os.environ.get("AGENTRECX_DEVICE", "cpu"),
             host=os.environ.get("AGENTRECX_HOST", "127.0.0.1"),

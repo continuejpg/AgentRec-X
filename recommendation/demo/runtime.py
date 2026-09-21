@@ -79,6 +79,7 @@ from .sessions import DEFAULT_MAX_SESSIONS, DemoSessionManager
 
 __all__ = [
     "DEFAULT_DEMO_MEMORY_DB",
+    "ENV_CATALOG_METADATA_PATH",
     "DemoRuntime",
     "DemoRuntimeError",
     "build_demo_runtime",
@@ -102,8 +103,26 @@ class DemoRuntimeError(RuntimeError):
     code = "demo_unavailable"
 
 
+#: Environment variable that points the demo at a specific catalogue-metadata artifact.
+#:
+#: Why this exists: the one-command demo runs against the small synthetic catalogue in
+#: ``recommendation/demo/artifacts/`` so a reviewer needs no 300 MB public dataset.  The
+#: accepted conventional path (``AGENTRECX_DATA_DIR`` + the category slug) is still the
+#: default, so a deployment with the real artifact is unaffected; this only lets the demo
+#: name a specific file.  It is read here rather than in ``recommendation.config`` because it
+#: configures the *demo*, not the preprocessing pipeline's output convention.
+ENV_CATALOG_METADATA_PATH = "AGENTRECX_CATALOG_METADATA_PATH"
+
+
 def catalog_metadata_path() -> Path:
-    """Conventional normalized catalogue-metadata artifact path."""
+    """Resolve the catalogue-metadata artifact path.
+
+    Precedence: ``AGENTRECX_CATALOG_METADATA_PATH`` (an explicit file), then the accepted
+    conventional path for the configured category.
+    """
+    configured = os.environ.get(ENV_CATALOG_METADATA_PATH, "").strip()
+    if configured:
+        return Path(configured)
     return project_config.default_catalog_metadata_path()
 
 
@@ -141,6 +160,7 @@ class DemoRuntime:
     control_plane: str = DEFAULT_CONTROL_PLANE
     _graphs: dict[tuple[int, str], AgentGraph] = field(default_factory=dict, repr=False)
     _loops: dict[tuple[int, str], DemoLoopRunner] = field(default_factory=dict, repr=False)
+    _agent_service: Any = field(default=None, repr=False)
     _graph_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # -- readiness --------------------------------------------------------- #
@@ -250,6 +270,34 @@ class DemoRuntime:
         """Run one turn on the configured control plane and return its state."""
         return self.runner_for(k, user_key=user_key).invoke(agent_input)
 
+    def agent_service(self) -> Any:
+        """Return the single-turn agent service, composing it once on first use.
+
+        Compensating an extra entry point must not mean a second copy of anything: the
+        service is handed the **same** engine, tool, catalogue, matcher, reranker and memory
+        service this runtime already owns, so one process still holds one checkpoint and one
+        store.  It is built lazily because a deployment that only serves the session API
+        should not pay for the full-catalogue search index.
+        """
+        with self._graph_lock:
+            if self._agent_service is None:
+                from .agent_service import DemoAgentService
+
+                # ``from_env`` is what applies the two explicit opt-ins
+                # (AGENTRECX_AGENT_SIMILAR_ITEMS, AGENTRECX_AGENT_POLICY).  Both default to
+                # off, so the composed service is offline unless the deployment asked
+                # otherwise.
+                self._agent_service = DemoAgentService.from_env(
+                    tool=self.tool,
+                    enricher=self.enricher,
+                    metadata=self.metadata,
+                    matcher=self.matcher,
+                    reranker=self.reranker,
+                    engine=self.engine,
+                    memory_service=self.memory_service,
+                )
+            return self._agent_service
+
     def release_user_key(self, user_key: str) -> int:
         """Drop every cached graph and loop bound to a namespace; returns how many."""
         with self._graph_lock:
@@ -289,10 +337,23 @@ class DemoRuntime:
             "metadata_records": getattr(self.metadata, "size", None),
             "compiled_graph_count": self.compiled_graph_count,
             "control_plane": self.control_plane,
+            "agent_service_composed": self._agent_service is not None,
+            "agent_service_sources": (
+                list(self._agent_service.available_sources)
+                if self._agent_service is not None
+                else []
+            ),
+            "agent_policy": (
+                self._agent_service.policy_name if self._agent_service is not None else None
+            ),
         }
 
     def close(self) -> None:
-        """Close the preference store, if it owns one."""
+        """Close the preference store, if it owns one, and release the agent cache."""
+        if self._agent_service is not None:
+            closer = getattr(self._agent_service, "close", None)
+            if callable(closer):
+                closer()
         closer = getattr(getattr(self.memory_service, "store", None), "close", None)
         if callable(closer):
             closer()

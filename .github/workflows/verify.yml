@@ -1,0 +1,186 @@
+# AgentRec-X continuous verification (packaging phase).
+#
+# What this workflow proves, and what it deliberately does not
+# -----------------------------------------------------------
+# Every job here runs **offline**.  No job needs a language-model API key, and none makes a
+# billed provider call: the "real DeepSeek" result in the README is an archived measurement
+# under a separate explicit opt-in, not something CI reproduces (reproducing it would need a
+# credential and would cost money on every push).
+#
+# The `test` job is the primary gate: the full offline suite, the byte-compile check, the HTTP
+# contract smoke and the canonical demo scenario.  The `container` job builds the Docker image
+# and smoke-tests the running container, so the one-command path `docker compose up` is
+# verified rather than assumed.
+
+name: verify
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded push does not need to keep running.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests, compile, API and demo smoke (offline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}
+          restore-keys: pip-${{ runner.os }}-
+
+      - name: Install the runtime and development dependencies
+        # requirements-cpu.txt pins the CPU-only PyTorch wheel against its dedicated index.
+        # A bare `pip install torch` would pull several GB of CUDA userspace onto a CPU-only
+        # runner; requirements-cpu.txt's header explains why that is forbidden here.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-cpu.txt
+          python -m pip install -r requirements-dev.txt
+          python -m pip check
+
+      - name: Assert the environment really is CPU-only
+        run: |
+          python - <<'PY'
+          import torch
+          assert torch.version.cuda is None, "a CUDA build was installed into a CPU-only job"
+          assert torch.cuda.is_available() is False, "CUDA unexpectedly available"
+          print("torch", torch.__version__, "cuda", torch.version.cuda)
+          PY
+
+      - name: Byte-compile every source tree
+        run: python -m compileall -q recommendation tests experiments
+
+      - name: Run the offline test suite
+        # No network and no credential: recording-dependent tests skip themselves when the
+        # archived Phase-3 recordings are absent, and nothing here reads an API key.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: python -m pytest -q
+
+      - name: API smoke test (real HTTP stack, synthetic artifacts)
+        # Exercises the documented endpoints through FastAPI's TestClient over the small
+        # synthetic catalogue: readiness, the model-only contract, the session demo, and the
+        # single-turn agent endpoint including a constraint that removes a candidate.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: python -m pytest tests/test_api.py tests/test_demo_api.py tests/test_demo_agent_api.py -q
+
+      - name: Offline demo smoke test (canonical scenario, real server)
+        # Builds the demo catalogue and checkpoint, then runs the canonical scenario through
+        # the same code path the served process uses. Fails if the scenario does not reach a
+        # successful terminal state or produces no recommendation.
+        env:
+          OMP_NUM_THREADS: "1"
+        run: |
+          python -m experiments.build_demo_catalog --out runs/demo_catalog
+          python -m experiments.demo_scenario --json > /tmp/scenario.json
+          python - <<'PY'
+          import json
+          body = json.load(open("/tmp/scenario.json"))
+          assert body["terminal"]["succeeded"] is True, body["terminal"]
+          assert body["recommendations"], "the scenario must present a recommendation"
+          assert body["grounded"]["grounded_count"] >= 1
+          assert body["eligibility"]["evaluated"] is True, "the scenario states a constraint"
+          excluded = (body["eligibility"].get("projection") or {}).get("excluded") or []
+          assert excluded, "the scenario is chosen so a proved violation is excluded"
+          presented = {item["parent_asin"] for item in body["recommendations"]}
+          assert not (presented & {item["parent_asin"] for item in excluded}), \
+              "an excluded candidate must never be presented"
+          print("scenario ok:", body["route"], len(body["recommendations"]), "recommendations,",
+                len(excluded), "excluded")
+          PY
+
+      - name: Documentation guards
+        run: python -m pytest tests/test_docs.py -q
+
+  container:
+    name: docker build and start smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Build the demo image
+        run: docker build -t agentrecx:ci .
+
+      - name: Start the container
+        run: |
+          docker run -d --name agentrecx-ci -p 8000:8000 agentrecx:ci
+          for attempt in $(seq 1 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' agentrecx-ci 2>/dev/null || echo starting)
+            echo "attempt ${attempt}: health=${status}"
+            if [ "${status}" = "healthy" ]; then exit 0; fi
+            sleep 2
+          done
+          echo "container did not become healthy; logs follow" >&2
+          docker logs agentrecx-ci >&2
+          exit 1
+
+      - name: Smoke the endpoints
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/v1/demo/health
+          response=$(curl -fsS -X POST http://127.0.0.1:8000/v1/demo/agent/recommend \
+            -H 'Content-Type: application/json' \
+            -d '{"message":"Recommend waterproof layers","history":["demo-socks","demo-trail-runner"],"k":3,"sources":["history","catalog_search"],"constraints":[{"kind":"price_max","value":"100"}]}')
+          echo "${response}" > /tmp/agent_response.json
+          python - <<'PY'
+          import json
+          body = json.load(open("/tmp/agent_response.json"))
+          assert body["terminal"]["succeeded"] is True, body["terminal"]
+          assert body["route"] == "recommend"
+          assert body["control_plane"] == "loop"
+          assert body["recommendations"], "a candidate must be presented"
+          assert body["grounded"]["grounded_count"] >= 1
+          assert body["eligibility"]["evaluated"] is True
+          assert body["trajectory"]["steps"], "the trajectory must be inspectable"
+          print("container smoke ok:", len(body["recommendations"]), "recommendations")
+          PY
+
+      - name: Assert no offline guarantee was breached
+        # The default image must not carry a provider credential or make a provider call.
+        run: |
+          set -euo pipefail
+          docker exec agentrecx-ci sh -c 'test -z "${AGENTRECX_LLM_API_KEY:-}"'
+          docker logs agentrecx-ci | grep -q "deterministic (offline" \
+            || { echo "the entrypoint did not report offline mode" >&2; docker logs agentrecx-ci >&2; exit 1; }
+          docker logs agentrecx-ci > /tmp/container.log
+          if grep -qiE "api[_-]?key|bearer " /tmp/container.log; then
+            echo "a credential-shaped string appeared in the container logs" >&2
+            exit 1
+          fi
+          echo "offline guarantee verified"
+
+      - name: Container logs
+        if: always()
+        run: docker logs agentrecx-ci || true
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f agentrecx-ci || true
