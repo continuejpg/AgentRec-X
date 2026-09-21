@@ -1472,7 +1472,39 @@ EVIDENCE_ACTIONS`; reasoning remains budget-free.
 
 ---
 
-## 25. Known limitations
+## 25. Public recommendation benchmark (Phase 5, IMPLEMENTED)
+
+`experiments/benchmark_public.py` is the benchmark protocol and `experiments/phase5_benchmark.py` is
+the runner. Nothing here is agent architecture: the phase exists to prove recommendation quality on
+public data before the project is packaged as a finished system.
+
+**One evaluator, one split, one candidate universe.** Every arm is scored by the accepted
+`recommendation.evaluation.batched.evaluate_batched` over the same split
+(`temporal_leave_two_out`, `agentrecx.eval_protocol.v1`), the same catalogue (`156 746` items), the
+same `k ∈ {5, 10, 20}` and the same cohort. The evaluator owns PAD exclusion, seen-item masking,
+tie-breaking and ranking; an arm supplies **raw scores** and never masks. A model arm yields a
+`[batch, num_items + 1]` score matrix; a ranker arm encodes its ranking as a strictly decreasing score
+matrix, so both are masked and ranked by the same code. `DEFAULT_BATCH_SIZE = 256` bounds peak memory
+at ~3.9 GB, because the evaluator holds a float32 score matrix *and* a same-shaped bool mask.
+
+**Five arms**, all on a deterministic 20 000-user history-length-stratified sample of the 412 445
+eligible users: `popularity` (frequency over cohort train histories only), `sequential` (the accepted
+SASRec checkpoint, no retraining), `metadata_retrieval` (BM25 item-to-item over catalogue text,
+rank-fused across recent history items), `fixed_fusion` (RRF of all three sources for every user) and
+`agent_selected` (per-user source selection over the same fusion). The runner refuses to write metrics
+if the leakage gate fails.
+
+**Measured outcome** (Recall@10): popularity 0.005 25 → metadata 0.009 25 → agent-selected 0.011 80 →
+sequential 0.013 50 → **fixed fusion 0.014 35**. The accepted full-cohort SASRec reference is
+0.013 57, which the sample's sequential arm reproduces (0.013 50). The result that matters for future
+scope is that **fusion beats every single source, and threshold-based adaptive selection loses to
+fusing everything** — the sources are complementary, so consulting one per user discards what the
+others retrieved. Full detail, including the leakage evidence and the sample-versus-cohort caveat:
+`docs/PHASE5_HANDOFF.md`.
+
+---
+
+## 26. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value
@@ -1513,6 +1545,17 @@ EVIDENCE_ACTIONS`; reasoning remains budget-free.
 * **Evidence is a local artifact, not live retrieval.** Phase 4 acquires facts from a reproducible
   fixture. There is no external or web evidence source, so a constraint the artifact does not
   cover stays `UNKNOWN` — which is the honest outcome, not a gap the model can reason around.
+* **The public benchmark evaluates a 20 000-user sample**, not the full 412 445-user cohort, because
+  this host is CPU-only with 7 GB of RAM. Comparisons between arms are controlled; absolute values are
+  estimates. The sequential arm reproduces the accepted full-cohort figure (0.013 50 vs 0.013 57),
+  which bounds the drift for that arm only.
+* **The benchmark's agent-selected arm is a deterministic rule stand-in, not the live LLM policy.**
+  A language model cannot be called once per user across 20 000 users. The rules are auditable, their
+  firing rates are reported, and the negative result (selection loses to fixed fusion) is reported as
+  measured rather than tuned away.
+* **Benchmark absolute quality is low** (best arm Recall@10 = 0.014 35 over 156 746 items with one
+  positive per user on a k-core-filtered category). It is a fair comparison, not evidence of a strong
+  recommender.
 * **The Phase-4 real-provider measurement exists, and its control is confounded.** Prompt v2
   unchanged, DeepSeek `deepseek-flash`, 18 cases recorded live (77 calls, 129 267 tokens, 81 324 ms
   model latency) and replayed exactly offline (77 replayed, 0 live, identical actions, terminals,

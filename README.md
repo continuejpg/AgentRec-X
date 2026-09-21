@@ -549,7 +549,7 @@ budgets: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) | research questions, dataset, protocol, model, training, accepted results, diagnostics, reproducibility, validity threats |
 | [`docs/USAGE.md`](docs/USAGE.md) | environment, artifacts, env vars, server, browser walkthrough, API recipes, tests, smokes, troubleshooting |
 | [`docs/PROJECT_HISTORY.md`](docs/PROJECT_HISTORY.md) | milestone-by-milestone history with commit hashes |
-| [`docs/README.md`](docs/README.md) | documentation index |
+| [`docs/README.md`](docs/README.md) | documentation index, including the current Phase-5 handoff |
 | [`AGENTS.md`](AGENTS.md) | development instructions and engineering rules |
 
 Per-package contracts live next to the code, e.g.

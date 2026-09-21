@@ -274,6 +274,45 @@ the small integration sample. It shares neither the artifact nor the full data w
 above, so presenting a SASRec-vs-ItemCF table would compare incomparable protocols. **No
 such comparison is made in this repository.**
 
+### 8.2 Phase 5 — five arms under one protocol (public-data benchmark)
+
+The table above is the accepted full-cohort result on a GPU. Phase 5 adds a second, **comparative**
+measurement built to be reproducible on CPU-only hardware and to answer whether the recommendation
+layer beats its baselines at all. Source: `experiments/phase5_benchmark.py`, artifact
+`runs/phase5_benchmark_public/arms.json` (git-ignored; regenerate with the command in
+`docs/PHASE5_HANDOFF.md`).
+
+Protocol: same split (`temporal_leave_two_out`, `agentrecx.eval_protocol.v1`), same catalogue
+(156 746 items), same full-catalogue evaluator, same `k ∈ {5, 10, 20}` for every arm; cohort is a
+deterministic 20 000-user history-length-stratified sample of the 412 445 eligible users.
+
+| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 |
+| --- | --- | --- | --- | --- | --- |
+| `popularity` (floor) | 0.00370 | 0.00525 | 0.00785 | 0.00269 | 0.00525 |
+| `metadata_retrieval` (BM25 item-to-item) | 0.00505 | 0.00925 | 0.01485 | 0.00441 | 0.00925 |
+| `agent_selected` (per-user source selection) | 0.00690 | 0.01180 | 0.01820 | 0.00584 | 0.01180 |
+| `sequential` (accepted SASRec checkpoint) | 0.00820 | **0.01350** | 0.02070 | 0.00685 | 0.01350 |
+| `fixed_fusion` (RRF of all three sources) | **0.00860** | **0.01435** | **0.02325** | **0.00743** | **0.01435** |
+| *accepted full cohort (412 445 users)* | *0.00830* | *0.01357* | *0.02149* | *0.00702* | *0.01357* |
+
+Three things this table supports, and one it does not:
+
+* **The sample is representative for the sequential arm.** 0.013 50 on 20 000 stratified users against
+  0.013 57 on all 412 445 — a 0.5% relative difference. This is the check that the sampling and the
+  model wiring are both correct.
+* **Multi-source fusion beats every single source.** The three sources retrieve different targets:
+  the target is in the sequential head for 20.5% of users, the popularity head for 10.7% and the
+  metadata head for 8.2%, so rank-fusing all three recovers candidates that no single source had.
+* **Threshold-based source selection loses to fusing everything.** `agent_selected` consults one
+  source for 99.96% of users, so it inherits that source's blind spots and lands below both
+  `fixed_fusion` and plain `sequential`. The negative result is reported as measured; no threshold was
+  tuned afterward.
+* **It does not support a claim of strong recommendation quality.** Best Recall@10 is 0.014 35 over
+  156 746 items with one positive per user on a k-core-filtered category. Retrieval is lexical, not
+  learned, and the metadata arm's mean target rank is a tail convention rather than a quality signal.
+
+`HR@10 == Recall@10` for every arm, as expected for single-positive leave-one-out evaluation.
+
 ---
 
 ## 9. Metadata Integration
