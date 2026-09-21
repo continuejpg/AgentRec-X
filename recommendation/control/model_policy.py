@@ -63,6 +63,8 @@ __all__ = [
     "LLM_POLICY_NAME",
     "POLICY_PARSE_PROTOCOL_VERSION",
     "POLICY_PROMPT_VERSION",
+    "PROMPT_V1",
+    "PROMPT_V2",
     "LLMAgentPolicy",
     "build_action_schema",
     "build_policy_context_payload",
@@ -73,7 +75,16 @@ __all__ = [
 LLM_POLICY_NAME = "llm_agent_policy"
 
 #: Version of the prompt contract, bumped when the payload shape changes.
-POLICY_PROMPT_VERSION = 1
+#: Version of the policy contract prompt.  Bumped when the contract the model is given changes,
+#: because a prompt revision can change an answer, so it is part of the recording fingerprint.
+#:
+#: 1: the original contract.  Measured against DeepSeek in Phase 3: 2/14, dominated by the model
+#:    asking for clarification when it already held enough to answer.
+#: 2: adds three generic behavioural rules - clarify only when a decision-relevant fact is
+#:    missing and no grounded action can obtain it; do not clarify merely because the request is
+#:    brief; do not repeat a read-only action whose observation added nothing.  Nothing else
+#:    changed: same action schema, same payload, same parse protocol.
+POLICY_PROMPT_VERSION = 2
 #: Version of the *parse protocol* the policy applies to a model answer.  Separate from the
 #: prompt version because the two change independently: a parse rule can be corrected without
 #: touching the contract the model is given.  It is part of the recording fingerprint, so a
@@ -82,11 +93,14 @@ POLICY_PROMPT_VERSION = 1
 #: 1: an empty ``arguments`` object was rejected for an action that declares none.
 #: 2: an empty ``arguments`` object is folded onto "no arguments" for such an action.  The
 #:    Phase-3 live baseline showed this accounted for 7 of 14 case failures.
-POLICY_PARSE_PROTOCOL_VERSION = 2
+#: 3: an empty ``arguments`` *array* is folded the same way.  The Prompt-v2 live run showed
+#:    DeepSeek switching from ``{}`` to ``[]``, which cost two cases with no usable action.
+#:    Both are the JSON spelling of "absent"; neither is a payload.
+POLICY_PARSE_PROTOCOL_VERSION = 3
 
 #: The policy contract.  Deliberately short: the architecture document does not belong in a
 #: per-step prompt, and a long prompt is a brittle one.
-SYSTEM_PROMPT = """\
+PROMPT_V1 = """\
 You are the next-action policy of a bounded recommendation agent.
 
 Choose exactly ONE action from the offered actions, then stop.
@@ -111,6 +125,60 @@ Rules:
    {"action": "<one of the offered actions>", "arguments": {...}, "rationale": "<short>"}
    Omit "arguments" for an action that takes none. "rationale" is optional and is never trusted.
 """
+
+#: The Prompt-v2 contract.  It is v1 plus three rules that address exactly what the Phase-3
+#: baseline showed, and nothing else.  Deliberately still generic: it names no case, no expected
+#: action, no trajectory and no gold label.
+#:
+#: Why each rule exists, stated as the behaviour it corrects:
+#:
+#: * over-clarification - the model asked a question when it had already grounded candidates and
+#:   could have answered, so the contract now says when asking is and is not warranted;
+#: * no-progress repetition - the model re-read the same facts until its step budget ran out, so
+#:   the contract now says what to do when an observation adds nothing.
+PROMPT_V2 = """\
+You are the next-action policy of a bounded recommendation agent.
+
+Choose exactly ONE action from the offered actions, then stop.
+
+Rules:
+1. Use only actions in the offered list. Never invent an action.
+2. Never invent a product identity, price, weight, brand, availability or any catalogue fact.
+   You do not have them. Facts come from tool observations only.
+2a. A reasoning action that names products (for example GET_DETAILS or COMPARE) may reference
+   ONLY identities listed in "candidates.candidate_refs". Those are the run's grounded
+   candidates. Any other identity is refused, so choose a listed one and read its facts
+   instead of guessing. You may choose which listed candidate to target.
+2b. "candidate_refs" tells you each candidate's eligibility and whether its evidence needs
+   attention. Prefer a candidate whose evidence is unsettled when you need more facts.
+3. An action's observation is the only evidence that it succeeded. Do not assume success.
+4. If a needed fact or product is missing, choose an action that retrieves or asks for it.
+4a. Ask a clarifying question only when information you need to make a useful decision is
+   missing AND no offered action could obtain it. Grounded candidates and their facts count as
+   information you have: if you can give a useful answer from them, do that instead of asking.
+4b. Do not ask merely because the request is brief or open-ended. A short request that the
+   available evidence can serve is answered, not questioned. Ask when the answer would
+   genuinely change which candidate is right - not to fill in a preference you can infer.
+5. Prefer the fewest steps that answer the request. Do not repeat an action whose observation
+   already answered it.
+5a. If an observation told you nothing new - the same facts, an empty result, or the same
+   candidates you already had - do not perform that same read-only action on those same targets
+   again. Change something instead: consult a different source, read a different candidate,
+   ask a question only if rule 4a holds, or finish on the evidence you have.
+5b. If you cannot make further progress with the budget that remains, finish with the grounded
+   evidence you have rather than spending the remaining steps on actions that already ran.
+6. FINISH only ends the turn as a proposal; it is validated and may be refused. If it is
+   refused, read the refusal, choose a different action, and do not propose FINISH again
+   unchanged.
+7. Respect the remaining budget. Do not plan more actions than remain.
+8. Output must be a single JSON object and nothing else:
+   {"action": "<one of the offered actions>", "arguments": {...}, "rationale": "<short>"}
+   Omit "arguments" for an action that takes none. "rationale" is optional and is never trusted.
+"""
+
+#: The active contract.  Kept as a name of its own so a revision is an explicit assignment
+#: rather than an in-place edit that would erase what was measured.
+SYSTEM_PROMPT = PROMPT_V2
 
 
 # --------------------------------------------------------------------------- #
@@ -298,6 +366,7 @@ class LLMAgentPolicy:
         *,
         max_attempts: int = 2,
         name: str = LLM_POLICY_NAME,
+        system_prompt: str | None = None,
     ) -> None:
         if not callable(getattr(model, "complete", None)):
             raise PolicyActionError(
@@ -308,6 +377,11 @@ class LLMAgentPolicy:
         self._model = model
         self._max_attempts = max_attempts
         self._name = name
+        #: The contract this policy asks under.  Defaults to the active prompt; overridable so a
+        #: recording made under an earlier contract can be reproduced exactly.  Replaying v1 while
+        #: sending v2's text would be a different experiment, and the request fingerprint keys on
+        #: the system prompt precisely so that cannot happen silently.
+        self._system_prompt = system_prompt or SYSTEM_PROMPT
         self._last_metadata: dict[str, Any] = {}
 
     # -- metadata ---------------------------------------------------------- #
@@ -427,7 +501,7 @@ class LLMAgentPolicy:
 
         for attempt in range(1, self._max_attempts + 1):
             request = ModelRequest(
-                system_prompt=build_policy_system_prompt(),
+                system_prompt=self._system_prompt,
                 context_payload=payload,
                 action_schema=action_schema,
                 correction=correction,
@@ -541,7 +615,13 @@ class LLMAgentPolicy:
             # keep rejecting a foreign or malformed payload outright.  A text model needs the
             # JSON equivalent of "absent" folded onto "absent"; trusted validation is untouched,
             # and an action that *does* take arguments still gets its payload checked in full.
-            if arguments == {} and not ARGUMENTS_BY_ACTION[action].model_fields:
+            if (
+                arguments in ({}, [])
+                and not ARGUMENTS_BY_ACTION[action].model_fields
+            ):
+                # Both spellings of "no arguments": an empty object and an empty array.  The v2
+                # live run showed DeepSeek using ``[]`` where the v1 run used ``{}`` - the same
+                # JSON convention, a different empty literal, and equally not a policy error.
                 arguments = None
             else:
                 fields["arguments"] = arguments

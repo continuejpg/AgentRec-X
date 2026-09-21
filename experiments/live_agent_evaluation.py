@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from experiments._harness import case_controller_factory  # noqa: E402
+from experiments._harness import case_controller_factory, catalog_reasoner  # noqa: E402
 from recommendation.control.model_client import ModelCallError  # noqa: E402
 from recommendation.control.model_recorder import (  # noqa: E402
     DEFAULT_RECORDINGS_DIR,
@@ -109,6 +109,32 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output", default=None, help="write the JSON report to this path")
     parser.add_argument("--max-attempts", type=int, default=2, help="model calls per decision")
     parser.add_argument(
+        "--parse-protocol",
+        type=int,
+        default=None,
+        help=(
+            "override the parse-protocol version used for the request fingerprint.  Needed only "
+            "to replay an archived recording: a recording made under an earlier protocol must be "
+            "looked up under that protocol, not the current one"
+        ),
+    )
+    parser.add_argument(
+        "--prompt-version",
+        type=int,
+        default=None,
+        help="override the prompt version used for the request fingerprint (archived replays)",
+    )
+    parser.add_argument(
+        "--prompt",
+        choices=("v1", "v2"),
+        default=None,
+        help=(
+            "which archived contract to send.  A recording's fingerprint includes the system "
+            "prompt, so replaying a v1 trace requires v1's text; sending the active contract "
+            "would miss every entry"
+        ),
+    )
+    parser.add_argument(
         "--confirm-live",
         action="store_true",
         help=(
@@ -132,6 +158,8 @@ def _build_client(
     sink: ModelSink,
     max_attempts: int,
     wrapped: Any = None,
+    parse_protocol_version: int | None = None,
+    prompt_version: int | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Build the recording client for the requested mode, or fail with a clear message.
 
@@ -160,8 +188,17 @@ def _build_client(
             mode=ReplayMode.REPLAY,
             provider=str(recorded.get("provider") or "recorded"),
             model=str(recorded.get("model") or "recorded"),
-            prompt_version=recorded.get("prompt_version"),
-            parse_protocol_version=recorded.get("parse_protocol_version"),
+            # An explicit override wins: a recording made under an earlier prompt or parse
+            # protocol must be looked up under *that* contract, and the current constant is the
+            # wrong key for it.
+            prompt_version=(
+                prompt_version if prompt_version is not None else recorded.get("prompt_version")
+            ),
+            parse_protocol_version=(
+                parse_protocol_version
+                if parse_protocol_version is not None
+                else recorded.get("parse_protocol_version")
+            ),
             sink=sink,
         )
         return client, {
@@ -235,6 +272,9 @@ def run(
     max_attempts: int = 2,
     on_case: Any = None,
     wrapped: Any = None,
+    parse_protocol_version: int | None = None,
+    prompt_version: int | None = None,
+    system_prompt: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Run the suite and return ``(exit_code, report)``.
 
@@ -248,14 +288,24 @@ def run(
         sink=sink,
         max_attempts=max_attempts,
         wrapped=wrapped,
+        parse_protocol_version=parse_protocol_version,
+        prompt_version=prompt_version,
     )
-    factory = build_live_model_policy_factory(client=client, max_attempts=max_attempts)
+    factory = build_live_model_policy_factory(
+        client=client, max_attempts=max_attempts, system_prompt=system_prompt
+    )
 
     runner = CaseRunner(case_controller_factory, variant=ABLATION_LIVE_MODEL)
+    # A **catalogue reasoner** must be supplied, or the constraint dimensions are never measured:
+    # ``_check_constraints`` returns an empty tuple without one, which reports every declared hard
+    # constraint as unchecked and marks a completed run as an ``unverified_completion``.  Phase 3
+    # omitted it, so its report falsely failed ``hard-constraint``; the recording is unaffected
+    # (the runtime does its own evaluation), only the measurement was wrong.
+    reasoner_factory = catalog_reasoner
     outcomes: list[Any] = []
     started = time.monotonic()
     for case in load_cases():
-        outcome = runner.run(case, policy=factory(case))
+        outcome = runner.run(case, policy=factory(case), reasoner=reasoner_factory())
         outcomes.append(outcome)
         if on_case is not None:
             on_case(case, outcome)
@@ -345,6 +395,9 @@ def main(argv: list[str] | None = None) -> int:
             output=Path(args.output) if args.output else None,
             max_attempts=args.max_attempts,
             on_case=_print_case,
+            parse_protocol_version=args.parse_protocol,
+            prompt_version=args.prompt_version,
+            system_prompt=_prompt_for(args.prompt),
         )
     except ModelCallError as exc:
         # A configuration or recording problem is reported as an actionable message, not a
@@ -387,6 +440,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.output:
         print(f"\n wrote {args.output}")
     return exit_code
+
+
+def _prompt_for(name: str | None) -> str | None:
+    """Resolve ``--prompt`` to an archived contract, or ``None`` for the active one."""
+    if name is None:
+        return None
+    from recommendation.control.model_policy import PROMPT_V1, PROMPT_V2
+
+    return {"v1": PROMPT_V1, "v2": PROMPT_V2}[name]
 
 
 def _print_case(case: Any, outcome: Any) -> None:

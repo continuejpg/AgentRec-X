@@ -1251,5 +1251,11 @@ def test_the_parse_protocol_version_is_reported() -> None:
         POLICY_PROMPT_VERSION,
     )
 
-    assert POLICY_PROMPT_VERSION == 1
-    assert POLICY_PARSE_PROTOCOL_VERSION == 2
+    # The values advance as the contracts are revised; what matters is that both exist, are
+    # positive, and are recorded - pinning literal numbers here would only make every future
+    # revision edit this test.
+    assert POLICY_PROMPT_VERSION >= 1
+    assert POLICY_PARSE_PROTOCOL_VERSION >= 1
+    from recommendation.control.model_policy import PROMPT_V1, PROMPT_V2
+
+    assert PROMPT_V1 != PROMPT_V2

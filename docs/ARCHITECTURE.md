@@ -782,6 +782,11 @@ empty retrieval; a trajectory metric says nothing about recommendation accuracy.
 
 ### Trajectory
 
+Evaluation-plane version 4 adds `read_signature` to each record: for a read-only step, a bounded
+signature of what it read (`get_details:cand-red,cand-blue`). It carries identities the record
+already implies and no catalogue value, and it exists so a repeated read is distinguishable from
+a read of different targets.
+
 `AgentTrajectory` is the evaluation-facing projection of a run: per-step proposed action, whether
 it was authorised, the refusal code if not, the observation kind/status, candidate and ungrounded
 counts, whether the step consumed a tool call, the **policy that decided the step**, and the
@@ -1308,11 +1313,55 @@ than recovering.  **No trust boundary was reached in any failing case**: no cand
 manufactured, no constraint verdict was overridden, no memory was committed and no `FINISH`
 bypassed the guard.
 
+### Phase 3.1: calibration, and the measured Prompt v1 / v2 comparison
+
+Two things were wrong after Phase 3, and they were different in kind.
+
+**The measurement.** The live command never passed a catalogue reasoner to the runner, so
+`_check_constraints` returned an empty tuple, every declared hard constraint was reported as
+unchecked, and a completed run was marked `unverified_completion`. `hard-constraint` was
+therefore failed for a reason that had nothing to do with the model. The runtime was unaffected -
+the loop does its own constraint evaluation - only the report was wrong. Fixed by supplying the
+reasoner, and pinned by a replay of the Phase-3 recording that flips that one case.
+
+The **clarification-suspension** semantics the phase was opened for turned out to be already
+correct: a run that suspends with `ASKED_CLARIFICATION` maps to that terminal and is accepted by
+a case that declares it, and is a failure for a case that forbids asking. That is now pinned in
+both directions, together with the neighbouring rules - a `COMPLETION_REFUSED`, a
+`BUDGET_EXHAUSTED` and a `FAILED` abort are each distinct terminals and none of them counts as a
+successful clarification.
+
+**The contract.** Prompt v2 adds three generic rules and changes nothing else - same action
+schema, same payload builder, same parse protocol:
+
+* clarify only when a decision-relevant fact is missing *and* no offered action could obtain it,
+  where grounded candidates and their facts count as information the run already has;
+* do not ask merely because the request is brief;
+* do not repeat a read-only action whose observation added nothing - change source, change
+  target, ask only if the first rule holds, or finish on the evidence.
+
+Measured over the same 14 cases, same model, same catalogue, same tools, same budgets, same
+parser: **prompt v1 4/14 → prompt v2 9/14**, with clarifications 9 → 4, repeated read-only
+actions 18 → 7, model calls 64 → 54 and model latency 59.4 s → 50.2 s. Six cases changed verdict,
+all six improved, none regressed.
+
+A second, narrower parse fix was needed along the way and is versioned as
+`POLICY_PARSE_PROTOCOL_VERSION=3`: the v2 run spelled "no arguments" as `[]` where the v1 run
+used `{}`, and only the object form was folded. Both are the JSON spelling of absent, neither is
+a payload, and a *non-empty* literal for an argumentless action is still refused.
+
+Trajectory records gained `read_signature` (evaluation-plane version 4) - `get_details:cand-red` -
+so "did the run repeat a read it had already performed" is answerable from the record. Without it
+two `get_details` steps on different candidates were indistinguishable from two on the same ones.
+
 ### Not implemented (documented, not claimed)
 
-* **No prompt tuning.** The baseline prompt was frozen and measured; its version is recorded in
-  every trajectory and in the fingerprint, so a prompt revision cannot silently replay an old
-  answer.  No material prompt change was made in this phase.
+* **No prompt tuning against individual cases.** Prompt v2 was written from the *pattern* the
+  baseline showed, before the v2 run, and no case was modified afterwards. Both prompt versions
+  and both result sets are preserved, and a test asserts the prompt contains no case id, no case
+  message and no expected action sequence.
+* **No `NoProgressGuard`.** Repetition fell from 18 to 7 occurrences under the prompt change
+  alone; a deterministic guard remains a documented option, not an implementation.
 * **The parse-protocol revision is versioned, not silent.** `POLICY_PARSE_PROTOCOL_VERSION` is
   part of the recording fingerprint, so a trace recorded under one interpretation of an answer
   cannot be replayed as though it were made under another.

@@ -38,10 +38,12 @@ __all__ = [
 #:
 #: 2: records carry ``policy_name``, so a report states which policy actually decided rather than
 #:    trusting the variant label it was filed under.
+#: 4: records carry ``read_signature``, so a repeated read-only action on the same targets is
+#:    distinguishable from a read of different targets.
 #: 3: the trajectory carries model identity and usage (``execution_mode``, ``model_provider``,
 #:    token counts, model latency, wall latency, estimated cost), and the ``model_policy``
 #:    variant is renamed ``scripted_model`` now that a real provider variant exists.
-EVALUATION_PLANE_VERSION = 3
+EVALUATION_PLANE_VERSION = 4
 
 
 class TerminalOutcome(str, Enum):
@@ -100,6 +102,16 @@ class TrajectoryRecord(BaseModel):
     produced_candidates: bool = False
     #: Whether the step consumed a tool call (candidate actions do; reasoning does not).
     consumed_tool_call: bool = False
+    #: Phase 3.1: for a **read-only** action, a bounded signature of what it read -
+    #: ``"get_details:cand-red,cand-blue"`` - and ``None`` for an action that reads nothing.
+    #:
+    #: Recorded because "did the run repeat a read it had already performed" is the no-progress
+    #: pattern Phase 3.1 has to measure, and the evaluation projection otherwise exposed only the
+    #: action name: two ``get_details`` steps that read different candidates looked identical to
+    #: two that read the same ones.  It carries identities the trajectory already carries
+    #: (``proposed_action`` names the action; the run's candidate set is not a secret to its own
+    #: audit record) and no catalogue value, no score and no prompt text.
+    read_signature: str | None = Field(default=None, max_length=200)
     note: str | None = Field(default=None, max_length=200)
 
 

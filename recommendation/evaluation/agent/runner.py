@@ -738,6 +738,7 @@ class CaseRunner:
                     ),
                     consumed_tool_call=validated.get("action")
                     in ("recommend_from_history", "search_catalog", "select_source", "find_similar"),
+                    read_signature=_read_signature(step),
                     note=step.note,
                 )
             )
@@ -837,6 +838,30 @@ def _model_metadata(result: LoopResult) -> dict[str, Any]:
     if modes:
         metadata["execution_mode"] = modes[-1]
     return metadata
+
+
+#: Actions that read facts without changing candidate membership.  Their *targets* are what make
+#: a repeat a repeat.
+_READ_ONLY_ACTION_NAMES: frozenset[str] = frozenset(
+    {"get_details", "compare", "trade_off", "check_compatibility", "bundle", "verify"}
+)
+
+
+def _read_signature(step: Any) -> str | None:
+    """A bounded signature of what a read-only step read, or ``None``.
+
+    Built from the validated action's own arguments, which the trajectory already records, so this
+    adds no new information channel - it makes an existing one addressable.  Bounded so a long
+    target list cannot grow the record without limit.
+    """
+    proposal = step.action_proposal or {}
+    action = proposal.get("action")
+    if action not in _READ_ONLY_ACTION_NAMES:
+        return None
+    arguments = proposal.get("arguments") or {}
+    targets = arguments.get("parent_asins") or ()
+    rendered = ",".join(str(target) for target in targets)
+    return f"{action}:{rendered}"[:200]
 
 
 def _terminal_outcome(result: LoopResult) -> TerminalOutcome:

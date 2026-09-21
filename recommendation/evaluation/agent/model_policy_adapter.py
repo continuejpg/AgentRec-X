@@ -310,6 +310,7 @@ def build_live_model_policy_factory(
     client: Any,
     max_attempts: int = 2,
     prompt_version: int | None = None,
+    system_prompt: str | None = None,
 ) -> Callable[[EvaluationCase], Any]:
     """Return a per-case factory that builds an ``LLMAgentPolicy`` over a **real** client.
 
@@ -320,6 +321,11 @@ def build_live_model_policy_factory(
     trust boundary.  That is what makes the ablation a comparison of *policies* rather than of
     runtimes.
 
+    ``system_prompt`` overrides the active contract, which is what an archived recording needs:
+    a request fingerprint includes the prompt, so replaying a v1 trace while sending v2's text
+    would be a different experiment.  Defaulting to the active prompt is correct for a current
+    recording and wrong for an archived one, so the archived case must say so.
+
     ``client`` is typically a
     :class:`~recommendation.control.model_recorder.RecordingModelClient`, so the same factory
     serves a live run, a recording run and an offline replay: the client decides which of those
@@ -328,6 +334,11 @@ def build_live_model_policy_factory(
     from recommendation.control.model_policy import LLMAgentPolicy
 
     def factory(case: EvaluationCase) -> Any:
-        return LLMAgentPolicy(client, max_attempts=max_attempts, name="live_agent_policy")
+        return LLMAgentPolicy(
+            client,
+            max_attempts=max_attempts,
+            name="live_agent_policy",
+            system_prompt=system_prompt,
+        )
 
     return factory
