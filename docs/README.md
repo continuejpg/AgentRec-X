@@ -10,6 +10,7 @@ depth.
 | [EXPERIMENTS.md](EXPERIMENTS.md) | check the dataset, the evaluation protocol, the accepted metrics, the policy diagnostics, and threats to validity |
 | [USAGE.md](USAGE.md) | actually run the server, the demo, the API, the tests and the smokes — including troubleshooting |
 | [PROJECT_HISTORY.md](PROJECT_HISTORY.md) | see the milestone sequence, its commits, and the invariants that held across them |
+| [PHASE4_HANDOFF.md](PHASE4_HANDOFF.md) | pick up the current state: completed milestones, architectural invariants, measured results, remaining gaps, and what must not be reopened |
 
 Development instructions and engineering rules live in [AGENTS.md](../AGENTS.md).
 
