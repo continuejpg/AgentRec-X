@@ -55,32 +55,33 @@ from recommendation.control.context import CandidateState  # noqa: E402
 from recommendation.control.model_client import ModelCallError  # noqa: E402
 from recommendation.control.model_policy import (  # noqa: E402
     LLMAgentPolicy,
+    POLICY_PROMPT_VERSION,
     build_action_schema,
     build_policy_context_payload,
     build_policy_system_prompt,
+)
+from recommendation.control.model_recorder import (  # noqa: E402
+    DEFAULT_RECORDINGS_DIR,
+    ModelSink,
+    RecordingModelClient,
+    RecordingStore,
+    ReplayMode,
 )
 from recommendation.control.provider_adapter import (  # noqa: E402
     ENV_BASE_URL,
     ENV_MODEL,
     build_provider_client,
     provider_configured,
+    provider_settings,
 )
 from tests.agent_reranking_fixture import CANDIDATE_ROWS  # noqa: E402
 from tests.control_fixture import build_control_harness  # noqa: E402
 
 
-def _urllib_transport(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout: float):
-    """A standard-library transport, imported lazily so the module needs no HTTP dependency."""
-    import urllib.error
-    import urllib.request
-
-    data = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:  # a provider error carries a status
-        return exc.code, exc.read().decode("utf-8", "replace")
+#: The transport now lives in the adapter module, so the smoke and the evaluation command call
+#: the provider through **one** implementation.  A local copy here would be a second HTTP path
+#: that no test covers and that could drift from the one the evaluation actually uses.
+from recommendation.control.provider_adapter import urllib_transport as _urllib_transport  # noqa: E402
 
 
 class _Map:
@@ -112,8 +113,20 @@ def _summary_path() -> Path:
     return Path(os.environ.get("AGENTRECX_LLM_SMOKE_SUMMARY", "/tmp/agentrecx_llm_policy_smoke.json"))
 
 
-def run(*, live: bool, transport: str | None) -> int:
-    """Run the smoke.  Returns a process exit code."""
+def run(
+    *,
+    live: bool,
+    transport: str | None,
+    mode: str | None = None,
+    recording: str | None = None,
+) -> int:
+    """Run the smoke.  Returns a process exit code.
+
+    ``mode`` supersedes ``live``: ``dry`` (default) shows what would be sent, ``live`` calls the
+    provider, ``record`` calls and writes a recording, ``replay`` reproduces a recorded call with
+    no network.  ``live`` is kept as a spelling of ``--mode live`` so Phase-1 invocations still
+    work.
+    """
     print("=" * 78)
     print(" AgentRec-X model-driven policy smoke (Phase 1)")
     print("=" * 78)
@@ -139,51 +152,103 @@ def run(*, live: bool, transport: str | None) -> int:
     print(f" context payload keys: {sorted(payload)}")
     print()
 
-    if not live:
+    resolved_mode = mode or ("live" if live else "dry")
+    if resolved_mode == "dry":
         print(" DRY RUN - no request was made.")
-        print(f" set --live and configure {ENV_BASE_URL} / {ENV_MODEL} to call a real endpoint.")
-        SUMMARY.update({"mode": "dry_run", "called_provider": False, "configured": provider_configured()})
+        print(f" use --mode live (or --live) with {ENV_BASE_URL} / {ENV_MODEL} to call a real endpoint.")
+        SUMMARY.update(
+            {"mode": "dry_run", "called_provider": False, "configured": provider_configured()}
+        )
         _write_summary()
         return 0
 
+    # A transport name is accepted for compatibility, but the standard-library client is the
+    # default now: it is the same transport the evaluation command uses, and requiring a flag to
+    # select the only implementation was ceremony rather than safety.
+    supported = {"urllib", None}
+    if transport not in supported:
+        print(f" unknown transport {transport!r}; supported: urllib")
+        SUMMARY.update({"mode": resolved_mode, "called_provider": False, "error": "unknown_transport"})
+        _write_summary()
+        return 2
+
+    recording_path = Path(recording) if recording else DEFAULT_RECORDINGS_DIR / "smoke.jsonl"
+
+    # REPLAY is offline by definition: it needs a recording and must not require configuration.
+    if resolved_mode == "replay":
+        store = RecordingStore(recording_path)
+        if not store.path.exists():
+            print(f" NOT CONFIGURED - no recording at {store.path}; run --mode record first.")
+            SUMMARY.update(
+                {"mode": "replay", "called_provider": False, "error": "recording_missing"}
+            )
+            _write_summary()
+            return 2
+        from recommendation.control.model_recorder import recording_identity
+
+        recorded = recording_identity(store.path)
+        sink = ModelSink()
+        client = RecordingModelClient(
+            _ReplayGuard(),
+            store=store,
+            mode=ReplayMode.REPLAY,
+            provider=str(recorded.get("provider") or "recorded"),
+            model=str(recorded.get("model") or "recorded"),
+            prompt_version=recorded.get("prompt_version"),
+            sink=sink,
+        )
+        print(f" replaying from {store.path} ({len(store)} recorded response(s))")
+        return _decide(client, context, sink, resolved_mode, called=False)
+
     if not provider_configured():
         print(f" NOT CONFIGURED - set {ENV_BASE_URL} and {ENV_MODEL} (and a key if required).")
-        SUMMARY.update({"mode": "live", "called_provider": False, "error": "not_configured"})
-        _write_summary()
-        return 2
-
-    if transport is None:
-        print(" refuse: --live requires --transport <name> (this repo imports no HTTP client).")
-        SUMMARY.update({"mode": "live", "called_provider": False, "error": "no_transport"})
-        _write_summary()
-        return 2
-
-    transport_fn = {"urllib": _urllib_transport}.get(transport)
-    if transport_fn is None:
-        print(f" unknown transport {transport!r}; supported: urllib")
-        SUMMARY.update({"mode": "live", "called_provider": False, "error": "unknown_transport"})
+        SUMMARY.update({"mode": resolved_mode, "called_provider": False, "error": "not_configured"})
         _write_summary()
         return 2
 
     try:
-        client = build_provider_client(transport=transport_fn)
+        settings = provider_settings()
+        wrapped = build_provider_client(
+            transport=_urllib_transport, settings=settings, max_tokens=512
+        )
     except ModelCallError as exc:
         print(f" could not build a provider client: {exc.code} - {exc}")
-        SUMMARY.update({"mode": "live", "called_provider": False, "error": exc.code})
+        SUMMARY.update({"mode": resolved_mode, "called_provider": False, "error": exc.code})
         _write_summary()
         return 2
 
-    policy = LLMAgentPolicy(client, max_attempts=2)
+    sink = ModelSink()
+    record_mode = ReplayMode.RECORD if resolved_mode == "record" else ReplayMode.LIVE
+    client = RecordingModelClient(
+        wrapped,
+        store=RecordingStore(recording_path),
+        mode=record_mode,
+        provider=settings.profile.name,
+        model=settings.model,
+        prompt_version=POLICY_PROMPT_VERSION,
+        sink=sink,
+    )
+    print(f" provider : {settings.base_url} model={settings.model} profile={settings.profile.name}")
+    print(f" credential present: {settings.api_key_present}   (never printed, never recorded)")
     print(" calling the provider ...")
+    return _decide(client, context, sink, resolved_mode, called=True)
+
+
+def _decide(
+    client: Any, context: PolicyContext, sink: ModelSink, mode: str, *, called: bool
+) -> int:
+    """Ask the policy for one action through ``client`` and report the outcome."""
+    policy = LLMAgentPolicy(client, max_attempts=2)
     try:
         proposal = policy.choose(context)
     except Exception as exc:  # noqa: BLE001 - report the failure clearly and stop
         print(f" the model policy produced no usable action: {type(exc).__name__}: {exc}")
         SUMMARY.update(
             {
-                "mode": "live",
-                "called_provider": True,
+                "mode": mode,
+                "called_provider": called,
                 "ok": False,
+                "usage": sink.summary(),
                 "metadata": policy.last_metadata,
             }
         )
@@ -192,18 +257,47 @@ def run(*, live: bool, transport: str | None) -> int:
 
     print(f" proposed action : {proposal.action.value}")
     print(f" arguments       : {proposal.arguments}")
+    print(f" validated       : the ActionProposal was built, so ActionValidator will see a legal shape")
+    usage = sink.summary()
+    print(f" model calls     : {usage['model_calls']} (live {usage['live_calls']}, replayed {usage['replayed_calls']})")
+    tokens = (
+        f"{usage['input_tokens']}/{usage['output_tokens']}/{usage['total_tokens']}"
+        if usage["total_tokens"] is not None
+        else "unknown (provider reported no usage)"
+    )
+    print(f" tokens in/out/total: {tokens}")
+    latency = (
+        f"{usage['model_latency_ms_total']} ms"
+        if usage["model_latency_ms_total"] is not None
+        else "unknown (not measured)"
+    )
+    print(f" model latency   : {latency}")
+    cost = (
+        f"{usage['estimated_cost_total']}"
+        if usage["estimated_cost_total"] is not None
+        else "unknown (no pricing configured)"
+    )
+    print(f" estimated cost  : {cost}")
     print(f" diagnostics     : {policy.last_metadata}")
     SUMMARY.update(
         {
-            "mode": "live",
-            "called_provider": True,
+            "mode": mode,
+            "called_provider": called,
             "ok": True,
             "action": proposal.action.value,
+            "usage": usage,
             "metadata": policy.last_metadata,
         }
     )
     _write_summary()
     return 0
+
+
+class _ReplayGuard:
+    """Refuses to be called, so a replay that reached the network fails loudly."""
+
+    def complete(self, request: Any) -> Any:  # pragma: no cover - guard
+        raise ModelCallError("replay attempted a provider call", code="replay_violation")
 
 
 def _write_summary() -> None:
@@ -233,14 +327,39 @@ def build_live_loop() -> Any:
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run the smoke."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true", help="actually call the provider")
+    parser.add_argument(
+        "--mode",
+        choices=("dry", "live", "record", "replay"),
+        default=None,
+        help=(
+            "dry = show the request and call nothing (default); "
+            "live = one real provider call; "
+            "record = one real call, written to a recording; "
+            "replay = reproduce a recording with no network"
+        ),
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="compatibility spelling of --mode live",
+    )
     parser.add_argument(
         "--transport",
         default=None,
-        help="HTTP transport to use for a live call (supported: urllib)",
+        help="HTTP transport for a live call (default: the standard-library client)",
+    )
+    parser.add_argument(
+        "--recording",
+        default=None,
+        help=f"recording file (default: {DEFAULT_RECORDINGS_DIR}/smoke.jsonl)",
     )
     args = parser.parse_args(argv)
-    return run(live=args.live, transport=args.transport)
+    return run(
+        live=args.live,
+        transport=args.transport,
+        mode=args.mode,
+        recording=args.recording,
+    )
 
 
 if __name__ == "__main__":

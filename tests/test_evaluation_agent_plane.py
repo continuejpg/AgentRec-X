@@ -767,7 +767,7 @@ def test_the_variant_label_matches_the_policy_that_actually_decided() -> None:
     # The exact shape that regressed: the arm asks the runner to build the policy itself.
     runner = CaseRunner(suite_factory, variant=ABLATION_MODEL_POLICY)
     silent = runner.run(case, policy=None, reasoner=build_reasoner())
-    assert silent.trajectory.policy_names() == ("suite-recommend-then-finish",), (
+    assert silent.trajectory.policy_names == ("suite-recommend-then-finish",), (
         "the runner's default is the adaptive stub; recording it is what exposes the mistake"
     )
 
@@ -777,7 +777,7 @@ def test_the_variant_label_matches_the_policy_that_actually_decided() -> None:
         policy=build_model_policy_factory()(case),
         reasoner=build_reasoner(),
     )
-    assert outcome.trajectory.policy_names() == (LLM_POLICY_NAME,)
+    assert outcome.trajectory.policy_names == (LLM_POLICY_NAME,)
     assert outcome.passed is True
     assert outcome.trajectory.action_sequence() == ("search_catalog", "finish")
 

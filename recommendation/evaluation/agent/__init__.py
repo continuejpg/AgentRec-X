@@ -37,11 +37,13 @@ from .cases import EVALUATION_CASES, EvaluationCase, case_by_id, load_cases
 from .metrics import TrajectoryMetrics, compute_metrics
 from .model_policy_adapter import (  # noqa: F401 - exported for the evaluation smoke
     ObservationReactiveModel,
+    build_live_model_policy_factory,
     build_model_policy_factory,
 )
 from .runner import (
     ABLATION_ADAPTIVE,
     ABLATION_DECIDE_ONCE,
+    ABLATION_LIVE_MODEL,
     ABLATION_MODEL_POLICY,
     CaseOutcome,
     CaseRunner,
@@ -59,6 +61,7 @@ from .schemas import (
 __all__ = [
     "ABLATION_ADAPTIVE",
     "ABLATION_DECIDE_ONCE",
+    "ABLATION_LIVE_MODEL",
     "ABLATION_MODEL_POLICY",
     "ATTRIBUTION_COMPONENTS",
     "EVALUATION_CASES",
@@ -71,6 +74,7 @@ __all__ = [
     "EvaluationCase",
     "FailureAttribution",
     "ObservationReactiveModel",
+    "build_live_model_policy_factory",
     "TerminalOutcome",
     "TrajectoryMetrics",
     "TrajectoryRecord",

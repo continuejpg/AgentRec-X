@@ -28,6 +28,7 @@ deterministic strategy that happens to be unable to react.
 
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from recommendation.control import (
@@ -59,6 +60,7 @@ from .schemas import AgentTrajectory, TerminalOutcome, TrajectoryRecord
 __all__ = [
     "ABLATION_ADAPTIVE",
     "ABLATION_DECIDE_ONCE",
+    "ABLATION_LIVE_MODEL",
     "ABLATION_MODEL_POLICY",
     "CaseOutcome",
     "CaseRunner",
@@ -76,9 +78,14 @@ __all__ = [
 ABLATION_ADAPTIVE = "adaptive"
 #: The decide-once baseline.
 ABLATION_DECIDE_ONCE = "decide_once"
-#: Phase 1: a model-driven next-action policy, supplied by the caller as a scripted model so
-#: the comparison stays offline and reproducible.
-ABLATION_MODEL_POLICY = "model_policy"
+#: Phase 1: a model-driven next-action policy driven by a **scripted deterministic double**.  The
+#: name says so explicitly because Phase 3 added a real provider: calling this ``model_policy``
+#: invited exactly the confusion the evaluation exists to avoid.
+ABLATION_MODEL_POLICY = "scripted_model"
+#: Phase 3: the same policy driven by a **real provider** (or by a recorded provider trace being
+#: replayed).  The trajectory's ``execution_mode`` distinguishes ``live`` from ``replay``, so a
+#: replayed run is never reported as a live one.
+ABLATION_LIVE_MODEL = "live_model"
 
 
 # --------------------------------------------------------------------------- #
@@ -625,11 +632,17 @@ class CaseRunner:
         # is precisely the gap this phase closes.
         task_state = task_state_from_case(case)
         controller = self._factory(case, chosen, limits, task_state)
+        # Wall latency around the whole turn, measured with a monotonic clock so a clock
+        # adjustment cannot produce a negative or absurd duration.  This is the trajectory's
+        # cost; the model's own latency is recorded separately and is a subset of it.
+        started = time.monotonic()
         result = controller.run(
             case.message, _HISTORY, turn_id=f"eval-{case.case_id}", task_state=task_state
         )
+        wall_latency_ms = round(max(0.0, (time.monotonic() - started) * 1000.0), 3)
 
         trajectory = self._project(case, result, controller)
+        trajectory = trajectory.model_copy(update={"wall_latency_ms": wall_latency_ms})
         # Two reports from one evaluation: what the run checked, and what it presented.  The
         # difference between them *is* enforcement.
         checked = self._check_constraints(case, result, reasoner)
@@ -728,6 +741,7 @@ class CaseRunner:
                     note=step.note,
                 )
             )
+        model = _model_metadata(result)
         return AgentTrajectory(
             scenario_id=case.case_id,
             variant=self._variant,
@@ -742,7 +756,87 @@ class CaseRunner:
             records=tuple(records),
             route=result.route,
             produced_candidates=any(record.produced_candidates for record in records),
+            policy_names=tuple(
+                dict.fromkeys(r.policy_name for r in records if r.policy_name)
+            ),
+            execution_mode=model["execution_mode"],
+            model_provider=model["model_provider"],
+            model_endpoint_id=model["model_endpoint_id"],
+            model_calls=model["model_calls"],
+            input_tokens=model["input_tokens"],
+            output_tokens=model["output_tokens"],
+            total_tokens=model["total_tokens"],
+            model_latency_ms=model["model_latency_ms"],
+            estimated_cost=model["estimated_cost"],
         )
+
+
+#: The model facts a trajectory can carry, so the runner and the writer below agree on the shape.
+_MODEL_METADATA_DEFAULTS: dict[str, Any] = {
+    "execution_mode": None,
+    "model_provider": None,
+    "model_endpoint_id": None,
+    "model_calls": 0,
+    "input_tokens": None,
+    "output_tokens": None,
+    "total_tokens": None,
+    "model_latency_ms": None,
+    "estimated_cost": None,
+}
+
+
+def _model_metadata(result: LoopResult) -> dict[str, Any]:
+    """Aggregate the per-step model metadata a run recorded.
+
+    A run has no single model call - a retry after a parse failure costs a second one - so the
+    trajectory reports the totals and the *last* identity observed.  Identities come from the
+    policy's own reporting (``execution_mode``, ``model_provider``, ``model_endpoint_id``), never
+    from the runner inspecting a client: the runner must stay unaware of which client it drives,
+    or the ablation would stop being a comparison of policies.
+
+    Token and latency fields are summed only over the steps that reported them, and stay ``None``
+    when nothing reported any.  A partially reported run therefore shows the partial total it
+    observed rather than a fabricated complete one.
+    """
+    metadata = dict(_MODEL_METADATA_DEFAULTS)
+    modes: list[str] = []
+    for step in result.trajectory.steps:
+        policy_metadata = step.policy_metadata or {}
+        for key in ("execution_mode", "model_provider", "model_endpoint_id"):
+            value = policy_metadata.get(key)
+            if isinstance(value, str) and value:
+                if key == "execution_mode":
+                    modes.append(value)
+                else:
+                    metadata[key] = value
+        calls = policy_metadata.get("model_calls")
+        if isinstance(calls, int) and not isinstance(calls, bool) and calls > 0:
+            metadata["model_calls"] += calls
+        for key, field in (
+            ("step_input_tokens", "input_tokens"),
+            ("step_output_tokens", "output_tokens"),
+            ("step_total_tokens", "total_tokens"),
+        ):
+            value = policy_metadata.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                metadata[field] = (metadata[field] or 0) + value
+        latency = policy_metadata.get("step_latency_ms")
+        if isinstance(latency, (int, float)) and not isinstance(latency, bool):
+            metadata["model_latency_ms"] = round(
+                float(metadata["model_latency_ms"] or 0.0) + float(latency), 3
+            )
+        cost = policy_metadata.get("step_estimated_cost")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            metadata["estimated_cost"] = round(
+                float(metadata["estimated_cost"] or 0.0) + float(cost), 8
+            )
+    # A run that replayed some steps and called live for others is reported by its *last* mode.
+    # Mixed modes within one run would mean the recording was incomplete, which the experiment
+    # commands prevent by construction; reporting the last one keeps the field single-valued and
+    # honest about what the final decision came from.
+    if modes:
+        metadata["execution_mode"] = modes[-1]
+    return metadata
 
 
 def _terminal_outcome(result: LoopResult) -> TerminalOutcome:
@@ -833,7 +927,10 @@ def run_suite(
     """Run a case set under one variant and return the aggregated report.
 
     ``model_policy_factory`` runs the set under a model-driven policy: it is called per case so
-    each case gets a fresh scripted model, and it takes precedence over ``policy_factory``.
+    each case gets a fresh model client, and it takes precedence over ``policy_factory``.  The
+    same parameter serves the scripted and live variants - what differs is the client the factory
+    builds, not the runner - which is what makes the ablation a comparison of *policies* rather
+    than of runtimes.
 
     ``reasoner_factory`` is optional: without a catalogue reasoner the hard-constraint case
     reports its constraints as unverified rather than as satisfied, which is the honest

@@ -38,7 +38,10 @@ __all__ = [
 #:
 #: 2: records carry ``policy_name``, so a report states which policy actually decided rather than
 #:    trusting the variant label it was filed under.
-EVALUATION_PLANE_VERSION = 2
+#: 3: the trajectory carries model identity and usage (``execution_mode``, ``model_provider``,
+#:    token counts, model latency, wall latency, estimated cost), and the ``model_policy``
+#:    variant is renamed ``scripted_model`` now that a real provider variant exists.
+EVALUATION_PLANE_VERSION = 3
 
 
 class TerminalOutcome(str, Enum):
@@ -113,6 +116,29 @@ class AgentTrajectory(BaseModel):
     scenario_id: str
     #: Which control-plane configuration produced this run, for ablations.
     variant: str = "adaptive"
+    #: Phase 3: which policy implementation actually decided, by name.  Distinct from
+    #: ``variant`` because a variant is a *label* and this is what the run reported.
+    policy_names: tuple[str, ...] = ()
+    #: Phase 3: the model identity, when a model drove the run at all.  ``execution_mode`` is
+    #: the field that separates a real provider call (``live``), a recorded trace being
+    #: replayed (``replay``) and a scripted double (``scripted``) - a distinction a variant
+    #: label cannot make, because the same variant can be replayed later.
+    execution_mode: str | None = None
+    model_provider: str | None = None
+    model_endpoint_id: str | None = None
+    #: Phase 3 model usage, summed over the trajectory.  ``None`` means "not reported", which is
+    #: different from zero and is preserved as such.
+    model_calls: int = Field(default=0, ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    #: Summed transport latency of the model calls, in milliseconds.  Distinct from
+    #: :attr:`wall_latency_ms`, which is the whole trajectory's duration.
+    model_latency_ms: float | None = Field(default=None, ge=0)
+    #: Whole-trajectory wall duration, measured with a monotonic clock by the runner.
+    wall_latency_ms: float | None = Field(default=None, ge=0)
+    #: **Estimated** cost from explicitly configured pricing, or ``None`` when unconfigured.
+    estimated_cost: float | None = Field(default=None, ge=0)
     terminal: TerminalOutcome
     #: The runtime's own termination reason, kept verbatim for audit.
     termination_reason: str | None = None
@@ -152,17 +178,6 @@ class AgentTrajectory(BaseModel):
         """True when ``action`` executed at least once."""
         return action in self.action_sequence()
 
-    def policy_names(self) -> tuple[str, ...]:
-        """The distinct policy names recorded, in first-seen order.
-
-        An empty tuple means the run recorded no policy provenance at all - which is a finding in
-        itself for a run that claims to be model-driven.
-        """
-        seen: list[str] = []
-        for record in self.records:
-            if record.policy_name and record.policy_name not in seen:
-                seen.append(record.policy_name)
-        return tuple(seen)
 
     def executed_action_count(self, action: str) -> int:
         """How many times ``action`` executed."""

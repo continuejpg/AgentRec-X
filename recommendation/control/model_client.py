@@ -118,11 +118,39 @@ class ModelResponse(BaseModel):
     #: Optional token accounting, when a provider reports it.  Diagnostic only.
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
+    #: Provider-reported total, or the sum of the two when the provider reported both parts.
+    #: ``None`` means unknown - a partially reported usage is never padded to look complete.
+    total_tokens: int | None = Field(default=None, ge=0)
+
+    #: Phase 3: provider correlation id, when the endpoint supplies one.  Diagnostic only, and
+    #: never a control signal.  Some providers surface it as a header, some in the body.
+    request_id: str | None = Field(default=None, max_length=120)
+    #: Wall duration of the transport call, measured with a monotonic clock by the adapter.
+    #: ``None`` for a client that does not measure it (a scripted double), which is why it is
+    #: not defaulted to zero - "not measured" and "instant" are different facts.
+    latency_ms: float | None = Field(default=None, ge=0)
+    #: The provider's own finish reason for the first choice, e.g. ``stop`` or ``length``.
+    #: Recorded because ``length`` separates "the model answered badly" from "the answer was
+    #: truncated", which are different findings about a malformed response.
+    finish_reason: str | None = Field(default=None, max_length=40)
+    #: **Estimated** cost from explicitly configured per-million prices.  ``None`` when pricing
+    #: is unconfigured: an estimate is never invented, and it is never provider billing truth.
+    estimated_cost: float | None = Field(default=None, ge=0)
 
     @property
     def is_empty(self) -> bool:
         """True when the model returned nothing usable."""
         return not self.text.strip()
+
+    def usage(self) -> dict[str, Any]:
+        """A compact, JSON-safe usage view, with unknowns left as ``None``."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "latency_ms": self.latency_ms,
+            "estimated_cost": self.estimated_cost,
+        }
 
 
 @runtime_checkable

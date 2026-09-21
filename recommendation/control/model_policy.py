@@ -61,6 +61,7 @@ from .schemas import (
 
 __all__ = [
     "LLM_POLICY_NAME",
+    "POLICY_PARSE_PROTOCOL_VERSION",
     "POLICY_PROMPT_VERSION",
     "LLMAgentPolicy",
     "build_action_schema",
@@ -73,6 +74,15 @@ LLM_POLICY_NAME = "llm_agent_policy"
 
 #: Version of the prompt contract, bumped when the payload shape changes.
 POLICY_PROMPT_VERSION = 1
+#: Version of the *parse protocol* the policy applies to a model answer.  Separate from the
+#: prompt version because the two change independently: a parse rule can be corrected without
+#: touching the contract the model is given.  It is part of the recording fingerprint, so a
+#: trace recorded under one protocol is never replayed as though it were made under another.
+#:
+#: 1: an empty ``arguments`` object was rejected for an action that declares none.
+#: 2: an empty ``arguments`` object is folded onto "no arguments" for such an action.  The
+#:    Phase-3 live baseline showed this accounted for 7 of 14 case failures.
+POLICY_PARSE_PROTOCOL_VERSION = 2
 
 #: The policy contract.  Deliberately short: the architecture document does not belong in a
 #: per-step prompt, and a long prompt is a brittle one.
@@ -318,6 +328,38 @@ class LLMAgentPolicy:
         return self._max_attempts
 
     @property
+    def model_metadata(self) -> dict[str, Any]:
+        """The model's *identity*, as opposed to how a particular decision went.
+
+        Phase 3 has to distinguish three things that all used to look like "a model policy": the
+        deterministic scripted double, a recorded provider trace being replayed, and a real
+        provider being called.  The client is the only component that knows which of those is
+        happening, so it is asked once, by duck-typing a small optional surface:
+
+        * ``mode`` - a :class:`~recommendation.control.model_recorder.ReplayMode` value
+          (``live`` / ``record`` / ``replay`` / ``record_if_missing``);
+        * ``provider`` - the provider profile name, when the client knows one;
+        * ``model`` - the endpoint's model identifier.
+
+        A client with none of that surface is a scripted double, which is reported as ``scripted``
+        rather than as an unknown live run.
+        """
+        metadata: dict[str, Any] = {}
+        mode = getattr(self._model, "mode", None)
+        execution_mode = getattr(mode, "value", None)
+        if isinstance(execution_mode, str) and execution_mode:
+            metadata["execution_mode"] = execution_mode
+        else:
+            metadata["execution_mode"] = "scripted"
+        provider = getattr(self._model, "provider", None)
+        if isinstance(provider, str) and provider:
+            metadata["model_provider"] = provider
+        model = getattr(self._model, "model", None)
+        if isinstance(model, str) and model:
+            metadata["model_endpoint_id"] = model
+        return metadata
+
+    @property
     def last_metadata(self) -> dict[str, Any]:
         """Safe diagnostics for the step just decided.
 
@@ -327,6 +369,34 @@ class LLMAgentPolicy:
         untrusted diagnostic prose, not reasoning truth.
         """
         return dict(self._last_metadata)
+
+    def _accumulate_usage(self, response: Any) -> None:
+        """Fold one response's usage into this decision's metadata.
+
+        Only non-``None`` values are added, so a provider that omits usage never appears to have
+        reported zero, and a decision that mixed a reported and an unreported call reports the
+        partial sum it actually observed.
+        """
+        for field in ("input_tokens", "output_tokens", "total_tokens"):
+            value = getattr(response, field, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                key = f"step_{field}"
+                self._last_metadata[key] = self._last_metadata.get(key, 0) + value
+        latency = getattr(response, "latency_ms", None)
+        if isinstance(latency, (int, float)) and not isinstance(latency, bool):
+            key = "step_latency_ms"
+            self._last_metadata[key] = round(
+                float(self._last_metadata.get(key, 0.0)) + float(latency), 3
+            )
+        cost = getattr(response, "estimated_cost", None)
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            key = "step_estimated_cost"
+            self._last_metadata[key] = round(
+                float(self._last_metadata.get(key, 0.0)) + float(cost), 8
+            )
+        finish = getattr(response, "finish_reason", None)
+        if finish:
+            self._last_metadata["finish_reason"] = str(finish)
 
     # -- the seam ---------------------------------------------------------- #
 
@@ -340,7 +410,12 @@ class LLMAgentPolicy:
             treats this as a deterministic abort with ``NO_AVAILABLE_ACTION`` rather than a
             crash, which is the existing bounded-failure path.
         """
-        self._last_metadata = {"policy": self._name, "model_calls": 0, "attempts": 0}
+        self._last_metadata = {
+            "policy": self._name,
+            "model_calls": 0,
+            "attempts": 0,
+            **self.model_metadata,
+        }
         available = tuple(context.available_actions)
         if not available:
             raise PolicyActionError("the system offered no action for this control state")
@@ -362,6 +437,12 @@ class LLMAgentPolicy:
             self._last_metadata["attempts"] = attempt
             if response.model_id is not None:
                 self._last_metadata["model_id"] = response.model_id
+            # Phase 3 diagnostics: accumulate the real provider's own reporting.  Token counts
+            # and latency are summed across the calls one *decision* took (a retry after a parse
+            # failure costs a second call), so the trajectory can attribute cost per step rather
+            # than only per run.  Unknowns stay unknown: a field the provider did not report is
+            # left absent instead of being counted as zero.
+            self._accumulate_usage(response)
 
             if response.is_empty:
                 failures.append("empty_response")
@@ -446,8 +527,24 @@ class LLMAgentPolicy:
         # rejects a foreign or malformed payload itself.  The policy adds no coercion: a
         # near-miss is a rejection, not a repair.
         fields: dict[str, Any] = {"action": action}
-        if "arguments" in decoded and decoded["arguments"] is not None:
-            fields["arguments"] = decoded["arguments"]
+        arguments = decoded.get("arguments")
+        if arguments is not None:
+            # ``{}`` and "no arguments" are the same statement for an action that declares no
+            # argument fields.  Measured on the Phase-3 live baseline: DeepSeek sent
+            # ``"arguments": {}`` for RECOMMEND_FROM_HISTORY on 20 of 44 calls, and the
+            # ``ActionProposal`` contract rejects it (``extra="forbid"``), so 7 of 14 cases
+            # failed with no usable action after two attempts *because of a JSON convention*
+            # rather than because of any policy error.
+            #
+            # The normalisation belongs here, in the model seam, and not in ``ActionProposal``:
+            # that type is also the deterministic policies' construction contract, and it should
+            # keep rejecting a foreign or malformed payload outright.  A text model needs the
+            # JSON equivalent of "absent" folded onto "absent"; trusted validation is untouched,
+            # and an action that *does* take arguments still gets its payload checked in full.
+            if arguments == {} and not ARGUMENTS_BY_ACTION[action].model_fields:
+                arguments = None
+            else:
+                fields["arguments"] = arguments
         if action is ActionKind.RECOMMEND_FROM_HISTORY:
             fields["k"] = decoded.get("k", 4)
         rationale = decoded.get("rationale")

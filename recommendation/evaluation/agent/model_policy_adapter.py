@@ -37,6 +37,7 @@ from .runner import ABLATION_MODEL_POLICY
 
 __all__ = [
     "ObservationReactiveModel",
+    "build_live_model_policy_factory",
     "build_model_policy_factory",
 ]
 
@@ -297,3 +298,36 @@ class _IdentityBindingPolicy(LLMAgentPolicy):
         if isinstance(model, ObservationReactiveModel):
             model._hints = dict(self._hints)  # noqa: SLF001
         return super().choose(context)
+
+
+# --------------------------------------------------------------------------- #
+# Phase 3: the same policy seam, driven by a real provider
+# --------------------------------------------------------------------------- #
+
+
+def build_live_model_policy_factory(
+    *,
+    client: Any,
+    max_attempts: int = 2,
+    prompt_version: int | None = None,
+) -> Callable[[EvaluationCase], Any]:
+    """Return a per-case factory that builds an ``LLMAgentPolicy`` over a **real** client.
+
+    Nothing here is provider-specific and nothing here relaxes a boundary: the factory builds the
+    same :class:`~recommendation.control.model_policy.LLMAgentPolicy` the scripted variant builds,
+    over the client the caller supplies.  What differs between the ``scripted_model`` and
+    ``live_model`` variants is the client - never the policy, the runner, the validator or the
+    trust boundary.  That is what makes the ablation a comparison of *policies* rather than of
+    runtimes.
+
+    ``client`` is typically a
+    :class:`~recommendation.control.model_recorder.RecordingModelClient`, so the same factory
+    serves a live run, a recording run and an offline replay: the client decides which of those
+    is happening, and the policy cannot tell the difference.
+    """
+    from recommendation.control.model_policy import LLMAgentPolicy
+
+    def factory(case: EvaluationCase) -> Any:
+        return LLMAgentPolicy(client, max_attempts=max_attempts, name="live_agent_policy")
+
+    return factory

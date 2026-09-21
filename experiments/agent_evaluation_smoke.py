@@ -166,7 +166,7 @@ def run(*, json_path: Path | None = None) -> int:
             actions = " -> ".join(outcome.trajectory.action_sequence()) or "(none)"
             # The policy that actually decided, read back from the run: a variant label is a
             # claim, and printing the recorded policy is what makes the claim checkable.
-            policies = ",".join(outcome.trajectory.policy_names()) or "unrecorded"
+            policies = ",".join(outcome.trajectory.policy_names) or "unrecorded"
             print(
                 f"   [{mark}] {case.case_id:32s} {outcome.trajectory.terminal.value:19s} "
                 f"tools={outcome.trajectory.tool_calls} steps={outcome.trajectory.steps} "
@@ -205,7 +205,7 @@ def run(*, json_path: Path | None = None) -> int:
                     "passed": outcome.passed,
                     "terminal": outcome.trajectory.terminal.value,
                     "actions": list(outcome.trajectory.action_sequence()),
-                    "policies": list(outcome.trajectory.policy_names()),
+                    "policies": list(outcome.trajectory.policy_names),
                     "constraint_checked": list(outcome.metrics.constraint_checked),
                     "constraint_enforced": not outcome.metrics.constraint_not_enforced,
                     "constraint_violations": list(outcome.metrics.constraint_violations),

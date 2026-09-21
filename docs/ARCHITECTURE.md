@@ -598,17 +598,18 @@ with the parse error passed back as a hint.
 
 ### Documentation of the seam, not of a provider
 
-The phase deliberately does **not** ship a live model call.  A live call requires an HTTP client
-the core does not depend on, and it would make the suite non-reproducible.  The adapter contract
-is implemented, tested with a stub transport, and configurable through `AGENTRECX_LLM_BASE_URL`,
-`AGENTRECX_LLM_MODEL` and `AGENTRECX_LLM_API_KEY`.
+This phase shipped the adapter contract and no live call: a live call would have made the suite
+non-reproducible.  The seam is configurable through `AGENTRECX_LLM_BASE_URL`,
+`AGENTRECX_LLM_MODEL` and `AGENTRECX_LLM_API_KEY`.  Phase 3 added the transport, the recording
+layer and the real-model evaluation; see **section 24**.
 
-### Not implemented (documented, not claimed)
+### Not implemented in this phase (documented, not claimed)
 
-* **No live provider smoke was executed.** The adapter is tested against a stub transport; no
-  request has been made to a real endpoint from this repository.
-* **No prompt tuning or evaluation against a real model.** The model variant is driven by a
-  deterministic double, so it measures the *runtime*, not a model's competence.
+* **No live provider smoke was executed *in this phase*.** The adapter was tested against a stub
+  transport.  A real call was made in Phase 3 (section 24).
+* **No prompt tuning or evaluation against a real model *in this phase*.** The model variant was
+  driven by a deterministic double, so it measured the *runtime*, not a model's competence.
+  Real-model measurement is Phase 3.
 * **No model-driven planning or subgoal generation** - one next action per step, as before.
 * **No fine-tuning, RL or reward model.**
 * **Hard-constraint narrowing was not implemented in this phase** - the model is not used to
@@ -1136,7 +1137,195 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 23. Known limitations
+## 23. Real provider evaluation with record and replay (Phase 3, IMPLEMENTED)
+
+Phases 1-2.1 built a bounded policy seam, a deterministic model double, constraint enforcement
+and a run-scoped reference boundary.  What none of them had done was put a **real model** through
+that seam, so every "model policy" number was really a statement about the runtime.
+
+This phase runs the real thing and makes the run reproducible.
+
+```
+LLMAgentPolicy
+      |  ModelRequest
+      v
+RecordingModelClient                    one seam, four modes
+      |
+      +-- canonical fingerprint (provider + model + prompt version + context + schema + correction)
+      |
+      +-- REPLAY            : look up, return the recorded response, never touch the network
+      +-- LIVE              : call, return, write nothing
+      +-- RECORD            : call, return, write
+      +-- RECORD_IF_MISSING  : replay when recorded, otherwise call and write
+      |
+      v
+OpenAICompatibleChatAdapter             provider profile: thinking, JSON mode, temperature
+      |
+      v
+urllib_transport                        standard library, imported lazily
+      |
+      v
+DeepSeek-compatible endpoint
+```
+
+Only the **policy** varies across the evaluation variants.  The runner, controller, tools,
+catalogue, candidate ledger, constraint kernel, reference boundary, completion guard and case
+definitions are the same objects in every run - see `experiments/_harness.py`, which exists
+precisely so the commands cannot drift apart.
+
+### Provider integration
+
+DeepSeek is OpenAI-compatible, so it reuses the existing adapter rather than a new one.  Two
+documented differences are handled by a `ProviderProfile` declaration rather than by branches in
+the request path:
+
+* **thinking mode is on by default** and emits a chain of thought in `reasoning_content`.  The
+  agent asks for *one structured action*, so the adapter asks for thinking to be **disabled** and
+  never reads the reasoning field.  The repository never requests chain-of-thought and never
+  records it.
+* **thinking mode ignores `temperature`**, so the adapter only sends sampling parameters the
+  chosen mode honours.
+
+Configuration is environment-only (`AGENTRECX_LLM_BASE_URL`, `_MODEL`, `_API_KEY`, `_TIMEOUT`,
+`_PROFILE`, `_JSON_MODE`, `_THINKING`, `_INPUT_PRICE`, `_OUTPUT_PRICE`).  The credential is read
+at call time, placed in the request header, and never logged, recorded, or included in an
+exception - `ProviderSettings.describe()` reports `api_key_present` as a boolean so a report can
+say a run was configured without carrying a value that could be printed.
+
+### Recording format (version 1)
+
+JSONL, one exchange per line, so a crashed run leaves every earlier exchange readable.  Each
+entry holds the format version, the provider, model and prompt version, the fingerprint, the
+request (system prompt, bounded context payload, action schema, correction), the response (text,
+model id, token counts, request id, finish reason, latency, estimated cost) and an informational
+timestamp.  It holds **no** credential, **no** authorization header and **no** provider
+reasoning.
+
+Recordings go to `/tmp/agentrecx-recordings/` by default - **outside version control**, because a
+recording contains a prompt and a model's verbatim answer: useful as an experiment artifact, wrong
+as an unreviewed repository fixture.  A deployment that wants in-tree fixtures points the path at
+a reviewed directory.
+
+### Fingerprinting
+
+Replay keys on a SHA-256 of a canonical JSON body containing the provider, model, prompt version,
+the system prompt's hash, the full context payload, the action schema and the correction.  Sorted
+keys and fixed separators make it independent of dict insertion order; a test recomputes it in a
+fresh interpreter to prove it does not depend on hash randomisation.
+
+It is deliberately **not** keyed on the user request alone: a policy decision depends on the
+observation, the candidate references, the offered menu, the constraint state and the retry
+correction, so each of those changes the key.
+
+A fingerprint may legitimately repeat within a run (an identical context makes an identical
+request).  The store keeps **every** response for a key and a replay consumes them in order, so an
+overwrite can never hide a collision and an exhausted key raises rather than reusing an earlier
+answer.
+
+### Modes, and the guarantee that matters
+
+`REPLAY` never falls back to the network.  A silent fallback would make a "reproducible" run
+quietly depend on a live endpoint, which is the property the mode exists to provide.  A missing
+key raises `recording_missing`; a malformed file raises with its line number; a recording from
+another format version is refused rather than guessed at.
+
+### What is measured
+
+Model identity and usage travel from the client to the trajectory through the policy's own
+reporting: `execution_mode` (`live` / `record` / `replay` / `scripted`), `model_provider`,
+`model_endpoint_id`, token counts, model latency and estimated cost.  Latency is measured with a
+**monotonic** clock; the trajectory additionally records whole-turn wall latency, so model cost
+and trajectory cost are distinguishable.  Unknowns stay `None`: a provider that reports no usage
+is never counted as zero, and a partial usage is never padded into a total that looks measured.
+
+Cost is estimated **only** from explicitly configured per-million prices.  Without them the cost
+is reported as unknown - never fabricated, and never presented as provider billing truth.
+
+Token and latency totals are summed over *every* call including replayed ones, because a replayed
+call carries the measurement taken when it was recorded; the `live_calls` / `replayed_calls`
+counts are what tell a reader which kind of measurement they are looking at.
+
+### Evaluation variants
+
+| Variant | Policy | What it measures |
+| --- | --- | --- |
+| `adaptive` / `decide_once` | deterministic stubs | the bounded loop itself |
+| `scripted_model` | `LLMAgentPolicy` over `ObservationReactiveModel` | the runtime under model-shaped control, offline |
+| `live_model` | `LLMAgentPolicy` over a real provider (or a replayed trace) | real model behaviour |
+
+`scripted_model` is the name Phase 1 used to call `model_policy`; it was renamed when a real
+provider arrived, because a label that could mean either invited exactly the confusion the
+evaluation exists to avoid.
+
+### Commands
+
+```bash
+# one bounded real call: configuration, transport, parsing, proposal, usage, latency
+.venv/bin/python -m experiments.llm_policy_smoke --mode live
+
+# the full case suite against the real provider, recording every exchange
+.venv/bin/python -m experiments.live_agent_evaluation --mode record --confirm-live
+
+# reproduce it offline: zero network, zero cost, same decisions
+.venv/bin/python -m experiments.live_agent_evaluation --mode replay
+```
+
+Live execution takes **two** deliberate flags and no environment variable can start a paid run on
+its own.  `pytest` requires no network, no credential and no provider.
+
+### Measured baseline (Phase 3)
+
+The baseline was run against DeepSeek (`deepseek-flash`) with the unchanged case suite, thinking
+mode disabled and `temperature=0`, recording every exchange.  Two runs are preserved because a
+**parse-protocol** revision sits between them - the prompt was never touched.
+
+| Run | Prompt | Parse protocol | Passed | Model calls | Tokens (in/out/total) | Model latency |
+| --- | --- | --- | --- | --- | --- | --- |
+| Baseline | v1 | v1 | **2/14** | 44 | 41 892 / 1 935 / 43 827 | 39 348 ms (894 ms mean) |
+| Revised | v1 | v2 | **3/14** | 62 | 77 818 / 3 195 / 81 013 | 56 679 ms (914 ms mean) |
+
+Failure attribution, by owning component:
+
+| Finding | Cases | Owner |
+| --- | --- | --- |
+| `"arguments": {}` rejected for an action that takes none | 7 of 12 baseline failures | `POLICY_PARSING` (fixed by parse protocol v2) |
+| Over-asks for clarification instead of using the candidates it grounded | 9 of revised failures | `POLICY_SELECTION` |
+| Repeated an action instead of recovering from a refused FINISH | 1 | `POLICY_SELECTION` |
+| Re-read the same facts repeatedly until the step budget ran out | 2 | `POLICY_SELECTION` |
+
+The first row is the interesting one, and it is a **harness** defect rather than a model defect:
+DeepSeek sent `"arguments": {}` for `RECOMMEND_FROM_HISTORY` on 20 of 44 calls, and
+`ActionProposal` rejects `{}` because it is not `None`.  `{}` and "no arguments" state the same
+thing for an action that declares no argument fields, so the model seam now folds one onto the
+other - narrowly: a *non-empty* payload for an argumentless action is still refused, an empty
+payload for an action that *does* take arguments is still refused, and `ActionProposal` itself is
+unchanged.  Correcting this accounted for 7 of 12 baseline failures and produced **no** regression.
+
+The remaining failures are genuine policy behaviour, not trust violations.  The real model
+systematically prefers asking a clarifying question over acting on the candidates it grounded -
+including cases where it had already retrieved and inspected them - and it repeats actions rather
+than recovering.  **No trust boundary was reached in any failing case**: no candidate identity was
+manufactured, no constraint verdict was overridden, no memory was committed and no `FINISH`
+bypassed the guard.
+
+### Not implemented (documented, not claimed)
+
+* **No prompt tuning.** The baseline prompt was frozen and measured; its version is recorded in
+  every trajectory and in the fingerprint, so a prompt revision cannot silently replay an old
+  answer.  No material prompt change was made in this phase.
+* **The parse-protocol revision is versioned, not silent.** `POLICY_PARSE_PROTOCOL_VERSION` is
+  part of the recording fingerprint, so a trace recorded under one interpretation of an answer
+  cannot be replayed as though it were made under another.
+* **No repeated sampling.** One recorded run per case is the baseline; multiple runs per case are
+  an extension, not a Phase-3 requirement.
+* **No assertion about model competence.** The evaluation reports where a real model's behaviour
+  differs from the deterministic policies; it does not claim a general quality level.
+* **No provider-agnostic guarantee.** The transport is generic and the profile is declarative, but
+  only DeepSeek was actually called.
+
+---
+
+## 24. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value
@@ -1171,5 +1360,14 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
   a resolution step without removing any exposure, because the identity is what the argument
   model is keyed by and every reference is re-validated against live run state anyway. If a
   future client needs identity-free prompts the projection is the single place to change.
-* **No real provider has been called.** The model policy is exercised through a deterministic
-  double (section 10); no claim is made about a real model's constraint behaviour.
+* **The real-model experiment has a small sample.** One recorded run per case over the fixture
+  catalogue (section 23): enough to measure where real behaviour differs in kind from the
+  deterministic policies, not enough for a rate.
+* **Single-provider bias.** Only DeepSeek was called. The transport and profile are generic, but
+  no other provider was exercised, so nothing here supports a cross-provider claim.
+* **Real models are not deterministic.** The baseline used thinking mode disabled and
+  `temperature=0` for the most reproducible setting available, but identical live trajectories
+  across calls are not claimed. Replay *is* deterministic, because it reproduces recorded text.
+* **The cases exercise a 4-item synthetic catalogue, not real shopping.** The fixture is designed
+  so that grounding, constraint and reference boundaries are observable; it does not model real
+  catalogue scale, ambiguity or noise.
