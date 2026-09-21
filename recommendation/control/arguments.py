@@ -254,6 +254,57 @@ class BundleArguments(BaseModel):
     purpose: str | None = Field(default=None, max_length=120)
 
 
+class FindSimilarArguments(BaseModel):
+    """Arguments for ``FIND_SIMILAR``: which already-grounded candidate to find neighbours of.
+
+    ``FIND_SIMILAR`` used to reuse :class:`SelectSourceArguments`, which carries only a source and
+    a limit - so the action could not say *similar to what*, and an implementation would have had
+    to pick a seed itself.  Phase 4 gives the model the choice explicitly, because choosing the
+    target is exactly the authority Phase 2.1 established the model should have.
+
+    The seed is validated against the run's own grounded candidate allowlist **before** any
+    retrieval happens, so a model can select a seed but cannot introduce one.  It names a single
+    product: similarity is defined from one item, and a multi-seed list would be a different
+    (and unimplemented) query.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    seed_parent_asin: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        description="A candidate the run already holds, to find similar products for.",
+    )
+    limit: int = Field(default=10, ge=MIN_K, le=MAX_K)
+
+
+class AcquireEvidenceArguments(BaseModel):
+    """Arguments for ``ACQUIRE_EVIDENCE``: which held candidate needs which fact.
+
+    The model names a **product the run already holds** and an attribute the trusted evidence
+    source models.  It cannot name a value: the observation carries what the source stated, never
+    what the model expected.  Producing an :class:`EvidenceItem` is trusted code's job, and
+    ``EvidenceItem`` has no verdict field for a policy to influence.
+
+    ``attribute`` is validated against the trusted source's own declared surface rather than
+    accepted as free text, so a policy cannot probe for attributes no source models.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_asin: str = Field(..., min_length=1, max_length=120)
+    attribute: str = Field(
+        ...,
+        min_length=1,
+        max_length=40,
+        description=(
+            "Which fact to acquire, e.g. 'material' or 'feature'. Must be one the configured "
+            "evidence source models."
+        ),
+    )
+
+
 class AskClarificationArguments(BaseModel):
     """Arguments for ``ASK_CLARIFICATION``: the question and why it is being asked.
 

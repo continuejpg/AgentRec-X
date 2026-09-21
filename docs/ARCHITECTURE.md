@@ -1374,7 +1374,105 @@ two `get_details` steps on different candidates were indistinguishable from two 
 
 ---
 
-## 24. Known limitations
+## 24. Active evidence acquisition and real SimilarItem retrieval (Phase 4, IMPLEMENTED)
+
+Phase 3.1 measured a capability ceiling rather than a reasoning one. Two facts made it visible:
+some stated hard constraints map to `ConstraintKind.UNVERIFIABLE`, so `check_constraint` returned
+`UNKNOWN` **by construction**; and repeated `GET_DETAILS` re-read the same facts, which cannot
+produce a different answer. The agent had no way to obtain genuinely new grounded information.
+
+### Two new trusted sources
+
+```
+FIND_SIMILAR(seed)                        ACQUIRE_EVIDENCE(candidate, attribute)
+      |                                          |
+      v                                          v
+SimilarItemSource                          EvidenceSource
+ lexcial TF-IDF + numpy cosine              reproducible local artifact
+ over the trusted catalogue                 (not the catalogue projection)
+      |                                          |
+      v                                          v
+CandidatePlane -> GroundingVerifier        EvidenceStore  (parent_asin, attribute) -> value
+      |                                          |
+      v                                          v
+CandidateLedger (similar_item provenance)  GroundedReasoner.check_constraint
+      |                                          |
+      +------------------+-----------------------+
+                         v
+              CandidateEligibilityEvaluator        <- unchanged, still the only authority
+```
+
+**`SimilarItemSource`** is a **lexical item–item index**: TF-IDF vectors over catalogue text with
+cosine similarity, in `numpy` alone. It is explicitly *not* learned embedding retrieval and *not*
+ANN — there is no trained encoder, no vector database and no approximate index. A lexical index is
+reproducible from the catalogue, needs no artifact, and its scores are explainable. Scores are
+recorded with `score_kind="item_item_similarity"` and are never fused numerically with a SASRec
+logit or a BM25 value; the ledger's rank-based fusion uses order alone.
+
+`FIND_SIMILAR` now takes an **explicit seed** (`FindSimilarArguments.seed_parent_asin`) instead of
+reusing the seedless `SelectSourceArguments`. Before, the action could not say *similar to what*,
+so an implementation would have had to choose a seed itself — exactly the implicit target selection
+Phase 2.1 removed. The seed is validated against the run's grounded allowlist **before** any
+retrieval, so a model can select a seed but cannot introduce one.
+
+**`LocalEvidenceArtifact`** is a trusted source over a reproducible local JSONL fixture that is
+deliberately **not** the catalogue projection. That separation is the point: a fact in the artifact
+is unknown to a run until an `ACQUIRE_EVIDENCE` action reads it, so the
+`UNKNOWN → acquire → SATISFIED` trajectory proves the capability rather than re-reading facts the
+run already had.
+
+### The authority split, and one verdict authority
+
+| Actor | May decide |
+|---|---|
+| the model | **which** held candidate needs evidence, **which** attribute, **which** grounded seed to widen from |
+| `EvidenceSource` | **what fact it holds**, with provenance — never a verdict |
+| `EvidenceStore` | **what is known**, and whether two trusted sources disagree |
+| `GroundedReasoner.check_constraint` | **the verdict** — the one place `SATISFIED`/`VIOLATED`/`UNKNOWN` is produced |
+| `CandidateEligibilityEvaluator` | **task eligibility**, from those verdicts, unchanged |
+
+`EvidenceItem` has no verdict field at all, so a model-authored claim has no path into the store
+and no path to a verdict. `EvidenceExecutor.execute` checks run membership before consulting any
+source, exactly as the reasoning executor checks its targets.
+
+### Three-state evidence semantics
+
+Acquisition distinguishes `FOUND` / `NOT_FOUND` / `UNSUPPORTED`, and these are **not** verdicts:
+
+* evidence states a satisfying value → `SATISFIED`;
+* evidence states a non-satisfying value → `VIOLATED`;
+* evidence states nothing, or the source cannot answer → `UNKNOWN`, **never** a violation inferred
+  from silence.
+
+`ConstraintKind` gained `MATERIAL` and `FEATURE`, decided from acquired evidence rather than from
+the catalogue. `UNVERIFIABLE` is preserved for constraints nothing can decide. A stated material or
+feature constraint therefore became resolvable instead of permanently unknown — but only through
+acquisition, and a candidate the source does not cover stays `UNRESOLVED` and is never presented as
+compliant.
+
+If two trusted sources disagree, both provenance records are kept and the fact becomes **undecided**
+(`UNKNOWN`), which is a conservative failure rather than a silent preference.
+
+### Budget classification
+
+`EVIDENCE_ACTIONS` is its own class: evidence acquisition is neither candidate-producing (the
+candidate set is untouched) nor read-only reasoning (it reaches a separate trusted source for facts
+the run does not have). It therefore consumes a tool call. `TOOL_CALL_ACTIONS = CANDIDATE_ACTIONS +
+EVIDENCE_ACTIONS`; reasoning remains budget-free.
+
+### Not implemented (documented, not claimed)
+
+* **Not embedding or ANN retrieval.** The index is lexical TF-IDF cosine. A learned or approximate
+  index would be a different implementation behind the same `CandidateSourceTool` protocol.
+* **No external or web evidence.** The evidence source is a local reproducible artifact. Active
+  external evidence retrieval is a later phase.
+* **No `NoProgressGuard`.** Repetition is measured; a deterministic guard was deliberately not added
+  (see the Phase-4 measurement).
+* **No planner**, multi-agent split, RL/SFT, or commerce.
+
+---
+
+## 25. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value
@@ -1409,6 +1507,15 @@ two `get_details` steps on different candidates were indistinguishable from two 
   a resolution step without removing any exposure, because the identity is what the argument
   model is keyed by and every reference is re-validated against live run state anyway. If a
   future client needs identity-free prompts the projection is the single place to change.
+* **Retrieval is lexical, not learned.** `FIND_SIMILAR` is TF-IDF cosine over catalogue text. It
+  has no embedding model and no ANN index, so it cannot find a semantically similar product that
+  shares no vocabulary.
+* **Evidence is a local artifact, not live retrieval.** Phase 4 acquires facts from a reproducible
+  fixture. There is no external or web evidence source, so a constraint the artifact does not
+  cover stays `UNKNOWN` — which is the honest outcome, not a gap the model can reason around.
+* **The Phase-4 capability has not been measured against the real provider yet.** The offline
+  implementation, the four new cases and both deterministic policies are verified; the real
+  DeepSeek re-run is the remaining step of the phase.
 * **The real-model experiment has a small sample.** One recorded run per case over the fixture
   catalogue (section 23): enough to measure where real behaviour differs in kind from the
   deterministic policies, not enough for a rate.

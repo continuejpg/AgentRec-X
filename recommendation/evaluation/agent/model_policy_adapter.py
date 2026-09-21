@@ -79,6 +79,11 @@ class ObservationReactiveModel:
         #: The candidate references the last request offered, so a test can assert the double
         #: chose among the ones it was actually given.
         self.offered_refs: tuple[str, ...] = ()
+        #: Phase 4: whether this double has already proposed an evidence acquisition.  One is
+        #: enough for the fixture catalogue, and it keeps the script from looping on the action.
+        self._evidence_asked = False
+        #: Phase 4: whether this double has already widened the set from a seed.
+        self._similar_asked = False
         #: The references from the most recent payload, for target ordering.
         self.context_refs: tuple[str, ...] = ()
         self._last_payload: dict[str, Any] = {}
@@ -133,6 +138,55 @@ class ObservationReactiveModel:
                     "blocks": "candidate_set",
                 },
                 "rationale": "the request does not say what the product is for",
+            }
+
+        # The legal targets, read from the payload here because the two Phase-4 branches below
+        # decide before the reasoning branch does.  Same source of truth as ``_target_order``:
+        # the offered references, never an identity the double made up.
+        refs = [
+            str(entry.get("parent_asin", ""))
+            for entry in payload.get("candidates", {}).get("candidate_refs", [])
+            if entry.get("parent_asin")
+        ]
+
+        # Phase 4: when a trusted evidence source is configured and candidates are held but none
+        # has been evidenced yet, consulting it is the competent next action - it is the only one
+        # that can turn an UNKNOWN constraint into a verdict.  The double reads this from the
+        # bounded payload, exactly as a real model would, and it names a *held* candidate (the
+        # only kind the executor accepts).
+        evidence = payload.get("evidence") or {}
+        if (
+            "acquire_evidence" in offered
+            and refs
+            and evidence.get("available_attributes")
+            and not self._evidence_asked
+        ):
+            self._evidence_asked = True
+            target = self._target_order()[0]
+            return {
+                "action": "acquire_evidence",
+                "arguments": {
+                    "parent_asin": target,
+                    "attribute": str(evidence["available_attributes"][0]),
+                },
+                "rationale": f"consult the trusted evidence source for {target}",
+            }
+
+        # Phase 4: when only a very small candidate set is grounded and a similar-item source is
+        # offered, widening from a held seed is the competent next action.  The seed comes from
+        # the offered references, and trusted code still validates it against the run.
+        if (
+            "find_similar" in offered
+            and payload.get("similar_item_available")
+            and refs
+            and not self._similar_asked
+            and len(refs) <= 1
+        ):
+            self._similar_asked = True
+            return {
+                "action": "find_similar",
+                "arguments": {"seed_parent_asin": refs[0], "limit": 3},
+                "rationale": f"widen the candidate set from {refs[0]}",
             }
 
         # Nothing usable yet: prefer retrieval, and switch source after a failure or an empty

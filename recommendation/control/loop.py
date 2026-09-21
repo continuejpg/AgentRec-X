@@ -55,7 +55,9 @@ from .context import CandidateState, PolicyContext, project_constraints, project
 from langgraph.errors import GraphRecursionError
 
 from .schemas import (
+    EVIDENCE_ACTIONS,
     CANDIDATE_ACTIONS,
+    TOOL_CALL_ACTIONS,
     READ_ONLY_ACTIONS,
     ActionKind,
     ActionProposal,
@@ -221,6 +223,7 @@ class _LoopEngine:
         reasoning_executor: Any = None,
         candidate_plane: Any = None,
         eligibility_evaluator: Any = None,
+        evidence_executor: Any = None,
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -277,6 +280,10 @@ class _LoopEngine:
         #: so it is available exactly when facts are: without a reasoner there is nothing to
         #: evaluate, and this stays ``None`` rather than inventing verdicts.
         self.eligibility = eligibility_evaluator
+        #: Phase 4 trusted evidence executor, or ``None`` when the deployment configures no
+        #: evidence source.  Absent means exactly the pre-Phase-4 behaviour and the action is
+        #: never offered, so no existing test or deployment changes meaning.
+        self.evidence = evidence_executor
         #: The active hard constraints, read from task state at construction.  A constraint
         #: set that changes mid-run rebuilds task state, and the feasibility view is
         #: recomputed from that state on the next step, so no stale eligibility survives here.
@@ -414,6 +421,21 @@ class _LoopEngine:
             # the run does not hold.  Bounded here rather than in the prompt, so no consumer can
             # accidentally unbound it.
             grounded_candidates=self.candidate_references(),
+            # Phase 4: bounded evidence summary, populated from the executor and its store.  No
+            # fact values cross here - only counts, so a policy can tell whether evidence exists
+            # without being handed facts it might restate as its own.
+            evidence_attributes=(
+                () if self.evidence is None else tuple(self.evidence.supported_attributes())
+            ),
+            acquired_evidence_count=(
+                0 if self.evidence is None else len(self.evidence.store)
+            ),
+            evidenced_candidate_count=(
+                0
+                if self.evidence is None
+                else len(self.evidence.store.as_dict().get("products", ()))
+            ),
+            similar_item_available=ActionKind.FIND_SIMILAR in self.available_actions(),
         )
 
     def candidate_references(self) -> tuple[Any, ...]:
@@ -483,6 +505,16 @@ class _LoopEngine:
         # nothing to ask about would invite a policy to burn the step budget.
         if self.reasoning is not None and self.candidates_grounded:
             actions.extend(self.reasoning.available_actions())
+        # Phase 4: evidence acquisition is offered only when the deployment has a trusted source,
+        # that source declares an answerable surface, and the run holds a grounded candidate to
+        # acquire evidence *about*.  The last condition is the run-scoped boundary expressed in
+        # the menu: there is nothing to ask about before retrieval has produced something.
+        if (
+            self.evidence is not None
+            and self.candidates_grounded
+            and self.evidence.supported_attributes()
+        ):
+            actions.extend(self.evidence.available_actions())
         actions.append(ActionKind.FINISH)
         return tuple(actions)
 
@@ -690,6 +722,8 @@ class _LoopEngine:
             return False
         if self.validated.action in READ_ONLY_ACTIONS:
             return True
+        if self.validated.action in EVIDENCE_ACTIONS:
+            return True
         return self.validated.action in (
             ActionKind.SEARCH_CATALOG,
             ActionKind.FIND_SIMILAR,
@@ -729,6 +763,8 @@ class _LoopEngine:
             return "clarify"
         if self.validated.action in READ_ONLY_ACTIONS:
             return "reason"
+        if self.validated.action in EVIDENCE_ACTIONS:
+            return "evidence"
         return "execute"
 
     # -- execute ----------------------------------------------------------- #
@@ -773,6 +809,11 @@ class _LoopEngine:
         """
         if not self.has_current_action():
             return StepOutcome.proceed()
+        # Phase 4: evidence acquisition reaches a trusted source and records the facts it states.
+        # It shares the candidate-plane steps below it: no raw domain payload to re-verify, and the
+        # acquisition is what produces the observation.
+        if self.validated.action in EVIDENCE_ACTIONS:
+            return self._execute_evidence()
         # Stage 2: an action that consults a *non-history* candidate source goes through the
         # plane, which grounds every identity before the ledger records it.  The history
         # action keeps using the accepted capability so the Stage 1 path is untouched.
@@ -904,6 +945,66 @@ class _LoopEngine:
             eligible_candidates=0,
         )
 
+    def _execute_evidence(self) -> StepOutcome:
+        """Acquire trusted evidence and re-derive the run's feasibility from it.
+
+        The acquisition itself is the observation - like a candidate-plane step there is no raw
+        domain payload to re-verify - and the constraint kernel is re-run immediately, because the
+        whole purpose of acquiring a fact is that it can change a verdict.  That re-evaluation is
+        the **existing** Phase-2 path: the same ``refresh_feasibility`` the candidate plane calls,
+        over the same ``CandidateEligibilityEvaluator``, so there is still exactly one verdict
+        authority and this phase adds no second constraint system.
+
+        A failure is normalised into a failed observation rather than crashing the loop, exactly as
+        a capability or reasoning failure is.
+        """
+        if not self.has_current_action():
+            return StepOutcome.proceed()
+        if self.evidence is None:
+            self.verification = VerificationResult(
+                verified=False,
+                code="evidence_unavailable",
+                detail="no evidence source is configured for this deployment",
+                checks=("evidence_available",),
+            )
+            self.observation = self.observation_adapter.failed_observation(
+                action_id=self.validated.action_id,
+                step_index=self.control.step_count,
+                action=self.validated.action,
+                code="evidence_unavailable",
+            )
+            return StepOutcome.proceed()
+        try:
+            self.observation = self.evidence.execute(
+                self.validated, authorized_candidates=self.grounded_identities()
+            )
+            self.verification = VerificationResult(
+                verified=True,
+                code="evidence_acquired",
+                detail=None,
+                checks=("grounded_evidence_source", "run_scoped_identity", "provenance_recorded"),
+            )
+        except Exception as exc:  # noqa: BLE001 - normalised into an observation
+            self.verification = VerificationResult(
+                verified=False,
+                code=_error_code(exc),
+                detail=f"evidence acquisition raised {type(exc).__name__}",
+                checks=("execution",),
+            )
+            self.observation = self.observation_adapter.failed_observation(
+                action_id=self.validated.action_id,
+                step_index=self.control.step_count,
+                action=self.validated.action,
+                code=_error_code(exc),
+            )
+            return StepOutcome.proceed()
+        # New trusted facts are in the overlay, so every verdict that depended on them must be
+        # recomputed now.  ``refresh_feasibility`` is the same call the candidate plane makes; it
+        # rebuilds the view from current constraints and current facts and never caches, so a fact
+        # acquired here cannot leave a stale verdict in force.
+        self.refresh_feasibility()
+        return StepOutcome.proceed()
+
     # -- verify ------------------------------------------------------------ #
 
     def verify(self) -> StepOutcome:
@@ -1027,7 +1128,7 @@ class _LoopEngine:
         self.control = self.control.advanced(
             action=self.validated.action,
             action_id=self.validated.action_id,
-            consumed_tool_call=self.validated.action in CANDIDATE_ACTIONS,
+            consumed_tool_call=self.validated.action in TOOL_CALL_ACTIONS,
         )
         self.last_proposal_rejected = False
         return StepOutcome.proceed()
@@ -1567,6 +1668,7 @@ class LoopController:
         reasoning_executor: Any = None,
         candidate_plane: Any = None,
         eligibility_evaluator: Any = None,
+        evidence_executor: Any = None,
     ) -> None:
         if not callable(getattr(policy, "choose", None)):
             raise PolicyActionError("policy must provide a callable choose(context) method")
@@ -1601,6 +1703,7 @@ class LoopController:
         self._reasoning = reasoning_executor
         self._candidate_plane = candidate_plane
         self._eligibility = eligibility_evaluator
+        self._evidence = evidence_executor
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -1735,6 +1838,7 @@ class LoopController:
                 candidate_plane if candidate_plane is not None else self._candidate_plane
             ),
             eligibility_evaluator=self._eligibility,
+            evidence_executor=self._evidence,
         )
 
     def _run(

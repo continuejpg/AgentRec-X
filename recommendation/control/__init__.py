@@ -93,6 +93,18 @@ from .context import (
     project_constraints,
     project_intent,
 )
+from .evidence import (
+    EVIDENCE_ARTIFACT_VERSION,
+    EVIDENCE_ATTRIBUTES,
+    EvidenceDocument,
+    EvidenceItem,
+    EvidenceSource,
+    EvidenceStatus,
+    EvidenceStore,
+    LocalEvidenceArtifact,
+)
+from .evidence_executor import EVIDENCE_EXECUTOR_ACTIONS, EvidenceExecutor
+from .similar_item import SimilarItemIndex, SimilarItemSource, build_similar_item_index
 from .grounded_reasoning import (
     GROUNDED_FACTS_VERSION,
     UNKNOWN,
@@ -140,6 +152,8 @@ from .provider_adapter import (
 )
 from .reasoning_executor import REASONING_ACTIONS, ReasoningExecutor
 from .schemas import (
+    TOOL_CALL_ACTIONS,
+    EVIDENCE_ACTIONS,
     ARGUMENTS_BY_ACTION,
     CANDIDATE_ACTIONS,
     CONTROL_PLANE_VERSION,
@@ -203,6 +217,8 @@ __all__ = [
     "TASK_STATE_VERSION",
     "CATALOG_SEARCH_SCORE_KIND",
     "CANDIDATE_ACTIONS",
+    "EVIDENCE_ACTIONS",
+    "TOOL_CALL_ACTIONS",
     "CANDIDATE_PLANE_VERSION",
     "NON_EXECUTING_ACTIONS",
     "READ_ONLY_ACTIONS",
@@ -243,6 +259,19 @@ __all__ = [
     "CandidateEligibilityEvaluator",
     "ConstraintReport",
     "ConstraintRequirement",
+    "EVIDENCE_ARTIFACT_VERSION",
+    "EVIDENCE_ATTRIBUTES",
+    "EVIDENCE_EXECUTOR_ACTIONS",
+    "EvidenceDocument",
+    "EvidenceExecutor",
+    "EvidenceItem",
+    "EvidenceSource",
+    "EvidenceStatus",
+    "EvidenceStore",
+    "LocalEvidenceArtifact",
+    "SimilarItemIndex",
+    "SimilarItemSource",
+    "build_similar_item_index",
     "DEFAULT_CANDIDATE_REFERENCE_LIMIT",
     "FeasibilityProjection",
     "FeasibleCandidateView",

@@ -303,6 +303,24 @@ def build_policy_context_payload(context: PolicyContext) -> dict[str, Any]:
         payload["last_observation"] = _observation_summary(observation)
     else:
         payload["last_observation"] = None
+    # Phase 4 keys are added **only when the capability is present**.  Two reasons, and the second
+    # is the important one:
+    #
+    # * a model is not told about a question it cannot ask;
+    # * the payload is part of the recording fingerprint.  Adding a key unconditionally would
+    #   change the fingerprint of every request - including the archived Phase-3 recordings -
+    #   so a trace made before Phase 4 would no longer replay.  Conditional inclusion keeps a
+    #   run without the capability byte-identical to what it was, which is what lets the Phase-3
+    #   baselines stay reproducible.
+    if context.evidence_attributes:
+        payload["evidence"] = {
+            "available_attributes": list(context.evidence_attributes),
+            # Counts only: a policy learns that facts exist and how many, never their values.
+            "acquired_count": context.acquired_evidence_count,
+            "evidenced_candidate_count": context.evidenced_candidate_count,
+        }
+    if context.similar_item_available:
+        payload["similar_item_available"] = True
     return payload
 
 

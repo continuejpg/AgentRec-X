@@ -45,9 +45,11 @@ from recommendation.control.constraint_eligibility import ConstraintRequirement
 from recommendation.control.task_state import ConstraintOrigin, TaskConstraint, TaskState
 from recommendation.memory.schemas import PreferenceKind
 from recommendation.control.arguments import (
+    AcquireEvidenceArguments,
     AskClarificationArguments,
     CheckCompatibilityArguments,
     CompareArguments,
+    FindSimilarArguments,
     GetDetailsArguments,
     SearchCatalogArguments,
 )
@@ -104,6 +106,11 @@ _CASE_CONSTRAINT_KINDS: dict[str, ConstraintKind] = {
     ConstraintKind.BRAND.value: ConstraintKind.BRAND,
     ConstraintKind.COLOR.value: ConstraintKind.COLOR,
     ConstraintKind.WEIGHT_MAX.value: ConstraintKind.WEIGHT_MAX,
+    # Phase 4: decidable from acquired trusted evidence.  A case may now declare an
+    # evidence-decidable hard constraint, which is what lets the suite measure
+    # ``UNKNOWN -> acquire -> SATISFIED`` end to end.
+    ConstraintKind.MATERIAL.value: ConstraintKind.MATERIAL,
+    ConstraintKind.FEATURE.value: ConstraintKind.FEATURE,
 }
 
 
@@ -114,6 +121,8 @@ _PREFERENCE_KIND_BY_CONSTRAINT: dict[ConstraintKind, PreferenceKind] = {
     ConstraintKind.CATEGORY: PreferenceKind.CATEGORY,
     ConstraintKind.BRAND: PreferenceKind.BRAND,
     ConstraintKind.COLOR: PreferenceKind.COLOR,
+    ConstraintKind.MATERIAL: PreferenceKind.MATERIAL,
+    ConstraintKind.FEATURE: PreferenceKind.FEATURE,
 }
 
 
@@ -429,6 +438,78 @@ class _RecoverAfterEmpty:
         return ActionProposal(action=ActionKind.FINISH)
 
 
+class _EvidenceSeekingPolicy:
+    """Recommend, acquire trusted evidence for each held candidate, then finish.
+
+    The deterministic counterpart of what a model is asked to do when a hard constraint cannot be
+    decided from the base catalogue: consult the trusted evidence source rather than re-read the
+    same facts.  It reads the required attribute from the **case**, so the check and the
+    measurement cannot drift apart, and it asks once per candidate because one acquisition is one
+    tool call.
+    """
+
+    name = "suite-evidence-seeking"
+
+    def __init__(self, attribute: str) -> None:
+        self._attribute = attribute
+        self._asked: set[str] = set()
+
+    def choose(self, context: PolicyContext) -> ActionProposal:
+        if not context.candidate_state.grounded:
+            return ActionProposal(action=ActionKind.RECOMMEND_FROM_HISTORY, k=4)
+        if (
+            context.awaiting_user
+            or ActionKind.ACQUIRE_EVIDENCE not in context.available_actions
+        ):
+            return ActionProposal(action=ActionKind.FINISH)
+        for identity in context.grounded_parent_asins:
+            if identity not in self._asked:
+                self._asked.add(identity)
+                return ActionProposal(
+                    action=ActionKind.ACQUIRE_EVIDENCE,
+                    arguments=AcquireEvidenceArguments(
+                        parent_asin=identity, attribute=self._attribute
+                    ),
+                )
+        return ActionProposal(action=ActionKind.FINISH)
+
+
+class _SimilarItemRecoveryPolicy:
+    """Search the catalogue for one candidate, widen from it with FIND_SIMILAR, then finish.
+
+    Deliberately asks for a *small* first result so the similar-item source has something to add:
+    the case is about expansion, and a first source that already returned everything would leave
+    nothing to prove.  The seed is the run's own grounded candidate, chosen by the policy - the
+    explicit-seed rule Phase 4 introduced.
+    """
+
+    name = "suite-similar-item-recovery"
+
+    def __init__(self, terms: tuple[str, ...]) -> None:
+        self._terms = terms
+        self._expanded = False
+
+    def choose(self, context: PolicyContext) -> ActionProposal:
+        if not context.candidate_state.grounded:
+            return ActionProposal(
+                action=ActionKind.SEARCH_CATALOG,
+                arguments=SearchCatalogArguments(terms=self._terms, limit=1),
+            )
+        if (
+            not self._expanded
+            and ActionKind.FIND_SIMILAR in context.available_actions
+            and context.grounded_parent_asins
+        ):
+            self._expanded = True
+            return ActionProposal(
+                action=ActionKind.FIND_SIMILAR,
+                arguments=FindSimilarArguments(
+                    seed_parent_asin=context.grounded_parent_asins[0], limit=3
+                ),
+            )
+        return ActionProposal(action=ActionKind.FINISH)
+
+
 class DecidingOncePolicy:
     """The decide-once ablation: one decision, then finish, never reading an observation.
 
@@ -480,6 +561,17 @@ def build_adaptive_policy(case: EvaluationCase) -> Any:
         return _SearchCatalogFirst(("redwidget",))
     if case.case_id == "missing-requirement":
         return _AskWhenUnspecified()
+    if "acquire_evidence" in case.required_actions:
+        # Checked **before** the generic constraint branch below: an evidence case also declares a
+        # hard constraint, and the generic branch would drive it with the compatibility-checking
+        # policy instead of acquiring the evidence the case exists to require.  The attribute comes
+        # from the case's own declaration, so the policy checks what the metric grades.
+        requirement = next(iter(case_constraint_requirements(case)), None)
+        return _EvidenceSeekingPolicy(
+            requirement.kind.value if requirement is not None else "material"
+        )
+    if "find_similar" in case.required_actions:
+        return _SimilarItemRecoveryPolicy(("redwidget",))
     if case.hard_constraints:
         # Any case that declares a hard constraint is driven by the policy that checks it -
         # and the requirement comes from the **case**, so the check and the measurement cannot
@@ -607,6 +699,7 @@ class CaseRunner:
         *,
         policy: Any | None = None,
         reasoner: Any | None = None,
+        reasoner_factory: Callable[[EvaluationCase], Any] | None = None,
     ) -> CaseOutcome:
         """Run one case and return its measured outcome.
 
@@ -631,7 +724,21 @@ class CaseRunner:
         # metric checked the final set while the runtime had no constraint to enforce, which
         # is precisely the gap this phase closes.
         task_state = task_state_from_case(case)
-        controller = self._factory(case, chosen, limits, task_state)
+        # Phase 4: when the caller supplies a reasoner *factory*, one instance is built here and
+        # handed to both the controller factory and the constraint measurement.  They must be the
+        # same object: a run may acquire trusted evidence during the turn, and an evaluator
+        # grading with a fresh reasoner would not see it, so it would report a resolved constraint
+        # as unresolved and fail a run that behaved correctly.  The pre-Phase-4 signature (a
+        # factory that takes three arguments) still works, which is why the call is guarded.
+        grading_reasoner = None if reasoner_factory is None else reasoner_factory(case)
+        if grading_reasoner is not None:
+            try:
+                controller = self._factory(case, chosen, limits, task_state, grading_reasoner)
+            except TypeError:  # pragma: no cover - a pre-Phase-4 three-argument factory
+                controller = self._factory(case, chosen, limits, task_state)
+                grading_reasoner = None
+        else:
+            controller = self._factory(case, chosen, limits, task_state)
         # Wall latency around the whole turn, measured with a monotonic clock so a clock
         # adjustment cannot produce a negative or absurd duration.  This is the trajectory's
         # cost; the model's own latency is recorded separately and is a subset of it.
@@ -644,9 +751,11 @@ class CaseRunner:
         trajectory = self._project(case, result, controller)
         trajectory = trajectory.model_copy(update={"wall_latency_ms": wall_latency_ms})
         # Two reports from one evaluation: what the run checked, and what it presented.  The
-        # difference between them *is* enforcement.
-        checked = self._check_constraints(case, result, reasoner)
-        presented = self._check_constraints(case, result, reasoner, presented=True)
+        # difference between them *is* enforcement.  The run's own reasoner is preferred, so
+        # evidence the turn acquired is visible to the measurement.
+        measured_with = grading_reasoner if grading_reasoner is not None else reasoner
+        checked = self._check_constraints(case, result, measured_with)
+        presented = self._check_constraints(case, result, measured_with, presented=True)
         metrics = compute_metrics(
             trajectory,
             case,
@@ -966,11 +1075,13 @@ def run_suite(
         variant=variant,
         policy_factory=None if model_policy_factory is not None else policy_factory,
     )
+    # The reasoner is passed as a *factory* rather than a built instance, so the runner can hand
+    # the same object to the controller and to the constraint measurement.
     outcomes = [
         runner.run(
             case,
             policy=None if model_policy_factory is None else model_policy_factory(case),
-            reasoner=None if reasoner_factory is None else reasoner_factory(case),
+            reasoner_factory=reasoner_factory,
         )
         for case in cases
     ]

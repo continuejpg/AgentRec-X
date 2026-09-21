@@ -367,7 +367,11 @@ def test_an_unmappable_constraint_stays_active_as_unverifiable() -> None:
     Dropping it would let a candidate be presented as compliant with a constraint that was
     never tested, which is the same class of error as treating UNKNOWN as a pass.
     """
-    task = _task(TaskConstraint(kind=PreferenceKind.FEATURE, value="waterproof"))
+    # ``free_form_constraint`` is the genuinely unsupported kind: no catalogue attribute models
+    # it and no evidence attribute does either.  Phase 4 moved ``material`` and ``feature`` out of
+    # this category because an evidence source *can* decide them; ``free_form_constraint`` stays,
+    # so an unsupported constraint remains visible rather than being dropped or guessed.
+    task = _task(TaskConstraint(kind=PreferenceKind.FREE_FORM_CONSTRAINT, value="fits my old rack"))
     requirements = constraints_from_task_state(task)
     assert len(requirements) == 1
     assert requirements[0].kind is ConstraintKind.UNVERIFIABLE
@@ -388,11 +392,14 @@ def test_constraint_kind_mapping_is_total_over_the_preference_ontology() -> None
         PreferenceKind.CATEGORY.value: ConstraintKind.CATEGORY,
         PreferenceKind.BRAND.value: ConstraintKind.BRAND,
         PreferenceKind.COLOR.value: ConstraintKind.COLOR,
+        # Phase 4: decidable from acquired trusted evidence rather than from the base catalogue.
+        PreferenceKind.MATERIAL.value: ConstraintKind.MATERIAL,
+        PreferenceKind.FEATURE.value: ConstraintKind.FEATURE,
     }
     for value, expected in mapped.items():
         assert constraint_kind_for(value) is expected
-    for unmappable in (PreferenceKind.FEATURE, PreferenceKind.MATERIAL, PreferenceKind.FREE_FORM_CONSTRAINT):
-        assert constraint_kind_for(unmappable) is ConstraintKind.UNVERIFIABLE
+    # Only a constraint nothing can decide stays UNVERIFIABLE.
+    assert constraint_kind_for(PreferenceKind.FREE_FORM_CONSTRAINT) is ConstraintKind.UNVERIFIABLE
 
 
 # =========================================================================== #

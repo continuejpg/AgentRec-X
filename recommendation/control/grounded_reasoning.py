@@ -391,8 +391,18 @@ class ConstraintKind(str, Enum):
     COLOR = "color"
     #: Weight ceiling, used for portability constraints.
     WEIGHT_MAX = "weight_max"
-    #: A stated constraint this catalogue carries no attribute for.  Never satisfiable and
-    #: never a violation: it resolves to ``UNKNOWN`` by construction.
+    #: Product material, e.g. ``leather``.  The base catalogue projection does not decide this,
+    #: so it is resolved from **acquired trusted evidence** when evidence exists and is
+    #: ``UNKNOWN`` otherwise.  Phase 4 added it precisely because a stated material constraint
+    #: used to be permanently unanswerable.
+    MATERIAL = "material"
+    #: A stated product feature, e.g. ``waterproof``.  Same rule as :attr:`MATERIAL`: evidence
+    #: decides it, absence of evidence leaves it ``UNKNOWN``.
+    FEATURE = "feature"
+    #: A stated constraint the trusted sources cannot decide at all - no catalogue attribute and
+    #: no evidence attribute models it.  Never satisfiable and never a violation: it resolves to
+    #: ``UNKNOWN`` by construction.  Preserved for genuinely unsupported constraints, which must
+    #: stay visible rather than being dropped or guessed.
     UNVERIFIABLE = "unverifiable"
 
 
@@ -443,6 +453,31 @@ class ConstraintReport:
             "verdict": self.verdict.value,
             "observed": self.observed,
         }
+
+
+#: Which acquired-evidence attribute decides which constraint dimension.  A closed map, so a new
+#: constraint kind cannot silently become "evidence-backed" without an attribute behind it.
+_EVIDENCE_KINDS: dict[ConstraintKind, tuple[str, ...]] = {
+    ConstraintKind.MATERIAL: ("material",),
+    # ``feature`` reads both the generic feature statement and a stated waterproof rating: they
+    # are two facets of the same question, and a source may carry either.
+    ConstraintKind.FEATURE: ("feature", "waterproof"),
+}
+
+
+def _evidence_matches(stated: str, expected: str) -> bool:
+    """True when a stated evidence value satisfies an expected constraint value.
+
+    Deterministic and deliberately narrow: normalised substring membership in either direction, so
+    ``expected="leather"`` is satisfied by a stated ``"Full-grain leather upper"`` and
+    ``expected="waterproof"`` by ``"waterproof membrane"``.  No stemming, no synonyms, no
+    inference - a near-miss is a violation of the *check*, not an invitation to guess.
+    """
+    needle = " ".join(str(expected).split()).casefold()
+    haystack = " ".join(str(stated).split()).casefold()
+    if not needle:
+        return False
+    return needle in haystack or haystack in needle
 
 
 class CompatibilityVerdict(str, Enum):
@@ -499,11 +534,21 @@ class GroundedReasoner:
     ``CompletionGuard`` can act on.
     """
 
-    def __init__(self, catalog: CatalogLike) -> None:
+    def __init__(self, catalog: CatalogLike, *, evidence: Any = None) -> None:
         if not isinstance(catalog, CatalogLike):
             raise TypeError("catalog must expose '__contains__' and 'records'")
         self._catalog = catalog
         self._cache: dict[str, GroundedFacts] = {}
+        #: Phase 4: an acquired-evidence overlay, or ``None`` for a deployment with no evidence
+        #: source.  It is consulted *before* the catalogue for the evidence-decidable dimensions
+        #: and is never consulted for a verdict - see ``check_constraint``.  Absent means exactly
+        #: the pre-Phase-4 behaviour, which is why every existing test still passes unchanged.
+        self._evidence = evidence
+
+    @property
+    def evidence(self) -> Any:
+        """The acquired-evidence overlay in use, or ``None``."""
+        return self._evidence
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -711,9 +756,25 @@ class GroundedReasoner:
         violated.  That three-state result is what lets the completion guard refuse to certify
         a run whose constraints were never actually verified.
         """
+        if kind in _EVIDENCE_KINDS:
+            # These dimensions are decided by acquired trusted evidence, never by the base
+            # catalogue projection: the whole point of Phase 4 is that reading the same facts
+            # again cannot answer them.  No evidence means UNKNOWN - never a guess, and never a
+            # violation inferred from silence.
+            report = self._evidence_constraint(parent_asin, kind=kind, expected=expected)
+            if report is not None:
+                return report
+            return ConstraintReport(
+                parent_asin=parent_asin,
+                kind=kind,
+                expected=expected,
+                verdict=ConstraintVerdict.UNKNOWN,
+                observed=None,
+            )
+
         if kind is ConstraintKind.UNVERIFIABLE:
-            # Not a missing *value* but a missing *dimension*: the catalogue carries no
-            # attribute that could decide this, so no amount of looking will resolve it.
+            # Not a missing *value* but a missing *dimension*: neither the catalogue nor any
+            # configured evidence source models it, so no amount of looking will resolve it.
             return ConstraintReport(
                 parent_asin=parent_asin,
                 kind=kind,
@@ -806,6 +867,61 @@ class GroundedReasoner:
                 ConstraintVerdict.SATISFIED if matched else ConstraintVerdict.VIOLATED
             ),
             observed=" | ".join(str(value) for value in haystack),
+        )
+
+    def _evidence_constraint(
+        self, parent_asin: str, *, kind: ConstraintKind, expected: str
+    ) -> ConstraintReport | None:
+        """Derive a verdict from acquired evidence, or ``None`` when evidence cannot decide it.
+
+        The *only* place an evidence-backed verdict is produced, and it is still this class -
+        ``EvidenceSource`` and the policy never compute one.
+
+        Three outcomes, in the order they are decided:
+
+        * **conflicting trusted sources** - the fact is undecided, so ``UNKNOWN``.  Both
+          provenance records are kept; picking one would be fabricated certainty.
+        * **evidence present** - deterministic, case-insensitive comparison against the stated
+          value, with the observed value kept for audit.  ``SATISFIED`` or ``VIOLATED``.
+        * **no evidence** - ``None``, so the caller reports ``UNKNOWN``.  Absence is never a
+          verdict.
+        """
+        if self._evidence is None:
+            return None
+        attributes = _EVIDENCE_KINDS[kind]
+        # A conflict on *any* facet the dimension reads makes the dimension undecided.
+        conflicts = tuple(
+            item
+            for attribute in attributes
+            for item in self._evidence.conflicts_for(parent_asin, attribute)
+        )
+        if conflicts:
+            return ConstraintReport(
+                parent_asin=parent_asin,
+                kind=kind,
+                expected=expected,
+                verdict=ConstraintVerdict.UNKNOWN,
+                observed=" | ".join(sorted({item.value for item in conflicts})),
+            )
+        stated = [
+            value
+            for attribute in attributes
+            if (value := self._evidence.value_for(parent_asin, attribute)) is not None
+        ]
+        if not stated:
+            return None
+        # A dimension may read more than one facet (``feature`` reads both the generic feature
+        # statement and a stated waterproof rating).  The constraint is satisfied when any facet
+        # supports it, because a source stating "waterproof membrane" and another stating a
+        # generic feature set are describing the same product, not contradicting each other.
+        combined = " | ".join(stated)
+        satisfied = any(_evidence_matches(value, expected) for value in stated)
+        return ConstraintReport(
+            parent_asin=parent_asin,
+            kind=kind,
+            expected=expected,
+            verdict=(ConstraintVerdict.SATISFIED if satisfied else ConstraintVerdict.VIOLATED),
+            observed=combined,
         )
 
     def check_constraints(

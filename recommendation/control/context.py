@@ -249,6 +249,20 @@ class PolicyContext:
     #: exclusion.  It cannot re-enter the recommendation set by being inspected.
     grounded_candidates: tuple[CandidateReference, ...] = ()
 
+    #: Phase 4: attributes the configured evidence source can be asked about, so a policy knows
+    #: which questions are answerable.  Empty when no evidence source is configured, which is how
+    #: a policy tells "evidence is not available here" from "I have not asked yet".
+    evidence_attributes: tuple[str, ...] = ()
+    #: Phase 4: how many distinct facts have been acquired for this run.  A count, never the
+    #: values: the facts belong to the constraint report, attached to the verdict they produced.
+    acquired_evidence_count: int = 0
+    #: Phase 4: how many candidates the evidence overlay holds facts about.  Lets a policy tell
+    #: "some candidates are still unevidenced" from "evidence is exhausted".
+    evidenced_candidate_count: int = 0
+    #: Phase 4: whether a similar-item source is configured, so the policy knows whether
+    #: ``FIND_SIMILAR`` can be proposed at all.  Derived from the offered menu, not asserted.
+    similar_item_available: bool = False
+
     def reasoning_targets(self) -> tuple[str, ...]:
         """The identities a reasoning action may legally name, in the run's own order.
 
@@ -303,6 +317,11 @@ class PolicyContext:
             # The summary carries the *count* of legal reasoning targets, never the identities:
             # the trajectory record is a different boundary from the policy's own view.
             "reasoning_target_count": len(self.grounded_candidates),
+            # Phase 4 counts only.  The acquired *values* stay in the constraint report.
+            "evidence_attribute_count": len(self.evidence_attributes),
+            "acquired_evidence_count": self.acquired_evidence_count,
+            "evidenced_candidate_count": self.evidenced_candidate_count,
+            "similar_item_available": self.similar_item_available,
         }
 
 

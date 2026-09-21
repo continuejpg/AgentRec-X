@@ -34,20 +34,32 @@ from recommendation.control import (  # noqa: E402
     CandidateLedger,
     CandidatePlane,
     CatalogSearchSource,
+    EvidenceExecutor,
+    EvidenceStore,
     GroundedReasoner,
     GroundingVerifier,
+    LocalEvidenceArtifact,
     ReasoningExecutor,
+    SimilarItemSource,
+    build_similar_item_index,
 )
 from recommendation.evaluation.agent import EvaluationCase  # noqa: E402
 from tests.agent_reranking_fixture import CANDIDATE_ROWS  # noqa: E402
 from tests.control_fixture import build_control_harness  # noqa: E402
 
 __all__ = [
+    "EVIDENCE_ARTIFACT",
     "IdentityMap",
     "catalog_reasoner",
     "case_controller_factory",
+    "evidence_enabled",
     "run_case_suite",
 ]
+
+#: The repository fixture Phase 4 evidence is read from.  Deliberately **not** the catalogue
+#: projection: a fact in this file is unknown to a run until an evidence action reads it, which is
+#: what makes the ``UNKNOWN -> acquire -> SATISFIED`` trajectory a real capability test.
+EVIDENCE_ARTIFACT = REPO_ROOT / "tests" / "fixtures" / "evidence" / "product_evidence.jsonl"
 
 
 class IdentityMap:
@@ -81,6 +93,15 @@ def catalog_reasoner() -> GroundedReasoner:
     )
 
 
+def evidence_enabled(case: EvaluationCase) -> bool:
+    """True when a case should run with Phase 4's evidence and similar-item sources wired.
+
+    Opt-in **per case**, so a case written before Phase 4 keeps the exact runtime it was written
+    for and an ablation can compare Phase-3 and Phase-4 behaviour on the same suite.
+    """
+    return "evidence" in case.category or "similar" in case.category
+
+
 def case_controller_factory(
     case: EvaluationCase,
     policy: Any,
@@ -103,7 +124,11 @@ def case_controller_factory(
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    reasoner = GroundedReasoner(metadata)
+    # Phase 4: the evidence store is created before the reasoner because the reasoner consults it,
+    # and the two must be the *same* object - a store the reasoner did not see would record facts
+    # no verdict could ever use.
+    store = EvidenceStore() if evidence_enabled(case) else None
+    reasoner = GroundedReasoner(metadata, evidence=store)
     harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001 - deliberate wiring
     # Phase 2: the same reasoner drives task-scoped constraint eligibility, so a case that
     # declares a hard constraint is run *and measured* against one enforced constraint set.
@@ -112,7 +137,19 @@ def case_controller_factory(
         ledger=CandidateLedger(),
         grounding=GroundingVerifier(IdentityMap(), metadata),
         catalog_search=CatalogSearchSource(metadata),
+        # Phase 4: a real lexical item-item index over the same trusted catalogue.  Registered
+        # only for the cases that opt in, so ``FIND_SIMILAR`` is offered exactly where a case
+        # exists to exercise it.
+        similar_item_tool=(
+            SimilarItemSource(build_similar_item_index(metadata))
+            if evidence_enabled(case)
+            else None
+        ),
     )
+    if store is not None:
+        harness.controller._evidence = EvidenceExecutor(  # noqa: SLF001
+            [LocalEvidenceArtifact(EVIDENCE_ARTIFACT)], store
+        )
     return harness.controller
 
 

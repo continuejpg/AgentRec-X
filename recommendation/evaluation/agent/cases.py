@@ -399,6 +399,122 @@ EVALUATION_CASES: tuple[EvaluationCase, ...] = (
         ),
     ),
     _case(
+        case_id="evidence-satisfies",
+        category="13_evidence_acquisition",
+        purpose=(
+            "A hard constraint the base catalogue cannot decide must be resolvable by acquiring "
+            "new trusted evidence, rather than by re-reading the same facts."
+        ),
+        message="I need a leather option.",
+        required_actions=("recommend_from_history", "acquire_evidence"),
+        acceptable_actions=(
+            "recommend_from_history",
+            "acquire_evidence",
+            "get_details",
+            "finish",
+        ),
+        hard_constraints=("material=leather",),
+        constraint_enforced=True,
+        constraint_note=(
+            "The material dimension is decidable only from acquired trusted evidence. Before the "
+            "evidence action runs, every candidate is UNKNOWN for it; after the source states a "
+            "material, the verdict is deterministic. A candidate the evidence source does not "
+            "cover stays UNKNOWN and is never presented as compliant."
+        ),
+        expected_memory_effect="none",
+        max_tool_calls=5,
+        max_steps=8,
+        notes=(
+            "Proves the Phase-4 capability end to end: UNKNOWN -> acquire -> SATISFIED -> FINISH, "
+            "with the evidence source's provenance recorded. The base catalogue projection is "
+            "deliberately unchanged by the acquisition, so the verdict can only have come from the "
+            "evidence store."
+        ),
+    ),
+    _case(
+        case_id="evidence-violates",
+        category="13_evidence_acquisition",
+        purpose=(
+            "New trusted evidence that disproves a constraint must exclude the candidate from the "
+            "feasible set while leaving it in the ledger."
+        ),
+        message="Only leather, nothing else.",
+        required_actions=("recommend_from_history", "acquire_evidence"),
+        acceptable_actions=(
+            "recommend_from_history",
+            "acquire_evidence",
+            "get_details",
+            "finish",
+        ),
+        hard_constraints=("material=leather",),
+        constraint_enforced=True,
+        constraint_note=(
+            "The evidence source states a non-leather material for a candidate the run holds. "
+            "That candidate becomes INELIGIBLE: it stays in the CandidateLedger with its "
+            "provenance and its verdict remains inspectable, but it cannot be presented."
+        ),
+        expected_memory_effect="none",
+        max_tool_calls=5,
+        max_steps=8,
+        notes=(
+            "The complement of evidence-satisfies: there the evidence proved compliance, here it "
+            "proves a violation. Both are decided by the same Phase-2 kernel; this phase adds an "
+            "input, not a second verdict authority."
+        ),
+    ),
+    _case(
+        case_id="evidence-not-found",
+        category="13_evidence_acquisition",
+        purpose=(
+            "An evidence source that holds nothing must leave the constraint UNKNOWN and the run "
+            "must terminate honestly rather than loop."
+        ),
+        message="I need a leather option.",
+        required_actions=("recommend_from_history", "acquire_evidence"),
+        acceptable_actions=(
+            "recommend_from_history",
+            "acquire_evidence",
+            "get_details",
+            "finish",
+        ),
+        hard_constraints=("material=leather",),
+        constraint_enforced=True,
+        constraint_note=(
+            "The evidence source is consulted and states nothing for the candidates it does not "
+            "cover, so their material verdict stays UNKNOWN. UNKNOWN is not compliance: nothing is "
+            "presented as verified, and the run ends."
+        ),
+        expected_memory_effect="none",
+        max_tool_calls=6,
+        max_steps=8,
+        notes=(
+            "Proves that NOT_FOUND is not a verdict. The source was genuinely consulted, which is "
+            "recorded, and the honest outcome is an unresolved constraint rather than an invented "
+            "satisfaction or a fabricated violation."
+        ),
+    ),
+    _case(
+        case_id="similar-item-recovery",
+        category="14_similar_item_expansion",
+        purpose=(
+            "When a retrieval returns too little, a real item-item source must be able to widen the "
+            "candidate set from an already-grounded seed."
+        ),
+        message="Show me more like the red one.",
+        required_actions=("search_catalog", "find_similar"),
+        acceptable_actions=("search_catalog", "find_similar", "get_details", "finish"),
+        expected_sources=("catalog_search", "similar_item"),
+        expected_memory_effect="none",
+        max_tool_calls=4,
+        max_steps=8,
+        notes=(
+            "The first source returns one candidate; FIND_SIMILAR then expands the run's candidate "
+            "set from that grounded seed through the trusted candidate machinery. Every new "
+            "identity is grounded by the verifier and recorded in the ledger with its own "
+            "similar-item provenance, so the expansion is auditable rather than a model claim."
+        ),
+    ),
+    _case(
         case_id="no-feasible-candidate",
         category="12_empty_feasible_set",
         purpose=(

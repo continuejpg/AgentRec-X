@@ -59,6 +59,14 @@ from recommendation.evaluation.agent.metrics import compute_metrics  # noqa: E40
 from recommendation.evaluation.agent.runner import build_adaptive_policy  # noqa: E402
 from recommendation.evaluation.agent.schemas import EVALUATION_PLANE_VERSION, AgentTrajectory  # noqa: E402
 from tests.agent_reranking_fixture import CANDIDATE_ROWS  # noqa: E402
+from experiments._harness import EVIDENCE_ARTIFACT, evidence_enabled  # noqa: E402
+from recommendation.control import (  # noqa: E402
+    EvidenceExecutor,
+    EvidenceStore,
+    LocalEvidenceArtifact,
+    SimilarItemSource,
+    build_similar_item_index,
+)
 from tests.control_fixture import build_control_harness  # noqa: E402
 
 # --------------------------------------------------------------------------- #
@@ -85,9 +93,17 @@ class _Map:
         raise KeyError(item_id)
 
 
-def build_reasoner() -> GroundedReasoner:
-    """A reasoner over the suite's synthetic catalogue."""
-    return GroundedReasoner(build_control_harness(catalog_rows=CANDIDATE_ROWS).parts["enricher"].metadata)
+def build_reasoner(*_ignored: object, evidence: object = None) -> GroundedReasoner:
+    """A reasoner over the suite's synthetic catalogue, optionally over an evidence overlay.
+
+    Accepts and ignores positional arguments so it can serve directly as a
+    ``reasoner_factory`` (which is called with the case) while still allowing a caller to ask for
+    a specific overlay by keyword.
+    """
+    return GroundedReasoner(
+        build_control_harness(catalog_rows=CANDIDATE_ROWS).parts["enricher"].metadata,
+        evidence=evidence,
+    )
 
 
 def suite_factory(
@@ -95,6 +111,7 @@ def suite_factory(
     policy: object,
     limits: object,
     task_state: object = None,
+    reasoner: object = None,
 ) -> object:  # noqa: ARG001 - signature matches the runner's factory contract
     """Compose a real control plane for one case.
 
@@ -119,7 +136,25 @@ def suite_factory(
         ),
     )
     metadata = harness.parts["enricher"].metadata
-    reasoner = GroundedReasoner(metadata)
+    # Phase 4: the store is created before the reasoner because the reasoner consults it.  A store
+    # the reasoner never saw would record facts no verdict could use, so the two must be the same
+    # object.  Built only for the cases that opt in, so every pre-Phase-4 case keeps the runtime it
+    # was written for.
+    wants_evidence = evidence_enabled(case)
+    store = EvidenceStore() if wants_evidence else None
+    # One reasoner is shared by the run and the measurement.  The runner hands in the object it
+    # will grade with when the caller supplied a reasoner *factory*; when no object was handed in
+    # this factory builds one over the case's evidence store.  Either way the controller gets the
+    # same instance the metric will use, so evidence the turn acquires is visible to the verdict
+    # that grades it - otherwise a resolved constraint would be reported as unresolved.
+    if reasoner is None:
+        reasoner = GroundedReasoner(metadata, evidence=store)
+    elif wants_evidence and getattr(reasoner, "evidence", None) is None:
+        # Attach the overlay to the reasoner the runner is holding, rather than building a second
+        # one.  Replacing it here would leave the controller and the metric looking at different
+        # reasoners, and the metric - which has no evidence - would report a constraint the run
+        # just resolved as unresolved.  One reasoner, one overlay, one verdict authority.
+        reasoner._evidence = store  # noqa: SLF001 - the run and the grader must share this
     harness.controller._reasoning = ReasoningExecutor(reasoner)  # noqa: SLF001 - deliberate wiring
     # Phase 2: the same reasoner drives task-scoped eligibility, so a case that declares a hard
     # constraint is run *and measured* against one enforced constraint set.
@@ -130,7 +165,16 @@ def suite_factory(
         ledger=CandidateLedger(),
         grounding=GroundingVerifier(_Map(), metadata),
         catalog_search=CatalogSearchSource(metadata),
+        # Phase 4: a real lexical item-item index over the same trusted catalogue, so
+        # FIND_SIMILAR is offered exactly where a case exists to exercise it.
+        similar_item_tool=(
+            SimilarItemSource(build_similar_item_index(metadata)) if wants_evidence else None
+        ),
     )
+    if store is not None:
+        harness.controller._evidence = EvidenceExecutor(  # noqa: SLF001
+            [LocalEvidenceArtifact(EVIDENCE_ARTIFACT)], store
+        )
     return harness.controller
 
 
@@ -220,6 +264,10 @@ def test_phase_two_cases_declare_real_enforceable_constraints() -> None:
         "hard-constraint",
         "unresolved-constraint",
         "no-feasible-candidate",
+        # Phase 4: these assert enforcement against an evidence-decidable dimension.
+        "evidence-satisfies",
+        "evidence-violates",
+        "evidence-not-found",
     }
     for case in enforcing:
         requirements = case_constraint_requirements(case)
@@ -543,7 +591,7 @@ def test_the_adaptive_loop_handles_the_case_set_except_documented_gaps() -> None
         controller_factory=suite_factory,
         variant=ABLATION_ADAPTIVE,
         policy_factory=build_adaptive_policy,
-        reasoner_factory=lambda case: build_reasoner(),
+        reasoner_factory=build_reasoner,
     )
     failed = {outcome.case.case_id for outcome in report.outcomes if not outcome.passed}
     assert failed <= {"premature-finish-recovery"}, [
@@ -612,7 +660,7 @@ def test_suite_report_has_no_single_aggregate_score() -> None:
         controller_factory=suite_factory,
         variant=ABLATION_ADAPTIVE,
         policy_factory=build_adaptive_policy,
-        reasoner_factory=lambda case: build_reasoner(),
+        reasoner_factory=build_reasoner,
     )
     payload = report.as_dict()
     assert "failures_by_component" in payload
@@ -683,7 +731,7 @@ def test_the_model_policy_variant_runs_the_whole_case_set() -> None:
         controller_factory=suite_factory,
         variant=ABLATION_MODEL_POLICY,
         model_policy_factory=build_model_policy_factory(),
-        reasoner_factory=lambda case: build_reasoner(),
+        reasoner_factory=build_reasoner,
     )
     assert report.failed == 0, [
         (outcome.case.case_id, outcome.metrics.failures())
@@ -705,7 +753,7 @@ def test_the_model_policy_is_observation_dependent_across_cases() -> None:
         controller_factory=suite_factory,
         variant=ABLATION_MODEL_POLICY,
         model_policy_factory=build_model_policy_factory(),
-        reasoner_factory=lambda case: build_reasoner(),
+        reasoner_factory=build_reasoner,
     )
     by_id = {outcome.case.case_id: outcome for outcome in report.outcomes}
     assert by_id["simple-fast-path"].trajectory.action_sequence() == (
@@ -745,7 +793,7 @@ def test_the_ablation_reports_components_not_a_score() -> None:
         controller_factory=suite_factory,
         variant=ABLATION_MODEL_POLICY,
         model_policy_factory=build_model_policy_factory(),
-        reasoner_factory=lambda case: build_reasoner(),
+        reasoner_factory=build_reasoner,
     )
     payload = report.as_dict()
     assert "score" not in payload

@@ -68,6 +68,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from recommendation.tools.schemas import DEFAULT_K, MAX_K, MIN_K
 
 from .arguments import (
+    AcquireEvidenceArguments,
+    FindSimilarArguments,
     AskClarificationArguments,
     BundleArguments,
     CheckCompatibilityArguments,
@@ -83,6 +85,8 @@ from .arguments import (
 __all__ = [
     "ARGUMENTS_BY_ACTION",
     "CANDIDATE_ACTIONS",
+    "EVIDENCE_ACTIONS",
+    "TOOL_CALL_ACTIONS",
     "CONTROL_PLANE_VERSION",
     "NON_EXECUTING_ACTIONS",
     "READ_ONLY_ACTIONS",
@@ -98,6 +102,7 @@ __all__ = [
     "CompatibilityObservation",
     "DetailObservation",
     "DomainResult",
+    "EvidenceObservation",
     "FailureObservation",
     "LoopLimits",
     "Observation",
@@ -202,6 +207,10 @@ class ActionKind(str, Enum):
     CHECK_COMPATIBILITY = "check_compatibility"
     BUNDLE = "bundle"
     VERIFY = "verify"
+    # Phase 4: reach a trusted evidence source for facts the base catalogue projection does not
+    # carry.  Not a reasoning action: it does not read facts the run already has, it *acquires*
+    # new ones, so it consumes a tool call like the candidate sources do.
+    ACQUIRE_EVIDENCE = "acquire_evidence"
 
 
 #: The accepted Stage 1 action space.  Kept as a named constant because the Stage 1 policy
@@ -233,6 +242,22 @@ READ_ONLY_ACTIONS: tuple[ActionKind, ...] = (
     ActionKind.VERIFY,
 )
 
+#: Phase 4: actions that acquire **new trusted facts** about candidates the run already holds.
+#:
+#: Deliberately its own class.  They are not candidate-producing - the candidate set is untouched -
+#: and they are not read-only reasoning either, because reasoning re-reads facts the run already
+#: has while these reach a genuinely separate trusted source for facts it does not.  That
+#: difference is why they consume a tool call and reasoning actions do not.
+EVIDENCE_ACTIONS: tuple[ActionKind, ...] = (
+    ActionKind.ACQUIRE_EVIDENCE,
+)
+
+#: Every action that reaches a tool and therefore consumes the tool-call budget.
+TOOL_CALL_ACTIONS: tuple[ActionKind, ...] = (
+    *CANDIDATE_ACTIONS,
+    *EVIDENCE_ACTIONS,
+)
+
 #: Actions that do not execute anything and do not touch the candidate set.
 NON_EXECUTING_ACTIONS: tuple[ActionKind, ...] = (
     ActionKind.FINISH,
@@ -251,7 +276,7 @@ ARGUMENTS_BY_ACTION: dict[ActionKind, type[BaseModel]] = {
     ActionKind.FINISH: EmptyArguments,
     ActionKind.SELECT_SOURCE: SelectSourceArguments,
     ActionKind.SEARCH_CATALOG: SearchCatalogArguments,
-    ActionKind.FIND_SIMILAR: SelectSourceArguments,
+    ActionKind.FIND_SIMILAR: FindSimilarArguments,
     ActionKind.ASK_CLARIFICATION: AskClarificationArguments,
     ActionKind.PROPOSE_MEMORY_WRITE: EmptyArguments,
     ActionKind.GET_DETAILS: GetDetailsArguments,
@@ -260,6 +285,7 @@ ARGUMENTS_BY_ACTION: dict[ActionKind, type[BaseModel]] = {
     ActionKind.CHECK_COMPATIBILITY: CheckCompatibilityArguments,
     ActionKind.BUNDLE: BundleArguments,
     ActionKind.VERIFY: EmptyArguments,
+    ActionKind.ACQUIRE_EVIDENCE: AcquireEvidenceArguments,
 }
 
 
@@ -865,6 +891,50 @@ class CompatibilityObservation(Observation):
             for entry in self.assessments
             if entry.get("verdict") == "satisfied"
         )
+
+
+class EvidenceObservation(Observation):
+    """Phase 4: what one evidence acquisition produced, minimised.
+
+    Reports *whether* new trusted facts arrived and *which attributes* they covered - never the
+    values, and never a verdict.  The values belong to the constraint report, where they are
+    attached to the ``SATISFIED`` / ``VIOLATED`` / ``UNKNOWN`` they produced, so a reader sees a
+    fact next to the decision it justified rather than loose in a trajectory.
+
+    ``status`` uses the acquisition vocabulary from the evidence contract
+    (``found`` / ``not_found`` / ``unsupported``), which is deliberately *not* the constraint
+    verdict vocabulary: "we looked and there was nothing" must not be mistakable for "the
+    constraint failed".
+    """
+
+    kind: str = "evidence"
+    status: Literal["found", "not_found", "unsupported"] = "not_found"
+    #: The candidate the evidence is about.
+    parent_asin: str = ""
+    #: The attribute the policy asked for.  Echoed so a trajectory shows the request even when the
+    #: source had nothing.
+    requested_attribute: str = ""
+    #: Which trusted source answered, for provenance.
+    source: str = ""
+    #: Whether the source stated anything at all.
+    found: bool = False
+    #: How many facts the document carried.
+    attribute_count: int = Field(default=0, ge=0)
+    #: The attributes the document covered, in order.
+    acquired_attributes: tuple[str, ...] = ()
+    #: The attributes that were **new** to the run's evidence store.  Empty means the acquisition
+    #: was a no-op, which is how the policy learns that asking again would change nothing.
+    newly_acquired_attributes: tuple[str, ...] = ()
+    #: The source's own provenance note for this record, when it carries one.
+    provenance_note: str | None = Field(default=None, max_length=200)
+    #: A payload-light view of the whole evidence store: counts, attribute names and provenance
+    #: identities, with conflicts reported.  No fact values.
+    evidence_state: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def made_progress(self) -> bool:
+        """True when this acquisition added a fact the run did not already hold."""
+        return bool(self.newly_acquired_attributes)
 
 
 class BundleObservation(Observation):

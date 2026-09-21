@@ -170,6 +170,15 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         # annotates that allowlist, it does not widen it - and the projection is capped, so the
         # policy's view cannot grow with the candidate set.
         "grounded_candidates",
+        # Phase 4 adds a bounded evidence summary to the same one-channel projection: an
+        # attribute *menu* (names only, never values), two counts, and whether a similar-item
+        # source is configured.  No fact value crosses - evidence values stay in the constraint
+        # report where they are attached to the verdict they produced - and the menu names only
+        # what a configured trusted source can actually answer.
+        "evidence_attributes",
+        "acquired_evidence_count",
+        "evidenced_candidate_count",
+        "similar_item_available",
     }
     assert set(vars(context)) == allowed
 
@@ -203,6 +212,12 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
     assert not hasattr(context, "tool")
     assert not hasattr(context, "engine")
     assert not hasattr(context, "preference_snapshot")
+
+    # Phase 4's summary is counts and an attribute menu: no evidence *value* can appear in it,
+    # because a value is only ever attached to a constraint verdict.
+    assert context.acquired_evidence_count == 0
+    assert context.evidenced_candidate_count == 0
+    assert context.similar_item_available is False
 
     serialised = repr(context) + str(context.summary())
     for asin in HISTORY:

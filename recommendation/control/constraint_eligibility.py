@@ -429,8 +429,7 @@ def candidate_eligibility(
 
 
 #: Which reasoner constraint dimension evaluates which preference kind.  A preference kind
-#: with no entry here (``feature``, ``material``, ``free_form_constraint``) has no
-#: deterministic catalogue check today, so it maps to
+#: with no entry here (``free_form_constraint``) has no deterministic check at all, so it maps to
 #: :attr:`ConstraintKind.UNVERIFIABLE` rather than being dropped: dropping it would present a
 #: candidate as compliant with a constraint that was never tested.
 _PREFERENCE_TO_CONSTRAINT: dict[str, ConstraintKind] = {
@@ -439,6 +438,12 @@ _PREFERENCE_TO_CONSTRAINT: dict[str, ConstraintKind] = {
     "category": ConstraintKind.CATEGORY,
     "brand": ConstraintKind.BRAND,
     "color": ConstraintKind.COLOR,
+    # Phase 4: material and feature are decidable from **acquired trusted evidence**.  Before the
+    # evidence layer existed they mapped to UNVERIFIABLE, which is why a stated material
+    # constraint was permanently UNKNOWN.  They belong here now because a dimension that *can* be
+    # resolved must be requested as a requirement, not discarded as unsupported.
+    "material": ConstraintKind.MATERIAL,
+    "feature": ConstraintKind.FEATURE,
 }
 
 
