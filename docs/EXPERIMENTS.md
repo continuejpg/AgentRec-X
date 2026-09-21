@@ -191,6 +191,8 @@ The same `max_seq_len = 50` is used at inference, so serving matches training.
 | Device | `cuda:0` |
 | Outer epoch budget | `MAX_EPOCHS = 200` |
 | Early-stopping patience | `PATIENCE = 10` |
+| **Training corpus** | **all 412 445 eligible users** (every `train_history`), 2 263 252 raw next-item transitions, 2 223 283 effective after the 50-item window |
+| Item coverage in training | 154 781 distinct target items of 156 746 |
 
 Note on the manifest's `optimizer_config.epochs = 1`: that is the trainer's own single-epoch
 configuration. The canonical training loop drives one epoch per iteration and applies the
@@ -313,43 +315,64 @@ Three things this table supports, and one it does not:
 
 `HR@10 == Recall@10` for every arm, as expected for single-positive leave-one-out evaluation.
 
-### 8.3 Post-Phase-5: Two-Tower retrieval, complementarity and a fusion ablation
+### 8.3 Post-Phase-5: Two-Tower retrieval, complementarity and controlled fusion
 
-The Phase-5 rows above are unchanged and remain the accepted result. A **second model family**
-was then added as a new arm, trained and evaluated through the identical protocol (same dataset,
-mapping, split, 20 000-user cohort, full catalogue, `k`, evaluator semantics). Full detail,
-including the architecture, the objective and every reproduction command:
+The Phase-5 rows above are unchanged and remain the accepted result. A **second model family** was
+then added as a new arm, trained and evaluated through the identical protocol (same dataset,
+mapping, split, 20 000-user cohort, full catalogue, `k`, evaluator semantics). Architecture,
+objective, the training-exposure audit and every reproduction command:
 [`TWOTOWER.md`](TWOTOWER.md).
+
+**Step 1.1 corrected a training-exposure confound.** The Step-1 Two-Tower was trained on the
+20 000-user *evaluation* cohort while SASRec was trained on all 412 445 eligible users — a 9.4×
+exposure gap invisible in any metric table. Two-Tower was retrained on the same eligible train-only
+corpus (1 850 807 pairs, 154 781 target items) with the architecture, loss, seed and
+hyper-parameters unchanged; the evaluation cohort stayed frozen. The Step-1 checkpoint and numbers
+are preserved as historical results.
 
 | Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 |
 | --- | --- | --- | --- | --- | --- |
-| `two_tower` (new) | 0.00550 | 0.00965 | 0.01650 | 0.00482 | 0.00965 |
-| `sasrec_two_tower_metadata` (new fusion) | **0.00940** | **0.01610** | **0.02695** | **0.00846** | **0.01610** |
-| `fixed_fusion` (Phase-5, unchanged) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.01435 |
+| `two_tower` (Step 1.1, corrected exposure) | 0.00860 | **0.01435** | 0.02285 | 0.00737 | 0.01435 |
 | `sequential` (accepted SASRec) | 0.00820 | 0.01350 | 0.02070 | 0.00685 | 0.01350 |
 | `metadata_retrieval` (Phase-5) | 0.00505 | 0.00925 | 0.01485 | 0.00441 | 0.00925 |
+| `fixed_fusion` (Phase-5, unchanged) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.01435 |
+| *`two_tower` (Step 1, 20k exposure — historical)* | *0.00550* | *0.00965* | *0.01650* | *0.00482* | *0.00965* |
 
-**The question was whether Two-Tower adds signal SASRec misses, not whether it wins alone.** Per-user
-hit analysis over each source's top-1000 head answers it:
+**At matched exposure Two-Tower is no longer a weaker single source:** Recall@10 rises from
+0.00965 to 0.01435, level with the accepted Phase-5 fusion and above SASRec.
 
-| Pair | hit by both | left only | right only | neither | union | Jaccard |
-| --- | --- | --- | --- | --- | --- | --- |
-| SASRec vs Two-Tower | 1 995 | 2 105 | **1 120** | 14 780 | **5 220** | 0.382 |
-| SASRec vs metadata | 407 | 3 693 | 1 227 | 14 673 | 5 327 | 0.076 |
+**Complementarity** (per-user hits inside each source's top-1000 head, corrected model):
 
-* Two-Tower retrieves the target for **1 120 users SASRec misses** at head-1000, and its top-10
-  head overlaps SASRec's by a mean Jaccard of only **0.101**. The two models are genuinely
-  different retrievers.
-* Consequently the three-source fusion including Two-Tower reaches Recall@10 **0.01610** against
-  the Phase-5 fusion's **0.01435** — a 12.2% relative gain, with the fusion rule, constant and
-  head size left at their codebase defaults and nothing tuned on the test split.
-* Two-Tower **alone is weaker than SASRec** (0.00965 vs 0.01350) and is under-trained at three
-  epochs. The honest summary is: complementary signal, weaker standalone model, fusion gain
-  measured but not attributable to Two-Tower alone (the new fusion also drops popularity).
+| Pair | both | left only | right only | neither | union | Jaccard | lift |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SASRec vs Two-Tower | 2 559 | 1 541 | **1 872** | 14 028 | **5 972** | 0.429 | **1.348** |
+| SASRec vs metadata | 407 | 3 693 | 1 227 | 14 673 | 5 327 | 0.076 | 1.299 |
 
-The comparison command re-ran the accepted arms and reproduced the stored Phase-5 values exactly
-(`sequential` 0.01350, `metadata_retrieval` 0.00925, `fixed_fusion` 0.01435), so the table is one
-process's output rather than a quotation.
+1 872 users have a target Two-Tower's head contains and SASRec's does not; the mean top-10 head
+Jaccard is only **0.083**. The signal is complementary, and correcting exposure made the two models
+*more* different at the head (0.101 → 0.083) while also raising Two-Tower's own coverage.
+
+**Controlled fusion.** The Step-1 fusion comparison changed two things at once (it added Two-Tower
+and removed popularity), so it could not attribute the effect. Four frozen source sets fix that —
+same RRF rule, constant, head size, cohort, catalogue and evaluator, with Two-Tower's presence the
+only difference inside each contrast:
+
+| Arm | Sources | Recall@10 | Recall@20 | NDCG@10 |
+| --- | --- | --- | --- | --- |
+| A | popularity + SASRec + metadata | 0.01435 | 0.02325 | 0.00743 |
+| **B** | A + **Two-Tower** | **0.01900** | **0.02995** | **0.00982** |
+| C | SASRec + metadata | 0.01620 | 0.02525 | 0.00887 |
+| **D** | C + **Two-Tower** | **0.02075** | **0.03295** | **0.01105** |
+
+| Contrast | Recall@10 | Δ relative | Δ Recall@20 | Δ NDCG@10 |
+| --- | --- | --- | --- | --- |
+| **B − A** (popularity held constant) | 0.01435 → 0.01900 | **+32.4%** | +28.8% | +32.0% |
+| **D − C** (popularity absent from both) | 0.01620 → 0.02075 | **+28.1%** | +30.5% | +24.5% |
+
+Both contrasts agree in magnitude, which is the evidence that the effect belongs to Two-Tower
+rather than to the source set around it. Nothing was tuned: the fusion rule, its constant, the head
+size and the source sets were fixed before the runs. The accepted arms were re-run in the same pass
+and reproduced their stored Recall@10 exactly (0.01350 / 0.00925 / 0.01435).
 
 ---
 

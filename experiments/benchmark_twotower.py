@@ -127,6 +127,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--two-tower-dir", type=Path, default=TWOTOWER_DIR)
     parser.add_argument("--sasrec-checkpoint", type=Path, default=SASREC_CHECKPOINT)
     parser.add_argument("--skip-fusion", action="store_true")
+    parser.add_argument(
+        "--with-controls",
+        action="store_true",
+        help=(
+            "also run the frozen A/B/C/D fusion controls in this pass.  They reuse the source "
+            "heads computed here, so running both together avoids recomputing the SASRec and "
+            "Two-Tower rankings twice."
+        ),
+    )
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
 
@@ -299,6 +308,68 @@ def main(argv: list[str] | None = None) -> int:
             "new_fusion_sources": ["sequential", "two_tower", "metadata"],
             "tuned_on_test": False,
         }
+
+    # ---- frozen A/B/C/D fusion controls ---------------------------------- #
+    if args.with_controls:
+        # Each control holds every previous source constant and varies only Two-Tower's
+        # presence, which is what makes the difference attributable.  See
+        # experiments/fusion_controls.py for the standalone command and the rationale.
+        from experiments.fusion_controls import CONTROLS, CONTRASTS, metrics_of
+
+        control_rankings = {
+            "popularity": pop_heads,
+            "sequential": sasrec_heads,
+            "metadata": meta_heads,
+            "two_tower": two_tower_heads,
+        }
+        control_arms: dict[str, Any] = {}
+        for name, sources in CONTROLS.items():
+            t0 = time.time()
+            control_arms[name] = B.evaluate_arm(
+                cases=cohort,
+                num_items=num_items,
+                batches=B.arm_fixed_fusion(
+                    num_items=num_items, source_rankings=control_rankings, sources=sources
+                ),
+            )
+            timings[name] = round(time.time() - t0, 1)
+            print(
+                f"  {name:42s} R@10="
+                f"{control_arms[name]['metrics']['Recall']['@10']:.5f} ({timings[name]}s)",
+                flush=True,
+            )
+        results["fusion_controls"] = {
+            "controls": {name: list(sources) for name, sources in CONTROLS.items()},
+            "rrf_constant": "accepted default, unchanged",
+            "head": HEAD,
+            "tuned_on_test": False,
+            "arms": control_arms,
+            "contrasts": {},
+        }
+        for left, right in CONTRASTS:
+            before, after = metrics_of(control_arms[left]), metrics_of(control_arms[right])
+            results["fusion_controls"]["contrasts"][f"{right}_minus_{left}"] = {
+                "held_constant": sorted(set(CONTROLS[left]) & set(CONTROLS[right])),
+                "added": sorted(set(CONTROLS[right]) - set(CONTROLS[left])),
+                "removed": sorted(set(CONTROLS[left]) - set(CONTROLS[right])),
+                "metrics": {
+                    key: {
+                        "before": before[key],
+                        "after": after[key],
+                        "absolute": round(after[key] - before[key], 6),
+                        "relative_percent": (
+                            round((after[key] - before[key]) / before[key] * 100.0, 3)
+                            if before[key]
+                            else None
+                        ),
+                    }
+                    for key in ("recall@10", "recall@20", "ndcg@10", "hr@10")
+                },
+            }
+            relative = results["fusion_controls"]["contrasts"][f"{right}_minus_{left}"][
+                "metrics"
+            ]["recall@10"]["relative_percent"]
+            print(f"  {right} - {left}: {relative:+.2f}% R@10", flush=True)
 
     # ---- cross-check against the stored Phase-5 artifact ----------------- #
     if PHASE5_ARTIFACT.exists():

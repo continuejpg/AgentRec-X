@@ -47,6 +47,7 @@ from recommendation.datasets.twotower import (  # noqa: E402
 )
 from recommendation.datasets.sasrec import PAD_ID  # noqa: E402
 from recommendation.evaluation.split import load_cohort_from_artifacts  # noqa: E402
+from recommendation.training.checkpoint import sha256_file as _sha256  # noqa: E402
 from recommendation.models.twotower import TwoTower, TwoTowerConfig  # noqa: E402
 from recommendation.training.checkpoint import (  # noqa: E402
     TrainingState,
@@ -71,7 +72,18 @@ PRODUCTS = REPO_ROOT / "data" / "processed" / "Sports_and_Outdoors_products.json
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Train the Two-Tower retrieval baseline")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--cohort", type=int, default=20_000, help="users in the train cohort")
+    parser.add_argument(
+        "--cohort",
+        type=int,
+        default=412_445,
+        help=(
+            "how many eligible users to TRAIN on, taken from the deterministic stratified "
+            "order.  The default is every eligible user, matching the accepted SASRec training "
+            "corpus; passing the 20 000 evaluation-cohort size would reproduce the Step-1 "
+            "training-exposure confound and is not the intended use.  Evaluation always uses "
+            "the frozen 20 000-user cohort regardless of this flag."
+        ),
+    )
     parser.add_argument("--cohort-seed", type=int, default=20260201)
     parser.add_argument("--max-seq-len", type=int, default=50)
     parser.add_argument("--embedding-size", type=int, default=128)
@@ -216,6 +228,12 @@ def main(argv: list[str] | None = None) -> int:
             "cohort_description": selection["description"],
             "split_report": split_report.as_dict(),
             "labels_from": "EvaluationCase.train_history only",
+            # Content hashes, so a reader can tell which preprocessing run produced the corpus.
+            "artifact_hashes": {
+                "sequences_sha256": _sha256(SEQUENCES),
+                "mappings_sha256": _sha256(MAPPINGS),
+                "catalog_metadata_sha256": _sha256(PRODUCTS),
+            },
         },
         "metadata": {
             "attributes": categories["attributes"],

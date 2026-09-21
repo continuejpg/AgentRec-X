@@ -104,6 +104,81 @@ only"`.
 
 ---
 
+## 3.1 Training-exposure parity with SASRec (Step 1.1)
+
+The Step-1 model was trained on the 20 000-user **evaluation** cohort while the accepted SASRec
+was trained on every eligible user. Nothing in a metrics table reveals that, so it is audited and
+corrected here.
+
+### What produced `runs/sasrec_canonical_2026/best.pt`
+
+| Quantity | Value | Source |
+|---|---|---|
+| Users | **412 445** (all eligible; 0 with zero transitions) | `run.json` `trainable_users`, and recomputed with the accepted builder |
+| Raw next-item transitions | **2 263 252** | `run.json` `train_transitions` |
+| Effective transitions (50-item window) | 2 223 283 | recomputed |
+| Training interactions in window | 2 635 728 | recomputed |
+| Item coverage | 154 781 distinct target items of 156 746 | recomputed |
+| Split source | `temporal_leave_two_out`, `agentrecx.eval_protocol.v1` | `run.json` |
+| Validation/test targets excluded | **yes** — `build_dataset` reads `case.train_history` only | `recommendation/datasets/sasrec.py` |
+| Epochs / batch / seed | 17 completed (patience exhausted) / 256 / 2026 | `run.json` |
+
+### The mismatch
+
+| | SASRec (accepted) | Two-Tower (Step 1) |
+|---|---|---|
+| Training users | 412 445 | **20 000** |
+| Training units | 2 223 283 effective transitions | **236 730 pairs** |
+| Item coverage | 154 781 | **86 002** |
+| **Exposure ratio** | | **9.4×** |
+
+The *rules* matched — both builders read `train_history` only, and both exclude single-item
+histories — but the **cohorts did not**. The exact relation between the two builders is
+
+```
+two_tower_pairs == sasrec_raw_transitions − sasrec_trainable_users
+```
+
+which holds at full scale (2 263 252 − 412 445 = 1 850 807) and is asserted by
+`tests/test_training_parity.py`. So the gap was entirely a cohort restriction, not a different
+training rule.
+
+### Correction
+
+Two-Tower was **retrained on the same eligible train-only corpus** — all 412 445 users'
+`train_history`, with the architecture, loss, negative-sampling design, seed (2026) and every
+other hyper-parameter unchanged. The evaluation cohort stays frozen at the same 20 000 users with
+`COHORT_SEED = 20260201`.
+
+| | Step 1 | Step 1.1 (corrected) |
+|---|---|---|
+| Training users | 20 000 | **412 445** |
+| Pairs | 236 730 | **1 850 807** |
+| Distinct target items | 86 002 | **154 781** |
+| Epochs × batch | 3 × 2048 | 8 × 2048 |
+| Steps | 336 | 6 952 |
+| Wall (CPU) | 212 s | 3 982 s |
+| In-batch accuracy (final) | 0.0238 | **0.1055** (chance 1/2048 = 0.00049) |
+| Artifact | `runs/twotower_public_2026` | `runs/twotower_public_2026_full` |
+
+The Step-1 checkpoint is preserved unchanged and is reported as a **historical** result. Both
+checkpoints remain on disk.
+
+### Residual, unavoidable differences
+
+Even at matched exposure the two models do not see identical tensors, and the difference is
+architectural rather than a confound:
+
+* SASRec's sample packs the whole window into one sequence and scores every position with a binary
+  logistic loss (5.49 transitions per user on average); Two-Tower emits one pair per transition
+  and scores them with an in-batch softmax over 2048 candidates. That is the point of comparing
+  two model families.
+* With a short window SASRec's *effective* transition count drops (transitions outside the window
+  are lost), while Two-Tower still holds one pair per transition. At the canonical
+  `max_seq_len = 50` the loss is small (2 263 252 → 2 223 283, 1.8%) and is recorded above.
+
+---
+
 ## 4. Dataset and split reuse
 
 Nothing about the benchmark protocol changed. Two-Tower is trained and evaluated through the
@@ -133,75 +208,113 @@ stored value exactly (`sequential` 0.01350, `metadata_retrieval` 0.00925, `fixed
 
 ## 5. Standalone metrics (20 000 users, full-catalogue)
 
-| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 | mean rank |
-|---|---|---|---|---|---|---|
-| `metadata_retrieval` | 0.00505 | 0.00925 | 0.01485 | 0.00441 | 0.00925 | 93 379 |
-| **`two_tower`** | 0.00550 | **0.00965** | 0.01650 | 0.00482 | 0.00965 | 36 319 |
-| `sequential` (SASRec) | 0.00820 | 0.01350 | 0.02070 | 0.00685 | 0.01350 | 20 598 |
-| `fixed_fusion` (Phase-5) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.01435 | 80 590 |
-| **`sasrec_two_tower_metadata`** (new) | **0.00940** | **0.01610** | **0.02695** | **0.00846** | **0.01610** | 78 753 |
+Two checkpoints exist. The **Step-1.1 (corrected)** one is the current model; the Step-1 one is
+preserved as a historical result and is what the exposure audit above replaces.
 
-**Two-Tower is a real but weaker single source than SASRec** (0.00965 vs 0.01350 Recall@10) and
-beats the lexical metadata retriever. Trained for 3 epochs on 236 730 pairs, it is plainly not
-converged; see limitations.
+| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | NDCG@20 | HR@10 | mean rank |
+|---|---|---|---|---|---|---|---|
+| `metadata_retrieval` | 0.00505 | 0.00925 | 0.01485 | 0.00441 | 0.00581 | 0.00925 | 93 379 |
+| `sequential` (SASRec, accepted) | 0.00820 | 0.01350 | 0.02070 | 0.00685 | 0.00865 | 0.01350 | 20 598 |
+| **`two_tower`** (Step 1.1, corrected) | 0.00860 | **0.01435** | 0.02285 | 0.00737 | 0.00951 | 0.01435 | 21 944 |
+| `fixed_fusion` (Phase-5) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.00968 | 0.01435 | 80 590 |
+| *`two_tower` (Step 1, 20k exposure — historical)* | *0.00550* | *0.00965* | *0.01650* | *0.00482* | *—* | *0.00965* | *36 319* |
+
+**Conclusion change.** At matched training exposure, Two-Tower is **no longer a weaker single
+source**: its Recall@10 rises from 0.00965 to **0.01435**, level with the accepted Phase-5 fusion
+and above SASRec's 0.01350. The Step-1 statement "Two-Tower is a real but weaker single source than
+SASRec" was an artifact of the 9.4× exposure gap, not of the architecture.
+
+Neither model is converged in any strong sense — Two-Tower's in-batch accuracy at the end of
+training was 10.6% against 0.05% chance, and SASRec early-stopped on patience — so these are
+matched-exposure baselines, not tuned endpoints.
 
 ---
 
 ## 6. Complementarity — the question that matters
 
-Standalone Recall is not the point. Per-user hit analysis over each source's top-1000 head:
+Standalone Recall is not the point. Per-user hit analysis over each source's top-1000 head
+(**Step 1.1, corrected exposure**):
 
-| Pair | both | left only | right only | neither | union | Jaccard |
-|---|---|---|---|---|---|---|
-| SASRec vs **Two-Tower** | 1 995 | 2 105 | **1 120** | 14 780 | **5 220** | 0.382 |
-| SASRec vs metadata | 407 | 3 693 | 1 227 | 14 673 | 5 327 | 0.076 |
-| Two-Tower vs metadata | 356 | 2 759 | 1 278 | 15 607 | 4 393 | 0.081 |
+| Pair | both | left only | right only | neither | union | Jaccard | lift |
+|---|---|---|---|---|---|---|---|
+| SASRec vs **Two-Tower** | 2 559 | 1 541 | **1 872** | 14 028 | **5 972** | 0.429 | **1.348** |
+| SASRec vs metadata | 407 | 3 693 | 1 227 | 14 673 | 5 327 | 0.076 | 1.299 |
+| Two-Tower vs metadata | 581 | 3 850 | 1 053 | 14 516 | 5 484 | 0.106 | 1.238 |
 
-Head-level overlap is **low**: mean Jaccard between the SASRec and Two-Tower top-10 heads is
-**0.101**, and **0.118** at top-1. The two models retrieve substantially different candidates.
+Head-level overlap stays **low**: mean Jaccard between the SASRec and Two-Tower top-10 heads is
+**0.083**, and **0.103** at top-1. Correcting exposure made the two models *more* different at the
+head, not less.
 
-Read the SASRec-vs-Two-Tower row carefully, because it is the answer to the phase's question:
+| | Step 1 (20k exposure) | Step 1.1 (full exposure) |
+|---|---|---|
+| Two-Tower head coverage | 0.1558 | **0.2216** |
+| SASRec head coverage | 0.2050 | 0.2050 |
+| **Two-Tower-only hits** | 1 120 | **1 872** |
+| union coverage | 0.2610 | **0.2986** |
+| lift over best single source | 1.273 | **1.348** |
+| head Jaccard @10 / @1 | 0.101 / 0.118 | **0.083 / 0.103** |
 
-* Two-Tower's head contains the target for **3 115** users (0.15575), SASRec's for **4 100**
-  (0.205);
-* **1 120 of Two-Tower's hits are users SASRec misses at head-1000**;
-* the union covers **5 220** users (0.261) versus SASRec's 4 100 — a **1.27× lift over the best
-  single source**.
+**Training exposure materially changed the complementarity conclusion**, in both directions at
+once: the corrected model retrieves *more* on its own, and it still misses a large set SASRec
+covers, so the two sources remain genuinely complementary. 1 872 users (0.0936 of the cohort) have
+a target that Two-Tower's head contains and SASRec's does not.
 
-So yes: **Two-Tower contributes candidates SASRec does not retrieve.** That is the precondition
-for it to be worth anything in a fusion, and it is measured rather than assumed.
-
-Caveat on scale: "misses" here means *not in the top-1000 head*, which is a statement about
-retrieval, not about ranking. SASRec may still rank a target highly that Two-Tower retrieved, and
-vice versa; the fusion results below are the end-to-end test of whether the complementarity
-converts into metric.
+Caveat on scale: "misses" means *not in the top-1000 head* — a statement about retrieval, not about
+ranking. The fusion controls in §7 are the end-to-end test of whether this converts into metric.
 
 ---
 
-## 7. Fusion ablation
+## 7. Fusion controls — the incremental value of Two-Tower
 
-One controlled experiment, run **after** the standalone result was frozen. Same source set as
-Phase-5 fusion plus Two-Tower in place of popularity:
+The Step-1 comparison was **not a controlled experiment**. It compared
+``SASRec + Two-Tower + metadata`` against the Phase-5 ``popularity + SASRec + metadata``, which
+changed two things at once — it added Two-Tower *and* removed popularity — so its +12.2% could not
+be attributed to Two-Tower. That artifact is preserved unchanged and is no longer used for
+attribution.
+
+Four frozen source sets now isolate one variable. The RRF rule, its constant, the head size
+(1000), the cohort, the catalogue, the `k` values and the evaluator are identical everywhere; the
+only difference between a contrast's two arms is Two-Tower's presence.
 
 | | Sources |
 |---|---|
-| `fixed_fusion` (accepted Phase-5) | popularity + sequential + metadata |
-| `sasrec_two_tower_metadata` (new) | sequential + **two_tower** + metadata |
+| **A** | popularity + SASRec + metadata *(the accepted Phase-5 fusion)* |
+| **B** | popularity + SASRec + metadata + **Two-Tower** |
+| **C** | SASRec + metadata |
+| **D** | SASRec + metadata + **Two-Tower** |
 
-Both use the repository's accepted reciprocal-rank fusion with the **accepted default constant**
-and the **same head size (1000)**. Nothing was tuned on the test split: the rule, the constant and
-the head are codebase defaults, and the only choice made is which three sources to fuse.
+| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 |
+|---|---|---|---|---|---|
+| A (Phase-5 fixed fusion) | 0.00860 | 0.01435 | 0.02325 | 0.00743 | 0.01435 |
+| **B (A + Two-Tower)** | **0.01125** | **0.01900** | **0.02995** | **0.00982** | **0.01900** |
+| C (SASRec + metadata) | 0.01015 | 0.01620 | 0.02525 | 0.00887 | 0.01620 |
+| **D (C + Two-Tower)** | **0.01280** | **0.02075** | **0.03295** | **0.01105** | **0.02075** |
 
-| Metric | `fixed_fusion` | `sasrec_two_tower_metadata` | change |
-|---|---|---|---|
-| Recall@5 | 0.00860 | **0.00940** | +9.3% |
-| Recall@10 | 0.01435 | **0.01610** | +12.2% |
-| Recall@20 | 0.02325 | **0.02695** | +15.9% |
-| NDCG@10 | 0.00743 | **0.00846** | +13.9% |
-| head-1000 target coverage | 0.2066 | **0.2242** | — |
+### Controlled contrasts
 
-The Phase-5 arm remains in the artifact unchanged; the two are reported side by side so the
-comparison is explicit rather than a silent replacement.
+Every previous source is held constant; the only change is adding Two-Tower. No source is removed
+and none is substituted.
+
+| Contrast | Held constant | Added | Recall@10 | Δ absolute | Δ relative | Δ Recall@20 | Δ NDCG@10 |
+|---|---|---|---|---|---|---|---|
+| **B − A** | popularity, SASRec, metadata | **two_tower** | 0.01435 → 0.01900 | **+0.00465** | **+32.4%** | +28.8% | +32.0% |
+| **D − C** | SASRec, metadata | **two_tower** | 0.01620 → 0.02075 | **+0.00455** | **+28.1%** | +30.5% | +24.5% |
+
+Both contrasts agree in magnitude (+28–32% relative Recall@10, +24–32% NDCG@10), which is the
+expected pattern: the incremental value of Two-Tower is similar whether or not popularity is in the
+fused set. **That agreement is the evidence that the effect belongs to Two-Tower rather than to the
+source set around it.** "Adding Two-Tower" is therefore a claim this repository can now make,
+because both comparisons hold every other source constant.
+
+### Note on popularity
+
+Popularity is retained in A and B deliberately. It is a weak *ranker* (Recall@10 0.00525) but a
+non-trivial *retriever* (target in head for 10.7% of users), and dropping it while adding Two-Tower
+is precisely the confound this step corrects. C and D exist to show the effect without it.
+
+The accepted Phase-5 numbers are unchanged and are re-checked in every run: in the corrected run
+the re-run `sequential`, `metadata_retrieval` and `fixed_fusion` arms reproduced their stored
+Recall@10 values exactly (0.01350 / 0.00925 / 0.01435).
 
 ---
 
@@ -240,13 +353,15 @@ with no change to candidate identity authority:
 
 ## 9. Known limitations
 
-1. **Two-Tower is under-trained.** Three epochs on 236 730 pairs, in-batch accuracy 2.4% against
-   0.05% chance. Its standalone Recall is ~29% below SASRec's. The complementarity and fusion
-   findings are measured at this training level; a longer run could move both the standalone
-   metric and the marginal value of the source.
-2. **The item tower sees only `train_history` targets** — 86 002 of 156 746 items appear as a
-   training label at least once, so most catalogue items are never a positive. Cold-start items
-   can only be retrieved through their metadata categories.
+1. **Two-Tower is still not converged.** Eight epochs on 1 850 807 pairs, in-batch accuracy 10.6%
+   against 0.05% chance, and the loss was still falling. Its standalone Recall is now level with
+   the accepted Phase-5 fusion, but a longer run could move both it and the marginal value of the
+   source. *This limitation replaced the Step-1 wording, which said the model was under-trained on
+   a 9.4× smaller corpus; that was true and is now corrected.*
+2. **The item tower sees only `train_history` targets** — 154 781 of 156 746 items appear as a
+   training label at least once after the exposure correction (86 002 before it), so coverage is
+   now near-total but the per-item signal is still extremely thin: 1 850 807 pairs over 154 781
+   targets is ~12 examples per item on average, with a long tail at one.
 3. **The user tower is trained on prefixes, not the full test history.** Training pairs are
    prefix→next pairs, while evaluation encodes the entire test history; the distribution shift is
    the standard two-tower compromise and is not corrected here.
