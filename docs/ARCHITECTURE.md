@@ -1513,9 +1513,19 @@ EVIDENCE_ACTIONS`; reasoning remains budget-free.
 * **Evidence is a local artifact, not live retrieval.** Phase 4 acquires facts from a reproducible
   fixture. There is no external or web evidence source, so a constraint the artifact does not
   cover stays `UNKNOWN` — which is the honest outcome, not a gap the model can reason around.
-* **The Phase-4 capability has not been measured against the real provider yet.** The offline
-  implementation, the four new cases and both deterministic policies are verified; the real
-  DeepSeek re-run is the remaining step of the phase.
+* **The Phase-4 capability has not been measured against the real provider yet — this is the
+  phase's outstanding step.** Everything offline is implemented and verified: the real
+  similar-item source, the trusted evidence source, the four new cases, and both deterministic
+  policies pass. What is missing is the Prompt-v2 re-run against DeepSeek to compare
+  before/after Phase 4 on task success, UNKNOWN resolution, repetition, tool calls, tokens and
+  latency. **No claim is made about the real model's behaviour with the new capability.** The
+  command is `.venv/bin/python -m experiments.live_agent_evaluation --mode record --confirm-live`
+  with the evidence and similar-item wiring enabled, and the changed variable is the capability —
+  the prompt is not to be tuned in the same experiment.
+* **Evidence acquisition cannot resolve a constraint the artifact does not cover.** Adding the
+  capability does not add facts: a candidate outside the evidence artifact stays `UNRESOLVED`, and
+  the run ends in an honest refusal exactly as it did before. The four new cases show both the
+  resolution path and the not-found path deliberately.
 * **The real-model experiment has a small sample.** One recorded run per case over the fixture
   catalogue (section 23): enough to measure where real behaviour differs in kind from the
   deterministic policies, not enough for a rate.
