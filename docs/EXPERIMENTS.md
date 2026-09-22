@@ -374,6 +374,54 @@ rather than to the source set around it. Nothing was tuned: the fusion rule, its
 size and the source sets were fixed before the runs. The accepted arms were re-run in the same pass
 and reproduced their stored Recall@10 exactly (0.01350 / 0.00925 / 0.01435).
 
+### 8.4 Post-Phase-5 / Step 2: Semantic-ID generative retrieval
+
+The Phase-5 (8.2), Two-Tower (8.3) and its control-closure results are unchanged. A third learned
+retrieval family was added: an RQ-VAE semantic tokenizer plus an autoregressive Semantic-ID
+generator. Architecture, tokenizer audit, decoding, resolution and the full failure analysis:
+[`SEMANTIC_ID.md`](SEMANTIC_ID.md).
+
+**Tokenizer** (trained on catalogue features, which contain no interactions): 156 746 / 156 746
+items tokenised (coverage 1.000), 153 391 distinct Semantic IDs, 6 520 items in a collision group
+(**4.16%**), largest group 6, codebook utilisation 0.871 / 0.961 / 1.000. Every item is tokenisable
+from its id alone, so metadata sparsity cannot make an item unretrievable.
+
+**Generator** (trained on `train_history` only): 1 850 807 examples from 412 445 users, 151 505
+distinct target items, 5 epochs. Cross-entropy 5.232 → **4.982**; code-token accuracy 2.6% →
+**6.7%** against chance 0.39%.
+
+| Arm | Recall@5 | **Recall@10** | Recall@20 | NDCG@10 | HR@10 |
+| --- | --- | --- | --- | --- | --- |
+| `two_tower` (Step 1.1) | 0.00860 | **0.01435** | 0.02285 | 0.00737 | 0.01435 |
+| `sequential` (accepted SASRec) | 0.00820 | **0.01350** | 0.02070 | 0.00685 | 0.01350 |
+| **`semantic_id_genrec`** | 0.00175 | **0.00185** | 0.00295 | 0.00142 | 0.00185 |
+
+**Invalid generation rate 0.000** across 20 000 generations — constrained decoding held, and the
+deterministic resolver never had to fail closed.
+
+**GenRec is far weaker standalone, and the reason is the bounded prefix search rather than the
+tokenizer:** it scored 534 of 156 746 items (0.34%), so the evaluator ranked 99.66% of the catalogue
+by the documented tail convention. Its 6.7% per-code accuracy compounds to ~0.03% for a full
+three-code sequence, which is the same order as the observed recall.
+
+**Complementarity** (top-1000 heads):
+
+| Pair | both | left only | right only | union | Jaccard |
+| --- | --- | --- | --- | --- | --- |
+| SASRec vs GenRec | 134 | 3 966 | 97 | 4 197 | 0.032 |
+| Two-Tower vs GenRec | 118 | 4 313 | 113 | 4 544 | 0.026 |
+| SASRec vs Two-Tower | 2 559 | 1 541 | 1 872 | 5 972 | 0.429 |
+
+Three-way partition: 106 users hit by all three, 2 493 by exactly two, 3 458 by exactly one
+(`sequential` 1 513, `two_tower` 1 860, **`semantic_id_genrec` 85**), 13 943 by none; union 6 057
+(0.3029). GenRec's overlap with the other two is the lowest in the repository — head Jaccard 0.020
+and 0.011 — so it is a genuinely orthogonal source, contributing **85 candidates no other source
+retrieved**. Adding it to the SASRec ∪ Two-Tower union raises coverage from 0.2986 to 0.3029.
+
+The framing stands unchanged: **these are retrieval metrics, not recommendation-quality claims**,
+and the arm was measured standalone. Adding it to the accepted fusion is a separate controlled
+experiment that this step deliberately does not run.
+
 ---
 
 ## 9. Metadata Integration

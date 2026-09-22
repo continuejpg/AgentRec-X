@@ -50,6 +50,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import experiments.benchmark_public as B  # noqa: E402
+from experiments.benchmark_public import hit_vector, overlap_table  # noqa: E402
 from recommendation.evaluation.split import EvaluationCase, load_cohort_from_artifacts  # noqa: E402
 
 SEQUENCES = REPO_ROOT / "data" / "processed" / "Sports_and_Outdoors_sequences.json"
@@ -69,38 +70,6 @@ def rss_gb() -> float:
         if line.startswith("VmRSS:"):
             return int(line.split()[1]) / 1e6
     return -1.0
-
-
-def hit_vector(targets: Sequence[int], heads: Sequence[Sequence[int]]) -> list[bool]:
-    """``True`` where a user's target falls inside that source's head."""
-    return [target in set(head) for target, head in zip(targets, heads, strict=True)]
-
-
-def overlap_table(flags: dict[str, list[bool]], left: str, right: str) -> dict[str, int]:
-    """The 2x2 hit table between two sources, over the users both cover."""
-    both = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if a and b)
-    only_left = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if a and not b)
-    only_right = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if b and not a)
-    neither = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if not a and not b)
-    union = both + only_left + only_right
-    total = len(flags[left])
-    return {
-        "users": total,
-        "hit_by_both": both,
-        "hit_by_left_only": only_left,
-        "hit_by_right_only": only_right,
-        "hit_by_neither": neither,
-        "hit_by_either": union,
-        "jaccard": round(both / union, 6) if union else 0.0,
-        "left_share": round((both + only_left) / total, 6) if total else 0.0,
-        "right_share": round((both + only_right) / total, 6) if total else 0.0,
-        "union_share": round(union / total, 6) if total else 0.0,
-        "lift_over_best_single": (
-            round(union / max(both + only_left, both + only_right), 6)
-            if max(both + only_left, both + only_right)
-            else 0.0
-        ),
-    }
 
 
 def head_overlap(left: Sequence[Sequence[int]], right: Sequence[Sequence[int]], *, top: int = 10) -> dict[str, float]:

@@ -22,7 +22,7 @@ letting the conversation influence what the user sees?*
 | Layer | Component |
 | --- | --- |
 | Candidate generation | **SASRec** (item-ID transformer), trained on full-category data |
-| Retrieval baseline | **Two-Tower / DSSM** dual encoder (post-Phase-5 expansion; see below) |
+| Retrieval baselines | **Two-Tower / DSSM** dual encoder and a **Semantic-ID generative** retriever (post-Phase-5 expansions; see below) |
 | Product grounding | **M8 metadata / candidate-scoped RAG** (lexical BM25 inside the candidate set) |
 | Persistent constraints | **M9 Preference Memory** (explicit preferences, ADD / REPLACE / REMOVE) |
 | Preference reasoning | **M10A Preference Evidence** (`MATCH` / `VIOLATION` / `UNKNOWN`) |
@@ -96,6 +96,7 @@ This distinction is central to reading the project correctly.
 | --- | --- |
 | SASRec candidate generation | **learned neural recommender** (the accepted sequential model) |
 | Two-Tower candidate retrieval | **learned dual encoder** — a second, independent retrieval family ([TWOTOWER.md](docs/TWOTOWER.md)) |
+| Semantic-ID generation | **learned generative retriever** (RQ-VAE tokenizer + autoregressive generator) — a third family, measured standalone only; far weaker on its own ([SEMANTIC_ID.md](docs/SEMANTIC_ID.md)) |
 | Product metadata lookup | deterministic (exact `parent_asin` probe) |
 | Candidate-scoped RAG | deterministic lexical retrieval (BM25 within candidates) |
 | Preference memory lifecycle | deterministic structured state |
@@ -329,7 +330,7 @@ Schemas, error codes and the full recipe list: [`docs/USAGE.md`](docs/USAGE.md).
 ```
 
 **Test counts are a snapshot of a commit, not a permanent property of the project.** At the
-packaging commit the offline suite is **2017 passed, 33 skipped**. `tests/test_docs.py`
+packaging commit the offline suite is **2047 passed, 33 skipped**. `tests/test_docs.py`
 verifies documented links, HTTP paths, smoke module names and code fences; `tests/test_packaging.py`
 covers the one-command path, the demo artifacts and the no-committed-credential guard. Suites
 needing the accepted checkpoint, the 300 MB metadata artifact or an archived Phase-3 recording
@@ -432,9 +433,13 @@ table.
 > * **Recommendation quality** — Recall / NDCG / HR at k, full-catalogue ranking on a real
 >   public dataset: the [SASRec benchmark](#sasrec-benchmark), the five-arm Phase-5 comparison
 >   in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) §8.2, and the post-Phase-5 Two-Tower
->   retrieval baseline in §8.3 / [`docs/TWOTOWER.md`](docs/TWOTOWER.md). Best measured arm:
+>   retrieval baseline in §8.3 / [`docs/TWOTOWER.md`](docs/TWOTOWER.md), and the Semantic-ID
+>   generative arm in §8.4 / [`docs/SEMANTIC_ID.md`](docs/SEMANTIC_ID.md). Best measured arm:
 >   SASRec + Two-Tower + metadata fusion, Recall@10 `0.02075` (Phase-5 fixed fusion: `0.01435`;
 >   adding Two-Tower to a *frozen* source set is worth **+28% to +32%** relative Recall@10).
+>   The Semantic-ID arm is **far weaker standalone** (Recall@10 `0.00185`) because its bounded
+>   prefix search scores only 0.34% of the catalogue; it is reported as a weak, orthogonal source,
+>   not as a competitive one, and it is not fused in this step.
 > * **Agent decision quality** — whether the run chose a legal next action, stayed inside its
 >   budgets and terminated honestly: the real-DeepSeek evaluation in
 >   [`docs/PHASE4_HANDOFF.md`](docs/PHASE4_HANDOFF.md) §3. The Phase-5 `agent_selected`
@@ -470,7 +475,7 @@ satisfaction claim is made for reranking anywhere in this repository.
 
 | Metric | Value |
 | --- | --- |
-| Offline test suite (packaging commit) | **2017 passed, 33 skipped** |
+| Offline test suite (packaging commit) | **2047 passed, 33 skipped** |
 | M10D M10A matcher / M10B reranker latency (p50) | ~0.46 ms / ~0.11 ms |
 | M10D added reranking overhead (p50) | ~0.58 ms |
 | M10D total graph latency (one request, CPU) | ~55 ms |

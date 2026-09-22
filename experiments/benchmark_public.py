@@ -84,8 +84,10 @@ __all__ = [
     "agent_selection_plan",
     "arm_metadata_retrieval",
     "metadata_fused_heads",
+    "overlap_table",
     "arm_popularity",
     "arm_sasrec",
+    "arm_semantic_id_genrec",
     "arm_two_tower",
     "assert_protocol",
     "cohort_from_cases",
@@ -98,6 +100,7 @@ __all__ = [
     "agent_selection_plan",
     "fused_head",
     "fusion_to_ranking",
+    "hit_vector",
     "popularity_rankings",
     "k_values",
     "left_pad_histories",
@@ -125,6 +128,11 @@ MODEL_SEED = 2026
 
 #: Users evaluated per arm.  See the module docstring for why this is a sample.
 DEFAULT_COHORT_SIZE = 20_000
+
+#: How many legal code prefixes the Semantic-ID arm expands per level when scoring the catalogue.
+#: The prefix search is bounded, so this is what decides how much of the catalogue the arm can
+#: reach; 512 keeps the number of forward passes independent of catalogue size.
+GENREC_BEAMS_PER_LEVEL = 512
 
 #: Evaluation batch size.  The shared evaluator holds a ``[batch, num_items + 1]`` float32 score
 #: matrix *and* a same-shaped bool candidate mask, so peak memory grows at roughly
@@ -1052,6 +1060,181 @@ def arm_two_tower(
             ], scores
 
     return score_batches
+
+
+def arm_semantic_id_genrec(
+    *,
+    artifact_dir: Path,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    beams_per_level: int = 512,
+    device: str = "cpu",
+) -> tuple[Callable[[Sequence[EvaluationCase]], Iterable[Any]], dict[str, Any]]:
+    """The Semantic-ID generative retriever, scored over the full catalogue.
+
+    Post-Phase-5 arm.  It supplies a score for every catalogue item - the generator's own
+    sequence log-probability of that item's Semantic ID, computed by a breadth-limited prefix
+    search - so the **accepted evaluator** owns PAD exclusion, seen-item masking, tie-breaking and
+    ranking exactly as it does for the other arms.  The model never masks.
+
+    Two honest notes, both recorded in the returned diagnostics:
+
+    * the prefix search is bounded, so items whose prefix was never expanded keep the documented
+      tail score rather than an exact likelihood.  ``scored_share`` reports how much of the
+      catalogue was reachable;
+    * items sharing a Semantic ID share a score, because the model cannot distinguish them.  The
+      collision rate is a tokenizer property and is reported with the tokenizer, not hidden here.
+
+    The second element of the return value is the artifact's diagnostics block, so a caller records
+    what the arm actually did without re-deriving it.
+    """
+    import torch
+
+    from recommendation.semantic_id.generator import (
+        SemanticIdGenerator,
+        SemanticPrefixTrie,
+        build_token_layout,
+    )
+
+    artifact_dir = Path(artifact_dir)
+    assignment_payload = json.loads(
+        (artifact_dir / "semantic_ids.json").read_text(encoding="utf-8")
+    )
+    item_codes = assignment_payload["assignment"]
+    levels = int(assignment_payload["levels"])
+    codebook_size = int(assignment_payload["codebook_size"])
+
+    payload = torch.load(artifact_dir / "generator.pt", map_location=device, weights_only=False)
+    config = dict(payload["model_config"])
+    layout = build_token_layout(levels=levels, codebook_size=codebook_size)
+    model = SemanticIdGenerator(
+        layout=layout,
+        max_items=int(config["max_items"]),
+        d_model=int(config["d_model"]),
+        n_heads=int(config["n_heads"]),
+        n_layers=int(config["n_layers"]),
+        dropout=float(config["dropout"]),
+    )
+    model.load_state_dict(payload["model_state_dict"])
+    model.eval()
+
+    trie = SemanticPrefixTrie(item_codes, levels=levels)
+    # ``full_catalog_scores`` already returns ``[batch, num_items + 1]`` with index 0 holding PAD's
+    # zero score, so the arm needs no scatter of its own: it hands the evaluator the matrix and the
+    # evaluator owns PAD exclusion, seen-item masking, tie-breaking and ranking, exactly as it does
+    # for the sequential and two-tower arms.  The trie is built here (not just inside the model) so
+    # the generation diagnostics below can re-check every generated code against the catalogue.
+    diagnostics: dict[str, Any] = {
+        "artifact_dir": str(artifact_dir),
+        "levels": levels,
+        "codebook_size": codebook_size,
+        "max_items": int(config["max_items"]),
+        "trie_nodes": trie.node_count,
+        "trie_depth_histogram": trie.depth_histogram(),
+        "beams_per_level": beams_per_level,
+        "num_items": len(item_codes) - 1,
+        "collision_audit": assignment_payload["audit"],
+    }
+    generated_invalid: list[int] = []
+    generated_total = [0]
+
+    def score_batches(cases: Sequence[EvaluationCase]) -> Iterable[Any]:
+        for start in range(0, len(cases), batch_size):
+            chunk = cases[start : start + batch_size]
+            histories = [
+                [
+                    code
+                    for item_id in case.test_history[-model.max_items :]
+                    for code in item_codes[item_id]
+                ]
+                for case in chunk
+            ]
+            with torch.no_grad():
+                scores, search_diagnostics = model.full_catalog_scores(
+                    histories,
+                    trie=trie,
+                    assignment=item_codes,
+                    beams_per_level=beams_per_level,
+                )
+                generations = model.generate(histories, trie=trie, beam=1)
+
+            if scores.shape[1] != len(item_codes):
+                raise RuntimeError(
+                    "the generator must return one score column per catalogue id plus PAD; "
+                    f"expected {len(item_codes)}, got {scores.shape[1]}"
+                )
+            # Any prefix the bounded search did not reach keeps ``-inf``, which the evaluator
+            # rejects by design.  Replace it with one explicit score strictly below every reached
+            # item: the documented tail convention, applied here rather than inside the evaluator,
+            # so the evaluator's finiteness check still means what it says.
+            finite = torch.isfinite(scores[:, 1:])
+            if bool(finite.any()):
+                floor = float(scores[:, 1:][finite].min()) - 1.0
+            else:
+                diagnostics["empty_batches"] = diagnostics.get("empty_batches", 0) + 1
+                floor = -1.0
+            scores = torch.where(
+                torch.isfinite(scores), scores, torch.full_like(scores, floor)
+            )
+            scores[:, 0] = 0.0  # PAD: never a candidate, masked positionally by the evaluator.
+
+            diagnostics.setdefault("search", search_diagnostics)
+            for generation in generations:
+                generated_total[0] += 1
+                node = trie.node_for(generation.codes) if generation.complete else None
+                generated_invalid.append(
+                    0 if node is not None and trie.items_at(node) else 1
+                )
+            yield [tuple(case.test_history) for case in chunk], [
+                case.test_target for case in chunk
+            ], scores
+
+    def finalize() -> dict[str, Any]:
+        diagnostics["generated"] = generated_total[0]
+        diagnostics["invalid_generations"] = int(sum(generated_invalid))
+        diagnostics["invalid_generation_rate"] = (
+            round(sum(generated_invalid) / generated_total[0], 6) if generated_total[0] else None
+        )
+        return diagnostics
+
+    score_batches.finalize = finalize  # type: ignore[attr-defined]
+    return score_batches, diagnostics
+
+
+def hit_vector(targets: Sequence[int], heads: Sequence[Sequence[int]]) -> list[bool]:
+    """``True`` where a user's target falls inside that source's head."""
+    return [target in set(head) for target, head in zip(targets, heads, strict=True)]
+
+
+def overlap_table(flags: dict[str, list[bool]], left: str, right: str) -> dict[str, Any]:
+    """The 2x2 hit table between two sources, over the users both cover.
+
+    The table is what makes complementarity checkable rather than asserted: ``hit_by_left_only``
+    and ``hit_by_right_only`` are the counts of users each source retrieves that the other misses,
+    and ``lift_over_best_single`` is how much the union beats the better source alone.
+    """
+    both = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if a and b)
+    only_left = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if a and not b)
+    only_right = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if b and not a)
+    neither = sum(1 for a, b in zip(flags[left], flags[right], strict=True) if not a and not b)
+    union = both + only_left + only_right
+    total = len(flags[left])
+    return {
+        "users": total,
+        "hit_by_both": both,
+        "hit_by_left_only": only_left,
+        "hit_by_right_only": only_right,
+        "hit_by_neither": neither,
+        "hit_by_either": union,
+        "jaccard": round(both / union, 6) if union else 0.0,
+        "left_share": round((both + only_left) / total, 6) if total else 0.0,
+        "right_share": round((both + only_right) / total, 6) if total else 0.0,
+        "union_share": round(union / total, 6) if total else 0.0,
+        "lift_over_best_single": (
+            round(union / max(both + only_left, both + only_right), 6)
+            if max(both + only_left, both + only_right)
+            else 0.0
+        ),
+    }
 
 
 # --------------------------------------------------------------------------- #
