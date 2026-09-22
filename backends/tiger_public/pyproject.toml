@@ -1,0 +1,24 @@
+# Public-TIGER backend (Step 2.3 skeleton).
+#
+# This project is installed into its OWN virtual environment.  It is never installed into
+# AgentRec-X's environment, and the root requirements.txt is never modified for it: AGENTS.md
+# sections 10 and 11 forbid disturbing the accepted CUDA/PyTorch stack, and the backend needs
+# a CUDA torch wheel while AgentRec-X runs CPU torch.
+#
+# Step 2.3 imports nothing beyond NumPy, so the placeholders run in either environment; the
+# ML dependencies below are declared now because Steps 2.4-2.6 install into this same venv.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tiger-public-backend"
+version = "0.0.1"
+description = "Public-TIGER generative-retrieval backend consumed by AgentRec-X through an adapter boundary"
+requires-python = ">=3.10"
+# Step 2.3: NumPy only.  Steps 2.4-2.6 add the ML stack, installed into this venv alone:
+#   torch==<cuda wheel>  transformers>=4.44  sentence-transformers>=3.0  pyarrow
+dependencies = ["numpy<2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
