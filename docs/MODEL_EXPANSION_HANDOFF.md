@@ -274,3 +274,42 @@ attribution is directional only; (b) widen GenRec's prefix search or give it a g
 a bounded engineering experiment; (c) re-evaluate whether a `NoProgressGuard` is now justified
 (Phase-4 repetition was 2 of 8 failures, both already bounded by existing budgets); (d) only then
 consider exposing generative retrieval to the Agent.
+
+---
+
+## 11. Step 2.1 audit outcome and the TIGER backend decision
+
+**Step 2.1 (public-implementation audit) is complete.** Two repositories were inspected:
+`mclwu22/amazon-genrec` and `snap-research/GRID`. Both were audited from source, not from their
+READMEs. Neither is vendored, and the reasons are legal as well as technical: `amazon-genrec`
+ships **no LICENSE file at all**, and `GRID` is **Snap Inc., non-commercial research purposes
+only** with a mandatory notice-retention clause. Absorbed elements are therefore *reimplemented*
+and labelled per file in `backends/tiger_public/PROVENANCE.md`.
+
+**The decision that supersedes "widen GenRec's prefix search" above.** Custom GenRec v0 stays
+frozen at `80f81b1` and is **not** upgraded with content embeddings, k-means++ initialisation or a
+collision-deduplication digit. Those would have produced a "GenRec v0.5" — an unattributable
+mixture of representation and search changes. Instead, the next generative-retrieval work is a
+**separate public-TIGER backend** behind an explicit adapter boundary, specified in
+[`TIGER_BACKEND.md`](TIGER_BACKEND.md).
+
+| Fact that drove the decision | Where it is measured |
+| --- | --- |
+| GenRec v0's item features are **seeded random**, not item content | this document §6; `docs/SEMANTIC_ID.md` §1 |
+| The binding constraint is the **bounded prefix search** (0.34 % catalogue coverage) | this document §6 |
+| GenRec v0's dead-code counts (`33/10/0`) are 12.9 %, 3.9 %, 0 % — i.e. **not** a catastrophic collapse | `runs/semantic_id_public_2026/semantic_ids.json` |
+| GenRec v0 detects collisions but does not resolve them (4.16 % of items share a score) | same artifact |
+
+**What must not be reopened by this decision:** the frozen evaluator, split, cohort, identity
+mapping and trust boundaries are unchanged, and GenRec v0's artifacts and numbers stay valid as a
+historical baseline. The new backend supplies **raw scores** in the frozen arm contract and owns
+nothing else; it never sees `parent_asin`, a target, or a seen-item identity.
+
+**Milestone sequence:** 2.2 specification (done) → 2.3 backend skeleton and handoff bridge, no ML
+→ 2.4 content embedding + RQ-VAE + collision-free Semantic IDs → 2.5 TIGER generator →
+2.6 certified catalogue retrieval and the canonical benchmark → 2.7 Agent integration, only after
+2.6 establishes value.
+
+**One item from the list above remains open and is unaffected:** multi-seed / bootstrap intervals
+(a) are still the cheapest way to make the current attribution non-directional, and remain a
+candidate step independent of the TIGER backend work.

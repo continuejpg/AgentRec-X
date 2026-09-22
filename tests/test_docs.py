@@ -40,6 +40,7 @@ DOC_PATHS: tuple[Path, ...] = (
     REPO_ROOT / "docs" / "MODEL_EXPANSION_HANDOFF.md",
     REPO_ROOT / "docs" / "TWOTOWER.md",
     REPO_ROOT / "docs" / "SEMANTIC_ID.md",
+    REPO_ROOT / "docs" / "TIGER_BACKEND.md",
 )
 
 #: Marketing language the documentation must not use (unsupported by any artifact).

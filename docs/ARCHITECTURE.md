@@ -1504,7 +1504,65 @@ others retrieved. Full detail, including the leakage evidence and the sample-ver
 
 ---
 
-## 26. Known limitations
+## 26. External model backends (Step 2.2 specification, NOT IMPLEMENTED)
+
+Custom **GenRec v0** (`recommendation/semantic_id/`, commit `80f81b1`) is **frozen as a historical
+baseline**. It is not extended: no content embeddings, no k-means++ initialisation, no
+collision-deduplication digit, no architecture change. The next generative-retrieval work is a
+**separate public-TIGER backend**, specified in [`TIGER_BACKEND.md`](TIGER_BACKEND.md).
+
+The boundary exists so AgentRec-X keeps every authority it already owns:
+
+| Owner | Owns |
+| --- | --- |
+| **AgentRec-X** | `parent_asin ↔ item_id`, `PAD = 0`, `temporal_leave_two_out`, `agentrecx.eval_protocol.v1`, train-history exposure, the 20 000-user cohort, the full catalogue, seen-item masking, tie-breaking, ranking, Recall/NDCG/HR, `GroundingVerifier`, `CandidateLedger`, the Agent runtime, the candidate plane, fusion, SASRec, Two-Tower |
+| **TigerBackend** | `item_id ↔ backend_row`, item content encoding, RQ-VAE / Semantic IDs, TIGER, catalogue-constrained and certified retrieval, raw item scores |
+
+Four layers, with `parent_asin` permitted only in the outer two:
+
+```text
+L0  AgentRec-X canonical identity      parent_asin <-> item_id
+L1  materialisation (experiments/)     reads parent_asin for text + required_frontier only
+L2  TigerBackendAdapter                recommendation/backends/ - item_id ONLY, stdlib + NumPy
+L3  TigerBackend                       backends/tiger_public/ - item_id ONLY, own venv
+```
+
+Three properties are structural rather than conventional:
+
+1. **No canonical identity reaches the backend or the adapter.** `parent_asin` is not a
+   parameter, field or return value anywhere under `recommendation/backends/` or `backends/`;
+   the adapter's score conversion is a *column alignment*, not an identity translation.
+2. **No target is visible to the backend.** The evaluation handoff carries histories and an
+   integer `required_frontier = K_max + |seen|` only — no `test_target`, no `validation_target`,
+   no seen-item identities, and no `grade_only` switch that would imply a protected field exists.
+3. **The adapter holds no ML import and no backend import.** The crossing is a subprocess and a
+   filesystem contract (JSONL / `.npy` / `.npz` / `.json`), with the backend in its own virtual
+   environment so the root `requirements.txt` and the accepted CUDA/PyTorch stack are untouched.
+
+The shared evaluator (`recommendation.evaluation.batched`) is **unchanged**: the backend streams
+batched raw scores in the evaluator's own `[batch, num_items + 1]` item-id-column convention,
+and the evaluator continues to own PAD exclusion, seen-item masking, tie-breaking, ranking and
+metrics. Retrieval is reported as `APPROXIMATE` (diagnostic only) or `CERTIFIED` (required before
+any comparison with SASRec or Two-Tower), and an uncertifiable run is reported as approximate
+rather than presented as the definitive figure.
+
+Steps: **2.3** skeleton and handoff bridge (no ML) → **2.4** content embedding + RQ-VAE +
+collision-free Semantic IDs → **2.5** TIGER generator → **2.6** certified retrieval and the
+canonical benchmark → **2.7** Agent integration, only once 2.6 establishes value.
+
+### Not implemented (documented, not claimed)
+
+* **No backend code, artifact or measurement exists yet.** Step 2.2 produced the specification
+  only.
+* **No item-content encoder, RQ-VAE, Semantic ID, TIGER or retrieval module is implemented**
+  under `backends/`.
+* **No `CandidateSource` member, no Agent tool and no fusion change** is introduced, and none is
+  planned before Step 2.7.
+* **No replacement of the frozen protocol, cohort, evaluator or identity mapping.**
+
+---
+
+## 27. Known limitations
 
 * **Preference extraction is conservative and rule-based**, behind an injected seam.
 * **Evidence coverage can be sparse** by design: a readable field holding a different value

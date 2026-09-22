@@ -566,4 +566,53 @@ preprocessing
 
 Only after this recommendation backbone is stable should the project move to the Agent layer.
 
+---
+
+## 19. External Model Backend Boundary Rule
+
+The project now admits **external generative-recommendation backends** behind an explicit
+boundary. The specification is [`docs/TIGER_BACKEND.md`](docs/TIGER_BACKEND.md); this section is
+the rule, not the design.
+
+### 19.1 The frozen split of authority
+
+```text
+AgentRec-X owns:  parent_asin ↔ item_id · PAD = 0 · temporal_leave_two_out ·
+                  agentrecx.eval_protocol.v1 · train-history exposure · the 20k cohort ·
+                  the full catalogue · seen-item masking · tie-breaking · ranking ·
+                  Recall / NDCG / HR · GroundingVerifier · CandidateLedger ·
+                  Agent runtime · CandidatePlane · fusion · SASRec · Two-Tower
+
+Backend owns:     item_id ↔ backend_row · item content encoding · RQ-VAE / Semantic IDs ·
+                  the generative model · catalogue-constrained retrieval · raw item scores
+```
+
+A backend supplies **raw scores only**. It never masks, ranks, resolves identity, selects
+candidates for presentation, or reports a metric.
+
+### 19.2 Hard rules
+
+1. **No canonical identity crosses the boundary.** `parent_asin` must not appear as a parameter,
+   field, local, return value, or artifact entry under `recommendation/backends/` **or**
+   `backends/`. Identity is re-attached only in the AgentRec-X layer outside the adapter.
+2. **No target is visible to a backend.** Not gated, not flagged: the evaluation handoff carries
+   histories and an integer `required_frontier` only. No `test_target`, no `validation_target`,
+   no seen-item identities, and no "grade-only" switch that would imply a protected field exists.
+3. **Training exposure is `train_history` only**, always, for every backend.
+4. **`PAD = 0` is isolated from any token space** by a negative sentinel, and a PAD row is never
+   tokenisable or resolvable.
+5. **The adapter holds no ML import and no backend import.** The crossing is a subprocess plus a
+   filesystem contract (JSONL / `.npy` / `.npz` / `.json`).
+6. **A backend lives in its own virtual environment.** The root `requirements.txt` and the
+   accepted CUDA/PyTorch stack are never modified for a backend.
+7. **The shared evaluator is never modified for a backend**, and the frozen protocol, cohort,
+   identity mapping and `CandidateSource` enum are unchanged.
+8. **No evidence, no integration.** A backend becomes an Agent candidate source only after its
+   retrieval value is established under the frozen protocol, in a separate pre-registered step.
+9. **Licence discipline.** An external repository is a *design* source only. A repository with no
+   licence, or with a non-commercial-research licence, is never vendored; absorbed elements are
+   reimplemented and labelled per file in a `PROVENANCE.md`.
+10. **`recommendation/semantic_id/` is frozen historical GenRec v0.** It is not extended, other
+    than an optional compatibility reader for an existing v0 artifact.
+
 At the beginning of every new milestone or substantial task, read this AGENTS.md before making repository changes.
