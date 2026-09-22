@@ -790,8 +790,9 @@ generator exists to retrieve from. Attribution:
 | Milestone | Deliverables | Gate | Non-goals |
 |---|---|---|---|
 | **2.2** (this doc) | `docs/TIGER_BACKEND.md` + AGENTS/ARCHITECTURE/handoff cross-references | document review | no code, no training |
+| **2.3** (done) | `contracts.py`, `io.py`, `cli.py`, `recommendation/backends/tiger_backend.py`, `materialize_tiger_backend.py`, boundary + adapter tests | all 15 smoke checks; 25 boundary guards; 42 adapter tests | no ML |
 | **2.3** | `contracts.py`, `io.py`, `recommendation/backends/tiger_backend.py`, `materialize_tiger_backend.py`, `test_backend_boundaries.py` (T1–T8), `test_tiger_backend_adapter.py`; **all ML stages stubbed** | **G1, G2, G3, G6, G8, G9, G10, G12**; the full suite stays green | no features, no quantizer, no TIGER, no retrieve |
-| **2.4** | `features.py`, `quantizer.py`, `dedup.py` | **G4, G5, G11**, then **H2, H3, H4** | no TIGER training; no evaluator/fusion change; no ANN |
+| **2.4** (implemented; full run deferred) | `features.py`, `quantizer.py`, `dedup.py` | **G4, G5, G5b, G11** pass; **H2** pass on 2 000 real items; **H3** blocked at full scale by one frozen design choice (see the note below) | no TIGER training; no evaluator/fusion change; no ANN |
 | **2.5** | `scoring.py`, `tiger.py`, `trie.py` | **G5b, G7**, then **H5, H6** | no canonical benchmark claim; no cohort metric asserted |
 | **2.6** | `retrieve.py` (APPROXIMATE + CERTIFIED), benchmark wiring | **G13, G14, G15, G16**, then **H7, H8** | no representation/generator change; no re-tuning against the cohort |
 | **2.7** | `TigerCandidateSource`, `CandidateSource` enum, fusion experiment | separate pre-registered controlled experiment | no fusion claim without holding every other source constant |
@@ -1154,6 +1155,37 @@ AgentRec-X shared evaluator
 ```
 
 ---
+
+## 17.1 Step-2.4 implementation note: the learning rate
+
+Step 2.4 froze `learning_rate = 1e-3` (the published GRID value). Measured on real
+`sentence-t5-base` embeddings, that setting **collapses the later residual levels**:
+
+| setting | used codes per level (K = 256) | verdict |
+|---|---|---|
+| `lr = 1e-3` (as specified) | 256 / 20 / 16 | levels 1 and 2 are 92 % and 94 % dead |
+| `lr = 3e-4` | 256 / 79 / 60 | levels 1 and 2 are 69 % and 77 % dead |
+| `lr = 1e-4` | 256 / 100 / 68 | 1 dead code at level 0 |
+
+Every setting was measured on the same 2 000-item real-embedding artifact, 60 epochs,
+batch 512, seed 2026, with k-means++ seeding and dead-code revival enabled. The measurement is
+reported rather than tuned away: `--learning-rate` is an explicit CLI argument, the frozen
+value remains the default, and the value actually used is recorded in
+`semantic_ids.json.quantizer`.
+
+**The consequence for H3.** H3 requires no level to exceed 20 % dead codes. No measured setting
+satisfied that at the smoke scale, and the closest (`lr = 3e-4`) still leaves levels 1 and 2 at
+69 % and 77 % dead. Two distinct questions are therefore open and are **not** resolved by
+tuning here:
+
+1. whether residual levels 1–2 are useful at all on this embedding distribution, given that
+   level 0 already reconstructs to MSE < 0.001; and
+2. whether H3's 20 % threshold is the right health criterion for a *hierarchical* code, where
+   coarse-to-fine levels are expected to differ in occupancy.
+
+Both are pre-registered questions for the full-catalogue run, not adjustments to make a gate
+pass. The `--allow-dead-codes` flag exists so a small-scale mechanism check can proceed while
+recording the waiver in the artifact; it must never be used for a reported result.
 
 ## 18. Provenance and licence constraints
 

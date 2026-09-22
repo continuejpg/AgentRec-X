@@ -58,10 +58,40 @@ FORBIDDEN_ARTIFACT_KEYS = (
 )
 
 
-def _python_files(root: Path) -> list[Path]:
+#: Directories that must never be scanned.  The backend keeps its own virtual environment
+#: under its tree, and scanning it would read thousands of third-party files - including some
+#: that are not even valid UTF-8 - so every walk below skips these.
+_EXCLUDED_PARTS = {".venv", "venv", "__pycache__", ".pytest_cache", ".git", "build", "dist"}
+
+
+def _is_scannable(path: Path) -> bool:
+    return not any(part in _EXCLUDED_PARTS for part in path.parts)
+
+
+def _walk(root: Path) -> list[Path]:
+    """Every scannable file below ``root``, **pruning** the excluded directories.
+
+    ``rglob`` descends into everything and filters afterwards, which made these guards spend
+    minutes inside the backend's own virtual environment - effectively hanging the suite.  A
+    pruning walk is both correct and fast.
+    """
     if not root.is_dir():
         return []
-    return sorted(path for path in root.rglob("*.py") if path.is_file())
+    found: list[Path] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        for entry in current.iterdir():
+            if entry.is_dir():
+                if entry.name not in _EXCLUDED_PARTS:
+                    stack.append(entry)
+            elif entry.is_file():
+                found.append(entry)
+    return sorted(found)
+
+
+def _python_files(root: Path) -> list[Path]:
+    return [path for path in _walk(root) if path.suffix == ".py"]
 
 
 def _module_level_imports(path: Path) -> set[str]:
@@ -191,7 +221,9 @@ def test_t4_backend_contains_no_split_or_evaluator_module() -> None:
     allowed = {"scoring.py", "retrieve.py"}
     offenders: list[str] = []
     for path in _python_files(BACKEND_ROOT):
-        if path.name in allowed:
+        # ``test_*.py`` files are excluded: the *guard* itself is named for the thing it forbids,
+        # and a test module is not a backend capability.
+        if path.name.startswith("test_") or path.name in allowed:
             continue
         name = path.name.lower()
         if any(fragment in name for fragment in forbidden_fragments):
@@ -274,10 +306,8 @@ def test_t6_every_backend_file_is_declared_in_provenance() -> None:
     assert provenance.is_file(), "backends/tiger_public/PROVENANCE.md is required"
     text = provenance.read_text(encoding="utf-8")
     missing: list[str] = []
-    for path in sorted(BACKEND_ROOT.rglob("*")):
-        if not path.is_file() or path.name == "PROVENANCE.md":
-            continue
-        if any(part in {".venv", "__pycache__", ".pytest_cache"} for part in path.parts):
+    for path in _walk(BACKEND_ROOT):
+        if path.name == "PROVENANCE.md":
             continue
         relative = path.relative_to(BACKEND_ROOT)
         if str(relative) not in text:
@@ -353,8 +383,6 @@ def test_t7b_backend_code_never_names_canonical_identity() -> None:
     """Under ``backends/`` the name may appear only in prose that states the rule."""
     offenders: list[str] = []
     for path in _python_files(BACKEND_ROOT):
-        if any(part in {".venv", "__pycache__", ".pytest_cache"} for part in path.parts):
-            continue
         for token in _code_identifiers(path):
             if "parent_asin" in token:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{token}")
@@ -375,10 +403,8 @@ def test_t7b_no_backend_data_file_carries_canonical_identity() -> None:
     text, so an emitted artifact record would be caught.
     """
     offenders: list[str] = []
-    for path in sorted(BACKEND_ROOT.rglob("*")):
-        if not path.is_file() or path.suffix == ".py" or path.name in _PROSE_ALLOWLIST:
-            continue
-        if any(part in {".venv", "__pycache__", ".pytest_cache"} for part in path.parts):
+    for path in _walk(BACKEND_ROOT):
+        if path.suffix == ".py" or path.name in _PROSE_ALLOWLIST:
             continue
         if "parent_asin" in path.read_text(encoding="utf-8", errors="replace"):
             offenders.append(str(path.relative_to(REPO_ROOT)))
@@ -508,9 +534,8 @@ def test_contract_versions_match_on_both_sides() -> None:
 def test_no_training_or_model_artifact_exists_yet() -> None:
     """Step 2.3 produces no checkpoint, no embedding and no measurement."""
     heavy = [
-        path
-        for path in BACKEND_ROOT.rglob("*")
-        if path.is_file() and path.suffix in {".pt", ".pth", ".ckpt", ".npy", ".npz"}
+        path for path in _walk(BACKEND_ROOT)
+        if path.suffix in {".pt", ".pth", ".ckpt", ".npy", ".npz"}
     ]
     assert heavy == [], f"Step 2.3 must not ship model artifacts: {heavy}"
 

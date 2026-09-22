@@ -72,6 +72,54 @@ sequence log-probability) and by `snap-research/GRID`
 renormalisation is explicitly forbidden because it would make a score depend on the search
 frontier. Neither source states the rule independently of its decoder.
 
+### `src/tiger_public/features.py`
+`ORIGINAL` for the streaming encoder driver, the atomic artifact write, the corruption guards
+and the deterministic smoke stand-in.
+Portions are `REIMPLEMENTED_FROM`:
+
+* `mclwu22/amazon-genrec`, `tiger/20_embed.py:21-57` — the frozen sentence encoder stage:
+  one row per item, an aligned id sidecar, `normalize_embeddings=False`, a `max_chars` cap and
+  batched encoding with progress. **Changed:** the text is read from AgentRec-X's
+  `products_text.jsonl` rather than composed here, the ids are opaque integers rather than
+  canonical strings, the array is written to a temporary path and renamed only on success, rows
+  are streamed into a memory-mapped file instead of being accumulated, and non-finite rows are
+  replaced with the batch mean and counted rather than written through.
+
+### `src/tiger_public/quantizer.py`
+`ORIGINAL` for the training loop, the dead-code revival, the deterministic seeding and the
+diagnostics wrapper.
+Portions are `REIMPLEMENTED_FROM`:
+
+* `snap-research/GRID@2fe3475b2d369580234093f35d52b1a2f54d0472`,
+  `src/modules/clustering/residual_quantization.py`, `src/modules/clustering/vector_quantization.py`,
+  `src/components/{quantization_strategies,distance_functions,loss_functions,clustering_initializers}.py`
+  — the encoder/decoder geometry (*hidden* widths `[768, 256, 128]` with the latent layer
+  appended by the model, i.e. `768 -> 256 -> 128 -> 64`), input normalisation, squared-Euclidean
+  nearest-code search, the straight-through estimator, `BetaQuantizationLoss` with
+  `beta = 0.25`, k-means++ codebook seeding with the degenerate-case escape, and the per-level
+  coverage / `id_entropy` diagnostics. **Changed:** the Lightning module, the DDP rank-0
+  broadcast protocol, the `MiniBatchKMeans` wrapper, the Hydra `_target_` wiring and the
+  `eval_step` defect are not adopted; the loop is plain PyTorch, the initialisation runs in one
+  process, and the dead-code revival follows amazon-genrec rather than GRID (GRID only
+  *reports* collapse).
+* `mclwu22/amazon-genrec`, `tiger/30_rqvae.py:73-84` — dead-code revival: unused codes are
+  re-seeded from sampled data each epoch. **Changed:** applied to encoder latents under the
+  model's own generator, with the revived count reported per epoch.
+* `snap-research/GRID@2fe3475b2d369580234093f35d52b1a2f54d0472`,
+  `src/modules/clustering/base_clustering_module.py` — the measured finding that Adam at
+  `learning_rate = 1e-3` collapses the later residual levels; see the Step-2.4 report.
+
+### `src/tiger_public/dedup.py`
+`ORIGINAL` for the module boundary, the overflow refusal and the recorded audit shape.
+The collision-ordinal scheme is `REIMPLEMENTED_FROM`
+`snap-research/GRID@2fe3475b2d369580234093f35d52b1a2f54d0472`,
+`src/utils/tensor_utils.py:125-176` (`deduplicate_rows_in_tensor`) and
+`mclwu22/amazon-genrec`, `tiger/30_rqvae.py:165-170`. **Changed:** the first member of each
+group is assigned `0` rather than `1`; the pass is one `O(N)` scan instead of an
+`O(groups x N)` loop; a zero-row (PAD) assignment is refused rather than silently numbered; and
+an oversize group raises instead of wrapping or sharing a final identity — neither source has
+that refusal.
+
 ### `src/tiger_public/cli.py`
 `ORIGINAL` for the stage wiring, the placeholder generators, the manifest writing and the
 streaming protocol.
@@ -91,7 +139,10 @@ Portions are `REIMPLEMENTED_FROM`:
   `>20%` dead-code rule is a *catastrophic-collapse refusal*, not a comparative quality gate.
 
 ### `tests/conftest.py`, `tests/__init__.py`, `tests/test_backend_local.py`
-`ORIGINAL`.
+### `tests/test_step24_features.py`, `tests/test_step24_quantizer.py`
+`ORIGINAL`.  The Step-2.4 test modules exercise the encoding stage, the RQ-VAE arithmetic, the
+k-means++ seeding, the straight-through gradient path, the dedup ordinals and the overflow
+refusal.  They need no model weights, because the smoke encoder is deterministic and offline.
 
 ## What is deliberately **not** absorbed
 

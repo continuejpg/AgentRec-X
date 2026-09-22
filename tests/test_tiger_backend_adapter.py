@@ -41,7 +41,7 @@ from recommendation.backends.tiger_backend import (  # noqa: E402
 )
 
 HASHES = {"mappings_sha256": "a" * 64, "sequences_sha256": "b" * 64, "products_sha256": "c" * 64}
-NUM_ITEMS = 12
+NUM_ITEMS = 96
 
 
 def make_handoff(root: Path, *, num_items: int = NUM_ITEMS, cohort: int = 4) -> TigerBackendAdapter:
@@ -72,7 +72,17 @@ def make_handoff(root: Path, *, num_items: int = NUM_ITEMS, cohort: int = 4) -> 
 def run_stub_stages(adapter: TigerBackendAdapter, *, status: str = "approximate") -> dict:
     """Run the four placeholder stages by subprocess, as the adapter does in production."""
     root = adapter.paths.root
-    adapter.run_stage("build-features", "--catalogue", str(root), "--out", str(root / "features"))
+    adapter.run_stage(
+        "build-features",
+        "--catalogue",
+        str(root),
+        "--out",
+        str(root / "features"),
+        "--encoder",
+        "smoke",
+    )
+    # A full-width codebook with few epochs: the Step-2.3 tests exercise the *boundary*, not the
+    # representation, so the quantizer only has to produce a valid assignment here.
     adapter.run_stage(
         "fit-sid",
         "--catalogue",
@@ -82,7 +92,21 @@ def run_stub_stages(adapter: TigerBackendAdapter, *, status: str = "approximate"
         "--out",
         str(root / "sid"),
         "--codebook-size",
-        "8",
+        "32",
+        "--epochs",
+        "2",
+        "--encoder-dims",
+        "768,64,32",
+        "--latent-dim",
+        "16",
+        "--device",
+        "cpu",
+        # These tests exercise the BOUNDARY, not the representation.  A 96-item catalogue with a
+        # 32-wide codebook cannot populate every level in 2 epochs, so the catastrophic-collapse
+        # stop is explicitly waived.  The waiver is recorded in `dead_code_waiver` inside the
+        # artifact, and the non-waived path is covered by the Step-2.4 smoke gate, which trains
+        # 40 epochs and passes the stop on its own.
+        "--allow-dead-codes",
     )
     adapter.run_stage(
         "train",
@@ -616,43 +640,22 @@ def test_g10_collision_audit_keeps_both_blocks_and_flags_overflow() -> None:
     assert audit["overflow_refusal_triggered"] is True
 
 
-def test_g10_the_dedup_overflow_refuses_the_build(tmp_path: Path) -> None:
-    """A dedup level that cannot disambiguate a group must refuse, never wrap or share.
+def test_g10_a_wide_codebook_is_refused_before_training(tmp_path: Path) -> None:
+    """A codebook wider than the catalogue cannot be filled, so the build refuses up front.
 
-    A 64-item catalogue with an 8-code book yields collision groups of eight, so a dedup width
-    of 1 cannot disambiguate them and the build must refuse with the documented reason.
+    With N items at most N codes can ever be selected, so a level wider than N is more than 20%
+    dead *by geometry*.  Refusing before training is cheaper than letting the collapse gate
+    report a configuration error as a modelling failure, and the message says which it is.
     """
     adapter = make_handoff(tmp_path, num_items=64)
     adapter.run_stage(
-        "build-features", "--catalogue", str(tmp_path), "--out", str(tmp_path / "features")
-    )
-    with pytest.raises(BackendProcessError) as error:
-        adapter.run_stage(
-            "fit-sid",
-            "--catalogue",
-            str(tmp_path),
-            "--features",
-            str(tmp_path / "features"),
-            "--out",
-            str(tmp_path / "tight"),
-            "--codebook-size",
-            "8",
-            "--dedup-vocab-size",
-            "1",
-        )
-    assert "exceeds dedup_vocab_size" in str(error.value)
-
-
-def test_g10_a_dead_code_level_is_refused_as_a_catastrophic_collapse(tmp_path: Path) -> None:
-    """A level with more than 20% dead codes is a hard stop, not a reportable observation.
-
-    A codebook wider than the catalogue genuinely *has* dead codes - most codes are never
-    selected because there are not enough items to select them - which is exactly the
-    catastrophic-collapse case the gate exists for.
-    """
-    adapter = make_handoff(tmp_path)
-    adapter.run_stage(
-        "build-features", "--catalogue", str(tmp_path), "--out", str(tmp_path / "features")
+        "build-features",
+        "--catalogue",
+        str(tmp_path),
+        "--out",
+        str(tmp_path / "features"),
+        "--encoder",
+        "smoke",
     )
     with pytest.raises(BackendProcessError) as error:
         adapter.run_stage(
@@ -664,11 +667,62 @@ def test_g10_a_dead_code_level_is_refused_as_a_catastrophic_collapse(tmp_path: P
             "--out",
             str(tmp_path / "wide"),
             "--codebook-size",
-            "100",
-            "--dedup-levels",
-            "0",
+            "256",
+            "--encoder-dims",
+            "32,16",
+            "--latent-dim",
+            "8",
+            "--epochs",
+            "1",
         )
-    assert "catastrophic collapse" in str(error.value)
+    assert "exceeds the catalogue size" in str(error.value)
+
+
+def test_g10_a_dedup_overflow_refuses_the_build(tmp_path: Path) -> None:
+    """A dedup level that cannot disambiguate a group must refuse, never wrap or share.
+
+    The catalogue here is small and the codebook deliberately coarse, so real pre-dedup
+    collision groups form and a dedup width of 1 cannot disambiguate them.
+    """
+    adapter = make_handoff(tmp_path, num_items=64)
+    adapter.run_stage(
+        "build-features",
+        "--catalogue",
+        str(tmp_path),
+        "--out",
+        str(tmp_path / "features"),
+        "--encoder",
+        "smoke",
+    )
+    with pytest.raises(BackendProcessError) as error:
+        adapter.run_stage(
+            "fit-sid",
+            "--catalogue",
+            str(tmp_path),
+            "--features",
+            str(tmp_path / "features"),
+            "--out",
+            str(tmp_path / "tight"),
+            "--codebook-size",
+            "4",
+            "--dedup-vocab-size",
+            "1",
+            "--encoder-dims",
+            "768,64,32",
+            "--latent-dim",
+            "16",
+            "--epochs",
+            "4",
+            "--allow-dead-codes",
+        )
+    message = str(error.value)
+    # Two phrasings are both correct refusals: the pre-training feasibility check (the
+    # configuration cannot address its own collisions) and the post-training measured check.
+    assert (
+        "exceeds dedup_vocab_size" in message
+        or "cannot disambiguate even a two-item collision group" in message
+        or "guarantees a collision group" in message
+    ), message
 
 
 # --------------------------------------------------------------------------- #
