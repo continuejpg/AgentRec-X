@@ -13,6 +13,7 @@ depth.
 | [PHASE4_HANDOFF.md](PHASE4_HANDOFF.md) | pick up the current state: completed milestones, architectural invariants, measured results, remaining gaps, and what must not be reopened |
 | [SEMANTIC_ID.md](SEMANTIC_ID.md) | the post-Two-Tower Semantic-ID generative baseline: RQ-VAE tokenizer audit, autoregressive generator, constrained decoding and deterministic resolution |
 | [TWOTOWER.md](TWOTOWER.md) | the post-Phase-5 Two-Tower retrieval baseline: architecture, objective, metrics, SASRec-vs-Two-Tower complementarity, and the frozen fusion ablation |
+| [MODEL_EXPANSION_HANDOFF.md](MODEL_EXPANSION_HANDOFF.md) | **handoff for the model-expansion steps**: Two-Tower parity and controls, Semantic-ID baseline, frozen protocol and trust boundaries |
 | [PHASE5_HANDOFF.md](PHASE5_HANDOFF.md) | **current handoff**: the public-data recommendation benchmark — dataset and split, five comparable arms, Recall/NDCG/HR@10, the agent-selection ablation, leakage checks and limitations |
 
 Development instructions and engineering rules live in [AGENTS.md](../AGENTS.md).
