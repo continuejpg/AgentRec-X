@@ -793,6 +793,7 @@ generator exists to retrieve from. Attribution:
 | **2.3** (done) | `contracts.py`, `io.py`, `cli.py`, `recommendation/backends/tiger_backend.py`, `materialize_tiger_backend.py`, boundary + adapter tests | all 15 smoke checks; 25 boundary guards; 42 adapter tests | no ML |
 | **2.3** | `contracts.py`, `io.py`, `recommendation/backends/tiger_backend.py`, `materialize_tiger_backend.py`, `test_backend_boundaries.py` (T1–T8), `test_tiger_backend_adapter.py`; **all ML stages stubbed** | **G1, G2, G3, G6, G8, G9, G10, G12**; the full suite stays green | no features, no quantizer, no TIGER, no retrieve |
 | **2.4** (implemented; full run deferred) | `features.py`, `quantizer.py`, `dedup.py` | **G4, G5, G5b, G11** pass; **H2** pass on 2 000 real items; **H3** blocked at full scale by one frozen design choice (see the note below) | no TIGER training; no evaluator/fusion change; no ANN |
+| **2.4F** (done) | `experiments/audit_tiger_sid.py`, `backends/tiger_public/REPRODUCIBILITY.md`, `requirements-ml.txt`, transactional `fit-sid`, encoder-revision pinning | read-only audit on the 2,000-item artifact; all suites green | no algorithm, schema, protocol or evaluator change |
 | **2.5** | `scoring.py`, `tiger.py`, `trie.py` | **G5b, G7**, then **H5, H6** | no canonical benchmark claim; no cohort metric asserted |
 | **2.6** | `retrieve.py` (APPROXIMATE + CERTIFIED), benchmark wiring | **G13, G14, G15, G16**, then **H7, H8** | no representation/generator change; no re-tuning against the cohort |
 | **2.7** | `TigerCandidateSource`, `CandidateSource` enum, fusion experiment | separate pre-registered controlled experiment | no fusion claim without holding every other source constant |
@@ -1186,6 +1187,90 @@ tuning here:
 Both are pre-registered questions for the full-catalogue run, not adjustments to make a gate
 pass. The `--allow-dead-codes` flag exists so a small-scale mechanism check can proceed while
 recording the waiver in the artifact; it must never be used for a reported result.
+
+## 17.2 Production full-run configuration (PRE-REGISTERED, Step 2.4F)
+
+Two configurations exist and must not be confused. The smoke configuration exists to prove the
+mechanism on a CPU host; the production configuration is what a 156,746-item artifact is built
+with, and it is frozen here **before** any recommendation-quality benchmark exists.
+
+### Production configuration — 156,746 items
+
+```text
+encoder           sentence-transformers/sentence-t5-base
+encoder_revision  fc5d4628481afbbaaacd7af6bb07cf9d3865f781   (immutable snapshot SHA-1)
+
+levels            3
+codebook_size     256
+latent_dim        64
+encoder_dims      768,256,128
+beta              0.25
+
+epochs            50
+batch_size        4096
+learning_rate     3e-4
+
+normalize_input   true
+revive_dead       true
+dedup_vocab_size  256
+seed              2026
+allow_dead_codes  false
+```
+
+### Smoke configuration — 2,000 items (NOT the production configuration)
+
+```text
+epochs            60
+batch_size        512
+learning_rate     3e-4
+encoder           smoke  (or sentence-t5-base for the real-embedding smoke)
+```
+
+The `epochs = 60` / `batch_size = 512` values were the **2,000-item CPU smoke** settings. They
+are recorded here so a later reader cannot mistake the smoke run for the production run, and so
+the production numbers are not quoted from a configuration that never produced them.
+
+### The learning-rate change, and its justification
+
+The production learning rate is **changed from the earlier specification of `1e-3` to `3e-4`**.
+The change is made **before any recommendation-quality benchmark**, and rests only on
+Step-2.4 tokenizer-health diagnostics — never on a Recall/NDCG number, because no such
+measurement exists for this backend yet:
+
+| learning rate | codes used per level (K = 256, 2,000 real items) |
+|---|---|
+| `1e-3` (earlier specification) | 256 / 20 / 16 |
+| `3e-4` (production) | 256 / 79 / 60 |
+| `1e-4` | 256 / 100 / 68 |
+
+`1e-3` leaves levels 1 and 2 at 92 % and 94 % dead. `3e-4` is the value that keeps all three
+levels functional without any search beyond these three measured points.
+
+**No further hyperparameter search is performed.** `epochs`, `batch_size`, `latent_dim`,
+`codebook_size`, `beta` and `dedup_vocab_size` are frozen above and are not to be tuned against
+the evaluation cohort or against any health metric.
+
+### What the Step-2.4F audit established about levels 1 and 2
+
+The read-only audit (`experiments/audit_tiger_sid.py`) measured how much each residual level
+actually contributes, which the single aggregate `reconstruction_loss` cannot show. On the
+2,000-item real-embedding artifact (`lr = 3e-4`, 60 epochs):
+
+| reconstruction | MSE against the normalised target |
+|---|---|
+| level 0 only | 0.000 751 |
+| levels 0 + 1 | 0.000 710 |
+| levels 0 + 1 + 2 | **0.000 694** |
+| (zero prediction, for scale) | 0.001 302 |
+
+Levels 1 and 2 together improve the reconstruction by **7.6 %** over level 0 alone. Residual
+norms fall 0.2319 → 0.0644 → 0.0527 → 0.0461 across the three levels, so most of the latent
+signal is consumed by level 0. Occupancy is 256 / 79 / 60 codes with entropy at 0.95 / 0.77 /
+0.73 of the per-level maximum.
+
+This is the measurement behind the two open questions in §17.1, and it is why the production
+configuration above is pre-registered rather than tuned: whether levels 1-2 are worth their
+depth is a question for the full-catalogue run to answer, not a reason to adjust a gate now.
 
 ## 18. Provenance and licence constraints
 

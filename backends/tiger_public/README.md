@@ -77,6 +77,16 @@ computed, then the dedup pass runs, and only then is anything written.
 waiver is recorded in `semantic_ids.json` under `dead_code_waiver`, so it cannot be silently
 inherited by a full run.
 
+`fit-sid` is **transactional**: every artifact is written into a sibling `*.partial` staging
+directory, the manifest is written last and re-verified from disk, and only then is the
+directory promoted with a single rename.  An interrupted run therefore leaves either an
+explicitly incomplete `*.partial` directory or nothing — never a final directory that could be
+mistaken for a completed run.
+
+A production run should also pass `--encoder-revision <sha>` to `build-features`, and must not
+pass `--no-require-features-manifest` to `fit-sid` (which exists only so older fixtures keep
+working and is recorded in the artifact when used).
+
 ### Learning rate
 
 The Step-2.4 measurement found that the published `learning_rate = 1e-3` collapses levels 1 and
@@ -128,5 +138,15 @@ src/tiger_public/
   dedup.py       stage 2 - deterministic collision ordinal with an overflow refusal
   cli.py         the four stage subcommands
 tests/           backend-local invariants
-PROVENANCE.md    per-file origin and licence status
+PROVENANCE.md      per-file origin and licence status
+REPRODUCIBILITY.md the pinned ML runtime and the encoder snapshot pin
+requirements-ml.txt the pinned package versions (torch installed separately, per host)
 ```
+
+### Read-only diagnostics
+
+`experiments/audit_tiger_sid.py` reports what the aggregate `reconstruction_loss` cannot: the
+prefix reconstruction MSE at L0 / L0+L1 / L0+L1+L2, residual norms after each level, per-level
+occupancy histograms, coverage, entropy, the **largest-code fraction** (a different question from
+coverage), and the pre-dedup collision-group size distribution.  It trains nothing and modifies
+nothing.

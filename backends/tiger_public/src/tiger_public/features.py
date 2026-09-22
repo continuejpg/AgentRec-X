@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -179,8 +180,15 @@ def resolve_encoder(
     batch_size: int,
     local_files_only: bool = False,
     max_chars: int | None = None,
+    revision: str | None = None,
 ) -> tuple[Callable[[Sequence[str]], np.ndarray], dict[str, Any]]:
-    """Return ``(encode, info)`` for an encoder name.
+    """Return ``(encode, info)`` for an encoder name, optionally pinned to a revision.
+
+    A repository *name* is mutable: the same name resolves to different weights over time, so a
+    production artifact must record the immutable snapshot it actually used.  ``revision`` is
+    therefore passed through to the loader, and the resolved commit is recorded separately from
+    the requested identifier.  When no revision is supplied the loader's own resolution is used
+    and reported honestly - the artifact never claims a pin it does not have.
 
     ``sentence-transformers`` is imported lazily, so the smoke encoder works in an environment
     where the ML stack is absent - which is exactly the situation the smoke gate is designed to
@@ -193,7 +201,10 @@ def resolve_encoder(
         return encode, {
             "id": SMOKE_ENCODER_MARKER,
             "requested_id": ENCODER_SMOKE,
-            "revision": "none",
+            "requested_revision": revision,
+            "revision": None,
+            "revision_resolved": False,
+            "weights_pinned": False,
             "dim": SENTENCE_T5_DIM,
             "pooling": "character-trigram-hash",
             "normalize": True,
@@ -213,20 +224,30 @@ def resolve_encoder(
             "Install it into the backend venv, or use --encoder smoke for a plumbing-only run."
         ) from error
 
+    load_kwargs: dict[str, Any] = {
+        "device": device,
+        "local_files_only": bool(local_files_only),
+    }
+    if revision:
+        load_kwargs["revision"] = revision
     try:
         # ``local_files_only`` must reach the loader: without it a missing cache silently becomes
         # a network fetch, which on an offline host hangs instead of failing.
-        model = SentenceTransformer(
-            name, device=device, local_files_only=bool(local_files_only)
-        )
+        model = SentenceTransformer(name, **load_kwargs)
     except Exception as error:  # pragma: no cover - network / cache dependent
         raise EncoderError(
-            f"could not load the encoder {name!r} on device {device!r}: {error}. Check that the "
-            "weights are cached locally (the host may have no route to huggingface.co)."
+            f"could not load the encoder {name!r} at revision {revision!r} on device "
+            f"{device!r}: {error}. Check that the weights are cached locally (the host may have "
+            "no route to huggingface.co)."
         ) from error
 
     dimension = _encoder_dim(model)
-    revision = _encoder_revision(model, requested=name)
+    resolved = _encoder_revision(model, requested=name)
+    if revision and not is_immutable_revision(resolved):
+        # The loader did not report the commit we asked for.  Recording the requested value
+        # verbatim would overstate the pin, so the resolved commit is taken from the cache when
+        # it can be read, and otherwise reported as unresolved.
+        resolved = _revision_from_hub_cache(name) or revision
     limit = int(max_chars or 0)
 
     def encode(texts: Sequence[str]) -> np.ndarray:
@@ -240,10 +261,14 @@ def resolve_encoder(
         )
         return np.asarray(vectors, dtype=np.float32)
 
+    immutable = is_immutable_revision(resolved)
     return encode, {
-        "id": revision,
+        "id": f"{name}@{resolved}" if immutable else name,
         "requested_id": name,
-        "revision": revision,
+        "requested_revision": revision,
+        "revision": resolved if immutable else None,
+        "revision_resolved": immutable,
+        "weights_pinned": bool(revision) and immutable,
         "dim": dimension,
         "pooling": "model default",
         "normalize": False,
@@ -282,24 +307,68 @@ def _encoder_dim(model: Any) -> int:
     )
 
 
-def _encoder_revision(model: Any, *, requested: str) -> str:
-    """A stable identifier for the exact weights, preferring a resolved commit hash.
+#: A HuggingFace snapshot identifier is a 40-character lowercase hex SHA-1.
+_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 
-    A repo name is not a revision: the same name can resolve to different weights over time.
-    Where the loader exposes the resolved commit, that is recorded; otherwise the requested name
-    is used but marked as unresolved in the artifact's ``metadata``.
+
+def is_immutable_revision(value: Any) -> bool:
+    """True when ``value`` is a commit hash rather than a mutable branch or tag.
+
+    ``"main"``, a tag, and the repository name itself are all *mutable* identifiers; only a
+    snapshot SHA-1 pins the weights.  The distinction is what stops an artifact from claiming a
+    reproducibility guarantee it does not have.
+    """
+    return isinstance(value, str) and bool(_REVISION_RE.match(value))
+
+
+def _encoder_revision(model: Any, *, requested: str) -> str:
+    """The loader's own resolved commit, when it exposes one.
+
+    Newer ``sentence-transformers`` builds no longer set ``_commit_hash``, so this often returns
+    the requested name; callers use :func:`is_immutable_revision` to tell the two apart and fall
+    back to the Hub cache.
     """
     for attribute in ("_model_card_vars", "config"):
         node = getattr(model, attribute, None)
         if isinstance(node, dict):
             for key in ("__version__", "_commit_hash", "revision"):
                 value = node.get(key)
-                if isinstance(value, str) and value:
+                if isinstance(value, str) and value and is_immutable_revision(value):
                     return value
     commit = getattr(model, "_commit_hash", None)
-    if isinstance(commit, str) and commit:
+    if isinstance(commit, str) and is_immutable_revision(commit):
         return commit
     return requested
+
+
+def _revision_from_hub_cache(repo_id: str) -> str | None:
+    """Read the snapshot SHA the local Hub cache holds for ``repo_id``.
+
+    The cache stores it in ``refs/main`` and names the snapshot directory after it, so the pin
+    can be recovered *after* a run that did not pass one - which is how the revision used by an
+    earlier run is established without guessing.  Returns ``None`` when no cache entry exists.
+    """
+    import os
+
+    roots = []
+    for variable in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        value = os.environ.get(variable)
+        if value:
+            roots.append(Path(value))
+    home = os.environ.get("HF_HOME")
+    if home:
+        roots.append(Path(home) / "hub")
+    roots.append(Path.home() / ".cache" / "huggingface" / "hub")
+    folder = "models--" + repo_id.replace("/", "--")
+    for root in roots:
+        ref = root / folder / "refs" / "main"
+        try:
+            value = ref.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if is_immutable_revision(value):
+            return value
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -318,6 +387,7 @@ def build_item_features(
     max_chars: int = 1000,
     expected_items: int | None = None,
     local_files_only: bool = False,
+    revision: str | None = None,
     log: Callable[[str], None] | None = None,
 ) -> tuple[FeatureBuildOutcome, dict[str, Any]]:
     """Encode every item and write ``item_features.npy`` plus its metadata.
@@ -342,7 +412,14 @@ def build_item_features(
         batch_size=batch_size,
         local_files_only=local_files_only,
         max_chars=max_chars,
+        revision=revision,
     )
+    if revision and not info["revision_resolved"]:
+        raise EncoderError(
+            f"the requested encoder revision {revision!r} could not be confirmed; refusing to "
+            "record a pin the run cannot prove. Check that the snapshot is cached, or pass "
+            "--local-files-only to make a missing snapshot fail instead of resolving elsewhere."
+        )
     resolved_dim = int(dim or info["dim"])
     if encoder != ENCODER_SMOKE and resolved_dim != int(info["dim"]):
         raise EncoderError(
@@ -374,7 +451,7 @@ def build_item_features(
         num_items=num_items,
         dim=resolved_dim,
         encoder_id=str(info["id"]),
-        encoder_revision=str(info["revision"]),
+        encoder_revision=str(info["revision"] or ""),
         device=device,
     )
     expected_row = 0

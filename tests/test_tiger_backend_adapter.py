@@ -784,3 +784,102 @@ def test_materialize_cli_help_is_available() -> None:
     )
     assert completed.returncode == 0, completed.stderr.decode()
     assert b"--mode" in completed.stdout
+
+
+# --------------------------------------------------------------------------- #
+# Step-2.4F: failure safety of the production fit-sid stage
+# --------------------------------------------------------------------------- #
+
+
+def _features_for(tmp_path: Path, *, num_items: int = NUM_ITEMS) -> Path:
+    """Build a feature artifact for the given handoff, once per test."""
+    adapter = make_handoff(tmp_path, num_items=num_items)
+    adapter.run_stage(
+        "build-features",
+        "--catalogue", str(tmp_path),
+        "--out", str(tmp_path / "features"),
+        "--encoder", "smoke",
+    )
+    return tmp_path / "features"
+
+
+def _fit_sid_argv(tmp_path: Path, features: Path, out: Path, *extra: str) -> list[str]:
+    return [
+        "fit-sid",
+        "--catalogue", str(tmp_path),
+        "--features", str(features),
+        "--out", str(out),
+        "--codebook-size", "32",
+        "--epochs", "2",
+        "--encoder-dims", "768,64,32",
+        "--latent-dim", "16",
+        "--device", "cpu",
+        "--allow-dead-codes",
+        *extra,
+    ]
+
+
+def test_fit_sid_failure_leaves_no_final_directory_and_no_staging(tmp_path: Path) -> None:
+    """An interrupted/failed run must not expose anything mistakable for a completed artifact."""
+    features = _features_for(tmp_path)
+    final = tmp_path / "sid"
+    # A codebook wider than the catalogue is refused before training, which is the cheapest way
+    # to drive the stage into a failure *after* it has already opened the staging directory.
+    with pytest.raises(BackendProcessError):
+        adapter = TigerBackendAdapter(tmp_path, timeout_seconds=600.0)
+        catalogue = adapter.read_catalogue()
+        adapter.run_stage(
+            *_fit_sid_argv(tmp_path, features, final, "--codebook-size", str(catalogue.num_items + 1))
+        )
+    assert not final.exists(), "a failed run left a final output directory"
+    assert not (tmp_path / "sid.partial").exists(), "a failed run left a staging directory"
+
+
+def test_fit_sid_success_promotes_atomically_and_keeps_no_staging(tmp_path: Path) -> None:
+    features = _features_for(tmp_path)
+    final = tmp_path / "sid"
+    adapter = TigerBackendAdapter(tmp_path, timeout_seconds=600.0)
+    adapter.run_stage(*_fit_sid_argv(tmp_path, features, final))
+    assert final.is_dir()
+    assert (final / "manifest.json").is_file()
+    assert (final / "semantic_ids.json").is_file()
+    assert not (tmp_path / "sid.partial").exists()
+    # Every artifact the promotion validated must be present in the final directory.
+    for name in ("tokenizer.pt", "tokenizer.json", "semantic_ids.json", "layout.json"):
+        assert (final / name).is_file(), name
+    # And the manifest must describe exactly those files.
+    manifest = json.loads((final / "manifest.json").read_text())
+    for name in ("tokenizer.pt", "tokenizer.json", "semantic_ids.json", "layout.json"):
+        assert name in manifest["files"], name
+
+
+def test_fit_sid_requires_a_features_manifest(tmp_path: Path) -> None:
+    """A production run must not consume features whose provenance cannot be verified."""
+    features = _features_for(tmp_path)
+    (features / "manifest.json").unlink()
+    adapter = TigerBackendAdapter(tmp_path, timeout_seconds=600.0)
+    with pytest.raises(BackendProcessError) as error:
+        adapter.run_stage(*_fit_sid_argv(tmp_path, features, tmp_path / "sid"))
+    assert "no manifest.json" in str(error.value)
+
+    # The documented relaxation still works, and records that it was used.
+    adapter.run_stage(
+        *_fit_sid_argv(
+            tmp_path, features, tmp_path / "sid_relaxed", "--no-require-features-manifest"
+        )
+    )
+    record = json.loads((tmp_path / "sid_relaxed" / "semantic_ids.json").read_text())
+    assert record["features_manifest_required"] is False
+
+
+def test_fit_sid_staging_directory_is_reported_in_the_artifact(tmp_path: Path) -> None:
+    """A completed run records that no staging directory was retained."""
+    features = _features_for(tmp_path)
+    final = tmp_path / "sid"
+    adapter = TigerBackendAdapter(tmp_path, timeout_seconds=600.0)
+    adapter.run_stage(*_fit_sid_argv(tmp_path, features, final))
+    manifest = json.loads((final / "manifest.json").read_text())
+    assert manifest["stage"] == "fit-sid"
+    assert "environment" in manifest
+    record = json.loads((final / "semantic_ids.json").read_text())
+    assert record["features_manifest_required"] is True

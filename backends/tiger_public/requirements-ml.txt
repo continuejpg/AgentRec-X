@@ -1,0 +1,22 @@
+# Public-TIGER backend ML runtime.
+#
+# Install into the BACKEND's own virtual environment, never into AgentRec-X's:
+#     cd backends/tiger_public && python -m venv .venv
+#     .venv/bin/python -m pip install -U pip
+#     .venv/bin/python -m pip install -r requirements-ml.txt
+#
+# Versions are the ones actually exercised by the Step-2.4 runs (see REPRODUCIBILITY.md).
+# They are pinned so a production artifact can name the stack that produced it.
+#
+# `torch` is deliberately NOT pinned here.  Package version and CUDA wheel are separate
+# decisions: the wheel must match the AutoDL host's driver, and choosing one from the
+# development box would be a guess.  Install it on the host, e.g.
+#     .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cu121
+# with the cuXXX suffix that host requires.
+numpy==1.26.4
+transformers==5.17.0
+sentence-transformers==6.1.0
+# Catalogue tooling (metadata/parquet paths); declared for completeness, not used by Step 2.4.
+pyarrow>=15,<22
+# Test runner for the backend-local suite.
+pytest>=8,<10

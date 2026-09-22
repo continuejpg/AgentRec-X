@@ -138,11 +138,44 @@ Portions are `REIMPLEMENTED_FROM`:
   `id_entropy` diagnostics. **Changed:** the coverage/entropy pair is computed inline and the
   `>20%` dead-code rule is a *catastrophic-collapse refusal*, not a comparative quality gate.
 
+### `REPRODUCIBILITY.md`, `requirements-ml.txt`
+`ORIGINAL`.  The pinned ML runtime and the two separate decisions it records: package versions
+(frozen to what Step 2.4 actually exercised) and the CUDA wheel/index (deliberately chosen on
+the production host, because a wheel selected here would be a guess about that host's driver).
+`DEPENDENCY(numpy==1.26.4, BSD-3-Clause)`,
+`DEPENDENCY(transformers==5.17.0, Apache-2.0)`,
+`DEPENDENCY(sentence-transformers==6.1.0, Apache-2.0)`,
+`DEPENDENCY(pyarrow, Apache-2.0)`, `DEPENDENCY(pytest, MIT)`.
+
 ### `tests/conftest.py`, `tests/__init__.py`, `tests/test_backend_local.py`
 ### `tests/test_step24_features.py`, `tests/test_step24_quantizer.py`
 `ORIGINAL`.  The Step-2.4 test modules exercise the encoding stage, the RQ-VAE arithmetic, the
 k-means++ seeding, the straight-through gradient path, the dedup ordinals and the overflow
 refusal.  They need no model weights, because the smoke encoder is deterministic and offline.
+
+### `tests/test_step24f_readiness.py`, `tests/test_step24f_audit.py`
+`ORIGINAL`.  The Step-2.4F test modules cover encoder-revision pinning and the refusal to record
+an unconfirmed pin, config reconstruction from a stored artifact block, and the read-only audit's
+arithmetic: prefix reconstruction MSE, residual norms, complete occupancy histograms, the
+largest-code fraction as distinct from codebook coverage, and the pre-dedup collision-group
+distribution.  Neither module needs network access.
+
+## Corrections and notices carried with the backend
+
+These are recorded because source-fidelity matters for a licence-sensitive tree.  They are
+notices, not vendored code.
+
+1. **The smoke encoder's User-Agent default.** The stand-in in `features.py` is described as
+   character-ngram hashing.  One detail of that description was inherited from an earlier draft
+   and does not match the code: no User-Agent string is set anywhere in this tree, and
+   `features.py` performs no HTTP request of its own, so it never sends one.  Network access, if
+   any, happens inside `transformers`/`huggingface_hub` when loading weights.
+2. **Host-specific configuration is not baked in.** No mirror endpoint is hardcoded;
+   `HF_ENDPOINT`, `HF_HOME` and `HF_HUB_CACHE` are read from the environment only.  A production
+   run sets them explicitly, and the values used belong in the run log rather than in the code.
+3. **The encoder revision is a snapshot SHA-1, not a tag.** `fc5d4628...` was recovered from the
+   Hub cache that produced the Step-2.4 artifact.  It is recorded as the pin because a tag or a
+   repository name is mutable and would not support the reproducibility claim.
 
 ## What is deliberately **not** absorbed
 

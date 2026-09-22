@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
+import shutil
 import struct
 import sys
 import time
@@ -125,6 +127,7 @@ def stage_build_features(
     max_chars: int = 1000,
     device: str = "cpu",
     local_files_only: bool = False,
+    revision: str | None = None,
 ) -> ItemFeatureArtifact:
     """Stage 1: encode ``products_text.jsonl`` into ``item_features.npy``.
 
@@ -143,6 +146,7 @@ def stage_build_features(
         max_chars=max_chars,
         expected_items=catalogue.num_items,
         local_files_only=local_files_only,
+        revision=revision,
     )
     write_manifest(
         out_dir,
@@ -174,15 +178,30 @@ def stage_build_features(
 # --------------------------------------------------------------------------- #
 
 
-def _load_features(features_dir: Path, *, verify: bool = True) -> tuple[np.ndarray, dict]:
+def _load_features(
+    features_dir: Path, *, verify: bool = True, require_manifest: bool = True
+) -> tuple[np.ndarray, dict]:
     """Read ``item_features.npy`` and its metadata, refusing an inconsistent artifact.
 
     The array must be two-dimensional, ``float32``, hold exactly ``num_items`` rows **and no PAD
     row**, and contain no non-finite value.  Each of those is a silent-corruption path if left
     unchecked: a NaN would poison a codebook, and a PAD row would let the reserved sentinel be
     quantised.
+
+    ``require_manifest`` defaults to **True**: a production ``fit-sid`` must be able to point at
+    digest-verified features, because a directory whose manifest is absent could have been
+    produced by an interrupted build.  ``--no-require-features-manifest`` restores the earlier
+    optional behaviour, and exists only so pre-existing test fixtures keep working; it is
+    recorded in the artifact so a relaxed run is visible.
     """
-    if verify and (features_dir / "manifest.json").is_file():
+    manifest_path = features_dir / "manifest.json"
+    if require_manifest and not manifest_path.is_file():
+        raise ArtifactError(
+            f"{features_dir} has no manifest.json; a production fit-sid requires digest-verified "
+            "features. Rebuild them with build-features, or pass "
+            "--no-require-features-manifest for a deliberately relaxed run."
+        )
+    if verify and manifest_path.is_file():
         verify_manifest(features_dir)
     record = read_json_file(features_dir / "item_features.json")
     array_path = features_dir / "item_features.npy"
@@ -237,6 +256,7 @@ def stage_fit_sid(
     determinism: bool = False,
     max_items: int | None = None,
     allow_dead_codes: bool = False,
+    require_features_manifest: bool = True,
     log: Any = None,
 ) -> SemanticIdArtifact:
     """Stage 2: train the RQ-VAE, assign codes, dedup, and audit.
@@ -253,7 +273,9 @@ def stage_fit_sid(
     """
     verify_manifest(catalogue_dir, required=("catalogue.json", "products_text.jsonl"))
     catalogue = read_catalogue(catalogue_dir)
-    features, feature_record = _load_features(features_dir)
+    features, feature_record = _load_features(
+        features_dir, require_manifest=require_features_manifest
+    )
 
     products_sha = sha256_file(catalogue_dir / "products_text.jsonl")
     recorded = str(feature_record.get("products_text_sha256", ""))
@@ -415,11 +437,24 @@ def stage_fit_sid(
     for item_id in range(1, len(assignment)):
         layout.tokenise(assignment[item_id])
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = out_dir / "tokenizer.pt"
+    # ------------------------------------------------------------------ #
+    # Transactional write.
+    #
+    # Every artifact goes into a staging directory whose name marks it incomplete, and the
+    # directory is promoted to its final name only after the manifest has been written and the
+    # manifest has been re-verified.  An interrupted run therefore leaves either an explicitly
+    # incomplete `*.partial` directory or nothing - never a final directory that could be
+    # mistaken for a completed run.
+    # ------------------------------------------------------------------ #
+    staging_dir = out_dir.parent / (out_dir.name + ".partial")
+    if staging_dir.exists():
+        # A previous attempt died here; its contents are by definition untrusted.
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = staging_dir / "tokenizer.pt"
     torch.save({"state_dict": model.state_dict(), "config": config.as_dict()}, checkpoint_path)
     write_json(
-        out_dir / "tokenizer.json",
+        staging_dir / "tokenizer.json",
         {
             "format": "agentrecx.tiger.tokenizer.v3",
             "contract_version": CONTRACT_VERSION,
@@ -462,12 +497,13 @@ def stage_fit_sid(
             "dim": int(feature_record["dim"]),
         },
         "dead_code_waiver": dead_code_waiver,
+        "features_manifest_required": bool(require_features_manifest),
         "checkpoint_sha256": sha256_file(checkpoint_path),
     }
-    write_json(out_dir / "semantic_ids.json", record)
-    write_json(out_dir / "layout.json", layout.as_dict())
+    write_json(staging_dir / "semantic_ids.json", record)
+    write_json(staging_dir / "layout.json", layout.as_dict())
     write_manifest(
-        out_dir,
+        staging_dir,
         extra={
             "stage": "fit-sid",
             "environment": environment_metadata(device=device),
@@ -477,6 +513,8 @@ def stage_fit_sid(
             },
         },
     )
+    # The manifest is written last, then re-verified from disk, and only then promoted.
+    promote_staging_directory(staging_dir, out_dir)
     return SemanticIdArtifact(
         format=record["format"],
         contract_version=CONTRACT_VERSION,
@@ -780,6 +818,36 @@ def stage_score(
 # --------------------------------------------------------------------------- #
 
 
+def promote_staging_directory(staging_dir: Path, final_dir: Path) -> None:
+    """Verify a staged stage-2 directory, then move it into place as a single rename.
+
+    The verification is the point: the manifest is re-hashed from disk *before* promotion, so a
+    directory that would fail a later read is refused here rather than being published.  The
+    promotion itself is one ``os.replace`` on the directory, which is atomic on POSIX when the
+    destination does not exist.
+    """
+    if not staging_dir.is_dir():
+        raise CliError(f"staging directory {staging_dir} does not exist")
+    required = ("tokenizer.pt", "tokenizer.json", "semantic_ids.json", "layout.json")
+    missing = [name for name in required if not (staging_dir / name).is_file()]
+    if missing:
+        raise CliError(
+            f"staging directory is incomplete: missing {missing}; refusing to promote a partial "
+            "Semantic-ID artifact"
+        )
+    # Re-hash what was written.  A failure here means the bytes on disk are not the bytes the
+    # manifest describes, so the directory must not become a final artifact.
+    verify_manifest(staging_dir, required=required)
+    if final_dir.exists():
+        # Replace a previous complete run, but never merge into it: a stale file that the new
+        # manifest does not list would otherwise survive and be read as part of this run.
+        previous = final_dir.parent / (final_dir.name + ".superseded")
+        if previous.exists():
+            shutil.rmtree(previous)
+        os.replace(final_dir, previous)
+    os.replace(staging_dir, final_dir)
+
+
 def read_json_file(path: Path) -> dict[str, Any]:
     """Read a JSON object, refusing a missing file or a non-object payload."""
     if not path.is_file():
@@ -893,6 +961,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="refuse to reach the network for encoder weights",
     )
+    features.add_argument(
+        "--encoder-revision",
+        default=None,
+        help=(
+            "immutable HuggingFace snapshot SHA-1 to pin the weights to. A production run must "
+            "pass this; the artifact records the resolved commit and refuses to claim a pin it "
+            "cannot confirm."
+        ),
+    )
 
     sid = sub.add_parser("fit-sid", help="stage 2: train the RQ-VAE and assign Semantic IDs")
     sid.add_argument("--catalogue", type=Path, required=True)
@@ -911,6 +988,15 @@ def _parser() -> argparse.ArgumentParser:
     sid.add_argument("--no-revive-dead", dest="revive_dead", action="store_false")
     sid.add_argument("--seed", type=int, default=2026)
     sid.add_argument("--device", default="cpu")
+    sid.add_argument(
+        "--no-require-features-manifest",
+        dest="require_features_manifest",
+        action="store_false",
+        help=(
+            "accept a features directory without a manifest.json (relaxed; recorded in the "
+            "artifact). A production run must not pass this."
+        ),
+    )
     sid.add_argument(
         "--allow-dead-codes",
         action="store_true",
@@ -959,6 +1045,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_chars=args.max_chars,
                 device=args.device,
                 local_files_only=args.local_files_only,
+                revision=args.encoder_revision,
             )
             record = {
                 "stage": args.stage,
@@ -966,6 +1053,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dim": artifact.dim,
                 "encoder": artifact.encoder.get("id"),
                 "encoder_is_model": bool(artifact.encoder.get("is_model")),
+                "encoder_requested_revision": artifact.encoder.get("requested_revision"),
+                "encoder_revision": artifact.encoder.get("revision"),
+                "encoder_weights_pinned": artifact.encoder.get("weights_pinned"),
                 "empty_text_items": artifact.empty_text_items,
                 "truncated_items": artifact.truncated_items,
             }
@@ -991,6 +1081,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 determinism=args.determinism,
                 allow_dead_codes=args.allow_dead_codes,
+                require_features_manifest=args.require_features_manifest,
                 log=(lambda entry: print(f"[fit-sid] {entry}", file=sys.stderr))
                 if not args.quiet
                 else None,

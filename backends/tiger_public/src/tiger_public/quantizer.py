@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -80,6 +80,12 @@ class QuantizerConfig:
     kmeans_iters: int = 10
 
     def __post_init__(self) -> None:
+        # ``encoder_dims`` is part of the type, not merely a hint: a JSON round trip through
+        # ``as_dict`` yields a list, and ``from_artifact`` would otherwise hand back a config
+        # whose declared type is a lie.  Normalising here makes the invariant hold for every
+        # construction path, including one built from a stored artifact.
+        if not isinstance(self.encoder_dims, tuple):
+            object.__setattr__(self, "encoder_dims", tuple(self.encoder_dims))
         for name in ("input_dim", "latent_dim", "levels", "codebook_size", "epochs",
                      "batch_size", "kmeans_sample", "kmeans_iters"):
             value = getattr(self, name)
@@ -102,6 +108,33 @@ class QuantizerConfig:
     @property
     def code_space(self) -> int:
         return self.codebook_size**self.levels
+
+    @classmethod
+    def from_artifact(cls, payload: Mapping[str, Any]) -> QuantizerConfig:
+        """Rebuild a config from a stored ``quantizer``/``config`` block.
+
+        ``as_dict`` records some **derived** keys for readability (``code_space``,
+        ``encoder_layer_widths``, ``encoder_hidden_dims``, ``decoder_layer_widths``) that are not
+        constructor parameters.  Rebuilding by splatting the whole block therefore fails, so
+        reconstruction goes through this one filter - which keeps the writer free to be
+        descriptive and the reader strict about what it accepts.
+        """
+        import dataclasses  # noqa: PLC0415
+
+        names = {field.name for field in dataclasses.fields(cls)}
+        unknown = sorted(set(payload) - names)
+        if unknown:
+            # Recording extra descriptive keys is fine; silently dropping one that looks like a
+            # parameter is not, so the filter is explicit about what it discarded.
+            known_ignored = {"code_space", "encoder_layer_widths", "decoder_layer_widths",
+                             "encoder_hidden_dims", "distance", "init"}
+            unexpected = [name for name in unknown if name not in known_ignored]
+            if unexpected:
+                raise QuantizerError(
+                    f"stored quantizer config holds unrecognised keys {unexpected}; refusing to "
+                    "guess how to rebuild the model"
+                )
+        return cls(**{key: value for key, value in payload.items() if key in names})
 
     def as_dict(self) -> dict[str, Any]:
         return {
