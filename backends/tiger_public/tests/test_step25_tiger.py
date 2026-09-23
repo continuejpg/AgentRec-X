@@ -1,6 +1,6 @@
 """Step-2.5 generator and trie tests (backend-local).
 
-Covers the seven things the Step-2.5 handoff requires:
+Covers the seven things the Step-2.5 handoff requires, plus the Gate-C closure:
 
 * train-history-only example construction, and no target leakage;
 * SID/layout-driven tokenisation (nothing hardcoded);
@@ -8,7 +8,10 @@ Covers the seven things the Step-2.5 handoff requires:
 * dedup level as its own token level;
 * trie catalogue completeness and invalid-prefix rejection;
 * checkpoint dependency-mismatch refusal;
-* a small train/save/load/generate smoke.
+* a small train/save/load/generate smoke;
+* the **generator layout** is a derived artifact: materialising it leaves the accepted SID
+  directory byte-for-byte unchanged, SEP cannot alias any catalogue code, and the checkpoint binds
+  both layout hashes.
 
 Model-building tests use a deliberately tiny architecture.  The registered production
 architecture is reported, not enforced (``TigerConfig.matches_registered_architecture``), because
@@ -20,11 +23,21 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 import torch
 
 from tiger_public.contracts import PAD_SENTINEL, build_token_layout
+from tiger_public.generator_layout import (
+    GENERATOR_LAYOUT_FORMAT,
+    GeneratorLayoutError,
+    assert_no_code_alias,
+    derive_generator_layout,
+    load_generator_layout,
+    materialise_generator_layout,
+    sha256_file,
+)
 from tiger_public.tiger import (
     PAD_TOKEN,
     TigerConfig,
@@ -47,10 +60,55 @@ DEDUP_VOCAB = 8
 # --------------------------------------------------------------------------- #
 
 
-def make_layout(*, levels: int = LEVELS, codebook: int = CODEBOOK, dedup: int = DEDUP_VOCAB) -> dict:
-    return build_token_layout(
+def make_accepted_layout(
+    *, levels: int = LEVELS, codebook: int = CODEBOOK, dedup: int = DEDUP_VOCAB
+) -> dict:
+    """The shape Step 2.4F produced: pad/bos/eos only, no SEP, vocab_size = code_space + 3."""
+    accepted = build_token_layout(
         levels=levels, codebook_size=codebook, dedup_levels=1, dedup_vocab_size=dedup
     ).as_dict()
+    accepted["format"] = "agentrecx.tiger.token_layout.v3"
+    del accepted["special"]["sep"]
+    accepted["vocab_size"] = accepted["code_space"] + 3
+    return accepted
+
+
+def make_layout(*, levels: int = LEVELS, codebook: int = CODEBOOK, dedup: int = DEDUP_VOCAB) -> dict:
+    """The generator layout, derived exactly as the CLI derives it from an accepted layout."""
+    accepted = make_accepted_layout(levels=levels, codebook=codebook, dedup=dedup)
+    return derive_generator_layout_from_dict(accepted)
+
+
+def derive_generator_layout_from_dict(accepted: dict) -> dict:
+    """Derive a generator layout in memory, using the real materialiser via a scratch directory.
+
+    The production path is file-based on purpose, so the test drives the real function rather than
+    a re-implementation: only the directory is disposable.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        sid_dir = root / "sid"
+        sid_dir.mkdir(parents=True)
+        (sid_dir / "layout.json").write_text(json.dumps(accepted), encoding="utf-8")
+        count = 64
+        assignment = [[PAD_SENTINEL] * (LEVELS + 1)]
+        for item in range(count):
+            assignment.append(
+                [
+                    item % int(accepted["codebook_size"]),
+                    (item // int(accepted["codebook_size"])) % int(accepted["codebook_size"]),
+                    0,
+                    item % DEDUP_VOCAB,
+                ]
+            )
+        (sid_dir / "semantic_ids.json").write_text(
+            json.dumps({"assignment": assignment}), encoding="utf-8"
+        )
+        return derive_generator_layout(
+            sid_dir=sid_dir, generator_layout_path=root / "generator_layout.json"
+        )
 
 
 def make_collision_free_assignment(count: int, *, codebook: int = CODEBOOK) -> list[list[int]]:
@@ -147,9 +205,33 @@ def test_tokenisation_refuses_an_out_of_range_digit(layout: dict) -> None:
 
 
 def test_a_layout_without_sep_is_refused(assignment: list[list[int]]) -> None:
-    """SEP must come from the layout, never be guessed."""
+    """SEP must come from a derived generator layout, never be guessed at use time."""
     layout = make_layout()
     layout["special"].pop("sep")
+    with pytest.raises(TigerError):
+        build_examples([[1, 2, 3]], assignment=assignment, layout=layout, max_hist_items=2)
+
+
+def test_the_accepted_sid_layout_is_refused_as_a_generator_layout(
+    assignment: list[list[int]],
+) -> None:
+    """Passing the accepted Step-2.4F layout must be an error, not a silent mis-tokenisation.
+
+    It has no SEP and a ``vocab_size`` one short, so accepting it would either crash later or, with
+    a guessed SEP, alias a real code.
+    """
+    accepted = make_accepted_layout()
+    accepted["format"] = "agentrecx.tiger.token_layout.v3"
+    with pytest.raises(TigerError) as error:
+        build_examples([[1, 2, 3]], assignment=assignment, layout=accepted, max_hist_items=2)
+    assert GENERATOR_LAYOUT_FORMAT in str(error.value)
+
+
+def test_a_generator_layout_with_the_wrong_format_tag_is_refused(
+    assignment: list[list[int]], layout: dict
+) -> None:
+    layout = dict(layout)
+    layout["format"] = "agentrecx.tiger.token_layout.v3"
     with pytest.raises(TigerError):
         build_examples([[1, 2, 3]], assignment=assignment, layout=layout, max_hist_items=2)
 
@@ -540,10 +622,14 @@ def trained_artifacts(tmp_path_factory, layout, assignment, trie):
     catalogue_dir = root / "catalogue"
     sid_dir = root / "sid"
     exposure_dir = root / "exposure"
-    for directory in (catalogue_dir, sid_dir, exposure_dir):
+    generator_dir = root / "generator"
+    for directory in (catalogue_dir, sid_dir, exposure_dir, generator_dir):
         directory.mkdir(parents=True)
 
-    (sid_dir / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+    # The accepted SID layout: pad/bos/eos only, no SEP.  The generator layout is derived from it.
+    (sid_dir / "layout.json").write_text(
+        json.dumps(make_accepted_layout()), encoding="utf-8"
+    )
     (sid_dir / "semantic_ids.json").write_text(
         json.dumps(
             {
@@ -583,6 +669,8 @@ def trained_artifacts(tmp_path_factory, layout, assignment, trie):
     config = tiny_config()
     model = build_model(layout, config)
     report = TigerTrainer(model, dataset, config=config, device="cpu").train()
+    # Derive the generator layout from the accepted one, exactly as the CLI does.
+    generator_layout = materialise_generator_layout(sid_dir=sid_dir, out=generator_dir)
     out_dir = root / "generator"
     metadata = save_generator(
         model=model,
@@ -590,6 +678,7 @@ def trained_artifacts(tmp_path_factory, layout, assignment, trie):
         sid_dir=sid_dir,
         exposure_path=exposure_path,
         catalogue_dir=catalogue_dir,
+        generator_layout_path=generator_dir / "generator_layout.json",
         out_dir=out_dir,
     )
     return {
@@ -598,6 +687,8 @@ def trained_artifacts(tmp_path_factory, layout, assignment, trie):
         "sid_dir": sid_dir,
         "catalogue_dir": catalogue_dir,
         "exposure_path": exposure_path,
+        "generator_layout": generator_layout,
+        "generator_layout_path": generator_dir / "generator_layout.json",
         "model": model,
         "dataset": dataset,
         "metadata": metadata,
@@ -615,7 +706,169 @@ def test_training_produces_finite_loss(trained_artifacts) -> None:
 
 def test_checkpoint_writes_the_documented_files(trained_artifacts) -> None:
     names = {path.name for path in trained_artifacts["out_dir"].iterdir()}
-    assert {"tiger.pt", "tiger.json", "layout.json", "score_rule.json"} <= names
+    assert {"tiger.pt", "tiger.json", "generator_layout.json", "score_rule.json"} <= names
+
+
+def test_materialising_the_generator_layout_leaves_the_sid_artifact_unchanged(
+    trained_artifacts,
+) -> None:
+    """The accepted SID artifact is immutable: materialisation is read-only in, new file out."""
+    sid_dir = trained_artifacts["sid_dir"]
+    accepted = json.loads((sid_dir / "layout.json").read_text(encoding="utf-8"))
+    assert sorted(accepted["special"]) == ["bos", "eos", "pad"], "the accepted layout gained a key"
+    assert accepted["vocab_size"] == accepted["code_space"] + 3
+    # No patched copy and no backup was written inside the accepted directory.
+    assert sorted(path.name for path in sid_dir.iterdir()) == [
+        "layout.json", "semantic_ids.json"
+    ] or "layout.v3.bak.json" not in {path.name for path in sid_dir.iterdir()}
+    # The derived artifact lives elsewhere and declares the accepted hashes.
+    derived = trained_artifacts["generator_layout"]
+    assert derived["source_sid_layout_sha256"] == sha256_file(sid_dir / "layout.json")
+    assert derived["source_semantic_ids_sha256"] == sha256_file(sid_dir / "semantic_ids.json")
+
+
+def test_the_generator_layout_extends_the_accepted_vocabulary_by_exactly_sep(
+    trained_artifacts,
+) -> None:
+    derived = trained_artifacts["generator_layout"]
+    accepted = json.loads(
+        (trained_artifacts["sid_dir"] / "layout.json").read_text(encoding="utf-8")
+    )
+    assert derived["format"] == GENERATOR_LAYOUT_FORMAT
+    assert derived["levels"] == accepted["levels"]
+    assert derived["dedup_levels"] == accepted["dedup_levels"]
+    assert derived["codebook_size"] == accepted["codebook_size"]
+    assert derived["dedup_vocab_size"] == accepted["dedup_vocab_size"]
+    assert derived["level_offsets"] == accepted["level_offsets"]
+    assert derived["code_space"] == accepted["code_space"]
+    assert (
+        derived["special"]["pad"],
+        derived["special"]["bos"],
+        derived["special"]["eos"],
+    ) == (
+        accepted["special"]["pad"],
+        accepted["special"]["bos"],
+        accepted["special"]["eos"],
+    )
+    assert derived["special"]["sep"] == accepted["vocab_size"]
+    assert derived["vocab_size"] == accepted["vocab_size"] + 1
+    assert derived["extension"]["added_special"] == "sep"
+
+
+def test_specials_are_distinct_and_outside_the_code_space(trained_artifacts) -> None:
+    derived = trained_artifacts["generator_layout"]
+    specials = derived["special"]
+    assert len(set(specials.values())) == 4
+    assert all(token >= derived["code_space"] for token in specials.values())
+    assert derived["audit"]["aliased_tokens"] == []
+
+
+def test_a_special_token_inside_the_code_space_is_refused(assignment) -> None:
+    """A SEP below ``code_space`` would shadow a real code, so derivation must refuse it."""
+    derived = make_layout()
+    derived["special"]["sep"] = derived["code_space"] - 1
+    with pytest.raises(GeneratorLayoutError):
+        assert_no_code_alias(derived, assignment)
+
+
+def test_a_special_or_a_digit_outside_its_block_is_refused(assignment) -> None:
+    """Defence in depth for a malformed layout.
+
+    For a layout whose blocks and ``code_space`` agree, no special can alias a real code: every
+    token lies in ``[0, code_space)`` and every special lies at or above it.  The alias guard is
+    therefore only reachable when the layout's own numbers disagree, and that is what this builds:
+    ``code_space`` is declared above a SEP that a real catalogue item also maps onto.  Either the
+    alias check or the digit-range check must fire; what must never happen is a vocabulary whose
+    SEP is simultaneously a real code.
+    """
+    derived = make_layout()
+    code_space = derived["code_space"]
+    used_tokens = {item_token_path(row, derived)[0] for row in assignment[1:]}
+    assert used_tokens, "the fixture must produce at least one token"
+    derived["special"] = {
+        "pad": code_space,
+        "bos": code_space + 1,
+        "eos": code_space + 2,
+        # The smallest real level-0 token: below the declared code space, so it aliases a code.
+        "sep": min(used_tokens),
+    }
+    with pytest.raises(GeneratorLayoutError) as error:
+        assert_no_code_alias(derived, assignment)
+    message = str(error.value)
+    assert "alias" in message or "inside the catalogue code space" in message, message
+
+
+def test_non_distinct_specials_are_refused(assignment) -> None:
+    derived = make_layout()
+    derived["special"]["sep"] = derived["special"]["pad"]
+    with pytest.raises(GeneratorLayoutError):
+        assert_no_code_alias(derived, assignment)
+
+
+def test_an_accepted_layout_with_a_bad_vocab_size_is_refused(tmp_path: Path, assignment) -> None:
+    """Derivation validates its input: a layout claiming code_space + 5 is not a known shape."""
+    sid_dir = tmp_path / "sid"
+    sid_dir.mkdir()
+    accepted = make_accepted_layout()
+    accepted["vocab_size"] = accepted["code_space"] + 5
+    (sid_dir / "layout.json").write_text(json.dumps(accepted), encoding="utf-8")
+    (sid_dir / "semantic_ids.json").write_text(
+        json.dumps({"assignment": assignment}), encoding="utf-8"
+    )
+    with pytest.raises(GeneratorLayoutError):
+        derive_generator_layout(
+            sid_dir=sid_dir, generator_layout_path=tmp_path / "generator_layout.json"
+        )
+
+
+def test_a_layout_that_already_carries_sep_is_preserved_not_doubled() -> None:
+    """The backend's own fit-sid writes a SEP-bearing layout; the derivation must not add a second.
+
+    Both accepted shapes must yield the *same* generator vocabulary, so that a stub run and the
+    accepted production artifact reach an identical token space.
+    """
+    without = make_layout()
+    with_sep = derive_generator_layout_from_dict(build_token_layout(
+        levels=LEVELS, codebook_size=CODEBOOK, dedup_levels=1, dedup_vocab_size=DEDUP_VOCAB
+    ).as_dict())
+    assert without["special"] == with_sep["special"]
+    assert without["vocab_size"] == with_sep["vocab_size"]
+    assert without["extension"]["added_special"] == "sep"
+    assert with_sep["extension"]["added_special"] is None
+    assert with_sep["source_sid_layout_had_sep"] is True
+    assert without["source_sid_layout_had_sep"] is False
+
+
+def test_a_generator_layout_of_the_wrong_format_is_refused(tmp_path: Path, layout) -> None:
+    path = tmp_path / "generator_layout.json"
+    path.write_text(json.dumps({"format": "nope", "special": layout["special"]}), encoding="utf-8")
+    with pytest.raises(GeneratorLayoutError):
+        load_generator_layout(path)
+
+
+def test_sep_is_never_interpreted_as_a_sid_digit(trained_artifacts, layout) -> None:
+    """SEP is a boundary token.  It is outside every level block and appears in no target."""
+    sep = layout["special"]["sep"]
+    offsets = layout["level_offsets"]
+    widths = [layout["codebook_size"]] * layout["levels"] + [layout["dedup_vocab_size"]]
+    for offset, width in zip(offsets, widths, strict=True):
+        assert not offset <= sep < offset + width
+    for target in trained_artifacts["dataset"].targets:
+        assert sep not in target[:-1], "SEP leaked into a target SID block"
+
+
+def test_the_checkpoint_binds_both_layout_hashes(trained_artifacts) -> None:
+    dependencies = trained_artifacts["metadata"]["dependency_hashes"]
+    assert dependencies["layout"] == sha256_file(trained_artifacts["sid_dir"] / "layout.json")
+    assert dependencies["generator_layout"] == sha256_file(
+        trained_artifacts["generator_layout_path"]
+    )
+    assert dependencies["layout"] != dependencies["generator_layout"]
+    assert (
+        trained_artifacts["metadata"]["generator_layout_sha256"]
+        == dependencies["generator_layout"]
+    )
+    assert trained_artifacts["metadata"]["layout_sha256"] == dependencies["layout"]
 
 
 def test_checkpoint_records_all_required_provenance(trained_artifacts) -> None:
@@ -629,7 +882,8 @@ def test_checkpoint_records_all_required_provenance(trained_artifacts) -> None:
     assert metadata["training"]["validation_used"] is False
     assert metadata["training"]["labels_from"].startswith("agentrecx.tiger.train_exposure")
     assert set(metadata["dependency_hashes"]) == {
-        "semantic_ids", "layout", "tokenizer", "train_exposure", "catalogue", "catalogue_items"
+        "semantic_ids", "layout", "tokenizer", "train_exposure", "catalogue", "catalogue_items",
+        "generator_layout",
     }
 
 
@@ -641,6 +895,7 @@ def test_checkpoint_saves_and_loads_with_identical_generation(trained_artifacts,
         sid_dir=trained_artifacts["sid_dir"],
         exposure_path=trained_artifacts["exposure_path"],
         catalogue_dir=trained_artifacts["catalogue_dir"],
+        generator_layout_path=trained_artifacts["generator_layout_path"],
         device="cpu",
     )
     assert restored.parameter_count() == model.parameter_count()
@@ -697,6 +952,7 @@ def test_checkpoint_refuses_a_changed_exposure(trained_artifacts) -> None:
                 sid_dir=trained_artifacts["sid_dir"],
                 exposure_path=path,
                 catalogue_dir=trained_artifacts["catalogue_dir"],
+                generator_layout_path=trained_artifacts["generator_layout_path"],
                 device="cpu",
             )
         assert "different dependencies" in str(error.value)
@@ -718,6 +974,7 @@ def test_checkpoint_refuses_a_changed_sid_layout(trained_artifacts) -> None:
                 sid_dir=trained_artifacts["sid_dir"],
                 exposure_path=trained_artifacts["exposure_path"],
                 catalogue_dir=trained_artifacts["catalogue_dir"],
+                generator_layout_path=trained_artifacts["generator_layout_path"],
                 device="cpu",
             )
     finally:
@@ -740,6 +997,7 @@ def test_checkpoint_refuses_a_changed_semantic_assignment(trained_artifacts) -> 
                 sid_dir=trained_artifacts["sid_dir"],
                 exposure_path=trained_artifacts["exposure_path"],
                 catalogue_dir=trained_artifacts["catalogue_dir"],
+                generator_layout_path=trained_artifacts["generator_layout_path"],
                 device="cpu",
             )
     finally:
@@ -753,6 +1011,7 @@ def test_loading_a_missing_checkpoint_is_refused(trained_artifacts, tmp_path) ->
             sid_dir=trained_artifacts["sid_dir"],
             exposure_path=trained_artifacts["exposure_path"],
             catalogue_dir=trained_artifacts["catalogue_dir"],
+            generator_layout_path=trained_artifacts["generator_layout_path"],
             device="cpu",
         )
 

@@ -39,6 +39,11 @@ from typing import Any, Sequence
 import torch
 
 from tiger_public.contracts import PAD_SENTINEL, build_token_layout
+from tiger_public.generator_layout import (
+    GeneratorLayoutError,
+    materialise_generator_layout,
+    sha256_file,
+)
 from tiger_public.tiger import (
     TigerConfig,
     TigerGenerator,
@@ -77,13 +82,19 @@ def build_smoke_artifacts(root: Path) -> dict[str, Path]:
     for directory in (catalogue_dir, sid_dir, exposure_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
-    layout = build_token_layout(
+    # The smoke writes an *accepted-style* SID layout: pad/bos/eos only, with SEP absent.  That is
+    # what Step 2.4F produced, and it is the input the generator-layout derivation consumes.  The
+    # generator's own vocabulary is derived from it below, exactly as the production CLI does.
+    accepted_layout = build_token_layout(
         levels=SMOKE_LEVELS,
         codebook_size=SMOKE_CODEBOOK,
         dedup_levels=1,
         dedup_vocab_size=SMOKE_DEDUP,
     ).as_dict()
-    (sid_dir / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+    accepted_layout["format"] = "agentrecx.tiger.token_layout.v3"
+    del accepted_layout["special"]["sep"]
+    accepted_layout["vocab_size"] = accepted_layout["code_space"] + 3
+    (sid_dir / "layout.json").write_text(json.dumps(accepted_layout), encoding="utf-8")
 
     # Unique SID per item, mirroring the Step-2.4F uniqueness guarantee.
     assignment = [[PAD_SENTINEL] * 4]
@@ -132,11 +143,19 @@ def build_smoke_artifacts(root: Path) -> dict[str, Path]:
         for user in range(users):
             row = [((user * 13 + step * 7) % SMOKE_ITEMS) + 1 for step in range(length)]
             handle.write(json.dumps({"case_id": user, "items": row}) + "\n")
+    # Derive the generator vocabulary from the accepted-style layout, non-mutating.  The smoke then
+    # uses the *derived* artifact everywhere, which is the same object the CLI builds.
+    generator_layout_path = root / "generator_layout.json"
+    generator_layout = materialise_generator_layout(
+        sid_dir=sid_dir, out=root
+    )
     return {
         "catalogue_dir": catalogue_dir,
         "sid_dir": sid_dir,
         "exposure_path": exposure_path,
-        "layout": layout,
+        "accepted_layout": accepted_layout,
+        "layout": generator_layout,
+        "generator_layout_path": generator_layout_path,
         "assignment": assignment,
         "users": users,
         "length": length,
@@ -308,27 +327,111 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # ---- checkpoint ---------------------------------------------------- #
         out_dir = root / "generator"
+        sid_before = {
+            path.name: sha256_file(path) for path in sorted(artifacts["sid_dir"].iterdir())
+        }
         metadata = save_generator(
             model=model, report=report,
             sid_dir=artifacts["sid_dir"],
             exposure_path=artifacts["exposure_path"],
             catalogue_dir=artifacts["catalogue_dir"],
+            generator_layout_path=artifacts["generator_layout_path"],
             out_dir=out_dir,
         )
         names = {path.name for path in out_dir.iterdir()}
         _progress(f"checkpoint: {sorted(names)} sha256={metadata['checkpoint_sha256'][:16]}")
-        check({"tiger.pt", "tiger.json", "layout.json", "score_rule.json"} <= names,
+        check({"tiger.pt", "tiger.json", "generator_layout.json", "score_rule.json"} <= names,
               "checkpoint writes the documented files")
         check(metadata["training"]["validation_used"] is False,
               "checkpoint records that no validation target was used")
+        check(
+            metadata["dependency_hashes"]["generator_layout"]
+            == metadata["generator_layout_sha256"],
+            "the checkpoint binds the derived generator-layout hash",
+        )
+        check(
+            metadata["dependency_hashes"]["layout"] == sid_before["layout.json"],
+            "the checkpoint binds the ACCEPTED SID layout hash",
+        )
+
+        # The accepted SID artifact must be byte-identical after materialisation + training.
+        sid_after = {
+            path.name: sha256_file(path) for path in sorted(artifacts["sid_dir"].iterdir())
+        }
+        check(sid_before == sid_after, "the accepted SID artifact is unchanged")
+        check(
+            not (artifacts["sid_dir"] / "layout.v3.bak.json").exists(),
+            "no backup or patch was written inside the accepted SID directory",
+        )
 
         restored, _meta, _resume = load_generator(
             out_dir=out_dir, sid_dir=artifacts["sid_dir"],
             exposure_path=artifacts["exposure_path"],
-            catalogue_dir=artifacts["catalogue_dir"], device="cpu",
+            catalogue_dir=artifacts["catalogue_dir"],
+            generator_layout_path=artifacts["generator_layout_path"], device="cpu",
         )
         check(restored.parameter_count() == model.parameter_count(),
               "checkpoint reloads with the same parameter count")
+
+        # A checkpoint must refuse a *different* generator layout.
+        tampered_path = root / "tampered_generator_layout.json"
+        tampered = dict(artifacts["layout"])
+        tampered["extension"] = {"added_special": "sep", "sep_token": 0}
+        tampered_path.write_text(json.dumps(tampered, indent=1, sort_keys=True) + "\n",
+                                 encoding="utf-8")
+        try:
+            load_generator(
+                out_dir=out_dir, sid_dir=artifacts["sid_dir"],
+                exposure_path=artifacts["exposure_path"],
+                catalogue_dir=artifacts["catalogue_dir"],
+                generator_layout_path=tampered_path, device="cpu",
+            )
+            check(False, "a changed generator layout is refused")
+        except Exception as error:  # noqa: BLE001 - the refusal type is the check
+            check("generator_layout" in str(error), f"a changed generator layout is refused: {type(error).__name__}")
+
+        # ...and must refuse a *valid but different* generator layout, because the checkpoint binds
+        # the hash of the exact artifact it was trained against.
+        relocated = root / "relocated"
+        relocated.mkdir(parents=True, exist_ok=True)
+        other = materialise_generator_layout(sid_dir=artifacts["sid_dir"], out=relocated)
+        other_path = relocated / "generator_layout.json"
+        payload = json.loads(other_path.read_text(encoding="utf-8"))
+        payload["annotation"] = "same vocabulary, different artifact"
+        other_path.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        try:
+            load_generator(
+                out_dir=out_dir, sid_dir=artifacts["sid_dir"],
+                exposure_path=artifacts["exposure_path"],
+                catalogue_dir=artifacts["catalogue_dir"],
+                generator_layout_path=other_path, device="cpu",
+            )
+            check(False, "the checkpoint refuses a different generator-layout artifact")
+        except Exception as error:  # noqa: BLE001 - the refusal is the check
+            check("generator_layout" in str(error),
+                  f"the checkpoint refuses a different generator-layout artifact: {type(error).__name__}")
+        check(other["audit"]["aliased_tokens"] == [],
+              "the re-derived layout still reports no SEP/SID alias")
+
+        # The accepted layout alone must NOT be usable as a generator layout.
+        try:
+            build_examples(
+                rows, assignment=assignment, layout=artifacts["accepted_layout"],
+                max_hist_items=5,
+            )
+            check(False, "the accepted SID layout is refused as a generator layout")
+        except Exception as error:  # noqa: BLE001
+            check("generator_layout" in str(error),
+                  f"the accepted SID layout is refused as a generator layout: {type(error).__name__}")
+
+        # SEP is a boundary token, never a digit: no target block may contain it, and every target
+        # must still resolve through the trie.
+        sep_token = layout["special"]["sep"]
+        check(sep_token not in {token for target in dataset.targets for token in target[:-1]},
+              "SEP is never interpreted as a SID digit")
+        check(sep_token not in {
+            token for row in assignment[1:] for token in item_token_path(row, layout)
+        }, "SEP is not part of any catalogue SID token path")
 
         # ---- generation ---------------------------------------------------- #
         sample = [list(dataset.inputs[index]) for index in range(min(16, dataset.examples))]

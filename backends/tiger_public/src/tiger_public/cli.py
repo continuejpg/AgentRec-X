@@ -573,6 +573,11 @@ def stage_train(
     The token space is taken from the accepted ``semantic_ids.json`` / ``layout.json``; nothing
     about the levels, offsets, codebook widths or special tokens is assumed here.
     """
+    from tiger_public.generator_layout import (
+        GeneratorLayoutError,
+        load_generator_layout,
+        materialise_generator_layout,
+    )
     from tiger_public.tiger import (
         TigerConfig,
         TigerGenerator,
@@ -593,7 +598,7 @@ def stage_train(
         )
 
     sid_record = read_json_file(sid_dir / "semantic_ids.json")
-    layout = read_json_file(sid_dir / "layout.json")
+    accepted_layout = read_json_file(sid_dir / "layout.json")
     assignment = sid_record["assignment"]
     if len(assignment) != catalogue.num_items + 1:
         raise CliError(
@@ -601,8 +606,17 @@ def stage_train(
             "items; it does not describe this catalogue"
         )
 
-    # The trie is built from the accepted final SIDs and used as a generation constraint only.
-    trie = CatalogueTrie(assignment, layout=layout)
+    # The accepted SID layout is read-only input.  The generator's own vocabulary is *derived* into
+    # the checkpoint tree, so the accepted artifact is never written and the derivation is hashed.
+    try:
+        generator_layout = materialise_generator_layout(sid_dir=sid_dir, out=out_dir)
+        generator_layout = load_generator_layout(out_dir / "generator_layout.json")
+    except GeneratorLayoutError as error:
+        raise CliError(f"cannot materialise the generator layout from {sid_dir}: {error}") from error
+
+    # The trie is built from the accepted final SIDs (the generator layout carries the same levels,
+    # offsets and codebook, plus SEP) and used as a generation constraint only.
+    trie = CatalogueTrie(assignment, layout=generator_layout)
     if not trie.collision_free():
         raise CliError(
             "the accepted assignment is not collision-free, so a generated path could resolve "
@@ -618,7 +632,7 @@ def stage_train(
     dataset = build_examples(
         rows,
         assignment=assignment,
-        layout=layout,
+        layout=generator_layout,
         max_hist_items=max_hist_items,
     )
     config = TigerConfig(
@@ -635,7 +649,9 @@ def stage_train(
         seed=seed,
     )
     torch.manual_seed(config.seed)
-    model = TigerGenerator(config=config, layout=layout, vocab_size=int(layout["vocab_size"]))
+    model = TigerGenerator(
+        config=config, layout=generator_layout, vocab_size=int(generator_layout["vocab_size"])
+    )
     trainer = TigerTrainer(model, dataset, config=config, device=device)
     report = trainer.train()
     final = report.final
@@ -648,10 +664,17 @@ def stage_train(
         sid_dir=sid_dir,
         exposure_path=exposure_path,
         catalogue_dir=catalogue_dir,
+        generator_layout_path=out_dir / "generator_layout.json",
         out_dir=out_dir,
     )
     metadata["trie"] = trie.stats.as_dict()
     metadata["examples"] = describe_examples(dataset)
+    metadata["accepted_sid_layout"] = {
+        "path": str(sid_dir / "layout.json"),
+        "sha256": sha256_file(sid_dir / "layout.json"),
+        "vocab_size": int(accepted_layout["vocab_size"]),
+        "special": accepted_layout.get("special"),
+    }
     write_json(out_dir / "tiger.json", metadata)
     write_manifest(
         out_dir,

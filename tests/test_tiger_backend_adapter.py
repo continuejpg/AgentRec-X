@@ -129,6 +129,11 @@ def _train_stub_root(root: Path) -> None:
         "--features", str(root / "features"),
         "--out", str(root / "sid"),
         "--codebook-size", "32",
+        # The dedup width must equal the codebook width.  The token layout places the pad/bos/eos
+        # specials at ``(levels + dedup_levels) * codebook_size``, so a dedup block *wider* than the
+        # codebook would run past the code space and collide with the specials.  The accepted
+        # production artifact has both at 256; the stub mirrors that shape at 32.
+        "--dedup-vocab-size", "32",
         "--epochs", "2",
         "--encoder-dims", "768,64,32",
         "--latent-dim", "16",
@@ -143,8 +148,13 @@ def _train_stub_root(root: Path) -> None:
         "--out", str(root / "ckpt"),
         *_STUB_MODEL_FLAGS,
     )
+    # Stage 3 derives its own vocabulary artifact (`generator_layout.json`) from the accepted SID
+    # layout and copies it into the checkpoint tree; the accepted `sid/layout.json` is untouched.
     for name in ("semantic_ids.json", "layout.json"):
         (root / name).write_bytes((root / "sid" / name).read_bytes())
+    (root / "generator_layout.json").write_bytes(
+        (root / "ckpt" / "generator_layout.json").read_bytes()
+    )
     (root / "tiger.json").write_bytes((root / "ckpt" / "tiger.json").read_bytes())
     adapter.write_manifest()
 

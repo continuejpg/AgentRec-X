@@ -1105,7 +1105,7 @@ TIGER row beside SASRec / Two-Tower without that label.
 | **H1** | frozen inputs: `mappings_sha256 == dca7815a...`, `sequences_sha256 == d3d83426...`, catalogue 156 746, users 412 445, `field_source == EvaluationCase.train_history`, exposure arithmetic parity (§8.4) | 2.4 | — |
 | **H2** | 156 746 x 768 float32 is about **481 MB**; `nan_inf_scan: clean`; `empty_text_items` / `truncated_items` recorded | 2.4 | ~4–10 min |
 | **H3** | `post_dedup.collision_groups == 0`; `post_dedup.distinct_sids == 156 746`; coverage `1.000`; `largest_group_le_dedup_vocab` true; **`pre_dedup` block recorded in full**; per-level utilisation recorded; **hard stop only on `dead_codes > 20 %` of a level** — no comparative threshold applied to any other reading | 2.4 | ~5–15 min |
-| **H4** | `layout.json` + `score_rule.json` written, hashed, and re-tested against the adapter **before** TIGER training starts, so neither the token space nor the scoring rule can drift mid-project | 2.4 | — |
+| **H4** | `layout.json` + `score_rule.json` written, hashed, and re-tested against the adapter **before** TIGER training starts, so neither the token space nor the scoring rule can drift mid-project. Gate C adds the derived `generator_layout.json` (`sep = 1027`, `vocab_size = 1028`), materialised read-only over `sid/` and hashed into the checkpoint | 2.4 / 2.5 | — |
 | **H5** | TIGER training, `d_model=256, layers=6`, batch 512, bf16, `epochs=20`, `lr=5e-4`, seed 2026, **2 263 252 examples** (Gate-B.1 registration; §17.4); `validation_used: false`. The "1 850 807 examples" and "resumable checkpoint every epoch" clauses of the original H5 text are superseded/parked — see §17.4 | 2.5 | ~3–6 h |
 | **H6** | `invalid_generation_rate` and APPROXIMATE `scored_share` measured and labelled diagnostic | 2.5 | — |
 | **H7** | **pre-step:** `min/max/mean/p95/p99_required_frontier` computed and recorded **before** any CERTIFIED attempt; then CERTIFIED retrieval over the frozen 20 k cohort with `certificate_holds_for_all_cases` true within budget, otherwise automatic APPROXIMATE downgrade | 2.6 | diagnostics: minutes; certification: hours, budget-dependent |
@@ -1421,15 +1421,27 @@ metric-driven tuning decision.** Both must be settled before Gate D.
    evaluator by construction. The registered rule above is therefore **final checkpoint, no metric
    selection**; H5's cadence clause is either waived in the Gate-C registration or implemented as
    in-training `val_loss`-free resumability.
-2. **The accepted Step-2.4F `layout.json` predates SEP.** It declares
-   `special = {pad: 1024, bos: 1025, eos: 1026}` and `vocab_size = 1027`; Gate B registers a fourth
-   special (`sep = 1027`) and `vocab_size = 1028`, and `build_examples` refuses a layout without
-   `sep` because deriving a token id at use time could alias a real code. Training against the
-   frozen archive as-is therefore **hard-stops**. The fix is a metadata-only re-derivation of
-   `sid/layout.json` (add `sep`, set `vocab_size` 1028, keep the format tag or bump it to v4); the
-   accepted `semantic_ids.json` assignment, `tokenizer.pt`, `item_features.npy` and every Semantic
-   ID are unchanged, so no RQ-VAE refit and no re-encode is required. This is registered as
-   Gate C's first action, not as a silent edit to a frozen artifact.
+2. **Resolved in Gate C: the accepted Step-2.4F `layout.json` predates SEP, and is not patched.**
+   It declares `special = {pad: 1024, bos: 1025, eos: 1026}` and `vocab_size = 1027`, and it stays
+   exactly that. The generator's fourth special is a **separate derived artifact**,
+   `generator_layout.json`, materialised by `tiger_public.generator_layout`:
+
+   ```text
+   accepted sid/layout.json   --read-only-->   generator_layout.json
+   pad 1024, bos 1025, eos 1026, vocab 1027    pad 1024, bos 1025, eos 1026, sep 1027, vocab 1028
+   ```
+
+   The derivation copies `levels`, `dedup_levels`, `codebook_size`, `dedup_vocab_size`,
+   `level_offsets` and `code_space` verbatim, appends `sep = accepted_vocab_size`, and records
+   `source_sid_layout_sha256` + `source_semantic_ids_sha256`. It refuses a special inside the code
+   space, a non-distinct special, or a special that aliases a token the accepted Semantic IDs
+   actually use. The accepted `sid/` directory is opened for reading only and is byte-identical
+   afterwards (asserted by the smoke and by `tests/test_step25_tiger.py`).
+
+   The checkpoint binds **both** hashes (`layout` and `generator_layout`), so a generator trained
+   on one token space cannot load against another, and `build_examples` refuses a layout whose
+   `format` is not `agentrecx.tiger.generator_layout.v1` — passing the accepted SID layout is an
+   error rather than a silent mis-tokenisation.
 
 ## 18. Provenance and licence constraints
 

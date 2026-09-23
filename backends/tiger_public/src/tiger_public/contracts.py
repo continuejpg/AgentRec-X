@@ -553,6 +553,10 @@ class TigerCheckpoint:
     training: Mapping[str, Any] = field(default_factory=dict)
     exposure_sha256: str = ""
     semantic_ids_sha256: str = ""
+    #: SHA256 of the *derived generator* layout, not of the accepted SID layout.  A checkpoint
+    #: binds both: ``layout`` names the token space the SIDs were assigned in, and this names the
+    #: generator vocabulary built on top of it.
+    generator_layout_sha256: str = ""
 
     def validate(self) -> None:
         """Check the artifact's own shape.
@@ -568,6 +572,8 @@ class TigerCheckpoint:
             raise ContractError("a checkpoint must carry its token layout (with vocab_size)")
         if not isinstance(self.score_rule, Mapping) or not self.score_rule:
             raise ContractError("a checkpoint must record its score rule by value")
+        if self.generator_layout_sha256:
+            require_sha256(self.generator_layout_sha256, "generator_layout_sha256")
 
 
 @dataclass(frozen=True)

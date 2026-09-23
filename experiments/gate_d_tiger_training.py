@@ -6,21 +6,33 @@ rather than rebuilt.  Rebuilding `Sentence-T5` features, the RQ-VAE or the Seman
 step here: the H2/H3 artifacts are frozen, and Gate A already proved the production handoff's
 `products_text` identity matches the accepted feature/SID dependency.
 
-What it does, in order:
+The Gate-D workflow this checks, in order:
 
-1. verifies the accepted archive's SHA256 against the pinned manifest below;
-2. verifies the per-file SHA256 of the extracted H2/H3 artifacts;
-3. streams `train_exposure.jsonl` and proves the frozen example arithmetic (2 263 252 transitions
-   over 412 445 rows, 156 746 catalogue items, zero validation/test targets);
-4. checks the one precondition Gate B introduced - the accepted `layout.json` must declare `sep`;
-5. prints the exact Gate-D training command, and refuses (exit 1) if any check fails.
+```text
+1  restore the repository at the exact accepted commit
+2  restore the verified Step-2.4F artifact archive
+3  verify the accepted SID hashes (layout / semantic_ids / tokenizer x2)
+4  restore (or materialise) the production handoff and verify its hashes
+5  materialise and verify generator_layout.json  (read-only over sid/)
+6  verify the production example count (2 263 252)
+7  train TIGER, and nothing else
+```
+
+It contains **no** `build-features`, **no** `fit-sid`, **no** RQ-VAE retraining, **no** SID
+regeneration, **no** benchmark and no Step-2.6 scoring.
+
+The accepted SID artifact is **immutable**.  Step 5 never writes inside `sid/`: it reads the
+accepted `layout.json` and writes a *new* `generator_layout.json` beside the generator output,
+recording the accepted layout's and Semantic IDs' SHA256.  All four accepted hashes are printed
+before and after and must be identical.
 
 Usage::
 
     cd backends/tiger_public
     PYTHONPATH=src .venv/bin/python ../../experiments/gate_d_tiger_training.py \\
         --archive ../../runs/_autodl_backup/step24f-tiger-public-dfabc1c.tar.gz \\
-        --restore  /data/agentrecx/step24f
+        --restore  /data/agentrecx/step24f \
+        --generator-out /data/agentrecx/tiger_generator_prod
 """
 
 from __future__ import annotations
@@ -65,9 +77,18 @@ FROZEN = {
     "sum_len_minus_2": 1_850_807,
 }
 
-#: The vocab layout Gate B's example builder requires.  SEP must be a registered special token,
-#: because deriving a token id at use time could alias a real code.
-EXPECTED_SPECIALS = ("pad", "bos", "eos", "sep")
+#: The accepted Step-2.4F SID layout declares exactly these three specials and no SEP.  The
+#: generator's fourth special is *derived*, never patched into the accepted file.
+ACCEPTED_SPECIALS = ("pad", "bos", "eos")
+EXPECTED_GENERATOR_SPECIALS = ("pad", "bos", "eos", "sep")
+
+#: The accepted SID artifacts, restated here so a reader sees the four hashes the run must preserve.
+ACCEPTED_SID_SHA256 = {
+    "layout.json": ACCEPTED_ARTIFACT_SHA256["sid/layout.json"],
+    "semantic_ids.json": ACCEPTED_ARTIFACT_SHA256["sid/semantic_ids.json"],
+    "tokenizer.pt": ACCEPTED_ARTIFACT_SHA256["sid/tokenizer.pt"],
+    "tokenizer.json": ACCEPTED_ARTIFACT_SHA256["sid/tokenizer.json"],
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -80,6 +101,18 @@ def sha256_file(path: Path) -> str:
 
 def check(name: str, ok: bool, detail: str = "") -> tuple[bool, str]:
     return (bool(ok), f"{name}: {detail}" if detail else name)
+
+
+def _git_head() -> str:
+    import subprocess  # noqa: PLC0415
+
+    try:
+        return subprocess.run(  # noqa: S603 - fixed argv, no shell
+            ["git", "rev-parse", "HEAD"], cwd=str(REPO_ROOT),
+            capture_output=True, check=True, text=True,
+        ).stdout.strip()
+    except Exception:  # pragma: no cover - git may be absent
+        return "unknown"
 
 
 def verify_archive(archive: Path) -> list[tuple[bool, str]]:
@@ -101,20 +134,12 @@ def verify_archive(archive: Path) -> list[tuple[bool, str]]:
     return results
 
 
-def canonical_layout_sha256(text: str) -> str:
-    """SHA256 of the exact bytes `patch_layout` writes, so the patched state is pinned by value."""
-    layout = json.loads(text)
-    canonical = json.dumps(layout, indent=1, sort_keys=True) + "\n"
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def verify_restored(root: Path) -> list[tuple[bool, str]]:
     """Verify the extracted H2/H3 artifacts.  The archive extracts under `runs/tiger_public_2026/`.
 
-    `sid/layout.json` has exactly two acceptable states: the pristine accepted bytes, or the
-    Gate-C patched bytes.  The patched state is pinned by recomputing the canonical serialisation
-    rather than by hardcoding a second digest, so the check cannot drift from `patch_layout`.
-    Anything else is refused, which is what makes "the hashes verify" mean something.
+    Every accepted hash must match **exactly**.  There is no "patched layout" state any more: the
+    generator vocabulary is a separate derived artifact and nothing this runbook does rewrites an
+    accepted file.
     """
     results: list[tuple[bool, str]] = []
     for name, expected in ACCEPTED_ARTIFACT_SHA256.items():
@@ -122,93 +147,99 @@ def verify_restored(root: Path) -> list[tuple[bool, str]]:
         if not path.is_file():
             results.append(check(f"artifact {name}", False, "missing"))
             continue
-        text = path.read_text(encoding="utf-8") if name.endswith(".json") else None
         actual = sha256_file(path)
-        if actual == expected:
-            results.append(check(f"artifact {name}", True, actual))
-            continue
-        if name == "sid/layout.json" and text is not None:
-            patched = canonical_layout_sha256(text)
-            specials = sorted((json.loads(text).get("special") or {}))
-            if actual == patched and specials == sorted(EXPECTED_SPECIALS):
-                results.append(
-                    check(
-                        f"artifact {name}",
-                        True,
-                        f"{actual} (Gate-C patched; pristine was {expected})",
-                    )
-                )
-                continue
-        results.append(check(f"artifact {name}", False, f"{actual} != {expected}"))
+        results.append(check(f"artifact {name}", actual == expected, actual))
     return results
 
 
-def patch_layout(sid_dir: Path) -> tuple[bool, str]:
-    """Apply the Gate-C additive layout patch: register SEP and widen the vocabulary by one.
-
-    This is **metadata only**.  It rewrites `layout.json` (keeping a `.v3.bak.json` beside it) and
-    touches no Semantic ID: `semantic_ids.json`, `tokenizer.pt`, `tokenizer.json` and
-    `item_features.npy` are not read or written, so no RQ-VAE refit and no re-encode happens.  The
-    SID digits stay identical; only the special-token block grows by one token.
-
-    Idempotent: a layout that already declares SEP is left alone.
-    """
-    path = sid_dir / "layout.json"
-    if not path.is_file():
-        return False, f"missing {path}"
-    layout = json.loads(path.read_text(encoding="utf-8"))
-    specials = layout.get("special") or {}
-    code_space = int(layout["code_space"])
-    if "sep" in specials:
-        if int(layout["vocab_size"]) != code_space + 4:
-            return False, f"SEP present but vocab_size={layout['vocab_size']}"
-        return False, "already patched"
-    before = sha256_file(path)
-    backup = path.with_suffix(".v3.bak.json")
-    if not backup.exists():
-        backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    layout["special"] = {
-        "pad": code_space,
-        "bos": code_space + 1,
-        "eos": code_space + 2,
-        "sep": code_space + 3,
+def accepted_sid_hashes(sid_dir: Path) -> dict[str, str]:
+    """The four accepted SID hashes, read now, so the run can prove it changed none of them."""
+    return {
+        name: sha256_file(sid_dir / name)
+        for name in ("layout.json", "semantic_ids.json", "tokenizer.pt", "tokenizer.json")
+        if (sid_dir / name).is_file()
     }
-    layout["vocab_size"] = code_space + 4
-    path.write_text(json.dumps(layout, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    after = sha256_file(path)
-    return True, (
-        f"layout.json {before} -> {after} "
-        f"(SEP {code_space + 3}, vocab_size {code_space + 4})"
-    )
 
 
-def verify_layout(sid_dir: Path) -> list[tuple[bool, str]]:
-    """Gate B's one precondition: the accepted layout must declare a SEP special token."""
+def verify_accepted_sid_hashes(sid_dir: Path, *, label: str) -> list[tuple[bool, str]]:
+    results: list[tuple[bool, str]] = []
+    actual = accepted_sid_hashes(sid_dir)
+    for name, expected in ACCEPTED_SID_SHA256.items():
+        results.append(check(f"{label} sid/{name}", actual.get(name) == expected, actual.get(name, "missing")))
+    return results
+
+
+def verify_accepted_layout(sid_dir: Path) -> list[tuple[bool, str]]:
+    """The accepted layout must be the *pre-SEP* artifact: three specials, vocab_size + 3."""
     path = sid_dir / "layout.json"
     if not path.is_file():
-        return [check("layout", False, f"missing {path}")]
+        return [check("accepted layout", False, f"missing {path}")]
     layout = json.loads(path.read_text(encoding="utf-8"))
     specials = sorted((layout.get("special") or {}))
-    results = [
-        check("layout specials", specials == sorted(EXPECTED_SPECIALS), str(specials)),
+    return [
+        check("accepted layout specials", specials == sorted(ACCEPTED_SPECIALS), str(specials)),
         check(
-            "layout vocab_size",
-            int(layout.get("vocab_size", -1)) == int(layout.get("code_space", -2)) + 4,
+            "accepted layout vocab_size",
+            int(layout.get("vocab_size", -1)) == int(layout.get("code_space", -2)) + 3,
             f"vocab_size={layout.get('vocab_size')} code_space={layout.get('code_space')}",
         ),
-        check("layout sentinel_tokenisable", layout.get("sentinel_tokenisable") is False),
+        check("accepted layout sentinel_tokenisable", layout.get("sentinel_tokenisable") is False),
     ]
-    if specials != sorted(EXPECTED_SPECIALS):
-        results.append(
-            check(
-                "layout needs the Gate-C additive patch",
-                False,
-                "run this script with --patch-layout: it adds sep = code_space + 3 and sets "
-                "vocab_size = code_space + 4 as METADATA ONLY. The SID assignment, tokenizer and "
-                "features are unchanged; no RQ-VAE refit and no re-encode. See docs/TIGER_BACKEND.md "
-                "17.4 discrepancy 2.",
-            )
+
+
+def materialise_generator_layout(sid_dir: Path, out: Path) -> list[tuple[bool, str]]:
+    """Derive `generator_layout.json` from the accepted layout.  Read-only over ``sid/``."""
+    try:
+        import sys as _sys
+
+        backend_src = REPO_ROOT / "backends" / "tiger_public" / "src"
+        if str(backend_src) not in _sys.path:
+            _sys.path.insert(0, str(backend_src))
+        from tiger_public.generator_layout import (
+            GeneratorLayoutError,
+            derive_generator_layout,
+            load_generator_layout,
         )
+    except Exception as error:  # pragma: no cover - the backend venv is the documented runner
+        return [check("generator layout", False, f"cannot import the materialiser: {error}")]
+
+    out = Path(out)
+    path = out / "generator_layout.json"
+    try:
+        record = derive_generator_layout(sid_dir=Path(sid_dir), generator_layout_path=path)
+        loaded = load_generator_layout(path)
+    except GeneratorLayoutError as error:
+        return [check("generator layout", False, str(error))]
+
+    results = [
+        check("generator layout materialised", path.is_file(), str(path)),
+        check("generator layout sha256", True, record["generator_layout_sha256"]),
+        check(
+            "generator layout source hashes",
+            record["source_sid_layout_sha256"] == ACCEPTED_SID_SHA256["layout.json"]
+            and record["source_semantic_ids_sha256"] == ACCEPTED_SID_SHA256["semantic_ids.json"],
+            f"layout={record['source_sid_layout_sha256'][:16]} sids="
+            f"{record['source_semantic_ids_sha256'][:16]}",
+        ),
+        check(
+            "generator specials",
+            sorted(loaded["special"]) == sorted(EXPECTED_GENERATOR_SPECIALS),
+            str(loaded["special"]),
+        ),
+        check(
+            "generator vocab_size",
+            int(loaded["vocab_size"]) == int(loaded["code_space"]) + 4,
+            f"vocab_size={loaded['vocab_size']} code_space={loaded['code_space']}",
+        ),
+        check("generator SEP token", int(loaded["special"]["sep"]) == int(loaded["vocab_size"]) - 1,
+              str(loaded["special"]["sep"])),
+        check(
+            "SEP aliases no catalogue SID token",
+            not record["audit"]["aliased_tokens"],
+            f"{record['audit']['distinct_sid_tokens']} distinct SID tokens, "
+            f"{record['audit']['catalogue_items']} items",
+        ),
+    ]
     return results
 
 
@@ -273,14 +304,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="extracted Step-2.4F root (contains features/ and sid/)")
     parser.add_argument("--handoff", type=Path, default=PRODUCTION_HANDOFF)
     parser.add_argument("--out", type=Path, default=Path("runs/tiger_generator_prod"))
+    parser.add_argument("--generator-out", type=Path, default=None,
+                        help="where generator_layout.json is materialised "
+                             "(default: <out>/generator)")
     parser.add_argument("--extract-to", type=Path, default=None,
                         help="extract the archive here before verifying")
-    parser.add_argument("--patch-layout", action="store_true",
-                        help="apply the Gate-C additive SEP/vocab_size layout patch (metadata only; "
-                             "writes a .v3.bak.json backup and touches no Semantic ID)")
+    parser.add_argument("--repo-commit", default=None,
+                        help="the accepted commit this run is pinned to; a mismatch is refused")
     args = parser.parse_args(argv)
 
     results: list[tuple[bool, str]] = []
+    generator_out = args.generator_out or (args.out / "generator")
+
+    # 1. repository pinned at the accepted commit
+    if args.repo_commit is not None:
+        head = _git_head()
+        results.append(check("repository commit", head == args.repo_commit,
+                             f"{head} (expected {args.repo_commit})"))
+    else:
+        results.append(check("repository commit", True, f"{_git_head()} (not pinned by --repo-commit)"))
+
+    # 2-3. restore and verify the accepted Step-2.4F artifact, before and after
     restored = args.restore
     if args.archive is not None:
         results += verify_archive(args.archive)
@@ -292,13 +336,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             results.append(check("extracted to", True, str(restored)))
     if restored is not None:
         results += verify_restored(restored)
-        if args.patch_layout:
-            changed, message = patch_layout(restored / "sid")
-            results.append(check("layout patch", True, ("applied: " if changed else "no change: ") + message))
-        results += verify_layout(restored / "sid")
+        results += verify_accepted_sid_hashes(restored / "sid", label="accepted")
+        results += verify_accepted_layout(restored / "sid")
+
+        # 5. materialise + verify the generator layout, then prove sid/ is untouched
+        before = accepted_sid_hashes(restored / "sid")
+        results += materialise_generator_layout(restored / "sid", generator_out)
+        after = accepted_sid_hashes(restored / "sid")
+        results.append(check("accepted SID artifact unchanged", before == after,
+                             "byte-identical" if before == after else f"{before} -> {after}"))
+        results += verify_restored(restored)
     else:
         results.append(check("restored artifacts", False, "pass --restore or --extract-to"))
 
+    # 4 + 6. handoff hashes and the production example count
     results += verify_handoff_catalogue(args.handoff / "catalogue.json")
     results += verify_exposure(args.handoff / "train_exposure.jsonl")
 

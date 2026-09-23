@@ -109,6 +109,15 @@ Portions are `REIMPLEMENTED_FROM`:
   `src/modules/clustering/base_clustering_module.py` — the measured finding that Adam at
   `learning_rate = 1e-3` collapses the later residual levels; see the Step-2.4 report.
 
+### `src/tiger_public/generator_layout.py`
+`ORIGINAL`.  The generator's token vocabulary as a **derived** artifact rather than a patched copy
+of the accepted SID layout.  It reads `sid/layout.json` read-only, copies every level, offset,
+codebook value and the pad/bos/eos ids verbatim, appends `sep` above the accepted vocabulary, and
+records `source_sid_layout_sha256` + `source_semantic_ids_sha256` so the derivation is auditable.
+It refuses a special inside the catalogue code space, a non-distinct special, or a special that
+aliases a token the accepted Semantic IDs actually use.  No external source: the accepted artifact
+is this project's own, so nothing here is absorbed from either reference repository.
+
 ### `src/tiger_public/trie.py`
 `ORIGINAL` for the trie, its stats and its fail-closed resolution.
 `REIMPLEMENTED_FROM` `mclwu22/amazon-genrec`, `tiger/50_train.py:36-49` (`build_trie`) and

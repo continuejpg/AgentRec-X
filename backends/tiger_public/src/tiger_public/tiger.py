@@ -57,6 +57,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from tiger_public.generator_layout import GENERATOR_LAYOUT_FORMAT
 from tiger_public.scoring import SCORE_RULE, validate_score_rule
 from tiger_public.trie import CatalogueTrie, TrieError, item_token_path
 
@@ -298,6 +299,16 @@ def build_examples(
     """
     if max_hist_items < 1:
         raise TigerError(f"max_hist_items must be >= 1, got {max_hist_items}")
+    # The generator vocabulary is a *derived* artifact, not the accepted SID layout.  Requiring the
+    # tag here means the two cannot be confused: the accepted layout has no SEP and a vocab_size
+    # one short, so using it would either fail later or silently mis-tokenise a boundary.
+    declared_format = layout.get("format")
+    if declared_format != GENERATOR_LAYOUT_FORMAT:
+        raise TigerError(
+            f"the generator needs a {GENERATOR_LAYOUT_FORMAT!r} layout, got {declared_format!r}. "
+            "Materialise it from the accepted SID layout (tiger_public.generator_layout) rather "
+            "than passing the accepted layout.json, which declares no SEP."
+        )
     levels = int(layout["levels"])
     total_levels = levels + int(layout["dedup_levels"])
     if len(assignment) < 2:
@@ -703,8 +714,16 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _dependency_hashes(sid_dir: Path, exposure_path: Path, catalogue_dir: Path) -> dict[str, str]:
-    """Everything a checkpoint depends on, so an incompatible load can be refused."""
+def _dependency_hashes(
+    sid_dir: Path, exposure_path: Path, catalogue_dir: Path, generator_layout_path: Path
+) -> dict[str, str]:
+    """Everything a checkpoint depends on, so an incompatible load can be refused.
+
+    Two layout artifacts appear, deliberately.  ``layout`` is the **accepted** Step-2.4F SID
+    layout, and ``generator_layout`` is the derived generator vocabulary.  Binding both means a
+    checkpoint refuses when either drifts: a re-derived generator layout over the same accepted
+    layout, or an accepted layout that changed underneath the same generator layout.
+    """
     resolved: dict[str, str] = {}
     for name, path in (
         ("semantic_ids", sid_dir / "semantic_ids.json"),
@@ -713,6 +732,7 @@ def _dependency_hashes(sid_dir: Path, exposure_path: Path, catalogue_dir: Path) 
         ("train_exposure", exposure_path),
         ("catalogue", catalogue_dir / "catalogue.json"),
         ("catalogue_items", catalogue_dir / "catalogue_items.jsonl"),
+        ("generator_layout", generator_layout_path),
     ):
         if not path.is_file():
             raise TigerError(f"missing dependency {path}")
@@ -727,20 +747,28 @@ def save_generator(
     sid_dir: Path,
     exposure_path: Path,
     catalogue_dir: Path,
+    generator_layout_path: Path,
     out_dir: Path,
     resume_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write ``tiger.pt``/``tiger.json``/``score_rule.json`` and return the metadata record.
+    """Write ``tiger.pt``/``tiger.json``/``generator_layout.json``/``score_rule.json``.
 
-    The metadata binds the checkpoint to the **exact** SID assignment, layout, tokenizer,
-    training exposure and catalogue it was trained against.  Loading a checkpoint against a
-    different one of any of those is refused rather than silently accepted, which is what stops
-    a generator trained on one token space from being used with another.
+    The metadata binds the checkpoint to the **exact** accepted SID assignment, accepted SID
+    layout, derived generator layout, tokenizer, training exposure and catalogue it was trained
+    against.  Loading a checkpoint against a different one of any of those is refused rather than
+    silently accepted, which is what stops a generator trained on one token space from being used
+    with another.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    dependencies = _dependency_hashes(sid_dir, exposure_path, catalogue_dir)
+    dependencies = _dependency_hashes(sid_dir, exposure_path, catalogue_dir, generator_layout_path)
     validate_score_rule(dict(SCORE_RULE))
     layout = model.layout
+    # The generator layout travels with the weights, so a checkpoint directory is self-describing.
+    # The dependency hash is over the caller's artifact, so writing it is idempotent when the
+    # caller already placed it there (the CLI does) and a copy otherwise.
+    written_layout = out_dir / "generator_layout.json"
+    if Path(generator_layout_path).resolve() != written_layout.resolve():
+        written_layout.write_bytes(Path(generator_layout_path).read_bytes())
     payload = {
         "state_dict": model.model.state_dict(),
         "model_config": model.config.as_dict(
@@ -757,15 +785,12 @@ def save_generator(
     score_rule_path.write_text(
         json.dumps(dict(SCORE_RULE), indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )
-    layout_path = out_dir / "layout.json"
-    layout_path.write_text(
-        json.dumps(dict(layout), indent=1, sort_keys=True) + "\n", encoding="utf-8"
-    )
 
     metadata = {
         "format": "agentrecx.tiger.checkpoint.v3",
         "layout": dict(layout),
-        "layout_sha256": _sha256_file(layout_path),
+        "layout_sha256": _sha256_file(sid_dir / "layout.json"),
+        "generator_layout_sha256": dependencies["generator_layout"],
         "score_rule": dict(SCORE_RULE),
         "score_rule_sha256": _sha256_file(score_rule_path),
         "model": {
@@ -806,32 +831,40 @@ def load_generator(
     sid_dir: Path,
     exposure_path: Path,
     catalogue_dir: Path,
+    generator_layout_path: Path,
     device: str = "cpu",
 ) -> tuple[TigerGenerator, dict[str, Any], dict[str, Any]]:
     """Load a checkpoint, refusing any dependency mismatch.
 
-    Returns ``(model, metadata, resume_state)``.  Three refusals matter:
+    Returns ``(model, metadata, resume_state)``.  Four refusals matter:
 
-    * a dependency hash that does not match the artifacts on disk - the checkpoint would be
-      applied to a different token space, exposure or catalogue;
+    * a dependency hash that does not match the artifacts on disk - the checkpoint would be applied
+      to a different token space, exposure or catalogue.  Both layout artifacts are covered: the
+      accepted SID layout and the derived generator layout;
     * a layout whose ``vocab_size`` disagrees with the checkpoint's own model config;
+    * a checkpoint directory that does not carry the generator layout it was trained with;
     * a missing checkpoint file.
     """
     checkpoint_path = out_dir / "tiger.pt"
     metadata_path = out_dir / "tiger.json"
     if not checkpoint_path.is_file() or not metadata_path.is_file():
         raise TigerError(f"no checkpoint at {out_dir}")
+    if not (out_dir / "generator_layout.json").is_file():
+        raise TigerError(
+            f"the checkpoint at {out_dir} carries no generator_layout.json; it names a vocabulary "
+            "that cannot be reconstructed, so it is refused rather than guessed"
+        )
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     expected = metadata.get("dependency_hashes") or {}
-    actual = _dependency_hashes(sid_dir, exposure_path, catalogue_dir)
+    actual = _dependency_hashes(sid_dir, exposure_path, catalogue_dir, generator_layout_path)
     mismatched = sorted(
         name for name, digest in expected.items() if actual.get(name) != digest
     )
     if mismatched:
         raise TigerError(
             "the checkpoint was trained against different dependencies; refusing to load. "
-            f"Mismatched: {mismatched}. A generator trained on one Semantic-ID layout, "
-            "exposure or catalogue must not be silently reused with another."
+            f"Mismatched: {mismatched}. A generator trained on one Semantic-ID layout, generator "
+            "layout, exposure or catalogue must not be silently reused with another."
         )
 
     payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -841,6 +874,21 @@ def load_generator(
         raise TigerError(
             f"the checkpoint's layout vocab_size {layout['vocab_size']} disagrees with its "
             f"model config vocab_size {recorded['vocab_size']}"
+        )
+    # The embedded copy and the dependency file must be the same artifact, and it must be a
+    # *derived generator* layout.  Accepting the accepted SID layout here would let a checkpoint
+    # name a vocabulary with no SEP.
+    embedded_raw = (out_dir / "generator_layout.json").read_text(encoding="utf-8")
+    embedded = json.loads(embedded_raw)
+    if embedded.get("format") != GENERATOR_LAYOUT_FORMAT:
+        raise TigerError(
+            f"the checkpoint's generator layout declares format {embedded.get('format')!r}, "
+            f"expected {GENERATOR_LAYOUT_FORMAT!r}"
+        )
+    if int(embedded["vocab_size"]) != int(recorded["vocab_size"]):
+        raise TigerError(
+            f"the checkpoint's embedded generator layout declares vocab_size "
+            f"{embedded['vocab_size']} but its model config says {recorded['vocab_size']}"
         )
     config = TigerConfig(
         d_model=int(recorded["d_model"]),

@@ -145,14 +145,15 @@ cd backends/tiger_public
 PYTHONPATH=src .venv/bin/python ../../experiments/gate_d_tiger_training.py \
     --archive ../../runs/_autodl_backup/step24f-tiger-public-dfabc1c.tar.gz \
     --extract-to /data/agentrecx/step24f \
-    --patch-layout
+    --generator-out /data/agentrecx/tiger_generator_prod/generator
 ```
 
-`--patch-layout` applies the one Gate-C metadata change Gate B requires: the accepted
-`sid/layout.json` predates the `sep` special token. The patch registers
-`sep = code_space + 3`, sets `vocab_size = code_space + 4`, and writes a `.v3.bak.json` backup. It
-reads and writes **only** `layout.json` — `semantic_ids.json`, `tokenizer.pt`, `tokenizer.json` and
-`item_features.npy` are untouched, so no refit and no re-encode happens.
+The accepted SID artifact is **immutable**. The accepted `sid/layout.json` predates the `sep`
+special token, so the generator's vocabulary is a **separate derived artifact**,
+`generator_layout.json`: the materialiser reads `sid/layout.json` read-only, copies every level,
+offset and codebook value verbatim, appends `sep = accepted_vocab_size`, and records the accepted
+layout's and Semantic IDs' SHA256. Nothing is written inside `sid/`, and the runbook prints all
+four accepted SID hashes before and after and requires them to be identical.
 
 Registered production configuration (frozen in `docs/TIGER_BACKEND.md` §17.4; the CLI defaults
 *are* these values, and `tests/test_step25_tiger.py` fails if they drift): `epochs 20`,
@@ -187,6 +188,7 @@ src/tiger_public/
   quantizer.py   stage 2 - RQ-VAE, k-means++ seeding, STE, dead-code revival, diagnostics
   dedup.py       stage 2 - deterministic collision ordinal with an overflow refusal
   scoring.py     the ONE frozen item-score rule and its admissibility helper
+  generator_layout.py  stage 3 - derives the generator vocabulary from the accepted SID layout
   trie.py        stage 3 - catalogue-constrained decoding (search constraint only)
   tiger.py       stage 3 - example builder, T5 generator, trainer, checkpoint I/O
   cli.py         the four stage subcommands
