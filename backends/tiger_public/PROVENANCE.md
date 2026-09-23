@@ -109,6 +109,36 @@ Portions are `REIMPLEMENTED_FROM`:
   `src/modules/clustering/base_clustering_module.py` — the measured finding that Adam at
   `learning_rate = 1e-3` collapses the later residual levels; see the Step-2.4 report.
 
+### `src/tiger_public/trie.py`
+`ORIGINAL` for the trie, its stats and its fail-closed resolution.
+`REIMPLEMENTED_FROM` `mclwu22/amazon-genrec`, `tiger/50_train.py:36-49` (`build_trie`) and
+`snap-research/GRID@2fe3475b`, `src/models/modules/semantic_id/tiger_generation_model.py:202-251`
+(`_check_valid_prefix`). **Changed:** the trie is built from the accepted catalogue assignment
+rather than a separate validated-token file, so it cannot drift from the SIDs actually in use;
+construction *refuses* a layout whose sentinel is tokenisable; the dedup level is its own token
+block via the layout's offsets; and the structure is a real prefix trie (O(1) child lookup)
+rather than GRID's `O(C x b x H)` membership test, which its own TODO notes is a placeholder.
+
+### `src/tiger_public/tiger.py`
+`ORIGINAL` for the example builder, the local trainer, the constrained beam search and the
+dependency-bound checkpoint I/O.
+Portions are `REIMPLEMENTED_FROM`:
+
+* `mclwu22/amazon-genrec`, `tiger/50_train.py` — the seq2seq direction: a randomly initialised
+  T5 encoder-decoder over SID tokens, one item block plus EOS as the target, AdamW with a
+  OneCycleLR schedule, bf16 autocast on a CUDA host, and constrained beam search over a
+  catalogue trie. **Changed:** training reads AgentRec-X's `train_exposure.jsonl` instead of
+  self-derived token files; token ids come from the accepted `layout.json` offsets rather than
+  hardcoded `VOCAB = 1027` constants repeated across files; the trainer is plain PyTorch with no
+  Lightning/Hydra/DDP; padding is masked and never a target; and the checkpoint is bound to
+  dependency hashes, which the source does not do.
+* `snap-research/GRID@2fe3475b`, `src/models/modules/semantic_id/tiger_generation_model.py` —
+  the per-level offset idea (one embedding table serving several codebooks via disjoint offset
+  blocks) and the beam-search shape. **Changed:** the offsets are derived from the accepted
+  layout, not from a `codebook_size` argument; decoding consults a prefix trie so an illegal
+  continuation cannot be produced at all, rather than being filtered afterwards; and the shipped
+  GRID prefix check is disabled by default, which this implementation does not inherit.
+
 ### `src/tiger_public/dedup.py`
 `ORIGINAL` for the module boundary, the overflow refusal and the recorded audit shape.
 The collision-ordinal scheme is `REIMPLEMENTED_FROM`
@@ -152,6 +182,14 @@ the production host, because a wheel selected here would be a guess about that h
 `ORIGINAL`.  The Step-2.4 test modules exercise the encoding stage, the RQ-VAE arithmetic, the
 k-means++ seeding, the straight-through gradient path, the dedup ordinals and the overflow
 refusal.  They need no model weights, because the smoke encoder is deterministic and offline.
+
+### `tests/test_step25_tiger.py`
+`ORIGINAL`.  Generator and trie tests: example construction from train history only, PAD
+exclusion, dedup-level token separation, trie completeness and invalid-prefix rejection,
+checkpoint dependency-mismatch refusal, and a small train/save/load/constrained-generate smoke.
+Model-building tests use a deliberately tiny architecture because the registered production
+architecture is *reported*, not enforced; a test that could not afford 14 M parameters would skip
+the very code paths that need testing.
 
 ### `tests/test_step24f_readiness.py`, `tests/test_step24f_audit.py`
 `ORIGINAL`.  The Step-2.4F test modules cover encoder-revision pinning and the refusal to record

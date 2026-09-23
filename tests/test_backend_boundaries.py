@@ -438,10 +438,16 @@ def test_t8_score_rule_lives_in_exactly_one_module() -> None:
         if "SCORE_RULE" in path.read_text(encoding="utf-8")
     ]
     names = sorted(path.name for path in definitions)
-    assert names == ["cli.py", "scoring.py"], f"the score rule is declared in {names}"
-    scoring_source = (BACKEND_SRC / "scoring.py").read_text(encoding="utf-8")
-    assert '"eos_in_score": False' in scoring_source
-    assert '"child_renormalisation": False' in scoring_source
+    # ``scoring.py`` declares the rule.  ``cli.py`` and ``tiger.py`` only *record* it into the
+    # checkpoint they write, and must not define a second copy - which the next assertion checks.
+    assert names == ["cli.py", "scoring.py", "tiger.py"], f"the score rule is declared in {names}"
+    scoring = (BACKEND_SRC / "scoring.py").read_text(encoding="utf-8")
+    for other in ("cli.py", "tiger.py"):
+        source = (BACKEND_SRC / other).read_text(encoding="utf-8")
+        assert '"eos_in_score": False' not in source, f"{other} duplicates the rule's values"
+        assert '"child_renormalisation": False' not in source, f"{other} duplicates the rule"
+    assert '"eos_in_score": False' in scoring
+    assert '"child_renormalisation": False' in scoring
 
 
 def test_t8_the_rule_values_are_declared_only_in_scoring() -> None:
@@ -480,8 +486,10 @@ def test_t8_adapter_and_backend_layout_arithmetic_agree() -> None:
     from recommendation.backends.tiger_backend import build_token_layout
 
     layout = build_token_layout(levels=3, codebook_size=64, dedup_levels=1)
-    assert layout["vocab_size"] == (3 + 1) * 64 + 3
-    assert layout["special"] == {"pad": 256, "bos": 257, "eos": 258}
+    # Code space + four specials (pad, bos, eos, sep).  SEP is registered because the generator
+    # needs an explicit item-boundary token rather than deriving one.
+    assert layout["special"] == {"pad": 256, "bos": 257, "eos": 258, "sep": 259}
+    assert layout["vocab_size"] == (3 + 1) * 64 + 4 == 260
     assert layout["level_offsets"] == [0, 64, 128, 192]
     assert layout["sentinel_tokenisable"] is False
 
@@ -550,12 +558,21 @@ def test_backend_entrypoint_exposes_exactly_the_four_stages() -> None:
 
 
 def test_stub_marker_is_unmistakable() -> None:
-    """A placeholder must be labelled so it can never be read as a measurement."""
+    """A placeholder must be labelled so it can never be read as a measurement.
+
+    Stage 4 (score) is still a placeholder and still carries the marker; stage 3 (train) became a
+    real implementation in Step 2.5, so its assertion moved with the code that makes it.
+    """
     source = (BACKEND_SRC / "__init__.py").read_text(encoding="utf-8")
     assert '"step-2.3-placeholder-no-ml"' in source
     cli = (BACKEND_SRC / "cli.py").read_text(encoding="utf-8")
     assert 'STUB_MARKER = "step-2.3-placeholder-no-ml"' in cli
-    assert '"validation_used": False' in cli
+    # The scorer is still the placeholder, and says so.
+    assert '"scorer": STUB_MARKER' in cli
+    # The trained generator asserts that no validation target was used; the assertion lives with
+    # the training config, because that is what the checkpoint records.
+    tiger = (BACKEND_SRC / "tiger.py").read_text(encoding="utf-8")
+    assert '"validation_used": False' in tiger
 
 
 def test_handoff_json_schema_is_target_free_when_materialised(tmp_path: Path) -> None:

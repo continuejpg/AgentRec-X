@@ -92,6 +92,9 @@ class TokenLayout:
     pad_token: int
     bos_token: int
     eos_token: int
+    #: Item-boundary separator.  The generator needs an explicit boundary token, so it is part of
+    #: the layout rather than derived at use time (a guessed id could alias a real code).
+    sep_token: int
     vocab_size: int
 
     @property
@@ -123,9 +126,13 @@ class TokenLayout:
             )
         if (self.bos_token, self.eos_token) != (self.code_space + 1, self.code_space + 2):
             raise ContractError("bos_token/eos_token must follow pad_token in that order")
-        if self.vocab_size != self.code_space + 3:
+        if self.sep_token != self.code_space + 3:
             raise ContractError(
-                f"vocab_size must be {self.code_space + 3}, got {self.vocab_size}"
+                f"sep_token must be {self.code_space + 3}, got {self.sep_token}"
+            )
+        if self.vocab_size != self.code_space + 4:
+            raise ContractError(
+                f"vocab_size must be {self.code_space + 4}, got {self.vocab_size}"
             )
 
     def is_tokenisable(self, semantic_id: Sequence[int]) -> bool:
@@ -173,6 +180,7 @@ class TokenLayout:
                 "pad": self.pad_token,
                 "bos": self.bos_token,
                 "eos": self.eos_token,
+                "sep": self.sep_token,
             },
             "vocab_size": self.vocab_size,
             "code_space": self.code_space,
@@ -209,7 +217,8 @@ def build_token_layout(
         pad_token=code_space,
         bos_token=code_space + 1,
         eos_token=code_space + 2,
-        vocab_size=code_space + 3,
+        sep_token=code_space + 3,
+        vocab_size=code_space + 4,
     )
     layout.validate()
     return layout

@@ -1,17 +1,18 @@
-"""Stage CLI for the public-TIGER backend (Step 2.3 skeleton).
+"""Stage CLI for the public-TIGER backend.
 
 Four stages, matching ``docs/TIGER_BACKEND.md`` section 1::
 
-    build-features  -> ItemFeatureArtifact     (Step 2.4 replaces the placeholder)
-    fit-sid         -> SemanticIdArtifact      (Step 2.4 replaces the placeholder)
-    train           -> TigerCheckpoint         (Step 2.5 replaces the placeholder)
-    score           -> Iterator[ScoreBatch]    (Step 2.6 replaces the stub scorer)
+    build-features  -> ItemFeatureArtifact     (real; Step 2.4)
+    fit-sid         -> SemanticIdArtifact      (real; Step 2.4F)
+    train           -> TigerCheckpoint         (real; Step 2.5)
+    score           -> Iterator[ScoreBatch]    (still the Step-2.3 bounded stub; Step 2.6)
 
-**Step 2.3 implements no ML.**  The artifact stages write deterministic *placeholders* so the
-process, schema, digest and score-batch boundary can be proven end to end today, and the
-scoring stage emits the historical bounded stub from
-:func:`tiger_public.contracts.compute_scores`.  Nothing here downloads a model, touches a GPU,
-or trains anything.
+The three artifact stages are implemented.  The **scoring stage is still the historical bounded
+stub** from :func:`tiger_public.contracts.compute_scores` and carries
+``STUB_MARKER``, so no number it produces can be read as a measurement; Step 2.6 replaces it and
+certifies retrieval separately.  ``train`` builds a real generator, but it never runs here on its
+own: a production run is a GPU job with the registered configuration, not something this file
+decides.
 
 Two invariants this file demonstrates:
 
@@ -78,6 +79,7 @@ from tiger_public.io import (
     ArtifactError,
     read_catalogue,
     read_eval_cohort,
+    read_exposure_rows,
     read_train_exposure,
     sha256_bytes,
     sha256_file,
@@ -113,7 +115,7 @@ class CliError(RuntimeError):
 
 
 # --------------------------------------------------------------------------- #
-# Stage 1 - build features (placeholder)
+# Stage 1 - build features (real; Step 2.4)
 # --------------------------------------------------------------------------- #
 
 
@@ -174,7 +176,7 @@ def stage_build_features(
 
 
 # --------------------------------------------------------------------------- #
-# Stage 2 - fit semantic ids (placeholder)
+# Stage 2 - fit semantic ids (real; Step 2.4F)
 # --------------------------------------------------------------------------- #
 
 
@@ -536,7 +538,7 @@ def stage_fit_sid(
 
 
 # --------------------------------------------------------------------------- #
-# Stage 3 - train (placeholder)
+# Stage 3 - train (real; Step 2.5)
 # --------------------------------------------------------------------------- #
 
 
@@ -546,48 +548,123 @@ def stage_train(
     exposure_path: Path,
     sid_dir: Path,
     out_dir: Path,
-    epochs: int = 0,
-) -> TigerCheckpoint:
-    """Write a placeholder checkpoint that records the frozen score rule and the layout.
+    epochs: int = 20,
+    batch_size: int = 512,
+    learning_rate: float = 5e-4,
+    d_model: int = 256,
+    num_layers: int = 6,
+    num_heads: int = 4,
+    d_ff: int = 1024,
+    dropout: float = 0.1,
+    max_hist_items: int = 20,
+    seed: int = 2026,
+    device: str = "cpu",
+    bf16: bool = True,
+    max_examples: int | None = None,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Stage 3: train the TIGER generator on ``train_history`` only.
 
-    No model is trained.  ``validation_used`` is ``false`` because the backend has no
-    validation split **and** no code path that could compute one.
+    Reads ``train_exposure.jsonl``, whose rows were verified to equal frozen
+    ``EvaluationCase.train_history``.  The function has **no parameter that could carry a
+    target**, and it never reads a cohort artifact, so a validation or test target cannot reach
+    training by construction rather than by convention.
+
+    The token space is taken from the accepted ``semantic_ids.json`` / ``layout.json``; nothing
+    about the levels, offsets, codebook widths or special tokens is assumed here.
     """
+    from tiger_public.tiger import (
+        TigerConfig,
+        TigerGenerator,
+        TigerTrainer,
+        build_examples,
+        describe_examples,
+        save_generator,
+    )
+    from tiger_public.trie import CatalogueTrie
+
+    verify_manifest(catalogue_dir, required=("catalogue.json",))
     catalogue = read_catalogue(catalogue_dir)
     exposure = read_train_exposure(exposure_path.parent, catalogue=catalogue)
-    layout_payload = json.loads((sid_dir / "layout.json").read_text(encoding="utf-8"))
-    # The frozen rule is validated through its single definition rather than re-checked here.
-    validate_score_rule(dict(SCORE_RULE))
-    checkpoint = {
-        "format": "agentrecx.tiger.checkpoint.v3",
-        "contract_version": CONTRACT_VERSION,
-        "layout": layout_payload,
-        "score_rule": dict(SCORE_RULE),
-        "model": {"family": STUB_MARKER, "init": "none", "params": 0},
-        "training": {
-            "objective": "none (Step 2.3 placeholder)",
-            "epochs": epochs,
-            "examples": exposure.examples,
-            "labels_from": exposure.field_source,
-            # An assertion, not a report field: the backend has no validation split.
-            "validation_used": False,
-        },
-        "exposure_sha256": exposure.examples_sha256,
-        "semantic_ids_sha256": sha256_file(sid_dir / "semantic_ids.json"),
-    }
-    out_dir.mkdir(parents=True, exist_ok=True)
-    write_json(out_dir / "tiger.json", checkpoint)
-    write_manifest(out_dir, extra={"stage": "train", "stub": True})
-    return TigerCheckpoint(
-        format=checkpoint["format"],
-        contract_version=CONTRACT_VERSION,
-        layout=layout_payload,
-        score_rule=dict(SCORE_RULE),
-        model=checkpoint["model"],
-        training=checkpoint["training"],
-        exposure_sha256=exposure.examples_sha256,
-        semantic_ids_sha256=checkpoint["semantic_ids_sha256"],
+    if exposure.field_source != "EvaluationCase.train_history":
+        raise CliError(
+            f"refusing to train on exposure from {exposure.field_source!r}; the generator trains "
+            "on train_history only"
+        )
+
+    sid_record = read_json_file(sid_dir / "semantic_ids.json")
+    layout = read_json_file(sid_dir / "layout.json")
+    assignment = sid_record["assignment"]
+    if len(assignment) != catalogue.num_items + 1:
+        raise CliError(
+            f"the assignment holds {len(assignment)} rows for {catalogue.num_items} catalogue "
+            "items; it does not describe this catalogue"
+        )
+
+    # The trie is built from the accepted final SIDs and used as a generation constraint only.
+    trie = CatalogueTrie(assignment, layout=layout)
+    if not trie.collision_free():
+        raise CliError(
+            "the accepted assignment is not collision-free, so a generated path could resolve "
+            "to more than one item; refusing to train a generator against it"
+        )
+
+    rows = read_exposure_rows(exposure_path)
+    if max_examples is not None and max_examples < 1:
+        raise CliError(f"--max-examples must be >= 1, got {max_examples}")
+    if max_examples is not None:
+        rows = rows[:max_examples]
+
+    dataset = build_examples(
+        rows,
+        assignment=assignment,
+        layout=layout,
+        max_hist_items=max_hist_items,
     )
+    config = TigerConfig(
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        dropout=dropout,
+        max_hist_items=max_hist_items,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        bf16=bf16,
+        seed=seed,
+    )
+    torch.manual_seed(config.seed)
+    model = TigerGenerator(config=config, layout=layout, vocab_size=int(layout["vocab_size"]))
+    trainer = TigerTrainer(model, dataset, config=config, device=device)
+    report = trainer.train()
+    final = report.final
+    if not report.history or not np.isfinite(float(final.get("loss", float("nan")))):
+        raise CliError("the generator reported no finite loss; refusing to write a checkpoint")
+
+    metadata = save_generator(
+        model=model,
+        report=report,
+        sid_dir=sid_dir,
+        exposure_path=exposure_path,
+        catalogue_dir=catalogue_dir,
+        out_dir=out_dir,
+    )
+    metadata["trie"] = trie.stats.as_dict()
+    metadata["examples"] = describe_examples(dataset)
+    write_json(out_dir / "tiger.json", metadata)
+    write_manifest(
+        out_dir,
+        extra={
+            "stage": "train",
+            "environment": environment_metadata(device=device),
+            "timing": {"seconds": round(report.seconds, 3),
+                       "peak_allocated_bytes": report.peak_allocated_bytes},
+        },
+    )
+    if log is not None:
+        log(metadata["training"])
+    return metadata
 
 
 # --------------------------------------------------------------------------- #
@@ -940,7 +1017,10 @@ def _collision_blocks(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tiger_public.cli",
-        description="public-TIGER backend stages (Step 2.3: no ML; all stages are placeholders)",
+        description=(
+            "public-TIGER backend stages: build-features, fit-sid, train (real); "
+            "score is still the Step-2.3 bounded stub"
+        ),
     )
     parser.add_argument("--quiet", action="store_true", help="suppress per-epoch progress")
     sub = parser.add_subparsers(dest="stage", required=True)
@@ -1015,12 +1095,36 @@ def _parser() -> argparse.ArgumentParser:
         help="request deterministic algorithms (advisory on CUDA; recorded, not promised)",
     )
 
-    train = sub.add_parser("train", help="stage 3: generator (placeholder)")
+    train = sub.add_parser("train", help="stage 3: train the TIGER SID generator")
     train.add_argument("--catalogue", type=Path, required=True)
     train.add_argument("--exposure", type=Path, required=True)
     train.add_argument("--sid", type=Path, required=True)
     train.add_argument("--out", type=Path, required=True)
-    train.add_argument("--epochs", type=int, default=0)
+    train.add_argument(
+        "--epochs", type=int, default=20,
+        help="fixed epoch budget; H5 registers 'fixed' without naming a value",
+    )
+    train.add_argument("--batch-size", type=int, default=512)
+    train.add_argument(
+        "--learning-rate", type=float, default=5e-4,
+        help="section 7.4 example value; NOT frozen by H5",
+    )
+    train.add_argument("--d-model", type=int, default=256)
+    train.add_argument("--layers", type=int, default=6)
+    train.add_argument("--heads", type=int, default=4)
+    train.add_argument("--d-ff", type=int, default=1024)
+    train.add_argument("--dropout", type=float, default=0.1)
+    train.add_argument("--max-hist-items", type=int, default=20)
+    train.add_argument("--seed", type=int, default=2026)
+    train.add_argument("--device", default="cpu")
+    train.add_argument(
+        "--no-bf16", dest="bf16", action="store_false",
+        help="bf16 autocast is CUDA-only; a CPU run is reported as fp32 regardless",
+    )
+    train.add_argument(
+        "--max-examples", type=int, default=None,
+        help="SMOKE ONLY: cap the example count so a local run is cheap; production must omit it",
+    )
 
     score = sub.add_parser("score", help="stage 4: scores (deterministic stub)")
     score.add_argument("--cohort", type=Path, required=True)
@@ -1105,16 +1209,39 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dead_code_waiver": dead_code_waiver_record,
             }
         elif args.stage == "train":
-            checkpoint = stage_train(
+            metadata = stage_train(
                 catalogue_dir=args.catalogue,
                 exposure_path=args.exposure,
                 sid_dir=args.sid,
                 out_dir=args.out,
                 epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                d_model=args.d_model,
+                num_layers=args.layers,
+                num_heads=args.heads,
+                d_ff=args.d_ff,
+                dropout=args.dropout,
+                max_hist_items=args.max_hist_items,
+                seed=args.seed,
+                device=args.device,
+                bf16=args.bf16,
+                max_examples=args.max_examples,
+                log=(lambda entry: print(f"[train] {entry}", file=sys.stderr))
+                if not args.quiet
+                else None,
             )
             record = {
                 "stage": args.stage,
-                "validation_used": checkpoint.training.get("validation_used"),
+                "examples": metadata["examples"]["examples"],
+                "users": metadata["examples"]["users"],
+                "params": metadata["model"]["params"],
+                "epochs": len(metadata["training"]["history"]),
+                "final_loss": metadata["training"]["history"][-1]["loss"],
+                "precision": metadata["training"]["precision"],
+                "validation_used": metadata["training"]["validation_used"],
+                "trie_nodes": metadata["trie"]["nodes"],
+                "checkpoint_sha256": metadata["checkpoint_sha256"],
             }
         else:
             record = stage_score(

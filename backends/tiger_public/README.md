@@ -6,15 +6,20 @@ It owns **learning and scoring only**; it owns none of the evaluation.
 Specification: [`docs/TIGER_BACKEND.md`](../../docs/TIGER_BACKEND.md).
 Boundary rule: [`AGENTS.md`](../../AGENTS.md) section 19.
 
-> **Status after Step 2.4.** Stages 1 and 2 are implemented:
+> **Status after Step 2.5 Gate B.** Stages 1-3 are implemented:
 >
 > * `build-features` encodes `products_text.jsonl` with a frozen sentence encoder;
 > * `fit-sid` trains the RQ-VAE, assigns three-level Semantic IDs, applies the deterministic
->   dedup digit, and audits the result.
+>   dedup digit, and audits the result;
+> * `train` builds a randomly initialised T5 encoder-decoder over the accepted SID token layout,
+>   learns it from `train_exposure.jsonl` (`train_history` only), and writes a checkpoint bound to
+>   dependency hashes. Constrained decoding over the catalogue prefix trie is implemented and
+>   exercised by `experiments/smoke_tiger_step25.py`.
 >
-> Stage 3 (`train`) and stage 4 (`score`) remain **placeholders** labelled
-> `step-2.3-placeholder-no-ml`: there is no TIGER model, no constrained retrieval, no certified
-> search and no recommendation measurement in this tree yet.
+> Stage 4 (`score`) remains the **Step-2.3 bounded stub** labelled `step-2.3-placeholder-no-ml`,
+> so no number it produces is a measurement. There is **no certified retrieval and no
+> recommendation measurement in this tree yet**: Step 2.6 owns that, and the full GPU training run
+> has not been executed.
 
 ## Why this is a separate project
 
@@ -43,8 +48,8 @@ The backend never receives, and cannot reconstruct:
 ```text
 build-features  -> ItemFeatureArtifact     IMPLEMENTED  frozen text encoder -> [N, 768] float32
 fit-sid         -> SemanticIdArtifact      IMPLEMENTED  RQ-VAE -> 3-level SIDs -> dedup digit
-train           -> TigerCheckpoint         placeholder  (Step 2.5)
-score           -> Iterator[ScoreBatch]    placeholder  (Step 2.6)
+train           -> TigerCheckpoint         IMPLEMENTED  T5 seq2seq + trie-constrained decoding
+score           -> Iterator[ScoreBatch]    placeholder  (Step 2.6: certified retrieval)
 ```
 
 ### Stage 1 — `build-features`
@@ -101,8 +106,9 @@ Production crossing is a subprocess plus a filesystem contract (JSONL / `.npy` /
 
 ## Running it
 
-The Step-2.3 placeholders need only NumPy, so they run in either environment; a real deployment
-uses the backend's own venv.
+Every stage now needs the backend's own venv: `train` builds a real torch model, and the
+AgentRec-X adapter tests point `backend_python` at it (they skip with a stated reason when it is
+absent).
 
 ```bash
 # backend-local tests (its own project; never collected by AgentRec-X)
@@ -116,6 +122,12 @@ cd ../..
 # a real run needs the encoder's weights, which a GPU host fetches from the Hub or a mirror
 HF_ENDPOINT=https://hf-mirror.com .venv/bin/python -m experiments.smoke_tiger_step24 \
     --items 2000 --encoder sentence-transformers/sentence-t5-base
+
+# the Step-2.5 Gate B smoke: trie + examples + tiny train/save/load/constrained generation
+PYTHONPATH=src .venv/bin/python ../../experiments/smoke_tiger_step25.py
+
+# what a production run would be (this is a report only; it trains nothing)
+PYTHONPATH=src .venv/bin/python ../../experiments/smoke_tiger_step25.py --report-production
 ```
 
 `--limit N` is **smoke only**: it remaps the cohort onto its N most-used items and carries the
@@ -138,10 +150,12 @@ compromise the model to fit a CPU.
 src/tiger_public/
   contracts.py   frozen dataclasses, the PAD sentinel, the token layout, the Protocol
   io.py          hashing, manifest verification, handoff readers, forbidden-key refusal
-  scoring.py     the ONE frozen item-score rule and its admissibility helper
   features.py    stage 1 - text encoder, streaming batches, atomic artifact write
   quantizer.py   stage 2 - RQ-VAE, k-means++ seeding, STE, dead-code revival, diagnostics
   dedup.py       stage 2 - deterministic collision ordinal with an overflow refusal
+  scoring.py     the ONE frozen item-score rule and its admissibility helper
+  trie.py        stage 3 - catalogue-constrained decoding (search constraint only)
+  tiger.py       stage 3 - example builder, T5 generator, trainer, checkpoint I/O
   cli.py         the four stage subcommands
 tests/           backend-local invariants
 PROVENANCE.md      per-file origin and licence status

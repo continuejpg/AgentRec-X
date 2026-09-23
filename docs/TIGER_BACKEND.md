@@ -1327,6 +1327,39 @@ documented in `PHASE5_HANDOFF.md` §8; that recurrence is not materializer leaka
 The cohort artifact carries `case_id`, `history` and `required_frontier` only. No target key and
 no canonical identity appears in any handoff artifact.
 
+## 17.4 Step 2.5 Gate B: generator example count (OPEN — needs registration)
+
+H5 registers "1 850 807 examples". That number is reproducible, but **not** from a true next-item
+objective. Measured against the accepted production exposure (412 445 rows):
+
+| convention | examples |
+|---|---|
+| `sum(len(row) - 1)` — every position predicted from its full causal prefix (**true next-item**) | **2 675 697** |
+| `sum(len(row) - 2)` — the first transition of every user dropped | **1 850 807** ← matches H5 |
+| `sum(len(row))` | 3 088 142 |
+
+1 850 807 is exactly the Two-Tower pair count from `docs/MODEL_EXPANSION_HANDOFF.md` §3, and it is
+the convention GenRec v0's generator dataset uses (`semantic_id/dataset.py`, which iterates from
+position 2). H5's figure was therefore inherited from that convention rather than derived from
+TIGER's own objective.
+
+**What Gate B implements.** The frozen prose in this document and §7.4 both define the objective
+as "the next item's SID" with a target of "the item's complete Semantic-ID token path", so the
+implementation uses the true next-item convention: `n - 1` examples per history of `n`, i.e.
+**2 675 697 examples**, and every example's target is a train-history item with no validation or
+test target anywhere in the input.
+
+**Why this is reported rather than silently chosen.** Gate C's H5 run cannot be described as
+executing the registered configuration while also using 44 % more examples than H5 names. Both
+readings are defensible — the larger corpus is the canonical TIGER objective and strictly better
+for training, while 1 850 807 is what H5 literally registers — so the choice belongs in the
+pre-registration, not in the implementation. Switching to the H5 figure is a one-line change in
+the example builder (skip the first transition of each row) and requires no other code change.
+
+**Also still requiring registration for Gate C:** `epochs`. H5 registers a "fixed epoch budget"
+without naming a value; §7.4 shows `epochs = 20`, and the CLI carries that value as its default.
+`d_model=256, layers=6, batch_size=512, bf16` **are** registered and are the CLI defaults.
+
 ## 18. Provenance and licence constraints
 
 Both audited repositories are legally *read-only design sources*; neither may be vendored.

@@ -9,13 +9,20 @@ Covers the gates the specification names for Step 2.3:
 * **G9** the identity round-trip and the shuffled-``item_ids`` refusal;
 * **G10** PAD is structurally impossible as a SID.
 
-Everything runs on synthetic data, so the suite needs no catalogue artifact, no model, no GPU
-and no backend virtual environment.
+Everything runs on synthetic data, so the suite needs no catalogue artifact, no model and no GPU.
+
+It does need the backend interpreter, because stage 3 stopped being a placeholder in Step 2.5:
+``train`` now builds a real T5 generator, and the repo interpreter deliberately has no ML stack.
+The ``stub_root`` fixture trains once per module against the backend venv and every staged test
+copies that trained root, so the boundary is exercised for real without paying for a training run
+per test.  When the backend venv is absent the staged tests *skip* with that reason rather than
+claiming a pass; the pure-contract tests still run.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -43,14 +50,35 @@ from recommendation.backends.tiger_backend import (  # noqa: E402
 HASHES = {"mappings_sha256": "a" * 64, "sequences_sha256": "b" * 64, "products_sha256": "c" * 64}
 NUM_ITEMS = 96
 
+# Stage 3 became a real generator in Step 2.5, so the staged tests drive the backend interpreter
+# rather than the repo interpreter.  The adapter takes this path as a parameter in production
+# (``backend_python``); the tests do the same, and skip when the venv is not installed.
+BACKEND_ROOT = REPO_ROOT / "backends" / "tiger_public"
+BACKEND_PYTHON = BACKEND_ROOT / ".venv" / "bin" / "python"
+HAVE_BACKEND_ML = BACKEND_PYTHON.is_file()
+requires_backend_ml = pytest.mark.skipif(
+    not HAVE_BACKEND_ML,
+    reason=f"stage 3 needs the backend venv's ML stack, and {BACKEND_PYTHON} is not installed",
+)
 
-def make_handoff(root: Path, *, num_items: int = NUM_ITEMS, cohort: int = 4) -> TigerBackendAdapter:
-    """Materialise a tiny, complete, target-free handoff on disk.
+# One trained template per module, copied per test.  The generator is deliberately tiny: these
+# tests exercise the *boundary*, never the representation.
+_STUB_MODEL_FLAGS = (
+    "--d-model", "32",
+    "--layers", "1",
+    "--heads", "1",
+    "--d-ff", "64",
+    "--epochs", "2",
+    "--batch-size", "8",
+    "--max-hist-items", "8",
+    "--seed", "7",
+    "--device", "cpu",
+    "--no-bf16",
+)
 
-    The catalogue record is threaded through explicitly so materialisation never re-reads a
-    half-written directory: the manifest that guards a *read* is written once, at the end.
-    """
-    adapter = TigerBackendAdapter(root, timeout_seconds=120.0)
+
+def _materialise(adapter: TigerBackendAdapter, *, num_items: int, cohort: int) -> None:
+    """Write the four handoff artifacts and the manifest for ``adapter``."""
     catalogue = adapter.materialise_catalogue(
         item_ids=list(range(1, num_items + 1)), num_users=3, **HASHES
     )
@@ -66,63 +94,93 @@ def make_handoff(root: Path, *, num_items: int = NUM_ITEMS, cohort: int = 4) -> 
     )
     adapter.write_score_request(status="APPROXIMATE", batch_size=2, sample_items=5)
     adapter.write_manifest()
+
+
+def make_handoff(root: Path, *, num_items: int = NUM_ITEMS, cohort: int = 4) -> TigerBackendAdapter:
+    """Materialise a tiny, complete, target-free handoff on disk.
+
+    The catalogue record is threaded through explicitly so materialisation never re-reads a
+    half-written directory: the manifest that guards a *read* is written once, at the end.
+    """
+    adapter = TigerBackendAdapter(root, timeout_seconds=600.0)
+    _materialise(adapter, num_items=num_items, cohort=cohort)
     return adapter
 
 
-def run_stub_stages(adapter: TigerBackendAdapter, *, status: str = "approximate") -> dict:
-    """Run the four placeholder stages by subprocess, as the adapter does in production."""
-    root = adapter.paths.root
+def _train_stub_root(root: Path) -> None:
+    """Materialise the handoff *and* train a tiny generator into it, once per module.
+
+    Only the four staged tests are allowed to see this cost; ``make_handoff`` stays cheap.
+    """
+    adapter = make_handoff(root)
+    adapter.backend_python = str(BACKEND_PYTHON)
     adapter.run_stage(
         "build-features",
-        "--catalogue",
-        str(root),
-        "--out",
-        str(root / "features"),
-        "--encoder",
-        "smoke",
+        "--catalogue", str(root),
+        "--out", str(root / "features"),
+        "--encoder", "smoke",
     )
-    # A full-width codebook with few epochs: the Step-2.3 tests exercise the *boundary*, not the
-    # representation, so the quantizer only has to produce a valid assignment here.
+    # A narrow codebook and few epochs: the boundary tests need a valid assignment, not a good
+    # one, so the catastrophic-collapse stop is waived (and recorded as waived in the artifact).
+    # The non-waived production path is covered by the Step-2.4 smoke gate.
     adapter.run_stage(
         "fit-sid",
-        "--catalogue",
-        str(root),
-        "--features",
-        str(root / "features"),
-        "--out",
-        str(root / "sid"),
-        "--codebook-size",
-        "32",
-        "--epochs",
-        "2",
-        "--encoder-dims",
-        "768,64,32",
-        "--latent-dim",
-        "16",
-        "--device",
-        "cpu",
-        # These tests exercise the BOUNDARY, not the representation.  A 96-item catalogue with a
-        # 32-wide codebook cannot populate every level in 2 epochs, so the catastrophic-collapse
-        # stop is explicitly waived.  The waiver is recorded in `dead_code_waiver` inside the
-        # artifact, and the non-waived path is covered by the Step-2.4 smoke gate, which trains
-        # 40 epochs and passes the stop on its own.
+        "--catalogue", str(root),
+        "--features", str(root / "features"),
+        "--out", str(root / "sid"),
+        "--codebook-size", "32",
+        "--epochs", "2",
+        "--encoder-dims", "768,64,32",
+        "--latent-dim", "16",
+        "--device", "cpu",
         "--allow-dead-codes",
     )
     adapter.run_stage(
         "train",
-        "--catalogue",
-        str(root),
-        "--exposure",
-        str(adapter.paths.exposure),
-        "--sid",
-        str(root / "sid"),
-        "--out",
-        str(root / "ckpt"),
+        "--catalogue", str(root),
+        "--exposure", str(adapter.paths.exposure),
+        "--sid", str(root / "sid"),
+        "--out", str(root / "ckpt"),
+        *_STUB_MODEL_FLAGS,
     )
     for name in ("semantic_ids.json", "layout.json"):
         (root / name).write_bytes((root / "sid" / name).read_bytes())
     (root / "tiger.json").write_bytes((root / "ckpt" / "tiger.json").read_bytes())
     adapter.write_manifest()
+
+
+@pytest.fixture(scope="module")
+def stub_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A trained backend root, built once for this module."""
+    root = tmp_path_factory.mktemp("stub_root")
+    _train_stub_root(root)
+    return root
+
+
+def stub_handoff(root: Path, stub_root: Path, *, cohort: int = 4) -> TigerBackendAdapter:
+    """A per-test, isolated copy of the trained root at ``root``, re-cohorted to ``cohort``."""
+    shutil.copytree(stub_root, root, dirs_exist_ok=True)
+    adapter = TigerBackendAdapter(root, timeout_seconds=600.0)
+    adapter.backend_python = str(BACKEND_PYTHON)
+    if cohort != 4:
+        # The cohort is not a dependency of the SID fit or of training, so the copy can re-cut
+        # it without redoing either.  The manifest is rewritten because it guards the reads.
+        catalogue = adapter.read_catalogue()
+        adapter.materialise_eval_cohort(
+            test_histories=[[1, 2, 3, 4, 5, 6][: 2 + index] for index in range(cohort)],
+            catalogue=catalogue,
+        )
+        adapter.write_manifest()
+    return adapter
+
+
+def run_stub_stages(adapter: TigerBackendAdapter, *, status: str = "approximate") -> dict:
+    """Run stage 4 against the trained checkpoint, as the adapter does in production.
+
+    Stages 1-3 already ran once for the module (see ``stub_root``); this replays the scorer so a
+    test can inspect, mutate or re-cut the result.
+    """
+    root = adapter.paths.root
     completed = adapter.run_stage(
         "score",
         "--cohort",
@@ -307,8 +365,9 @@ def test_g3_a_single_item_exposure_row_is_refused(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_g6_the_stub_run_produces_a_valid_shard_index(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=6)
+@requires_backend_ml
+def test_g6_the_stub_run_produces_a_valid_shard_index(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=6)
     summary = run_stub_stages(adapter)
     assert summary["stage"] == "score"
     assert summary["transport"] == "shards"
@@ -322,8 +381,9 @@ def test_g6_the_stub_run_produces_a_valid_shard_index(tmp_path: Path) -> None:
     assert receipts == list(range(6))
 
 
-def test_g6_a_reordered_receipt_is_refused(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=4)
+@requires_backend_ml
+def test_g6_a_reordered_receipt_is_refused(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=4)
     run_stub_stages(adapter)
     batches = list(adapter.read_score_shards())
     # Reverse the first batch's receipt: the conversion to evaluator input must refuse it.
@@ -346,8 +406,9 @@ def test_g6_a_reordered_receipt_is_refused(tmp_path: Path) -> None:
         )
 
 
-def test_g6_an_incomplete_stream_is_refused(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=4)
+@requires_backend_ml
+def test_g6_an_incomplete_stream_is_refused(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=4)
     run_stub_stages(adapter)
     batches = list(adapter.read_score_shards())
     with pytest.raises(ContractViolation):
@@ -359,13 +420,14 @@ def test_g6_an_incomplete_stream_is_refused(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_g8_the_adapter_output_satisfies_the_frozen_evaluator(tmp_path: Path) -> None:
+@requires_backend_ml
+def test_g8_the_adapter_output_satisfies_the_frozen_evaluator(tmp_path: Path, stub_root: Path) -> None:
     """The whole point of Step 2.3: raw scores reach ``evaluate_batched`` unmodified."""
     import torch
 
     from recommendation.evaluation.batched import evaluate_batched
 
-    adapter = make_handoff(tmp_path, cohort=8)
+    adapter = stub_handoff(tmp_path, stub_root, cohort=8)
     run_stub_stages(adapter)
     batches = list(adapter.read_score_shards())
     cohort = adapter.read_cohort()
@@ -394,8 +456,9 @@ def test_g8_the_adapter_output_satisfies_the_frozen_evaluator(tmp_path: Path) ->
     assert report.mean_num_candidates > 0
 
 
-def test_g8_every_score_including_the_tail_is_finite(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=4)
+@requires_backend_ml
+def test_g8_every_score_including_the_tail_is_finite(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=4)
     run_stub_stages(adapter)
     for batch in adapter.read_score_shards():
         assert np.isfinite(batch.scores).all()
@@ -404,8 +467,9 @@ def test_g8_every_score_including_the_tail_is_finite(tmp_path: Path) -> None:
         assert not batch.reachable[:, 0].any()
 
 
-def test_g8_unreachable_items_sit_strictly_below_every_reachable_item(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=2)
+@requires_backend_ml
+def test_g8_unreachable_items_sit_strictly_below_every_reachable_item(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=2)
     run_stub_stages(adapter)
     for batch in adapter.read_score_shards():
         for row in range(len(batch.case_ids)):
@@ -417,9 +481,10 @@ def test_g8_unreachable_items_sit_strictly_below_every_reachable_item(tmp_path: 
                 assert (tail < reachable_min).all()
 
 
-def test_g8_streaming_transport_matches_the_sharded_transport(tmp_path: Path) -> None:
+@requires_backend_ml
+def test_g8_streaming_transport_matches_the_sharded_transport(tmp_path: Path, stub_root: Path) -> None:
     """The stream path and the shard path must produce identical scores for the same input."""
-    adapter = make_handoff(tmp_path, cohort=4)
+    adapter = stub_handoff(tmp_path, stub_root, cohort=4)
     run_stub_stages(adapter)
     sharded = list(adapter.read_score_shards())
     streamed = list(
@@ -444,9 +509,10 @@ def test_g8_an_unknown_stage_is_refused(tmp_path: Path) -> None:
         adapter.run_stage("evaluate", "--out", str(tmp_path))
 
 
-def test_g8_an_empty_frontier_is_refused_rather_than_filled(tmp_path: Path) -> None:
+@requires_backend_ml
+def test_g8_an_empty_frontier_is_refused_rather_than_filled(tmp_path: Path, stub_root: Path) -> None:
     """A row with no reachable real item has no defined tail score, so the run must fail."""
-    adapter = make_handoff(tmp_path, cohort=2)
+    adapter = stub_handoff(tmp_path, stub_root, cohort=2)
     run_stub_stages(adapter)
     batches = list(adapter.read_score_shards())
     first = batches[0]
@@ -480,8 +546,9 @@ def test_g8_an_empty_frontier_is_refused_rather_than_filled(tmp_path: Path) -> N
     assert "no real item is reachable" in str(error.value)
 
 
-def test_g8_a_nan_score_is_refused(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=2)
+@requires_backend_ml
+def test_g8_a_nan_score_is_refused(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=2)
     run_stub_stages(adapter)
     first = next(iter(adapter.read_score_shards()))
     poisoned = np.array(first.scores, copy=True)
@@ -501,8 +568,9 @@ def test_g8_a_nan_score_is_refused(tmp_path: Path) -> None:
         )
 
 
-def test_g8_a_wrong_shaped_score_matrix_is_refused(tmp_path: Path) -> None:
-    adapter = make_handoff(tmp_path, cohort=2)
+@requires_backend_ml
+def test_g8_a_wrong_shaped_score_matrix_is_refused(tmp_path: Path, stub_root: Path) -> None:
+    adapter = stub_handoff(tmp_path, stub_root, cohort=2)
     run_stub_stages(adapter)
     first = next(iter(adapter.read_score_shards()))
     with pytest.raises(ContractViolation):
@@ -730,14 +798,19 @@ def test_g10_a_dedup_overflow_refuses_the_build(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_the_stub_run_is_bit_identical_on_a_second_invocation(tmp_path: Path) -> None:
-    first = make_handoff(tmp_path / "a")
+@requires_backend_ml
+def test_the_staged_run_is_bit_identical_on_a_second_invocation(
+    tmp_path: Path, stub_root: Path
+) -> None:
+    """Two invocations over one trained checkpoint must agree byte for byte."""
+    first = stub_handoff(tmp_path / "a", stub_root, cohort=4)
     run_stub_stages(first)
-    second = make_handoff(tmp_path / "b")
-    run_stub_stages(second)
     left = sorted((tmp_path / "a" / "scores").glob("part-*.npz"))
+    assert left
+    second = stub_handoff(tmp_path / "b", stub_root, cohort=4)
+    run_stub_stages(second)
     right = sorted((tmp_path / "b" / "scores").glob("part-*.npz"))
-    assert len(left) == len(right) and left
+    assert len(left) == len(right)
     for one, two in zip(left, right, strict=True):
         with np.load(one, allow_pickle=False) as a, np.load(two, allow_pickle=False) as b:
             assert np.array_equal(a["scores"], b["scores"])

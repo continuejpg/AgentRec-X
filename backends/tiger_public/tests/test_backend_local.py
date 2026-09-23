@@ -39,7 +39,9 @@ from tiger_public.scoring import (
 
 def test_token_layout_puts_specials_above_the_code_space() -> None:
     layout = build_token_layout(levels=3, codebook_size=256, dedup_levels=1)
-    assert layout.vocab_size == 4 * 256 + 3
+    # Code space + pad + bos + eos + sep: SEP is registered because the generator
+    # needs an explicit item-boundary token rather than a derived one.
+    assert layout.vocab_size == 4 * 256 + 4
     assert (layout.pad_token, layout.bos_token, layout.eos_token) == (1024, 1025, 1026)
     assert layout.code_space == 1024
     # Token 0 is the legal code (level 0, code 0), not PAD.
@@ -64,7 +66,8 @@ def test_tokenise_refuses_an_out_of_range_digit() -> None:
 
 def test_vocab_size_is_derived_not_hardcoded() -> None:
     small = build_token_layout(levels=2, codebook_size=32, dedup_levels=1)
-    assert (small.code_space, small.pad_token, small.vocab_size) == (96, 96, 99)
+    assert (small.code_space, small.pad_token, small.vocab_size) == (96, 96, 100)
+    assert small.sep_token == 99
     with pytest.raises(ContractError):
         build_token_layout(levels=0, codebook_size=8)
 
