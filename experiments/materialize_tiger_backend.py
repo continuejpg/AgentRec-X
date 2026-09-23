@@ -160,19 +160,30 @@ def load_item_ids_and_texts(
     return ids, texts, coverage
 
 
-def select_cohort(*, cohort_size: int):
-    """Select the frozen evaluation cohort, returning cases plus the split report.
+def load_all_cases():
+    """Load every eligible case from the frozen artifacts, once.
 
-    The cohort is the accepted deterministic sample: same seed, same bucket definition, same
-    ordering.  Nothing here shrinks it; a smoke run subsamples *items* afterwards instead
-    (see :func:`subsample_items`), because keeping the accepted cohort definition intact is
-    what makes a smoke run a smoke run of the real pipeline.
+    ``train_exposure`` and the evaluation cohort are two different populations drawn from this
+    one load, which is why it is separated from the selection step.
+    """
+    return load_cohort_from_artifacts(SEQUENCES, MAPPINGS)
+
+
+def select_eval_cohort(cases: Sequence[Any], *, cohort_size: int):
+    """Select the frozen deterministic evaluation cohort from ``cases``.
+
+    Thin delegation to the accepted algorithm in ``experiments.benchmark_public`` - same seed,
+    same bucket definition, same ordering.  This function exists so a caller can select the
+    evaluation cohort *without* also truncating the training population, which is exactly the
+    coupling that produced a 2,000-user training exposure for a 412,445-user catalogue.
     """
     import experiments.benchmark_public as bench
 
-    cases, split_report = load_cohort_from_artifacts(SEQUENCES, MAPPINGS)
     selection = bench.cohort_from_cases(cases, size=cohort_size)
-    return cases, list(selection["cases"]), split_report, selection
+    # ``cohort_from_cases`` returns {"cases", "description"}; the description is what carries
+    # the seed, the eligible-user count and the per-bucket provenance, so it is unwrapped here
+    # rather than making every caller reach through the envelope.
+    return list(selection["cases"]), selection["description"]
 
 
 @dataclass(frozen=True)
@@ -249,10 +260,28 @@ def subsample_items(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="materialise the TIGER backend handoff")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--limit", type=int, default=None,
-                        help="smoke runs: remap the cohort onto its N most-used items")
-    parser.add_argument("--cohort", type=int, default=2000,
-                        help="cohort size before the item-id limit is applied")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "SMOKE ONLY. Remap the cohort onto its N most-used item ids and derive both the "
+            "training exposure and the evaluation cohort from the remapped, usable cases. "
+            "Omit it for production, where training exposure is every eligible user."
+        ),
+    )
+    parser.add_argument(
+        "--cohort",
+        type=int,
+        default=2000,
+        help=(
+            "size of the deterministic EVALUATION cohort. On the production path (no --limit) "
+            "this sizes the evaluation cohort only and does NOT truncate training exposure, "
+            "which is always every eligible user. In smoke mode (--limit given) the cohort also "
+            "defines the source cases used for coherent item remapping. The canonical "
+            "production evaluation cohort is 20000."
+        ),
+    )
     parser.add_argument("--mode", choices=("handoff", "stub-run"), default="handoff")
     parser.add_argument("--status", choices=("approximate", "certified"), default="approximate")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -270,26 +299,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_dir: Path = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cases, cohort, split_report, selection = select_cohort(cohort_size=args.cohort)
-    if not cohort:
-        raise SystemExit("the cohort is empty; raise --cohort")
+    # Loaded once.  Two populations are drawn from it and they are deliberately NOT the same:
+    #
+    #   training exposure  every eligible user's train_history   -> the model's training corpus
+    #   evaluation cohort  a deterministic --cohort subset       -> what the evaluator scores
+    #
+    # They were coupled, so `--cohort 2000` (the default) silently produced a 2,000-user
+    # training corpus for a 412,445-user catalogue.  `--cohort` now sizes ONLY the evaluation
+    # cohort; training exposure is all eligible users and does not depend on it.
+    all_cases, split_report = load_all_cases()
+    if not all_cases:
+        raise SystemExit("the frozen artifacts yielded no eligible cases")
+
+    eval_cases, selection = select_eval_cohort(all_cases, cohort_size=args.cohort)
+    if not eval_cases:
+        raise SystemExit("the evaluation cohort is empty; raise --cohort")
 
     catalogue_ids: Sequence[int] | None = None
-    if args.limit is not None:
-        catalogue_ids, cohort = subsample_items(cohort, num_items=args.limit)
-        if not cohort:
+    if args.limit is None:
+        # PRODUCTION: full training exposure.  Every eligible case, independent of --cohort.
+        training_cases: Sequence[Any] = all_cases
+    else:
+        # SMOKE: the full histories reference item ids outside the smoke catalogue, so a
+        # full-history artifact would be incoherent.  The remap is applied to the evaluation
+        # selection and the training exposure comes from the same remapped, usable cases -
+        # which is why in smoke mode the cohort also defines the remapping source.
+        catalogue_ids, smoke_cases = subsample_items(eval_cases, num_items=args.limit)
+        if not smoke_cases:
             raise SystemExit(
-                f"--limit {args.limit} leaves no usable case; raise --limit or --cohort"
+                f"--limit {args.limit} leaves no usable case; raise --cohort or --limit"
             )
+        eval_cases = smoke_cases
+        training_cases = smoke_cases
         if not args.quiet:
             print(
                 f"[handoff] --limit {args.limit}: remapped onto {len(catalogue_ids)} most-used "
-                f"items; kept {len(cohort)} usable cases",
+                f"items; kept {len(smoke_cases)} usable cases for both exposure and evaluation",
                 flush=True,
             )
     item_ids, texts, coverage = load_item_ids_and_texts(item_ids=catalogue_ids)
     say(f"[handoff] catalogue: {len(item_ids)} items, {coverage['items_empty_text']} with no text")
-    say(f"[handoff] cohort: {len(cohort)} cases (of {split_report.num_users_eligible} eligible)")
+    say(
+        f"[handoff] eligible users: {split_report.num_users_eligible}; "
+        f"training exposure: {len(training_cases)} cases; "
+        f"evaluation cohort: {len(eval_cases)} cases"
+    )
 
     adapter = TigerBackendAdapter(
         out_dir, backend_python=args.backend_python, timeout_seconds=1800.0
@@ -303,11 +357,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     adapter.materialise_products_text(texts, catalogue=catalogue)
     exposure = adapter.materialise_train_exposure(
-        train_histories=[case.train_history for case in cohort],
+        train_histories=[case.train_history for case in training_cases],
         catalogue=catalogue,
     )
     selected, stats = adapter.materialise_eval_cohort(
-        test_histories=[case.test_history for case in cohort],
+        test_histories=[case.test_history for case in eval_cases],
         catalogue=catalogue,
         cohort_seed=DEFAULT_COHORT_SEED,
         k_values=DEFAULT_K_VALUES,
@@ -318,15 +372,41 @@ def main(argv: Sequence[str] | None = None) -> int:
         sample_items=args.sample_items,
         seed=args.seed,
     )
-    manifest = adapter.write_manifest()
+    # Additive manifest metadata so the exposure/evaluation distinction is observable by
+    # inspection of the handoff itself, without changing any artifact schema.
+    manifest = adapter.write_manifest(
+        extra={
+            "populations": {
+                "eligible_users": split_report.num_users_eligible,
+                "train_exposure_users": exposure.users,
+                "train_exposure_examples": exposure.examples,
+                "eval_cohort_cases": selected.cohort_size,
+                "catalogue_items": catalogue.num_items,
+                "protocol": exposure.protocol,
+                "protocol_version": exposure.protocol_version,
+                "exposure_field_source": exposure.field_source,
+                "cohort_seed": selected.cohort_seed,
+                "smoke_remapped": args.limit is not None,
+            }
+        }
+    )
 
     summary: dict[str, Any] = {
         "out": str(out_dir),
         "mode": args.mode,
+        # The four counts that make the exposure/evaluation distinction observable, using the
+        # names from the frozen protocol so a production run can be verified by inspection:
+        #   eligible_users 412445 / train_exposure_users 412445 / eval_cohort_cases 20000
+        #   / catalogue_items 156746
+        "eligible_users": split_report.num_users_eligible,
+        "train_exposure_users": exposure.users,
+        "eval_cohort_cases": selected.cohort_size,
+        "catalogue_items": catalogue.num_items,
         "items": catalogue.num_items,
         "cohort_cases": selected.cohort_size,
         "exposure_users": exposure.users,
         "exposure_examples": exposure.examples,
+        "smoke_remapped": args.limit is not None,
         "required_frontier": stats.as_dict(),
         "coverage": coverage,
         "manifest_files": sorted(manifest["files"]),

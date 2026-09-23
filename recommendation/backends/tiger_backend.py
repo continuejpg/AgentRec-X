@@ -805,8 +805,13 @@ class TigerBackendAdapter:
             },
         )
 
-    def write_manifest(self) -> dict[str, Any]:
-        """Hash every handoff file so a reader can verify before it trusts anything."""
+    def write_manifest(self, extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Hash every handoff file, with optional additive metadata.
+
+        ``extra`` is **additive only**: it cannot replace ``format``, ``contract_version`` or
+        ``files``, so a caller can record diagnostics (population counts, remap provenance)
+        without being able to forge the digest block a reader trusts.
+        """
         files: dict[str, str] = {}
         for path in sorted(self.paths.root.rglob("*")):
             if not path.is_file() or path.name == "manifest.json":
@@ -814,11 +819,18 @@ class TigerBackendAdapter:
             files[str(path.relative_to(self.paths.root))] = hashlib.sha256(
                 path.read_bytes()
             ).hexdigest()
-        payload = {
+        payload: dict[str, Any] = {
             "format": "agentrecx.tiger.manifest.v3",
             "contract_version": CONTRACT_VERSION,
             "files": files,
         }
+        if extra:
+            for key, value in extra.items():
+                if key in payload:
+                    raise ContractViolation(
+                        f"manifest metadata may not overwrite {key!r}; it is additive only"
+                    )
+                payload[key] = value
         _write_json(self.paths.manifest, payload)
         return payload
 

@@ -1272,6 +1272,61 @@ This is the measurement behind the two open questions in §17.1, and it is why t
 configuration above is pre-registered rather than tuned: whether levels 1-2 are worth their
 depth is a question for the full-catalogue run to answer, not a reason to adjust a gate now.
 
+## 17.3 Training exposure vs evaluation cohort (the two populations)
+
+Two populations are materialised for the backend and they are **deliberately not the same**:
+
+```text
+training exposure   every eligible user's train_history   -> the ordinary training corpus
+evaluation cohort   a deterministic --cohort subset       -> what the evaluator scores
+```
+
+They were coupled: `--cohort` sized *both*, so `--cohort 2000` (the default) shipped a
+**2,000-user** training corpus for a **412,445-user** catalogue. That is invisible in a metrics
+table and visible only in the handoff populations, which is why the manifest now records them.
+
+### Production path — `--limit` absent
+
+```text
+all eligible cases --+--> case.train_history --> train_exposure   (412,445 users)
+                     |
+                     `--> deterministic --cohort selection --> eval_cohort  (20,000 cases)
+```
+
+`--cohort` sizes **only** the evaluation cohort. Training exposure is every eligible user and
+does not depend on it.
+
+### Smoke path — `--limit N`
+
+The full histories reference item ids outside a reduced smoke catalogue, so a full-history
+artifact would be incoherent. The remap is therefore applied to the evaluation selection, and
+**both** the exposure and the cohort come from the same remapped, usable cases. In smoke mode the
+cohort also defines the source cases used for item remapping.
+
+### Verifying a production handoff
+
+The manifest carries an additive `populations` block, so the distinction is checkable by
+inspection without changing any artifact schema:
+
+```text
+eligible_users        412445
+train_exposure_users  412445
+eval_cohort_cases      20000
+catalogue_items       156746
+exposure_field_source EvaluationCase.train_history
+smoke_remapped        false
+```
+
+### What the materializer can and cannot leak
+
+Every exposure row is **byte-identical to that case's `train_history`**, so the materializer
+cannot introduce a validation or test target — it passes the history through unchanged. A target
+item may still *recur* inside a history, because a repeat purchase is a legal event and is
+documented in `PHASE5_HANDOFF.md` §8; that recurrence is not materializer leakage.
+
+The cohort artifact carries `case_id`, `history` and `required_frontier` only. No target key and
+no canonical identity appears in any handoff artifact.
+
 ## 18. Provenance and licence constraints
 
 Both audited repositories are legally *read-only design sources*; neither may be vendored.

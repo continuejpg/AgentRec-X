@@ -118,9 +118,15 @@ HF_ENDPOINT=https://hf-mirror.com .venv/bin/python -m experiments.smoke_tiger_st
     --items 2000 --encoder sentence-transformers/sentence-t5-base
 ```
 
-`--limit N` remaps the cohort onto its N most-used items and carries the real AgentRec-X item
-ids through under a new `backend_row` order; the cohort definition, the split, the cohort seed
-and the evaluation protocol are never altered by it.
+`--limit N` is **smoke only**: it remaps the cohort onto its N most-used items and carries the
+real AgentRec-X item ids through under a new `backend_row` order. The cohort definition, the
+split, the cohort seed and the evaluation protocol are never altered by it.
+
+Without `--limit` the materializer is on the **production path**, where two different populations
+are produced: training exposure from **every eligible user's** `train_history` (412,445 users for
+this dataset), and the evaluation cohort from the deterministic `--cohort` selection (20,000 for
+the canonical handoff). `--cohort` never truncates training exposure. The handoff manifest
+records both under `populations`, so the distinction is verifiable by inspection.
 
 The **full-catalogue** stage-1 run is a GPU job: this backend encodes at roughly 3 items/s on a
 CPU-only host, i.e. about 15 hours for 156 746 items, against minutes on an RTX 4090.  Do not
