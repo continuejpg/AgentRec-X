@@ -34,6 +34,7 @@ from torch import nn
 __all__ = [
     "QuantizerConfig",
     "QuantizerError",
+    "RngPair",
     "RqVae",
     "ResidualQuantizer",
     "kmeans_plus_plus",
@@ -163,6 +164,36 @@ class QuantizerConfig:
         }
 
 
+@dataclass(frozen=True)
+class RngPair:
+    """One seed, two generators, because this trainer spans two devices.
+
+    The full feature matrix stays on CPU by design - it is far larger than the model - and each
+    batch is transferred to ``device``.  PyTorch requires a random operation's generator to live
+    on the same device as the tensor it produces, so a single generator cannot serve both:
+
+    * :attr:`cpu` drives every operation over CPU feature storage - the epoch row permutation,
+      the k-means subsample draw, the revival subsample draw;
+    * :attr:`device` drives every operation over device tensors - the k-means++ draws, the
+      Lloyd fallback fill, and the dead-code revival index.
+
+    On a CPU run the two are **both** CPU generators seeded identically, which is what keeps the
+    existing CPU behaviour and its determinism unchanged.
+    """
+
+    cpu: torch.Generator
+    device: torch.Generator
+
+    @classmethod
+    def seeded(cls, seed: int, device: torch.device | str) -> RngPair:
+        """Build the pair for ``device``; both generators carry the same frozen seed."""
+        target = torch.device(device)
+        cpu = torch.Generator(device="cpu").manual_seed(int(seed))
+        if target.type == "cpu":
+            return cls(cpu=cpu, device=cpu)
+        return cls(cpu=cpu, device=torch.Generator(device=target).manual_seed(int(seed)))
+
+
 def _activation(name: str) -> nn.Module:
     return nn.ReLU() if name == "relu" else nn.GELU()
 
@@ -210,6 +241,8 @@ def kmeans_plus_plus(points: torch.Tensor, k: int, *, generator: torch.Generator
             fill = torch.randint(n, (k - index,), generator=generator, device=device)
             centroids[index:] = points[fill]
             break
+        # ``multinomial`` requires the generator and the probability tensor to be on the same
+        # device; ``closest`` derives from ``points``, so the caller passes a matching generator.
         pick = int(torch.multinomial(closest, 1, generator=generator).item())
         centroids[index] = points[pick]
         closest = torch.minimum(closest, (points - centroids[index]).pow(2).sum(dim=1))
@@ -315,7 +348,15 @@ class ResidualQuantizer(nn.Module):
             dead = (self.usage[level] < 1).nonzero().flatten()
             if dead.numel() == 0:
                 continue
-            pool = latents[torch.randint(latents.shape[0], (dead.numel(),), generator=generator)]
+            # The index is created on ``latents.device`` explicitly: a CUDA generator paired
+            # with the default CPU output device is the exact mismatch this fixes.
+            index = torch.randint(
+                latents.shape[0],
+                (dead.numel(),),
+                generator=generator,
+                device=latents.device,
+            )
+            pool = latents[index]
             self.codebooks[level].data[dead] = pool
             revived += int(dead.numel())
         self.usage.zero_()
@@ -388,18 +429,21 @@ class RqVae(nn.Module):
         return torch.cat(chunks, dim=0) if chunks else torch.zeros((0, self.config.levels), dtype=torch.long)
 
     @torch.no_grad()
-    def seed_codebooks(self, features: torch.Tensor, *, generator: torch.Generator) -> dict[str, Any]:
+    def seed_codebooks(self, features: torch.Tensor, *, rng: RngPair) -> dict[str, Any]:
         """k-means++ initialise each level on the residual of the previous level.
 
         The sampling matches ``kmeans_sample``; the residual is recomputed per level so level
         ``l + 1`` is seeded on what level ``l`` failed to explain, which is what makes the
         hierarchy coarse-to-fine rather than three copies of one clustering.
+
+        Two generators are used deliberately: the row subsample is drawn over **CPU** feature
+        storage, and the k-means draws run over device residuals.
         """
         device = next(self.parameters()).device
         sample = features
         if features.shape[0] > self.config.kmeans_sample:
             index = torch.randperm(
-                features.shape[0], generator=generator, device=features.device
+                features.shape[0], generator=rng.cpu, device=features.device
             )[: self.config.kmeans_sample]
             sample = features[index]
         sample = sample.to(device)
@@ -407,9 +451,11 @@ class RqVae(nn.Module):
             residual = self.encoder(self.normalise(sample))
             revived_total = 0
             for level in range(self.config.levels):
-                centroids = kmeans_plus_plus(residual, self.config.codebook_size, generator=generator)
+                centroids = kmeans_plus_plus(
+                    residual, self.config.codebook_size, generator=rng.device
+                )
                 centroids, empty = refine_codebook(
-                    centroids, residual, iterations=self.config.kmeans_iters, generator=generator
+                    centroids, residual, iterations=self.config.kmeans_iters, generator=rng.device
                 )
                 self.quantizer.codebooks[level].data = centroids
                 distances = (
@@ -498,10 +544,13 @@ def train_quantizer(
     model = model.to(device)
     if determinism:
         torch.use_deterministic_algorithms(True, warn_only=True)
-    generator = torch.Generator(device="cpu").manual_seed(config.seed)
+    # One seed, two generators: CPU storage gets a CPU generator, device tensors get a device
+    # generator, and on a CPU run both are the same CPU generator (so CPU semantics are
+    # unchanged).  See :class:`RngPair`.
+    rng = RngPair.seeded(config.seed, device)
     torch.manual_seed(config.seed)
 
-    outcome.seed_info = model.seed_codebooks(features, generator=generator)
+    outcome.seed_info = model.seed_codebooks(features, rng=rng)
     optimizer = torch.optim.Adam(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -512,7 +561,8 @@ def train_quantizer(
     rows = features.shape[0]
     for epoch in range(config.epochs):
         model.train()
-        order = torch.randperm(rows, generator=generator)
+        # CPU: the permutation indexes CPU-resident feature rows.
+        order = torch.randperm(rows, generator=rng.cpu)
         totals = {"loss": 0.0, "reconstruction_loss": 0.0, "quantization_loss": 0.0}
         steps = 0
         for start in range(0, rows, config.batch_size):
@@ -533,10 +583,12 @@ def train_quantizer(
             steps += 1
         revived = 0
         if config.revive_dead:
-            sample = features[torch.randperm(rows, generator=generator)[: min(rows, 20_000)]]
+            # CPU draw for the rows, device generator for the revival indices.
+            sampled = torch.randperm(rows, generator=rng.cpu)[: min(rows, 20_000)]
+            sample = features[sampled]
             with torch.no_grad():
                 latents = model.encoder(model.normalise(sample.to(device)))
-            revived = model.quantizer.revive_dead_codes(latents, generator=generator)
+            revived = model.quantizer.revive_dead_codes(latents, generator=rng.device)
             outcome.revived_total += revived
         divisor = max(1, steps)
         record = {

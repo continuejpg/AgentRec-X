@@ -345,9 +345,15 @@ def stage_fit_sid(
         )
     torch.manual_seed(config.seed)
     model = RqVae(config)
+    # ``features`` is a read-only memory map.  ``np.array(..., copy=True)`` makes it writable so
+    # ``torch.from_numpy`` neither warns nor hands the trainer an array it could be told not to
+    # write.  A C-contiguous memmap is backed by the page cache, so this is a mapped read account
+    # rather than a 481 MB anonymous allocation; the trainer only ever *reads* the source
+    # (``features[index]`` is an advanced-index copy), and the copy makes that structural.
+    feature_matrix = np.array(features, dtype=np.float32, copy=True)
     outcome = train_quantizer(
         model,
-        torch.from_numpy(np.asarray(features, dtype=np.float32)),
+        torch.from_numpy(feature_matrix),
         config=config,
         device=device,
         determinism=determinism,
@@ -359,9 +365,7 @@ def stage_fit_sid(
         if not np.isfinite(value):
             raise CliError(f"the RQ-VAE reported a non-finite {term} ({value}); refusing to write")
 
-    codes = model.codes_for_features(
-        torch.from_numpy(np.asarray(features, dtype=np.float32))
-    ).numpy()
+    codes = model.codes_for_features(torch.from_numpy(feature_matrix)).numpy()
     if codes.shape[0] != catalogue.num_items:
         raise CliError(
             f"assigned {codes.shape[0]} codes for {catalogue.num_items} items; every catalogue "

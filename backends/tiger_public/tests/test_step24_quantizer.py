@@ -8,6 +8,8 @@ what lives here is the arithmetic and the tensor-level invariants.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 import torch
@@ -226,3 +228,114 @@ def test_dedup_and_the_shared_audit_agree() -> None:
     assert audit["post_dedup"]["collision_groups"] == 0
     assert audit["post_dedup"]["distinct_sids"] == len(codes)
     assert audit["largest_group_le_dedup_vocab"] is True
+
+
+# --------------------------------------------------------------------------- #
+# CUDA generator-device compatibility (Step-2.4F hotfix)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_train_quantizer_on_cuda_with_cpu_resident_features() -> None:
+    """The production configuration keeps features on CPU and trains on CUDA.
+
+    That shape is what broke the registered H3 run: k-means++ and the dead-code revival draw
+    indices from a generator, and a generator's device must match the tensor it produces.  This
+    exercises the real path - CPU feature storage, CUDA residuals, CUDA k-means, CUDA revival -
+    rather than a simplified stand-in, so a regression here is a regression in production.
+    """
+    device = "cuda:0"
+    config = QuantizerConfig(
+        input_dim=16,
+        encoder_dims=(16, 8),
+        latent_dim=8,
+        codebook_size=8,
+        levels=2,
+        epochs=2,
+        batch_size=16,
+        seed=2026,
+        # Small enough that the whole set is sampled, so the CPU-side row draw is not the point.
+        kmeans_sample=64,
+        revive_dead=True,
+    )
+    torch.manual_seed(config.seed)
+    model = RqVae(config)
+    # CPU-resident storage, exactly as the CLI hands the matrix over.
+    features = torch.randn(64, 16, generator=torch.Generator().manual_seed(1))
+    assert features.device.type == "cpu"
+
+    outcome = train_quantizer(model, features, config=config, device=device)
+
+    assert outcome.device == device
+    assert outcome.history, "training produced no epochs"
+    for entry in outcome.history:
+        assert math.isfinite(entry["loss"])
+        assert math.isfinite(entry["reconstruction_loss"])
+        assert math.isfinite(entry["quantization_loss"])
+    # Revival ran on CUDA latents, which is where the CPU/CUDA generator mismatch lived.
+    assert outcome.revived_total >= 0
+    codes = model.codes_for_features(features.to(device))
+    assert codes.shape == (64, 2)
+    assert int(codes.max()) < config.codebook_size
+    assert int(codes.min()) >= 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_rng_pair_uses_a_device_generator_only_off_cpu() -> None:
+    """On CPU the pair must stay a single CPU generator, preserving existing semantics."""
+    from tiger_public.quantizer import RngPair
+
+    cpu_pair = RngPair.seeded(2026, "cpu")
+    assert cpu_pair.cpu is cpu_pair.device
+
+    cuda_pair = RngPair.seeded(2026, "cuda:0")
+    assert cuda_pair.device.device.type == "cuda"
+    assert cuda_pair.cpu.device.type == "cpu"
+    assert cuda_pair.device is not cuda_pair.cpu
+
+
+def test_training_never_mutates_the_source_feature_tensor() -> None:
+    """The trainer reads its input and must not write to it.
+
+    The promotion to a writable array exists so ``torch.from_numpy`` is given a clean tensor;
+    it must not become a licence to mutate the caller's data.  This pins that the source is
+    byte-identical after a training run, which is what makes reusing one array across the
+    training pass and the assignment pass safe.
+    """
+    config = QuantizerConfig(input_dim=16, encoder_dims=(16, 8), latent_dim=8,
+                             codebook_size=8, levels=2, epochs=2, batch_size=16, seed=2026)
+    torch.manual_seed(config.seed)
+    model = RqVae(config)
+    features = torch.randn(64, 16, generator=torch.Generator().manual_seed(1))
+    before = features.clone()
+
+    train_quantizer(model, features, config=config, device="cpu")
+    model.codes_for_features(features)
+
+    assert torch.equal(features, before), "training mutated the caller's feature tensor"
+
+
+def test_a_read_only_source_array_is_accepted() -> None:
+    """A read-only (memory-mapped) source must train cleanly once copied to writable storage.
+
+    This mirrors the CLI: the artifact is loaded read-only, and the fix is a single copy rather
+    than teaching every consumer to tolerate a read-only tensor.
+    """
+    import numpy as np
+
+    config = QuantizerConfig(input_dim=16, encoder_dims=(16, 8), latent_dim=8,
+                             codebook_size=8, levels=2, epochs=2, batch_size=16, seed=2026)
+    torch.manual_seed(config.seed)
+    model = RqVae(config)
+
+    source = np.random.default_rng(0).standard_normal((64, 16)).astype(np.float32)
+    source.setflags(write=False)
+    assert not source.flags.writeable
+
+    writable = np.array(source, dtype=np.float32, copy=True)
+    assert writable.flags.writeable
+    features = torch.from_numpy(writable)
+    outcome = train_quantizer(model, features, config=config, device="cpu")
+    assert math.isfinite(outcome.final["loss"])
+    # The read-only original is untouched by construction.
+    assert not source.flags.writeable
