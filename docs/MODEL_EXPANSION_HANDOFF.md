@@ -76,6 +76,13 @@ two_tower_pairs == sasrec_raw_transitions − sasrec_trainable_users
 2 263 252 − 412 445 = 1 850 807        ✓
 ```
 
+> **Note (Step 2.5 Gate B.1).** The `1 850 807 examples` in the GenRec column above is GenRec v0's
+> `n - 2` convention: it drops the first transition of every user, so one two-item prefix is not a
+> history. That figure is a *historical* GenRec v0 record and is unchanged. The Step-2.5 public-TIGER
+> generator trains on the true next-item objective, `sum(max(0, len(row) - 1))` = **2 263 252**
+> examples over the same 412 445 rows, and `2 675 697` is `sum(len(row))`, an item-occurrence total
+> that is not an example count. See `docs/TIGER_BACKEND.md` §17.4.
+
 **Step 1's Two-Tower was trained on the 20 000-user *evaluation* cohort — a 9.4× exposure gap that no
 metrics table reveals.** That checkpoint and its numbers are preserved as historical results in
 `runs/twotower_public_2026`; the corrected one is `runs/twotower_public_2026_full`. Never quote the

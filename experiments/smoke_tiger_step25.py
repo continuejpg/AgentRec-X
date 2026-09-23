@@ -52,6 +52,12 @@ from tiger_public.trie import CatalogueTrie, item_token_path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PRODUCTION_HANDOFF = REPO_ROOT / "runs" / "tiger_backend_handoff_prod"
 
+#: The frozen production example count (Gate B.1).  ``build_examples`` emits ``n - 1`` next-item
+#: examples for a train history of ``n`` items, and the accepted exposure's 412 445 rows sum to
+#: 2 263 252 transitions.  ``2 675 697`` is ``sum(len(row))`` - the number of train-history item
+#: *occurrences*, not a transition count - and must never be reported as an example count.
+EXPECTED_PRODUCTION_EXAMPLES = 2_263_252
+
 #: The smoke's own small item space.  Kept tiny on purpose: this is a mechanism gate.
 SMOKE_ITEMS = 240
 SMOKE_LEVELS = 3
@@ -137,8 +143,62 @@ def build_smoke_artifacts(root: Path) -> dict[str, Path]:
     }
 
 
-def production_report() -> int:
-    """Report the registered production configuration without running anything."""
+def count_production_exposure(path: Path = PRODUCTION_HANDOFF / "train_exposure.jsonl") -> dict[str, int]:
+    """Count the production exposure **by streaming**, never by building an example list.
+
+    The three sums are kept separate on purpose, because conflating them is exactly the error this
+    report exists to prevent::
+
+        sum(len(row))     item occurrences       2 675 697
+        sum(len(row) - 1) next-item transitions  2 263 252   <- the generator's example count
+        sum(len(row) - 2) GenRec-v0 / H5 pairs   1 850 807
+
+    A row is read, its length taken, and the row dropped; peak memory is one row regardless of the
+    412 445-row, 32 MB artifact.  No model, no tokenisation, no training.
+    """
+    users = 0
+    occurrences = 0
+    transitions = 0
+    pairs = 0
+    shortest = 2**31
+    longest = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            length = len(json.loads(line)["items"])
+            users += 1
+            occurrences += length
+            transitions += max(0, length - 1)
+            pairs += max(0, length - 2)
+            shortest = min(shortest, length)
+            longest = max(longest, length)
+    return {
+        "users": users,
+        "sum_len": occurrences,
+        "sum_len_minus_1": transitions,
+        "sum_len_minus_2": pairs,
+        "min_history": shortest,
+        "max_history": longest,
+    }
+
+
+def production_report(*, verify: bool = True, path: Path | None = None) -> int:
+    """Report the registered production configuration without running anything.
+
+    ``verify`` streams the accepted exposure and refuses to print a configuration report if the
+    measured transitions differ from the frozen count, so a drifted handoff cannot be reported as
+    production-ready.
+    """
+    exposure = Path(path) if path is not None else PRODUCTION_HANDOFF / "train_exposure.jsonl"
+    counts = None
+    if exposure.is_file():
+        counts = count_production_exposure(exposure)
+    elif verify:
+        print(f"REFUSING: no exposure at {exposure}; the production count cannot be verified")
+        return 1
+
     config = TigerConfig()
     manifest = PRODUCTION_HANDOFF / "manifest.json"
     populations = {}
@@ -152,16 +212,34 @@ def production_report() -> int:
     print("ACCEPTED PRODUCTION HANDOFF POPULATIONS")
     print(json.dumps(populations, indent=2, sort_keys=True))
     print()
-    print("NOTE: H5's 1850807 is sum(len-2) over this exposure (the GenRec-v0 convention).")
-    print("      A true next-item objective over the same rows is sum(len-1) = 2675697.")
-    print("      See docs/TIGER_BACKEND.md 17.4; Gate C must register which one it means.")
+    if counts is not None:
+        print("MEASURED BY STREAMING train_exposure.jsonl (Gate B.1)")
+        print(json.dumps(counts, indent=2, sort_keys=True))
+        print()
+        print("EXAMPLE ARITHMETIC - keep the three sums distinct")
+        print(f"  sum(len(row))     item occurrences      {counts['sum_len']}")
+        print(f"  sum(len(row) - 1) next-item transitions {counts['sum_len_minus_1']}"
+              "   <- GENERATOR EXAMPLES (Gate B objective)")
+        print(f"  sum(len(row) - 2) GenRec-v0 / H5 pairs  {counts['sum_len_minus_2']}")
+        print()
+        if counts["sum_len_minus_1"] != EXPECTED_PRODUCTION_EXAMPLES:
+            print(
+                f"REFUSING: measured {counts['sum_len_minus_1']} generator examples, expected "
+                f"{EXPECTED_PRODUCTION_EXAMPLES}; the exposure artifact has drifted"
+            )
+            return 1
+        print(f"OK: generator examples == {EXPECTED_PRODUCTION_EXAMPLES} (frozen, Gate B.1)")
+    print("NOTE: H5's 1850807 is sum(len - 2) over this exposure (the GenRec-v0 convention).")
+    print("      The generator's own objective is one next-item example per adjacent target")
+    print("      position, i.e. sum(len - 1) = 2263252. See docs/TIGER_BACKEND.md 17.4.")
     return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Step-2.5 Gate B local smoke")
     parser.add_argument("--report-production", action="store_true",
-                        help="print the registered production configuration and exit")
+                        help="print the registered production configuration and the measured "
+                             "example arithmetic, then exit")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--keep", action="store_true", help="keep the working directory")
     parser.add_argument("--out", type=Path, default=None)

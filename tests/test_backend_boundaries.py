@@ -625,3 +625,103 @@ def test_forged_pad_item_id_is_refused(tmp_path: Path) -> None:
             sequences_sha256="b" * 64,
             products_sha256="c" * 64,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Gate B.1 - the production example count is a boundary invariant
+# --------------------------------------------------------------------------- #
+
+#: Frozen production facts (Gate B.1).  All three are distinct numbers and only the middle one is
+#: a generator-example count:
+#:
+#:     sum(len(row))     item occurrences       2 675 697
+#:     sum(len(row) - 1) next-item transitions  2 263 252   <- the generator's examples
+#:     sum(len(row) - 2) GenRec-v0 / H5 pairs   1 850 807
+#:
+#: Gate B's report once transposed the first and second; this guard is why that cannot recur.
+PRODUCTION_HANDOFF = REPO_ROOT / "runs" / "tiger_backend_handoff_prod"
+FROZEN_EXPOSURE = {
+    "users": 412_445,
+    "sum_len": 2_675_697,
+    "sum_len_minus_1": 2_263_252,
+    "sum_len_minus_2": 1_850_807,
+    "catalogue_items": 156_746,
+}
+
+
+def test_production_exposure_declares_the_frozen_next_item_count() -> None:
+    """The accepted exposure's own record must declare ``sum(len - 1)``, not an occurrence total.
+
+    Skips with a stated reason when the handoff is not materialised, so a fresh clone stays green
+    while a host that *does* hold the artifact cannot drift silently.
+    """
+    record_path = PRODUCTION_HANDOFF / "train_exposure.json"
+    if not record_path.is_file():
+        pytest.skip(f"the production handoff is not materialised at {PRODUCTION_HANDOFF}")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["users"] == FROZEN_EXPOSURE["users"]
+    assert record["examples"] == FROZEN_EXPOSURE["sum_len_minus_1"]
+    assert record["field_source"] == "EvaluationCase.train_history"
+    # The declared count is a transition count, so it must be strictly below the occurrence total
+    # and strictly above the GenRec-v0 pair count.
+    assert FROZEN_EXPOSURE["sum_len_minus_2"] < record["examples"] < FROZEN_EXPOSURE["sum_len"]
+
+
+def test_production_exposure_streams_to_the_frozen_counts() -> None:
+    """Measure the artifact itself, by streaming, and pin all three sums.
+
+    ``sum(max(0, len(row) - 1))`` is the generator's example count **before** any ``--max-examples``
+    smoke truncation.  Rows are read and dropped one at a time, so this costs one row of memory
+    rather than a 2.26-million-element example list.
+    """
+    exposure = PRODUCTION_HANDOFF / "train_exposure.jsonl"
+    if not exposure.is_file():
+        pytest.skip(f"the production handoff is not materialised at {PRODUCTION_HANDOFF}")
+    users = 0
+    occurrences = 0
+    transitions = 0
+    pairs = 0
+    with exposure.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            length = len(json.loads(line)["items"])
+            users += 1
+            occurrences += length
+            transitions += max(0, length - 1)
+            pairs += max(0, length - 2)
+    assert users == FROZEN_EXPOSURE["users"]
+    assert occurrences == FROZEN_EXPOSURE["sum_len"]
+    assert transitions == FROZEN_EXPOSURE["sum_len_minus_1"]
+    assert pairs == FROZEN_EXPOSURE["sum_len_minus_2"]
+
+
+def test_the_handoff_carries_no_validation_or_test_target_field() -> None:
+    """Gate B.1: no mechanism may add one label per user from validation or test targets.
+
+    A leaked target would add exactly 412 445 labels, so it is detectable by arithmetic as well as
+    by inspection - but the field must be absent outright, not merely unused.
+    """
+    cohort = PRODUCTION_HANDOFF / "eval_cohort.jsonl"
+    if not cohort.is_file():
+        pytest.skip(f"the production handoff is not materialised at {PRODUCTION_HANDOFF}")
+    forbidden = ("test_target", "validation_target", "target", "label")
+    with cohort.open("r", encoding="utf-8") as handle:
+        for index, line in enumerate(handle):
+            if not line.strip():
+                continue
+            keys = set(json.loads(line))
+            offenders = sorted(key for key in keys if any(word in key for word in forbidden))
+            assert offenders == [], f"cohort row {index} carries {offenders}"
+            if index >= 500:
+                # The schema is homogeneous, so a prefix is enough; the exposure file is scanned
+                # separately by its own recorded count and hash.
+                break
+    record = json.loads((PRODUCTION_HANDOFF / "train_exposure.json").read_text(encoding="utf-8"))
+    assert record["users"] == FROZEN_EXPOSURE["users"]
+    # A leak would add exactly one label per user onto the train-history transition count, so the
+    # declared count must not equal that sum.
+    leaked = FROZEN_EXPOSURE["sum_len_minus_1"] + FROZEN_EXPOSURE["users"]
+    assert record["examples"] == FROZEN_EXPOSURE["sum_len_minus_1"]
+    assert record["examples"] != leaked

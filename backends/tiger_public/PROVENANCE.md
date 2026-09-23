@@ -187,9 +187,23 @@ refusal.  They need no model weights, because the smoke encoder is deterministic
 `ORIGINAL`.  Generator and trie tests: example construction from train history only, PAD
 exclusion, dedup-level token separation, trie completeness and invalid-prefix rejection,
 checkpoint dependency-mismatch refusal, and a small train/save/load/constrained-generate smoke.
-Model-building tests use a deliberately tiny architecture because the registered production
-architecture is *reported*, not enforced; a test that could not afford 14 M parameters would skip
-the very code paths that need testing.
+Example provenance is asserted **positionally** - the source is exactly
+`train_history[max(0, k - max_hist_items):k]` with no position at or after `k` - and a
+repeat-purchase case (`[A, B, A] -> input [A, B], target A`) is retained as valid, because an
+item-set disjointness test would wrongly delete every repurchase.  The Gate-C registration is
+pinned against both the dataclass and the CLI defaults, so a drifting default fails here instead
+of after a GPU run.  Model-building tests use a deliberately tiny architecture because the
+registered production architecture is *reported*, not enforced; a test that could not afford
+14 M parameters would skip the very code paths that need testing.
+
+### `experiments/smoke_tiger_step25.py`, `experiments/gate_d_tiger_training.py`
+`ORIGINAL`, and outside this package's licence-sensitive tree (they live in AgentRec-X's
+`experiments/`).  The Gate-B smoke exercises the generator end to end on a tiny CPU model; the
+Gate-D runbook check restores and verifies the accepted Step-2.4F archive, streams the frozen
+exposure arithmetic, and refuses to print a training command unless every hash and count matches.
+Neither rebuilds features, the RQ-VAE or the Semantic IDs.  `gate_d_tiger_training.py` is the only
+place that rewrites an accepted artifact, and only under the explicit `--patch-layout` flag
+(additive `sep`/`vocab_size` metadata, with a backup and no change to any Semantic ID).
 
 ### `tests/test_step24f_readiness.py`, `tests/test_step24f_audit.py`
 `ORIGINAL`.  The Step-2.4F test modules cover encoder-revision pinning and the refusal to record

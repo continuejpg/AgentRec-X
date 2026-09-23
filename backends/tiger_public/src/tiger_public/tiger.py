@@ -24,13 +24,18 @@ target tokens  = [i(k+1) block], EOS
 
 Two properties follow and both are load-bearing:
 
-* **1 850 807 examples** for this corpus — one per (history position, next item), which is
-  ``sum(len(row) - 1)``.  This is the count registered in ``docs/TIGER_BACKEND.md`` H5 and it
-  reproduces exactly;
-* the **last** item of a row is a target and never an input, so no target is ever fed as history.
-  The target item is of course an input to *later* examples of the same user — that is the
-  definition of a next-item objective over one chronological sequence, not leakage, because the
-  sequence is causal and contains no validation or test interaction.
+* **2 263 252 examples** for the accepted exposure — one per (history position, next item), which
+  is ``sum(max(0, len(row) - 1))`` over its 412 445 rows.  This is the count registered in
+  ``docs/TIGER_BACKEND.md`` 17.4 and it reproduces exactly.  ``2 675 697`` is ``sum(len(row))``,
+  the number of item *occurrences*, and ``1 850 807`` is ``sum(len(row) - 2)``, the GenRec-v0 /
+  Two-Tower pair count — neither is an example count, and conflating them is the error Gate B.1
+  corrected;
+* the **last** item of a row is a target and never an input, so no row-final item is fed as
+  history.  A target item may legitimately recur earlier in its own source: a repurchase is a legal
+  next item, and an item-set disjointness test would wrongly delete every repurchase example.  The
+  invariant that holds is positional — the source is exactly
+  ``train_history[max(0, k - max_hist_items):k]`` and no position at or after ``k`` enters it.
+  The sequence is causal and contains no validation or test interaction.
 
 Input construction is **batch-complete**: every example's full input is embedded, with padding
 placed so padding is never distinguishable from a position the model was trained on.  Because the
@@ -91,12 +96,14 @@ class TigerConfig:
 
     Model dimensions are the values registered in ``docs/TIGER_BACKEND.md`` H5 / section 7.4
     (``d_model=256``, 6 layers, 4 heads, ``d_ff=1024``, dropout 0.1, batch 512, bf16 on a CUDA
-    host).  ``epochs`` and ``learning_rate`` are carried at the section 7.4 example values
-    because H5 registers a *fixed epoch budget* without naming it; see the completion report.
+    host).  ``epochs``, ``learning_rate`` and the rest of the training values are carried at
+    ``REGISTERED_TRAINING`` below, which is the Gate-B.1 registration in section 17.4; that section
+    also records the two items still open (the H5 per-epoch checkpoint cadence and the accepted
+    layout's missing ``sep``).
 
-    ``max_hist_items`` is the model's history window.  The frozen H5 example count (1 850 807)
-    is the number of examples, not the window length, and the window bounds only how far back a
-    single prediction may look.
+    ``max_hist_items`` is the model's history window, not the example count: it bounds only how far
+    back a single prediction may look, and truncating it does not change how many examples a row
+    yields.  The registered production example count is 2 263 252 (§17.4).
     """
 
     # -- architecture (registered) --------------------------------------- #
@@ -150,11 +157,50 @@ class TigerConfig:
         """True when every registered architecture dimension matches."""
         return all(getattr(self, name) == value for name, value in self.REGISTERED.items())
 
+    #: The registered Gate-C training configuration, as frozen in ``docs/TIGER_BACKEND.md`` 17.4.
+    #: This is the full set of values, not only the architecture ones: an unregistered learning
+    #: rate or epoch budget is exactly how two runs become incomparable.  ``matches_registered_
+    #: training`` checks the *instance* against it, so a diverging default fails a test rather
+    #: than being discovered after a 3-6 hour GPU run.
+    REGISTERED_TRAINING = {
+        "max_hist_items": 20,
+        "d_model": 256,
+        "num_layers": 6,
+        "num_heads": 4,
+        "d_ff": 1024,
+        "dropout": 0.1,
+        "batch_size": 512,
+        "epochs": 20,
+        "learning_rate": 5e-4,
+        "weight_decay": 0.0,
+        "max_grad_norm": 1.0,
+        "warmup_fraction": 0.05,
+        "bf16": True,
+        "seed": 2026,
+    }
+
+    def training_divergence(self) -> dict[str, tuple[Any, Any]]:
+        """Registered values this instance does not match, as ``{field: (registered, actual)}``."""
+        return {
+            name: (value, getattr(self, name))
+            for name, value in self.REGISTERED_TRAINING.items()
+            if getattr(self, name) != value
+        }
+
+    def matches_registered_training(self) -> bool:
+        """True when every registered training and architecture value matches this instance."""
+        return not self.training_divergence()
+
     def as_dict(self, *, vocab_size: int, per_item_tokens: int) -> dict[str, Any]:
         return {
             "family": "T5ForConditionalGeneration-style encoder-decoder",
             "init": "random",
             "registered_architecture": self.matches_registered_architecture(),
+            "registered_training": self.matches_registered_training(),
+            "training_divergence": {
+                name: {"registered": registered, "actual": actual}
+                for name, (registered, actual) in self.training_divergence().items()
+            },
             "vocab_size": vocab_size,
             "d_model": self.d_model,
             "num_layers": self.num_layers,

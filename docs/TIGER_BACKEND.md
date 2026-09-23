@@ -654,11 +654,17 @@ Six layers, strongest first.
    unexplained membership. The `seen` sets computed here are used **only** to compute
    `required_frontier` in L1; they are never sent to the backend as identities.
 
-**Checkpoint selection without a backend-side target.** AgentRec-X evaluates **saved checkpoints
-externally** against the validation protocol: the backend writes `generator/epoch-0007/`, and
-AgentRec-X computes `validation_target` Recall@10 with its own evaluator and picks the winner.
-The backend implements **no** Recall/NDCG and **no** validation loop, so `validation_used: false`
-is guaranteed true.
+**Checkpoint selection without a backend-side target.** The backend implements **no**
+Recall/NDCG, **no** validation loop and **no** validation split, so `validation_used: false` is
+guaranteed true rather than merely asserted.
+
+§8 originally described a per-epoch cadence in which AgentRec-X would evaluate `generator/epoch-N/`
+externally with `validation_target` Recall@10 and pick the winner.  **That is superseded by the
+Gate-B.1 registration in §17.4**, for two reasons: it selects a *production* checkpoint with a
+recommendation metric, and it contradicts H5's own "no cohort metric is asserted" clause.  The
+backend writes one checkpoint at the end of the configured epoch budget and the registered
+selection rule is simply *that* checkpoint.  H5's "resumable checkpoint every epoch" clause is
+therefore an open item (§17.4, discrepancy 1), not something the current trainer implements.
 
 ---
 
@@ -1100,7 +1106,7 @@ TIGER row beside SASRec / Two-Tower without that label.
 | **H2** | 156 746 x 768 float32 is about **481 MB**; `nan_inf_scan: clean`; `empty_text_items` / `truncated_items` recorded | 2.4 | ~4–10 min |
 | **H3** | `post_dedup.collision_groups == 0`; `post_dedup.distinct_sids == 156 746`; coverage `1.000`; `largest_group_le_dedup_vocab` true; **`pre_dedup` block recorded in full**; per-level utilisation recorded; **hard stop only on `dead_codes > 20 %` of a level** — no comparative threshold applied to any other reading | 2.4 | ~5–15 min |
 | **H4** | `layout.json` + `score_rule.json` written, hashed, and re-tested against the adapter **before** TIGER training starts, so neither the token space nor the scoring rule can drift mid-project | 2.4 | — |
-| **H5** | TIGER training, 1 850 807 examples, `d_model=256, layers=6`, batch 512, bf16, fixed epoch budget, **resumable checkpoint every epoch**; `validation_used: false` | 2.5 | ~3–6 h |
+| **H5** | TIGER training, `d_model=256, layers=6`, batch 512, bf16, `epochs=20`, `lr=5e-4`, seed 2026, **2 263 252 examples** (Gate-B.1 registration; §17.4); `validation_used: false`. The "1 850 807 examples" and "resumable checkpoint every epoch" clauses of the original H5 text are superseded/parked — see §17.4 | 2.5 | ~3–6 h |
 | **H6** | `invalid_generation_rate` and APPROXIMATE `scored_share` measured and labelled diagnostic | 2.5 | — |
 | **H7** | **pre-step:** `min/max/mean/p95/p99_required_frontier` computed and recorded **before** any CERTIFIED attempt; then CERTIFIED retrieval over the frozen 20 k cohort with `certificate_holds_for_all_cases` true within budget, otherwise automatic APPROXIMATE downgrade | 2.6 | diagnostics: minutes; certification: hours, budget-dependent |
 | **H8** | canonical benchmark via the unchanged evaluator, `--cohort 20000`; `run.json` carrying the whole hash chain plus `retrieval_status` and `comparison_eligible` | 2.6 | ~22 min |
@@ -1327,38 +1333,103 @@ documented in `PHASE5_HANDOFF.md` §8; that recurrence is not materializer leaka
 The cohort artifact carries `case_id`, `history` and `required_frontier` only. No target key and
 no canonical identity appears in any handoff artifact.
 
-## 17.4 Step 2.5 Gate B: generator example count (OPEN — needs registration)
+## 17.4 Step 2.5 Gate B.1: the frozen generator-example count, and the registered configuration
 
-H5 registers "1 850 807 examples". That number is reproducible, but **not** from a true next-item
-objective. Measured against the accepted production exposure (412 445 rows):
+**Registered and frozen: 2 263 252 generator examples.**
 
-| convention | examples |
-|---|---|
-| `sum(len(row) - 1)` — every position predicted from its full causal prefix (**true next-item**) | **2 675 697** |
-| `sum(len(row) - 2)` — the first transition of every user dropped | **1 850 807** ← matches H5 |
-| `sum(len(row))` | 3 088 142 |
+The Gate-B completion report transposed two of the three length sums. This section records the
+correction, the measurement that establishes it, and the guard that keeps it from recurring.
 
-1 850 807 is exactly the Two-Tower pair count from `docs/MODEL_EXPANSION_HANDOFF.md` §3, and it is
-the convention GenRec v0's generator dataset uses (`semantic_id/dataset.py`, which iterates from
-position 2). H5's figure was therefore inherited from that convention rather than derived from
-TIGER's own objective.
+### The three sums, kept distinct
 
-**What Gate B implements.** The frozen prose in this document and §7.4 both define the objective
-as "the next item's SID" with a target of "the item's complete Semantic-ID token path", so the
-implementation uses the true next-item convention: `n - 1` examples per history of `n`, i.e.
-**2 675 697 examples**, and every example's target is a train-history item with no validation or
-test target anywhere in the input.
+Measured by streaming the accepted production exposure
+(`runs/tiger_backend_handoff_prod/train_exposure.jsonl`, 412 445 rows, 32 MB) — one row in memory
+at a time, no example list built, no training:
 
-**Why this is reported rather than silently chosen.** Gate C's H5 run cannot be described as
-executing the registered configuration while also using 44 % more examples than H5 names. Both
-readings are defensible — the larger corpus is the canonical TIGER objective and strictly better
-for training, while 1 850 807 is what H5 literally registers — so the choice belongs in the
-pre-registration, not in the implementation. Switching to the H5 figure is a one-line change in
-the example builder (skip the first transition of each row) and requires no other code change.
+| quantity | expression | value |
+|---|---|---|
+| train-history item **occurrences** | `sum(len(row))` | 2 675 697 |
+| **next-item transitions = generator examples** | `sum(max(0, len(row) - 1))` | **2 263 252** |
+| GenRec-v0 / Two-Tower pairs | `sum(max(0, len(row) - 2))` | 1 850 807 |
 
-**Also still requiring registration for Gate C:** `epochs`. H5 registers a "fixed epoch budget"
-without naming a value; §7.4 shows `epochs = 20`, and the CLI carries that value as its default.
-`d_model=256, layers=6, batch_size=512, bf16` **are** registered and are the CLI defaults.
+`2 675 697` is **not** an example count and must never be reported as one. It is the number of
+train-history item occurrences, i.e. how many items appear across the 412 445 histories.
+
+### Why 2 263 252 is the generator's count
+
+`build_examples` (Gate B) emits **one example for every adjacent target position** of a history of
+`n` items, i.e. `n - 1` examples, each with source
+`train_history[max(0, k - max_hist_items):k]` and target `train_history[k]`. Summed over the
+accepted exposure that is exactly 2 263 252, and it is also the transition count AgentRec-X's own
+parity test derives (`tests/test_training_parity.py`: `2 263 252 - 412 445 = 1 850 807`). The
+exposure artifact's own record agrees: `train_exposure.json` declares `"examples": 2263252`, and
+the handoff manifest declares `train_exposure_examples: 2263252`.
+
+H5's `1 850 807` is the GenRec-v0 convention (`semantic_id/dataset.py` iterates from position 2)
+and is the Two-Tower pair count from `docs/MODEL_EXPANSION_HANDOFF.md` §3. It is a *different*
+objective, not a different reading of the same one: it drops the first transition of every user.
+Gate B implements the next-item objective, so H5's figure is superseded by the registration here.
+
+**Guards.** `tests/test_backend_boundaries.py` pins all three sums, the users count and the
+catalogue size against the artifact (skipping with a stated reason when the handoff is not
+materialised), and `experiments/smoke_tiger_step25.py --report-production` streams and prints the
+same three sums, refusing if the transition count differs from 2 263 252.
+
+### Registered production configuration (Gate C input)
+
+```text
+example semantics          train_history only; one next-item example per adjacent target
+                           position; expected production examples = 2 263 252
+max_hist_items             20
+d_model                    256
+num_layers                 6
+num_heads                  4
+d_ff                       1024
+dropout                    0.1
+batch_size                 512
+bf16                       true  (CUDA autocast; a CPU run reports fp32 regardless)
+epochs                     20
+learning_rate              5e-4
+seed                       2026
+validation_used            false
+optimizer                  AdamW            (recorded as "AdamW"; torch.optim.AdamW, defaults)
+scheduler                  OneCycleLR       (max_lr = learning_rate,
+                                             pct_start = warmup_fraction = 0.05,
+                                             total_steps = epoch_budget *
+                                             ceil(examples / batch_size))
+weight_decay               0.0
+gradient clipping          clip_grad_norm_(max_norm = 1.0); disabled only if max_grad_norm <= 0
+decoder_start_token_id     layout["special"]["bos"], read from the accepted layout (1025 today)
+label padding              none: every target is exactly per_item_tokens + 1 long, so no label is
+                           padded. The HF loss is CrossEntropyLoss(ignore_index=-100), so if a
+                           padded label ever appeared it would be ignored rather than learned as
+                           a token - but no code path produces one.
+checkpoint cadence         1 checkpoint, written once at the end of the configured epoch budget
+final-checkpoint selection the final checkpoint. No validation or test recommendation metric is
+                           consulted, because the backend computes none.
+```
+
+**Two discrepancies are reported here rather than silently resolved, and neither is a
+metric-driven tuning decision.** Both must be settled before Gate D.
+
+1. **H5's "resumable checkpoint every epoch" is not implemented.** §8 describes the backend
+   writing `generator/epoch-0007/` per epoch for external selection; the implementation writes one
+   final checkpoint (`tiger.pt`, `tiger.json`, `layout.json`, `score_rule.json`). The trainer
+   *accepts* `resume_state` (`optimizer`, `scheduler`, `epoch`, `history`) but the CLI has no
+   `--resume` and no per-epoch cadence. Selecting a checkpoint by validation Recall@10 (§8)
+   contradicts "no validation metric may select a production checkpoint", and the backend has no
+   evaluator by construction. The registered rule above is therefore **final checkpoint, no metric
+   selection**; H5's cadence clause is either waived in the Gate-C registration or implemented as
+   in-training `val_loss`-free resumability.
+2. **The accepted Step-2.4F `layout.json` predates SEP.** It declares
+   `special = {pad: 1024, bos: 1025, eos: 1026}` and `vocab_size = 1027`; Gate B registers a fourth
+   special (`sep = 1027`) and `vocab_size = 1028`, and `build_examples` refuses a layout without
+   `sep` because deriving a token id at use time could alias a real code. Training against the
+   frozen archive as-is therefore **hard-stops**. The fix is a metadata-only re-derivation of
+   `sid/layout.json` (add `sep`, set `vocab_size` 1028, keep the format tag or bump it to v4); the
+   accepted `semantic_ids.json` assignment, `tokenizer.pt`, `item_features.npy` and every Semantic
+   ID are unchanged, so no RQ-VAE refit and no re-encode is required. This is registered as
+   Gate C's first action, not as a silent edit to a frozen artifact.
 
 ## 18. Provenance and licence constraints
 

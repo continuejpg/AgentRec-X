@@ -130,6 +130,39 @@ PYTHONPATH=src .venv/bin/python ../../experiments/smoke_tiger_step25.py
 PYTHONPATH=src .venv/bin/python ../../experiments/smoke_tiger_step25.py --report-production
 ```
 
+## Gate D (GPU): restore the accepted artifacts, then train
+
+`experiments/gate_d_tiger_training.py` is the runbook check. It **trains nothing**; it verifies the
+accepted Step-2.4F archive, the H2/H3 artifact hashes, the frozen example arithmetic and the token
+layout, then prints the exact training command and refuses if any check fails.
+
+**Do not rebuild `Sentence-T5` features, the RQ-VAE or the Semantic IDs.** They are frozen, and
+Gate A already proved the production handoff's `products_text` identity matches the accepted
+feature/SID dependency. Gate D restores and verifies the archive instead.
+
+```bash
+cd backends/tiger_public
+PYTHONPATH=src .venv/bin/python ../../experiments/gate_d_tiger_training.py \
+    --archive ../../runs/_autodl_backup/step24f-tiger-public-dfabc1c.tar.gz \
+    --extract-to /data/agentrecx/step24f \
+    --patch-layout
+```
+
+`--patch-layout` applies the one Gate-C metadata change Gate B requires: the accepted
+`sid/layout.json` predates the `sep` special token. The patch registers
+`sep = code_space + 3`, sets `vocab_size = code_space + 4`, and writes a `.v3.bak.json` backup. It
+reads and writes **only** `layout.json` — `semantic_ids.json`, `tokenizer.pt`, `tokenizer.json` and
+`item_features.npy` are untouched, so no refit and no re-encode happens.
+
+Registered production configuration (frozen in `docs/TIGER_BACKEND.md` §17.4; the CLI defaults
+*are* these values, and `tests/test_step25_tiger.py` fails if they drift): `epochs 20`,
+`batch_size 512`, `d_model 256`, `layers 6`, `heads 4`, `d_ff 1024`, `dropout 0.1`,
+`max_hist_items 20`, `lr 5e-4`, `seed 2026`, bf16 on, `weight_decay 0.0`, grad clip 1.0, OneCycleLR
+with `pct_start 0.05`, AdamW, final checkpoint selected with no recommendation metric.
+
+Production example count: **2 263 252** `= sum(max(0, len(row) - 1))` over the 412 445 accepted
+rows. `2 675 697` is `sum(len(row))`, an item-*occurrence* total, and is not an example count.
+
 `--limit N` is **smoke only**: it remaps the cohort onto its N most-used items and carries the
 real AgentRec-X item ids through under a new `backend_row` order. The cohort definition, the
 split, the cohort seed and the evaluation protocol are never altered by it.

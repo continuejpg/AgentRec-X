@@ -264,21 +264,77 @@ def test_examples_are_next_item_and_use_only_train_history(
     assert dataset.targets[2] == (*item_token_path(assignment[4], layout), layout["special"]["eos"])
 
 
-def test_no_target_is_ever_an_input(assignment: list[list[int]], layout: dict) -> None:
-    """Each example's target block must not appear at the END of its own input.
+def _decode_input_items(
+    tokens: Sequence[int], assignment: list[list[int]], layout: dict, *, trie: CatalogueTrie
+) -> tuple[int, ...]:
+    """Recover the item sequence an example's input encodes.
 
-    A target may legitimately appear earlier as history (a repurchase, and the causal next-item
-    objective), but the item being predicted must not already be the last thing the model saw.
+    The input is ``[BOS, block, SEP, block, SEP, ...]``.  Decoding it back is how the provenance
+    test checks *which positions* the source came from, instead of comparing token sets.
     """
-    rows = [(1, 2, 3, 4, 5)]
-    dataset = build_examples(rows, assignment=assignment, layout=layout, max_hist_items=10)
-    block = len(item_token_path(assignment[1], layout))
-    for position, target in enumerate(dataset.targets):
-        wanted = target[:-1]  # drop EOS
-        assert len(wanted) == block
-        # the second-to-last block of the input, which the model attends over
-        items_seen = (len(dataset.inputs[position]) - 1) // (block + 1)
-        assert items_seen >= 1
+    codes_per_item = len(item_token_path(assignment[1], layout))
+    sep = layout["special"]["sep"]
+    body = list(tokens)[1:]  # drop BOS
+    items: list[int] = []
+    index = 0
+    while index < len(body):
+        if body[index] == sep:
+            raise AssertionError("the input has an empty item block")
+        block = tuple(body[index : index + codes_per_item])
+        if len(block) != codes_per_item:
+            raise AssertionError("the input ends in a partial item block")
+        item_id = trie.item_for_path(block)
+        if item_id is None:
+            raise AssertionError(f"input block {block} is not a catalogue item path")
+        items.append(item_id)
+        index += codes_per_item
+        if index < len(body):
+            assert body[index] == sep, "two item blocks were not separated by SEP"
+            index += 1
+    return tuple(items)
+
+
+def test_source_items_are_exactly_the_prefix_before_the_target(
+    assignment: list[list[int]], layout: dict
+) -> None:
+    """The leakage invariant is *positional*, not set-disjointness.
+
+    For a target at position ``k`` the source must be ``history[max(0, k - max_hist_items):k]`` and
+    nothing else.  A repeated item is legal: predicting ``A`` from a history that already contains
+    ``A`` is a repurchase, not a leak, so an item-set test would be wrong in both directions.
+    """
+    trie = CatalogueTrie(assignment, layout=layout)
+    row = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+    # The source must be a contiguous, newest-first slice of the prefix and nothing else, so the
+    # check is on positions rather than on the item set: an item may repeat (see the repurchase
+    # test below), but a position at or after the target may never appear.
+    position_of = {item_id: index for index, item_id in enumerate(row)}
+    for window in (2, 3, 5, 20):
+        dataset = build_examples([row], assignment=assignment, layout=layout, max_hist_items=window)
+        for k, (source, target) in enumerate(
+            zip(dataset.inputs, dataset.targets, strict=True), start=1
+        ):
+            decoded = _decode_input_items(source, assignment, layout, trie=trie)
+            assert decoded == row[max(0, k - window) : k]
+            assert all(position_of[item] < k for item in decoded)
+            assert trie.item_for_path(target[:-1]) == row[k]
+
+
+def test_a_repeated_item_is_kept_as_a_valid_repurchase(assignment: list[list[int]], layout: dict) -> None:
+    """``[A, B, A]`` must yield ``input=[A, B] -> target=A`` rather than being dropped as a leak.
+
+    Dropping it would silently delete every repurchase example from training, which is a data
+    change with no basis in the frozen protocol: AgentRec-X's own handoff documents that a naive
+    target may recur inside a history (``PHASE5_HANDOFF.md`` section 8).
+    """
+    trie = CatalogueTrie(assignment, layout=layout)
+    dataset = build_examples([(1, 2, 1)], assignment=assignment, layout=layout, max_hist_items=10)
+    assert dataset.examples == 2
+    # Example 0: [1] -> 2.  Example 1: [1, 2] -> 1, the repurchase.
+    assert _decode_input_items(dataset.inputs[1], assignment, layout, trie=trie) == (1, 2)
+    assert trie.item_for_path(dataset.targets[1][:-1]) == 1
+    # And the repeated item really is present in both the source and the target.
+    assert 1 in _decode_input_items(dataset.inputs[1], assignment, layout, trie=trie)
 
 
 def test_example_count_matches_the_frozen_next_item_definition(
@@ -287,6 +343,22 @@ def test_example_count_matches_the_frozen_next_item_definition(
     rows = [(1, 2, 3), (4, 5, 6, 7)]
     dataset = build_examples(rows, assignment=assignment, layout=layout, max_hist_items=4)
     assert dataset.examples == sum(len(row) - 1 for row in rows)
+
+
+def test_the_three_length_sums_are_kept_distinct() -> None:
+    """Guard the arithmetic that Gate B.1 corrected.
+
+    ``sum(len)``, ``sum(len - 1)`` and ``sum(len - 2)`` are three different numbers and only the
+    middle one is an example count.  A row shorter than two items contributes no transition and no
+    pair, which is what ``max(0, ...)`` encodes.
+    """
+    rows = [(1, 2, 3, 4), (5, 6), (7,)]
+    assert sum(len(row) for row in rows) == 7
+    assert sum(max(0, len(row) - 1) for row in rows) == 4
+    assert sum(max(0, len(row) - 2) for row in rows) == 2
+    # A one-item row is not a transition, and a two-item row is not a Two-Tower pair.
+    assert max(0, len(rows[2]) - 1) == 0
+    assert max(0, len(rows[1]) - 2) == 0
 
 
 def test_history_window_truncates_from_the_oldest_end(
@@ -363,6 +435,93 @@ def test_registered_dimensions_are_the_h5_values() -> None:
 
 def test_config_records_validation_was_not_used() -> None:
     assert tiny_config().as_training_dict()["validation_used"] is False
+
+
+#: Every registered Gate-C value, spelled out independently of the implementation so a change to
+#: the class cannot quietly redefine what "registered" means.
+GATE_C_REGISTRATION = {
+    "max_hist_items": 20,
+    "d_model": 256,
+    "num_layers": 6,
+    "num_heads": 4,
+    "d_ff": 1024,
+    "dropout": 0.1,
+    "batch_size": 512,
+    "epochs": 20,
+    "learning_rate": 5e-4,
+    "weight_decay": 0.0,
+    "max_grad_norm": 1.0,
+    "warmup_fraction": 0.05,
+    "bf16": True,
+    "seed": 2026,
+}
+
+
+def test_registered_training_is_exactly_the_gate_c_registration() -> None:
+    assert TigerConfig.REGISTERED_TRAINING == GATE_C_REGISTRATION
+
+
+def test_the_default_config_is_the_registered_configuration() -> None:
+    """The defaults a Gate-D command inherits must *be* the registered values.
+
+    An unregistered default is how a 3-6 hour GPU run becomes incomparable to its registration, so
+    this fails before the run rather than after it.
+    """
+    config = TigerConfig()
+    assert config.matches_registered_training() is True
+    assert config.training_divergence() == {}
+
+
+def test_a_diverging_config_reports_which_fields_differ() -> None:
+    diverged = TigerConfig(epochs=5, learning_rate=1e-3)
+    report = diverged.training_divergence()
+    assert report == {"epochs": (20, 5), "learning_rate": (5e-4, 1e-3)}
+    assert diverged.matches_registered_training() is False
+    # A test-sized model is allowed to diverge, and says so in its own metadata.
+    assert tiny_config().as_dict(vocab_size=132, per_item_tokens=4)["registered_training"] is False
+
+
+def test_the_cli_defaults_are_the_registered_configuration() -> None:
+    """The CLI is the Gate-D entry point, so its argparse defaults must match the registration."""
+    from tiger_public.cli import _parser
+
+    subparsers = next(
+        action
+        for action in _parser()._actions
+        if action.dest == "stage"
+    )
+    train = subparsers.choices["train"]
+    defaults = {action.dest: action.default for action in train._actions if action.dest != "help"}
+
+    # Every registered value that Gate D sets from the command line is reachable, with the
+    # argparse destination it actually uses.  Two names differ from the registration's field
+    # names, which is exactly the drift this test is here to catch.
+    cli_exposed = {
+        "num_layers": "layers",
+        "num_heads": "heads",
+        "max_hist_items": "max_hist_items",
+        "d_model": "d_model",
+        "d_ff": "d_ff",
+        "dropout": "dropout",
+        "batch_size": "batch_size",
+        "epochs": "epochs",
+        "learning_rate": "learning_rate",
+        "seed": "seed",
+        "bf16": "bf16",
+    }
+    for name, option in cli_exposed.items():
+        assert option in defaults, f"the train subcommand has no --{option} option"
+        assert defaults[option] == GATE_C_REGISTRATION[name], f"the CLI default for --{option} drifted"
+    # bf16 is registered true; --no-bf16 exists to diverge it deliberately for a CPU smoke.
+    assert defaults["bf16"] is True
+    assert defaults["device"] == "cpu"
+
+    # These four are deliberately not CLI options, so the registered value must be the dataclass
+    # default - which is the only way Gate D can set them.
+    config = TigerConfig()
+    for name in ("weight_decay", "max_grad_norm", "warmup_fraction"):
+        assert name not in defaults, f"--{name} is exposed; its default is no longer the only source"
+        assert getattr(config, name) == GATE_C_REGISTRATION[name], name
 
 
 def test_config_refuses_a_non_divisible_head_count() -> None:
