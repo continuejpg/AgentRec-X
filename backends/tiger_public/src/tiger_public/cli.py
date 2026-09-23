@@ -542,6 +542,30 @@ def stage_fit_sid(
 # --------------------------------------------------------------------------- #
 
 
+def _train_dependency_hashes(
+    *,
+    sid_dir: Path,
+    exposure_path: Path,
+    catalogue_dir: Path,
+    generator_layout_path: Path,
+) -> dict[str, str]:
+    """Hash everything a training run depends on.
+
+    Shared by the canonical checkpoint writer and the resumable-state writer so the two can never
+    bind different sets of dependencies.  ``layout`` is the **accepted** SID layout and
+    ``generator_layout`` the derived generator vocabulary; both are bound on purpose.
+    """
+    return {
+        "semantic_ids": sha256_file(sid_dir / "semantic_ids.json"),
+        "layout": sha256_file(sid_dir / "layout.json"),
+        "tokenizer": sha256_file(sid_dir / "tokenizer.pt"),
+        "train_exposure": sha256_file(exposure_path),
+        "catalogue": sha256_file(catalogue_dir / "catalogue.json"),
+        "catalogue_items": sha256_file(catalogue_dir / "catalogue_items.jsonl"),
+        "generator_layout": sha256_file(generator_layout_path),
+    }
+
+
 def stage_train(
     *,
     catalogue_dir: Path,
@@ -561,6 +585,7 @@ def stage_train(
     device: str = "cpu",
     bf16: bool = True,
     max_examples: int | None = None,
+    resume: Path | None = None,
     log: Any = None,
 ) -> dict[str, Any]:
     """Stage 3: train the TIGER generator on ``train_history`` only.
@@ -572,6 +597,11 @@ def stage_train(
 
     The token space is taken from the accepted ``semantic_ids.json`` / ``layout.json``; nothing
     about the levels, offsets, codebook widths or special tokens is assumed here.
+
+    ``resume`` names a previously published ``resume/latest.pt``.  When given, training continues
+    from that state's ``completed_epoch + 1`` up to the same fixed budget, restoring the model,
+    optimizer, scheduler and RNG; the state's dependencies and registered configuration must match
+    or the run is refused.  ``epochs`` is always the TOTAL budget.
     """
     from tiger_public.generator_layout import (
         GeneratorLayoutError,
@@ -584,7 +614,10 @@ def stage_train(
         TigerTrainer,
         build_examples,
         describe_examples,
+        load_resumable,
+        resume_checkpoint_path,
         save_generator,
+        save_resumable,
     )
     from tiger_public.trie import CatalogueTrie
 
@@ -648,15 +681,56 @@ def stage_train(
         bf16=bf16,
         seed=seed,
     )
+    # Everything the run depends on, hashed before the run so a published resumable state can be
+    # refused if any of it changes.
+    dependency_hashes = _train_dependency_hashes(
+        sid_dir=sid_dir,
+        exposure_path=exposure_path,
+        catalogue_dir=catalogue_dir,
+        generator_layout_path=out_dir / "generator_layout.json",
+    )
+    resume_state = None
+    if resume is not None:
+        resume_state = load_resumable(
+            path=Path(resume), dependency_hashes=dependency_hashes, config=config
+        )
     torch.manual_seed(config.seed)
     model = TigerGenerator(
         config=config, layout=generator_layout, vocab_size=int(generator_layout["vocab_size"])
     )
+
+    resume_path = resume_checkpoint_path(out_dir)
+    writes: list[dict[str, Any]] = []
+
+    def publish(
+        *, model, optimizer, scheduler, completed_epoch: int, global_step: int, history
+    ) -> None:
+        """Publish this epoch's resumable state.  Operational only; never a selection candidate."""
+        writes.append(
+            save_resumable(
+                path=resume_path,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                completed_epoch=completed_epoch,
+                epoch_budget=config.epochs,
+                global_step=global_step,
+                history=history,
+                dependency_hashes=dependency_hashes,
+                config=config,
+            )
+        )
+
     trainer = TigerTrainer(model, dataset, config=config, device=device)
-    report = trainer.train()
+    report = trainer.train(resume_state=resume_state, checkpoint_hook=publish)
     final = report.final
     if not report.history or not np.isfinite(float(final.get("loss", float("nan")))):
         raise CliError("the generator reported no finite loss; refusing to write a checkpoint")
+    if report.completed_epoch != config.epochs - 1:
+        raise CliError(
+            f"the run stopped at epoch {report.completed_epoch} of a {config.epochs}-epoch budget; "
+            "refusing to publish a canonical checkpoint for an incomplete budget"
+        )
 
     metadata = save_generator(
         model=model,
@@ -675,6 +749,22 @@ def stage_train(
         "vocab_size": int(accepted_layout["vocab_size"]),
         "special": accepted_layout.get("special"),
     }
+    metadata["checkpoint_policy"] = {
+        "budget": f"fixed {config.epochs} epochs",
+        "validation_based_selection": "none",
+        "recommendation_metric_selection": "none",
+        "canonical_checkpoint": (
+            f"final successfully completed epoch (epoch {report.completed_epoch})"
+        ),
+        "resumable_state": str(resume_path),
+        "resumable_writes": len(writes),
+        "resumable_is_a_selection_candidate": False,
+        "note": (
+            "resume/latest.pt exists only so an interrupted run can continue; no validation or "
+            "test recommendation metric is computed or consulted anywhere in this backend"
+        ),
+    }
+    metadata["resumed_from_epoch"] = report.resumed_from_epoch
     write_json(out_dir / "tiger.json", metadata)
     write_manifest(
         out_dir,
@@ -683,6 +773,7 @@ def stage_train(
             "environment": environment_metadata(device=device),
             "timing": {"seconds": round(report.seconds, 3),
                        "peak_allocated_bytes": report.peak_allocated_bytes},
+            "checkpoint_policy": metadata["checkpoint_policy"],
         },
     )
     if log is not None:
@@ -1148,6 +1239,14 @@ def _parser() -> argparse.ArgumentParser:
         "--max-examples", type=int, default=None,
         help="SMOKE ONLY: cap the example count so a local run is cheap; production must omit it",
     )
+    train.add_argument(
+        "--resume", type=Path, nargs="?", const=Path("__auto__"), default=None,
+        help=(
+            "continue an interrupted run from its resumable state (default: <out>/resume/latest.pt). "
+            "Training restarts at completed_epoch + 1; --epochs remains the TOTAL budget. The state's "
+            "dependencies and registered configuration must match or the run is refused."
+        ),
+    )
 
     score = sub.add_parser("score", help="stage 4: scores (deterministic stub)")
     score.add_argument("--cohort", type=Path, required=True)
@@ -1164,6 +1263,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from tiger_public.tiger import resume_checkpoint_path
+
     args = _parser().parse_args(argv)
     try:
         if args.stage == "build-features":
@@ -1232,6 +1333,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "dead_code_waiver": dead_code_waiver_record,
             }
         elif args.stage == "train":
+            # ``--resume`` with no value means "the default location for this run directory".
+            resume = args.resume
+            if resume is not None and str(resume) == "__auto__":
+                resume = resume_checkpoint_path(args.out)
             metadata = stage_train(
                 catalogue_dir=args.catalogue,
                 exposure_path=args.exposure,
@@ -1250,6 +1355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 bf16=args.bf16,
                 max_examples=args.max_examples,
+                resume=resume,
                 log=(lambda entry: print(f"[train] {entry}", file=sys.stderr))
                 if not args.quiet
                 else None,

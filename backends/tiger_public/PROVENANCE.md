@@ -148,6 +148,11 @@ Portions are `REIMPLEMENTED_FROM`:
   continuation cannot be produced at all, rather than being filtered afterwards; and the shipped
   GRID prefix check is disabled by default, which this implementation does not inherit.
 
+Resumability (Gate C) is `ORIGINAL`: an atomically published per-epoch state carrying model,
+optimizer, scheduler and RNG state, the training history, the registered configuration and the
+dependency hashes, with a refusing loader.  It is an operational artifact only - no validation
+split, no evaluator and no metric exists in this backend, so no epoch can be ranked.
+
 ### `src/tiger_public/dedup.py`
 `ORIGINAL` for the module boundary, the overflow refusal and the recorded audit shape.
 The collision-ordinal scheme is `REIMPLEMENTED_FROM`

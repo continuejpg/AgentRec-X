@@ -659,12 +659,20 @@ Recall/NDCG, **no** validation loop and **no** validation split, so `validation_
 guaranteed true rather than merely asserted.
 
 §8 originally described a per-epoch cadence in which AgentRec-X would evaluate `generator/epoch-N/`
-externally with `validation_target` Recall@10 and pick the winner.  **That is superseded by the
-Gate-B.1 registration in §17.4**, for two reasons: it selects a *production* checkpoint with a
-recommendation metric, and it contradicts H5's own "no cohort metric is asserted" clause.  The
-backend writes one checkpoint at the end of the configured epoch budget and the registered
-selection rule is simply *that* checkpoint.  H5's "resumable checkpoint every epoch" clause is
-therefore an open item (§17.4, discrepancy 1), not something the current trainer implements.
+externally with `validation_target` Recall@10 and pick the winner.  **That rule is superseded and
+must not be used.**  It selects a *production* checkpoint with a recommendation metric, and it
+contradicts H5's own "no cohort metric is asserted" clause.
+
+What replaced it, frozen in §17.4:
+
+* the canonical checkpoint is `tiger.pt`, written once after the **final** epoch of the fixed
+  pre-registered budget; nothing selects between epochs;
+* a resumable state (`resume/latest.pt`) is published atomically at the end of every epoch, so an
+  interrupted run continues from `completed_epoch + 1` with its optimizer, scheduler and RNG state
+  intact.  It exists for **operational resumability only** and is never a model-selection
+  candidate;
+* no validation or test recommendation metric is consulted during training, because no such metric
+  and no such split exist in this backend.
 
 ---
 
@@ -1404,23 +1412,51 @@ label padding              none: every target is exactly per_item_tokens + 1 lon
                            padded. The HF loss is CrossEntropyLoss(ignore_index=-100), so if a
                            padded label ever appeared it would be ignored rather than learned as
                            a token - but no code path produces one.
-checkpoint cadence         1 checkpoint, written once at the end of the configured epoch budget
-final-checkpoint selection the final checkpoint. No validation or test recommendation metric is
-                           consulted, because the backend computes none.
+checkpoint cadence         a resumable state (resume/latest.pt) is published atomically at the end
+                           of EVERY epoch, for operational resumability only
+canonical checkpoint       tiger.pt, written once after the FINAL epoch of the fixed budget
+final-checkpoint selection the final successfully completed epoch. No validation or test
+                           recommendation metric is consulted, because the backend computes none.
 ```
 
-**Two discrepancies are reported here rather than silently resolved, and neither is a
-metric-driven tuning decision.** Both must be settled before Gate D.
+### Checkpoint policy (frozen)
 
-1. **H5's "resumable checkpoint every epoch" is not implemented.** §8 describes the backend
-   writing `generator/epoch-0007/` per epoch for external selection; the implementation writes one
-   final checkpoint (`tiger.pt`, `tiger.json`, `layout.json`, `score_rule.json`). The trainer
-   *accepts* `resume_state` (`optimizer`, `scheduler`, `epoch`, `history`) but the CLI has no
-   `--resume` and no per-epoch cadence. Selecting a checkpoint by validation Recall@10 (§8)
-   contradicts "no validation metric may select a production checkpoint", and the backend has no
-   evaluator by construction. The registered rule above is therefore **final checkpoint, no metric
-   selection**; H5's cadence clause is either waived in the Gate-C registration or implemented as
-   in-training `val_loss`-free resumability.
+```text
+training budget                     fixed 20 epochs
+validation-based checkpoint selection   NONE
+recommendation-metric selection         NONE
+canonical production checkpoint         final successfully completed epoch (epoch 20)
+epoch checkpoints (resume/latest.pt)    operational resumability ONLY
+```
+
+Three statements are load-bearing, and they are the reason the cadence exists at all:
+
+* **epoch checkpoints exist only so an interrupted run can continue.** A fixed 20-epoch budget on a
+  shared GPU host will be interrupted eventually, and restarting from epoch 0 wastes the run;
+* **they are NOT model-selection candidates.** Nothing in this tree reads `resume/latest.pt` to
+  choose a model, and `tiger.json` records
+  `resumable_is_a_selection_candidate: false` beside the policy;
+* **no validation or test recommendation metric is consulted during training.** This backend has no
+  validation split, no evaluator and no metric code, so `validation_used: false` is structural
+  rather than a promise. The canonical checkpoint is the final epoch of the pre-registered budget.
+
+The resumable state records the completed epoch, the model/optimizer/scheduler states, the
+optimizer-step total, the CPU RNG state, the training history through that epoch, the registered
+configuration, and the dependency hashes (accepted SID layout, Semantic IDs, tokenizer, generator
+layout, exposure, catalogue). Publication writes `<name>.tmp`, reads it back and asserts it
+describes the epoch and step it claims, then `os.replace`s it into place, so an interrupted write
+cannot destroy the last valid state. `--resume` (default `<out>/resume/latest.pt`) refuses a
+dependency mismatch, a changed registered configuration, or a renegotiated budget, and continues
+from `completed_epoch + 1` with the full budget unchanged.
+
+**One open item remains, and it is not a metric-driven tuning decision.**
+
+1. ~~H5's "resumable checkpoint every epoch" is not implemented.~~ **Implemented in Gate C.**
+   §8's original per-epoch-external-selection rule (evaluate `generator/epoch-N/` and pick the
+   winner by `validation_target` Recall@10) is **superseded and must not be used**: it selects a
+   production checkpoint with a recommendation metric, and it contradicts §8's own "no cohort
+   metric is asserted" clause. The cadence now serves resumability only, and the canonical
+   checkpoint is the final epoch.
 2. **Resolved in Gate C: the accepted Step-2.4F `layout.json` predates SEP, and is not patched.**
    It declares `special = {pad: 1024, bos: 1025, eos: 1026}` and `vocab_size = 1027`, and it stays
    exactly that. The generator's fourth special is a **separate derived artifact**,

@@ -40,13 +40,17 @@ from tiger_public.generator_layout import (
 )
 from tiger_public.tiger import (
     PAD_TOKEN,
+    RESUMABLE_FORMAT,
     TigerConfig,
     TigerError,
     TigerGenerator,
     TigerTrainer,
     build_examples,
     load_generator,
+    load_resumable,
+    resume_checkpoint_path,
     save_generator,
+    save_resumable,
 )
 from tiger_public.trie import CatalogueTrie, TrieError, item_token_path
 
@@ -839,6 +843,58 @@ def test_a_layout_that_already_carries_sep_is_preserved_not_doubled() -> None:
     assert without["source_sid_layout_had_sep"] is False
 
 
+def test_the_malformed_wide_dedup_layout_is_refused_by_derivation(tmp_path: Path) -> None:
+    """Regression: a dedup block wider than the code space can never be materialised.
+
+    ``contracts.build_token_layout`` is frozen and is NOT changed by this task; it happily builds
+    this shape because the dedup width is not part of its own consistency check.  The generator
+    boundary is what refuses it, and it must refuse *before* any example or model is built.
+    """
+    layout = build_token_layout(
+        levels=3, codebook_size=32, dedup_levels=1, dedup_vocab_size=256
+    ).as_dict()
+    assert layout["code_space"] == 128 and layout["level_offsets"][-1] == 96
+    sid_dir = tmp_path / "sid"
+    sid_dir.mkdir()
+    (sid_dir / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+    (sid_dir / "semantic_ids.json").write_text(
+        json.dumps({"assignment": [[PAD_SENTINEL] * 4] + [[i % 32, 0, 0, i % 256] for i in range(64)]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(GeneratorLayoutError) as error:
+        derive_generator_layout(
+            sid_dir=sid_dir, generator_layout_path=tmp_path / "generator_layout.json"
+        )
+    assert "last level block" in str(error.value)
+    assert not (tmp_path / "generator_layout.json").exists(), "a partial artifact was written"
+
+
+def test_the_coherent_narrow_dedup_layout_is_accepted(tmp_path: Path) -> None:
+    """The same K=32 with a matching dedup width must derive cleanly.  This is the ablation."""
+    layout = build_token_layout(
+        levels=3, codebook_size=32, dedup_levels=1, dedup_vocab_size=32
+    ).as_dict()
+    sid_dir = tmp_path / "sid"
+    sid_dir.mkdir()
+    (sid_dir / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+    (sid_dir / "semantic_ids.json").write_text(
+        json.dumps({"assignment": [[PAD_SENTINEL] * 4] + [[i % 32, (i // 32) % 32, 0, i % 32] for i in range(200)]}),
+        encoding="utf-8",
+    )
+    derived = derive_generator_layout(
+        sid_dir=sid_dir, generator_layout_path=tmp_path / "generator_layout.json"
+    )
+    assert derived["code_space"] == 128
+    # `build_token_layout` already emits SEP (code_space + 3) and vocab code_space + 4, so the
+    # derivation preserves it rather than appending a second one.
+    assert derived["special"]["sep"] == layout["special"]["sep"] == 131
+    assert derived["vocab_size"] == layout["vocab_size"] == 132
+    assert derived["extension"]["added_special"] is None
+    assert derived["audit"]["aliased_tokens"] == []
+    # The accepted layout on disk is untouched, and no backup appears beside it.
+    assert sorted(path.name for path in sid_dir.iterdir()) == ["layout.json", "semantic_ids.json"]
+
+
 def test_a_generator_layout_of_the_wrong_format_is_refused(tmp_path: Path, layout) -> None:
     path = tmp_path / "generator_layout.json"
     path.write_text(json.dumps({"format": "nope", "special": layout["special"]}), encoding="utf-8")
@@ -1022,3 +1078,337 @@ def test_examples_carry_no_target_like_field(trained_artifacts) -> None:
     payload = dataset.as_dict()
     for forbidden in ("validation_target", "test_target", "target_asin"):
         assert forbidden not in payload
+
+
+# --------------------------------------------------------------------------- #
+# Resumability (Gate D blocker)
+# --------------------------------------------------------------------------- #
+#
+# The fixed budget is the budget: these tests never renegotiate it, and no epoch is ever selected
+# by a metric.  What is asserted is that an interrupted run continues where it stopped, with the
+# optimizer/scheduler/RNG state it had, and that a state which does not describe this run is
+# refused rather than half-applied.
+
+
+def _resume_deps(*, sid_dir, exposure_path, catalogue_dir, generator_layout_path) -> dict:
+    from tiger_public.cli import _train_dependency_hashes
+
+    return _train_dependency_hashes(
+        sid_dir=sid_dir,
+        exposure_path=exposure_path,
+        catalogue_dir=catalogue_dir,
+        generator_layout_path=generator_layout_path,
+    )
+
+
+@pytest.fixture(scope="module")
+def resume_rig(trained_artifacts):
+    """A tiny deterministic training rig: 4 epochs, 3 batches each, one published state per epoch."""
+    artifacts = trained_artifacts
+    config = tiny_config(epochs=4)
+    dataset = artifacts["dataset"]
+    deps = _resume_deps(
+        sid_dir=artifacts["sid_dir"],
+        exposure_path=artifacts["exposure_path"],
+        catalogue_dir=artifacts["catalogue_dir"],
+        generator_layout_path=artifacts["generator_layout_path"],
+    )
+
+    def fresh() -> TigerGenerator:
+        return build_model(artifacts["generator_layout"], config)
+
+    def train(*, out_dir, stop_after: int | None = None, resume_state=None):
+        model = fresh()
+        trainer = TigerTrainer(model, dataset, config=config, device="cpu")
+        writes: list[dict] = []
+
+        def hook(**kwargs):
+            writes.append(
+                save_resumable(
+                    path=resume_checkpoint_path(out_dir),
+                    model=kwargs["model"],
+                    optimizer=kwargs["optimizer"],
+                    scheduler=kwargs["scheduler"],
+                    completed_epoch=kwargs["completed_epoch"],
+                    epoch_budget=config.epochs,
+                    global_step=kwargs["global_step"],
+                    history=kwargs["history"],
+                    dependency_hashes=deps,
+                    config=config,
+                )
+            )
+            if stop_after is not None and kwargs["completed_epoch"] == stop_after:
+                raise KeyboardInterrupt("simulated interruption")
+
+        try:
+            report = trainer.train(resume_state=resume_state, checkpoint_hook=hook)
+        except KeyboardInterrupt:
+            report = None
+        return model, report, writes
+
+    return {
+        "config": config,
+        "dataset": dataset,
+        "deps": deps,
+        "fresh": fresh,
+        "train": train,
+        "artifacts": artifacts,
+    }
+
+
+def test_continuous_training_runs_the_whole_budget(resume_rig) -> None:
+    _model, report, writes = resume_rig["train"](out_dir=resume_rig["artifacts"]["root"] / "cont")
+    assert report is not None
+    assert [entry["epoch"] for entry in report.history] == [0, 1, 2, 3]
+    assert report.completed_epoch == 3
+    assert report.global_step == report.steps_per_epoch * 4
+    assert len(writes) == 4, "every completed epoch must publish a resumable state"
+
+
+def test_an_interrupted_run_resumes_at_the_next_epoch(resume_rig, tmp_path) -> None:
+    """The headline requirement: stop after epoch 1, resume, and train 2..3 - not 4 more."""
+    out_dir = tmp_path / "run"
+    _model, report, writes = resume_rig["train"](out_dir=out_dir, stop_after=1)
+    assert report is None, "the rig was supposed to be interrupted"
+    assert [entry["completed_epoch"] for entry in writes] == [0, 1]
+
+    state = load_resumable(
+        path=resume_checkpoint_path(out_dir),
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    assert state["completed_epoch"] == 1
+    assert state["epoch_budget"] == 4
+    # Two epochs' worth of optimizer steps, which is the unit the resume continues from.
+    steps_per_epoch = math.ceil(
+        resume_rig["dataset"].examples / resume_rig["config"].batch_size
+    )
+    assert state["global_step"] == steps_per_epoch * 2
+
+    _model2, resumed, writes2 = resume_rig["train"](out_dir=out_dir, resume_state=state)
+    assert resumed is not None
+    assert resumed.resumed_from_epoch == 1
+    assert [entry["epoch"] for entry in resumed.history] == [0, 1, 2, 3], "epochs must not repeat"
+    assert [entry["completed_epoch"] for entry in writes2] == [2, 3], (
+        "only the remaining epochs are published"
+    )
+
+
+def test_resumed_training_matches_continuous_training(resume_rig, tmp_path) -> None:
+    """Continuing must equal never having stopped - the optimizer state is genuinely restored."""
+    continuous_dir = tmp_path / "continuous"
+    continuous_model, continuous_report, _ = resume_rig["train"](out_dir=continuous_dir)
+
+    interrupted_dir = tmp_path / "interrupted"
+    resume_rig["train"](out_dir=interrupted_dir, stop_after=1)
+    state = load_resumable(
+        path=resume_checkpoint_path(interrupted_dir),
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    resumed_model, resumed_report, _ = resume_rig["train"](
+        out_dir=interrupted_dir, resume_state=state
+    )
+
+    assert [entry["loss"] for entry in resumed_report.history] == [
+        entry["loss"] for entry in continuous_report.history
+    ], "the resumed loss trajectory diverged from the continuous one"
+    assert [entry["lr"] for entry in resumed_report.history] == [
+        entry["lr"] for entry in continuous_report.history
+    ], "the OneCycleLR schedule did not continue"
+    assert resumed_report.steps == continuous_report.steps
+    assert resumed_report.global_step == continuous_report.global_step
+    # The implementation promises determinism under a fixed seed, so the weights must match too.
+    for name, tensor in continuous_model.state_dict().items():
+        assert torch.equal(tensor, resumed_model.state_dict()[name]), name
+
+
+def test_the_published_state_restores_optimizer_and_scheduler_state(resume_rig, tmp_path) -> None:
+    """Not just model weights: the Adam moments and the LR schedule are in the state."""
+    out_dir = tmp_path / "run"
+    _model, _report, _writes = resume_rig["train"](out_dir=out_dir, stop_after=1)
+    state = load_resumable(
+        path=resume_checkpoint_path(out_dir),
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    assert state["optimizer_state"]["state"], "the optimizer moments are empty"
+    assert state["scheduler_state"], "the scheduler state is empty"
+    assert state["grad_scaler_state"] is None, "no AMP scaler exists on CPU fp32"
+    assert state["rng_state"]["cpu"] is not None
+    assert "model_state" in state
+    # The Adam step counter must equal the optimizer steps completed, not 0.
+    steps = {value["step"] for value in state["optimizer_state"]["state"].values()}
+    assert all(int(step) == state["global_step"] for step in steps), steps
+    assert state["history"][-1]["epoch"] == state["completed_epoch"]
+
+
+def test_publishing_a_state_validates_it_before_promotion(resume_rig, tmp_path) -> None:
+    """Transactional publication: a verified temp file is renamed into place, atomically."""
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=0)
+    path = resume_checkpoint_path(out_dir)
+    assert path.is_file()
+    # No partial artifact survives beside the real one.
+    assert not path.with_name(path.name + ".tmp").exists()
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    assert payload["format"] == RESUMABLE_FORMAT
+    assert payload["completed_epoch"] == 0
+    assert set(payload["dependency_hashes"]) == set(resume_rig["deps"])
+
+
+def test_an_interrupted_write_does_not_replace_the_last_good_state(resume_rig, tmp_path) -> None:
+    """A failed publication must leave the previous valid state readable and unchanged."""
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=1)
+    path = resume_checkpoint_path(out_dir)
+    good = path.read_bytes()
+    good_state = torch.load(path, map_location="cpu", weights_only=False)
+
+    class Exploding:
+        """Stands in for a torch.optim.Optimizer whose state dict raises mid-write."""
+
+        def state_dict(self):
+            raise RuntimeError("simulated failure while serialising optimizer state")
+
+    with pytest.raises(RuntimeError):
+        save_resumable(
+            path=path,
+            model=resume_rig["fresh"](),
+            optimizer=Exploding(),
+            scheduler=torch.optim.lr_scheduler.OneCycleLR(
+                torch.optim.AdamW(resume_rig["fresh"]().parameters(), lr=5e-4),
+                max_lr=5e-4, total_steps=4,
+            ),
+            completed_epoch=2,
+            epoch_budget=resume_rig["config"].epochs,
+            global_step=3,
+            history=good_state["history"],
+            dependency_hashes=resume_rig["deps"],
+            config=resume_rig["config"],
+        )
+    assert path.read_bytes() == good, "the last valid state was replaced by a failed write"
+    assert not path.with_name(path.name + ".tmp").exists(), "a temp file was left behind"
+    reread = load_resumable(
+        path=path, dependency_hashes=resume_rig["deps"], config=resume_rig["config"]
+    )
+    assert reread["completed_epoch"] == 1
+
+
+def test_a_truncated_state_is_refused(resume_rig, tmp_path) -> None:
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=0)
+    path = resume_checkpoint_path(out_dir)
+    data = path.read_bytes()
+    path.write_bytes(data[: len(data) // 3])  # a partial file
+    with pytest.raises(Exception) as error:
+        load_resumable(path=path, dependency_hashes=resume_rig["deps"], config=resume_rig["config"])
+    assert error.type is not None
+
+
+def test_a_foreign_file_is_refused_as_a_resume_state(resume_rig, tmp_path) -> None:
+    path = tmp_path / "latest.pt"
+    torch.save({"format": "something.else", "completed_epoch": 1}, path)
+    with pytest.raises(TigerError) as error:
+        load_resumable(path=path, dependency_hashes=resume_rig["deps"], config=resume_rig["config"])
+    assert "not a resumable state" in str(error.value)
+
+
+def test_a_missing_resume_state_is_refused(resume_rig, tmp_path) -> None:
+    with pytest.raises(TigerError):
+        load_resumable(
+            path=tmp_path / "absent.pt",
+            dependency_hashes=resume_rig["deps"],
+            config=resume_rig["config"],
+        )
+
+
+def test_resume_refuses_a_changed_dependency(resume_rig, tmp_path) -> None:
+    """Continuing on a different corpus/SID/layout would silently train two different problems."""
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=0)
+    changed = dict(resume_rig["deps"])
+    changed["train_exposure"] = "0" * 64
+    with pytest.raises(TigerError) as error:
+        load_resumable(
+            path=resume_checkpoint_path(out_dir),
+            dependency_hashes=changed,
+            config=resume_rig["config"],
+        )
+    assert "dependencies changed" in str(error.value)
+
+
+def test_resume_refuses_a_changed_registered_configuration(resume_rig, tmp_path) -> None:
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=0)
+    # tiny_config already uses lr=1e-3, so a "change" must be a real change.
+    for override in ({"learning_rate": 5e-4}, {"seed": 99}, {"batch_size": 4}, {"bf16": True}):
+        with pytest.raises(TigerError) as error:
+            load_resumable(
+                path=resume_checkpoint_path(out_dir),
+                dependency_hashes=resume_rig["deps"],
+                config=tiny_config(epochs=4, **override),
+            )
+        assert "registered configuration changed" in str(error.value), override
+
+
+def test_resume_refuses_a_renegotiated_epoch_budget(resume_rig, tmp_path) -> None:
+    """``--epochs`` is the TOTAL budget; a resume may not shrink or grow it."""
+    out_dir = tmp_path / "run"
+    resume_rig["train"](out_dir=out_dir, stop_after=0)
+    with pytest.raises(TigerError) as error:
+        load_resumable(
+            path=resume_checkpoint_path(out_dir),
+            dependency_hashes=resume_rig["deps"],
+            config=tiny_config(epochs=8),
+        )
+    assert "TOTAL budget" in str(error.value)
+
+
+def test_resume_refuses_a_state_that_completed_the_whole_budget(resume_rig, tmp_path) -> None:
+    """A state at (or past) the final epoch has nothing to continue, so it is refused."""
+    out_dir = tmp_path / "run"
+    model, _report, _writes = resume_rig["train"](out_dir=out_dir, stop_after=0)
+    state = load_resumable(
+        path=resume_checkpoint_path(out_dir),
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=5e-4, total_steps=8)
+    save_resumable(
+        path=resume_checkpoint_path(out_dir),
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        completed_epoch=resume_rig["config"].epochs,
+        epoch_budget=resume_rig["config"].epochs,
+        global_step=0,
+        history=state["history"],
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    with pytest.raises(TigerError) as error:
+        load_resumable(
+            path=resume_checkpoint_path(out_dir),
+            dependency_hashes=resume_rig["deps"],
+            config=resume_rig["config"],
+        )
+    assert "outside the" in str(error.value)
+
+
+def test_a_state_whose_history_disagrees_with_its_epoch_is_refused(resume_rig, tmp_path) -> None:
+    """An inconsistent state must be refused, not silently continued from."""
+    out_dir = tmp_path / "run"
+    model, _report, _writes = resume_rig["train"](out_dir=out_dir, stop_after=1)
+    state = load_resumable(
+        path=resume_checkpoint_path(out_dir),
+        dependency_hashes=resume_rig["deps"],
+        config=resume_rig["config"],
+    )
+    # A 3-epoch budget with 2 completed epochs is consistent; claim 1 completed instead.
+    assert len(state["history"]) == 2
+    with pytest.raises(TigerError):
+        TigerTrainer(
+            model, resume_rig["dataset"], config=resume_rig["config"], device="cpu"
+        ).train(resume_state={**state, "completed_epoch": 0})

@@ -161,6 +161,32 @@ Registered production configuration (frozen in `docs/TIGER_BACKEND.md` §17.4; t
 `max_hist_items 20`, `lr 5e-4`, `seed 2026`, bf16 on, `weight_decay 0.0`, grad clip 1.0, OneCycleLR
 with `pct_start 0.05`, AdamW, final checkpoint selected with no recommendation metric.
 
+### Checkpoint policy and resumability
+
+A fixed 20-epoch budget on a shared host will be interrupted, so the trainer publishes a resumable
+state at the end of **every** epoch:
+
+```bash
+# first attempt (interrupt it however you like)
+PYTHONPATH=src .venv/bin/python -m tiger_public.cli train --catalogue ... --exposure ... \
+    --sid ... --out /data/agentrecx/tiger_generator_prod --device cuda
+
+# continue it: default is <out>/resume/latest.pt, and --epochs stays the TOTAL budget
+PYTHONPATH=src .venv/bin/python -m tiger_public.cli train --catalogue ... --exposure ... \
+    --sid ... --out /data/agentrecx/tiger_generator_prod --device cuda --resume
+```
+
+`resume/latest.pt` carries the model, optimizer, scheduler and RNG state plus the training history,
+the registered configuration and every dependency hash, so continuing restores the optimization
+state instead of restarting it. `os.replace` after a read-back assertion makes publication
+transactional: an interrupted write never replaces the last good state.
+
+**Epoch checkpoints exist only for resumability.** They are not model-selection candidates, no
+validation or test recommendation metric is consulted anywhere in this backend, and the canonical
+checkpoint is `tiger.pt` written after the final epoch of the pre-registered fixed budget. A
+`--resume` against changed dependencies, a changed registered configuration or a different
+`--epochs` is refused.
+
 Production example count: **2 263 252** `= sum(max(0, len(row) - 1))` over the 412 445 accepted
 rows. `2 675 697` is `sum(len(row))`, an item-*occurrence* total, and is not an example count.
 

@@ -45,13 +45,14 @@ vocabulary has no pad token (special tokens sit above the code space), padding u
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Protocol, Sequence
 
 import numpy as np
 import torch
@@ -63,6 +64,8 @@ from tiger_public.trie import CatalogueTrie, TrieError, item_token_path
 
 __all__ = [
     "PAD_TOKEN",
+    "RESUMABLE_FORMAT",
+    "CheckpointHook",
     "TigerConfig",
     "TigerDataset",
     "TigerError",
@@ -71,8 +74,36 @@ __all__ = [
     "build_examples",
     "describe_examples",
     "load_generator",
+    "load_resumable",
+    "resume_checkpoint_path",
     "save_generator",
+    "save_resumable",
 ]
+
+#: Format tag of the resumable (per-epoch) state.  It is a *different artifact* from the canonical
+#: checkpoint in ``tiger.pt``: this one exists only so an interrupted run can continue, and it is
+#: never a model-selection candidate.
+RESUMABLE_FORMAT = "agentrecx.tiger.resume.v1"
+
+#: Where a resumable state lives inside the run directory.  One rolling file, atomically replaced,
+#: rather than twenty retained optimizer blobs: the fixed budget is the budget, and no historical
+#: epoch is ever a candidate for the canonical checkpoint.
+RESUMABLE_NAME = "resume/latest.pt"
+
+
+class CheckpointHook(Protocol):
+    """Called by :meth:`TigerTrainer.train` once per successfully completed epoch."""
+
+    def __call__(
+        self,
+        *,
+        model: "TigerGenerator",
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler,
+        completed_epoch: int,
+        global_step: int,
+        history: list[dict[str, Any]],
+    ) -> Any: ...
 
 
 class TigerError(ValueError):
@@ -570,6 +601,13 @@ class TigerTrainingReport:
     precision: str = "fp32"
     peak_allocated_bytes: int | None = None
     resumed_from_epoch: int | None = None
+    #: The last epoch that completed.  ``None`` only when no epoch ran at all.
+    completed_epoch: int | None = None
+    #: Optimizer steps completed.  This is the unit a resumed run continues from, because it is
+    #: what the LR schedule advances by and what makes "the next epoch" unambiguous.
+    global_step: int = 0
+    #: Batches per epoch, so ``global_step`` maps back to an epoch without re-deriving it.
+    steps_per_epoch: int = 0
 
     @property
     def final(self) -> dict[str, Any]:
@@ -622,7 +660,23 @@ class TigerTrainer:
             mask[position, : len(tokens)] = 1
         return rows, mask, targets
 
-    def train(self, *, resume_state: Mapping[str, Any] | None = None) -> TigerTrainingReport:
+    def train(
+        self,
+        *,
+        resume_state: Mapping[str, Any] | None = None,
+        checkpoint_hook: "CheckpointHook | None" = None,
+    ) -> TigerTrainingReport:
+        """Run the configured epoch budget, optionally continuing a published resumable state.
+
+        ``resume_state`` is the payload of :func:`load_resumable`.  It restores the model,
+        optimizer, scheduler **and RNG** rather than only the weights, so optimization continues
+        instead of restarting: ``completed_epoch + 1`` is the first epoch trained, and the
+        configured ``epochs`` stays the TOTAL budget.
+
+        ``checkpoint_hook`` is called once per **successfully completed** epoch, after that epoch's
+        loss was recorded.  It is how the CLI publishes ``resume/latest.pt``; the trainer itself
+        stays free of filesystem policy.
+        """
         report = TigerTrainingReport(device=str(self.device), examples=self.dataset.examples)
         self.model.to(self.device)
         model = self.model.model
@@ -634,6 +688,7 @@ class TigerTrainer:
             weight_decay=self.config.weight_decay,
         )
         steps_per_epoch = math.ceil(self.dataset.examples / self.config.batch_size)
+        report.steps_per_epoch = steps_per_epoch
         total_steps = max(1, steps_per_epoch * self.config.epochs)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
@@ -643,11 +698,44 @@ class TigerTrainer:
         )
         start_epoch = 0
         if resume_state:
-            optimizer.load_state_dict(resume_state["optimizer"])
-            scheduler.load_state_dict(resume_state["scheduler"])
-            start_epoch = int(resume_state["epoch"]) + 1
-            report.resumed_from_epoch = int(resume_state["epoch"])
-            report.history = list(resume_state.get("history", []))
+            model.load_state_dict(resume_state["model_state"])
+            optimizer.load_state_dict(resume_state["optimizer_state"])
+            scheduler.load_state_dict(resume_state["scheduler_state"])
+            _restore_rng(resume_state.get("rng_state") or {})
+            completed = int(resume_state["completed_epoch"])
+            global_step = int(resume_state["global_step"])
+            report.resumed_from_epoch = completed
+            report.history = [dict(entry) for entry in resume_state.get("history", [])]
+            report.steps = global_step
+            report.global_step = global_step
+            # The optimizer step is the unit of continuation, so "the next epoch" is derived from
+            # it rather than trusted as a separate number that could disagree.
+            if global_step % steps_per_epoch != 0:
+                raise TigerError(
+                    f"the resumable state stopped at optimizer step {global_step}, which is not a "
+                    f"multiple of the {steps_per_epoch} steps in an epoch; the state is from a "
+                    "different batching configuration"
+                )
+            start_epoch = global_step // steps_per_epoch
+            if start_epoch != completed + 1:
+                raise TigerError(
+                    f"the resumable state records {completed} completed epochs but {global_step} "
+                    f"optimizer steps ({start_epoch} epochs at {steps_per_epoch} steps each); "
+                    "refusing to resume from an inconsistent state"
+                )
+            if len(report.history) != completed + 1:
+                raise TigerError(
+                    f"the resumable state holds {len(report.history)} history entries for "
+                    f"{completed + 1} completed epochs; refusing to resume from an inconsistent "
+                    "history"
+                )
+            # The scheduler must have advanced exactly once per optimizer step, otherwise the
+            # restored LR schedule does not continue the run it claims to.
+            if int(scheduler.last_epoch) != global_step:
+                raise TigerError(
+                    f"the restored scheduler is at step {int(scheduler.last_epoch)} but the state "
+                    f"records {global_step}; refusing to resume with a misaligned LR schedule"
+                )
 
         if self.device.type == "cuda" and torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()
@@ -695,6 +783,22 @@ class TigerTrainer:
                     "lr": round(float(scheduler.get_last_lr()[0]), 8),
                 }
             )
+            if checkpoint_hook is not None:
+                # Only after the epoch completed AND was recorded: a hook that fails must not leave
+                # a state claiming an epoch that is not in the history.
+                report.global_step = int(scheduler.last_epoch)
+                checkpoint_hook(
+                    model=self.model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    completed_epoch=epoch,
+                    global_step=report.global_step,
+                    history=report.history,
+                )
+        report.completed_epoch = report.history[-1]["epoch"] if report.history else None
+        # The optimizer-step total belongs to the report regardless of whether a hook ran, so a
+        # resume without a checkpoint hook still reports where the budget actually ended.
+        report.global_step = int(scheduler.last_epoch)
         report.seconds = time.perf_counter() - started
         if self.device.type == "cuda" and torch.cuda.is_available():
             report.peak_allocated_bytes = int(torch.cuda.max_memory_allocated())
@@ -903,3 +1007,195 @@ def load_generator(
     model.model.load_state_dict(payload["state_dict"])
     model.to(torch.device(device))
     return model, metadata, payload.get("resource", {})
+
+
+# --------------------------------------------------------------------------- #
+# Resumable (per-epoch) state
+# --------------------------------------------------------------------------- #
+#
+# Why this exists, stated once
+# ---------------------------
+# A fixed 20-epoch budget on a shared GPU host will be interrupted eventually, and restarting from
+# epoch 0 wastes the whole run.  So the trainer publishes a **resumable** state at the end of every
+# epoch.
+#
+# It is emphatically **not** a model-selection mechanism:
+#
+# * no validation split exists in this backend, and no validation or test recommendation metric is
+#   computed anywhere in it, so no epoch can be ranked against another;
+# * the canonical production checkpoint is the ``tiger.pt`` written after the FINAL epoch of the
+#   pre-registered budget;
+# * ``resume/latest.pt`` is a rolling operational artifact, replaced every epoch, and it is never
+#   read as a candidate.  Loading it and calling ``constrained_generate`` is possible, but nothing
+#   in this tree selects on it.
+
+
+def resume_checkpoint_path(out_dir: Path) -> Path:
+    """The rolling resumable state for a run directory."""
+    return Path(out_dir) / RESUMABLE_NAME
+
+
+def _rng_state() -> dict[str, Any]:
+    """CPU RNG state, which is what this implementation's batching actually consumes.
+
+    The frozen dataset is CPU-resident and the per-epoch permutation comes from a *freshly seeded*
+    ``torch.Generator``, so training does not depend on global RNG progression.  The global state is
+    recorded anyway, because restoring it is what makes a resumed run byte-comparable to a
+    continuous one if global randomness ever enters the loop.
+    """
+    return {"cpu": torch.get_rng_state()}
+
+
+def _restore_rng(state: Mapping[str, Any]) -> None:
+    cpu = state.get("cpu")
+    if cpu is not None:
+        torch.set_rng_state(torch.as_tensor(cpu, dtype=torch.uint8))
+
+
+def _snapshot_state_dict(module: torch.nn.Module) -> dict[str, Any]:
+    return {name: tensor.detach().clone() for name, tensor in module.state_dict().items()}
+
+
+def save_resumable(
+    *,
+    path: Path,
+    model: TigerGenerator,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    completed_epoch: int,
+    epoch_budget: int,
+    global_step: int,
+    history: Sequence[Mapping[str, Any]],
+    dependency_hashes: Mapping[str, str],
+    config: TigerConfig,
+    grad_scaler_state: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Transactionally publish the resumable state for ``completed_epoch``.
+
+    Three steps, in this order, so an interrupted write can never destroy the previous good state:
+
+    1. write to ``<path>.tmp``;
+    2. read it back with ``torch.load`` **and** assert it describes the epoch and step we meant -
+       a truncated file parses as nothing and a corrupt one raises, so neither is promoted;
+    3. ``os.replace`` onto the final path, which is atomic on POSIX for a same-filesystem rename.
+
+    The optimizer and scheduler states are cloned, not referenced: PyTorch mutates its state dicts
+    in place as training continues, so storing the live tensors would make the "checkpoint" change
+    underneath us after it was written.
+    """
+    import os
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "format": RESUMABLE_FORMAT,
+        "completed_epoch": int(completed_epoch),
+        "epoch_budget": int(epoch_budget),
+        "global_step": int(global_step),
+        "model_state": _snapshot_state_dict(model.model),
+        "optimizer_state": copy.deepcopy(optimizer.state_dict()),
+        "scheduler_state": copy.deepcopy(scheduler.state_dict()),
+        "grad_scaler_state": dict(grad_scaler_state) if grad_scaler_state else None,
+        "rng_state": _rng_state(),
+        # An explicit, self-contained record under the dataclass's OWN field names, so the resume
+        # check compares like with like.  ``as_training_dict`` is deliberately NOT merged in: it is
+        # a provenance record with its own key names ("lr", "epochs") and merging it would shadow
+        # the real fields.
+        "config": {
+            **{name: getattr(config, name) for name in TigerConfig.REGISTERED_TRAINING},
+            "epochs": int(config.epochs),
+            "vocab_size": int(model.vocab_size),
+            "per_item_tokens": int(model.per_item_tokens),
+        },
+        "training_record": config.as_training_dict(),
+        "dependency_hashes": dict(dependency_hashes),
+        "history": [dict(entry) for entry in history],
+        "torch": torch.__version__,
+    }
+    temporary = path.with_name(path.name + ".tmp")
+    torch.save(payload, temporary)
+    try:
+        # Read back before promoting: a partial file is not a checkpoint.
+        verified = torch.load(temporary, map_location="cpu", weights_only=False)
+        if verified.get("format") != RESUMABLE_FORMAT:
+            raise TigerError(f"the written resume state declares {verified.get('format')!r}")
+        if int(verified["completed_epoch"]) != int(completed_epoch):
+            raise TigerError("the written resume state records a different completed epoch")
+        if int(verified["global_step"]) != int(global_step):
+            raise TigerError("the written resume state records a different global step")
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return {
+        "path": str(path),
+        "completed_epoch": int(completed_epoch),
+        "epoch_budget": int(epoch_budget),
+        "global_step": int(global_step),
+        "bytes": path.stat().st_size,
+    }
+
+
+def load_resumable(
+    *,
+    path: Path,
+    dependency_hashes: Mapping[str, str],
+    config: TigerConfig,
+) -> dict[str, Any]:
+    """Read a resumable state, refusing a dependency or registered-configuration mismatch.
+
+    The refusals are the point.  Continuing a run whose corpus, catalogue, SID layout or generator
+    vocabulary has changed would silently produce a model trained on two different problems, and
+    the file on disk cannot tell anyone that afterwards.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise TigerError(f"no resumable state at {path}")
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    if payload.get("format") != RESUMABLE_FORMAT:
+        raise TigerError(
+            f"{path} declares format {payload.get('format')!r}, expected {RESUMABLE_FORMAT!r}; it "
+            "is not a resumable state (a truncated or foreign file is refused)"
+        )
+    for key in ("completed_epoch", "epoch_budget", "global_step", "model_state", "optimizer_state",
+                "scheduler_state", "config", "dependency_hashes", "history"):
+        if key not in payload:
+            raise TigerError(f"the resumable state at {path} is missing {key!r}")
+
+    expected = dict(payload["dependency_hashes"])
+    mismatched = sorted(name for name, digest in expected.items() if dependency_hashes.get(name) != digest)
+    if mismatched:
+        raise TigerError(
+            "refusing to resume: the run's dependencies changed. "
+            f"Mismatched: {mismatched}. A resumed run must continue on the same Semantic IDs, "
+            "generator layout, exposure and catalogue as the run it continues."
+        )
+    missing = sorted(name for name in dependency_hashes if name not in expected)
+    if missing:
+        raise TigerError(f"the resumable state does not record {missing}; refusing to resume")
+
+    recorded = dict(payload["config"])
+    # ``epochs`` is the budget and is checked on its own below, because the configured value is the
+    # TOTAL budget for the resumed run rather than a value the resumed run may redefine.
+    divergence = {
+        name: (getattr(config, name), recorded.get(name))
+        for name in TigerConfig.REGISTERED_TRAINING
+        if name != "epochs" and recorded.get(name) != getattr(config, name)
+    }
+    if divergence:
+        raise TigerError(
+            f"refusing to resume: the registered configuration changed. {divergence}"
+        )
+    if int(payload["epoch_budget"]) != int(config.epochs):
+        raise TigerError(
+            f"the resumable state was written for a {payload['epoch_budget']}-epoch budget but "
+            f"--epochs is {config.epochs}; the fixed budget is the TOTAL budget and must not be "
+            "renegotiated on resume"
+        )
+    completed = int(payload["completed_epoch"])
+    if not 0 <= completed < int(config.epochs):
+        raise TigerError(
+            f"the resumable state completed epoch {completed}, which is outside the "
+            f"0..{int(config.epochs) - 1} range of a {int(config.epochs)}-epoch budget"
+        )
+    return payload

@@ -46,11 +46,15 @@ from tiger_public.generator_layout import (
 )
 from tiger_public.tiger import (
     TigerConfig,
+    TigerError,
     TigerGenerator,
     TigerTrainer,
     build_examples,
     load_generator,
+    load_resumable,
+    resume_checkpoint_path,
     save_generator,
+    save_resumable,
 )
 from tiger_public.trie import CatalogueTrie, item_token_path
 
@@ -450,6 +454,113 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         reloaded_paths = restored.constrained_generate(batch, mask, trie=trie, beam=3)
         check(reloaded_paths == paths, "a reloaded checkpoint generates identically")
+
+        # ---- resumability -------------------------------------------------- #
+        # Interrupt the same 3-epoch budget after epoch 1, then continue it.  The comparison is
+        # against `losses`, the uninterrupted run above, so a partial restore cannot pass.
+        smoke_budget = TigerConfig(
+            d_model=64, num_layers=2, num_heads=2, d_ff=128, dropout=0.0,
+            max_hist_items=5, epochs=args.epochs, batch_size=32,
+            learning_rate=1e-3, bf16=False, seed=2026,
+        )
+        smoke_deps = {
+            "semantic_ids": sha256_file(artifacts["sid_dir"] / "semantic_ids.json"),
+            "layout": sha256_file(artifacts["sid_dir"] / "layout.json"),
+            "tokenizer": sha256_file(artifacts["sid_dir"] / "tokenizer.pt"),
+            "train_exposure": sha256_file(artifacts["exposure_path"]),
+            "catalogue": sha256_file(artifacts["catalogue_dir"] / "catalogue.json"),
+            "catalogue_items": sha256_file(artifacts["catalogue_dir"] / "catalogue_items.jsonl"),
+            "generator_layout": sha256_file(artifacts["generator_layout_path"]),
+        }
+        resume_path = resume_checkpoint_path(root / "resume_run")
+        # Seeded like the uninterrupted run above: an unseeded start would diverge for a reason
+        # that has nothing to do with resumability.
+        torch.manual_seed(smoke_budget.seed)
+        resume_model = TigerGenerator(
+            config=smoke_budget, layout=layout, vocab_size=int(layout["vocab_size"])
+        )
+        interrupted = False
+
+        partial_history: list[dict[str, Any]] = []
+
+        def _hook(**kwargs):
+            nonlocal interrupted
+            partial_history[:] = [dict(entry) for entry in kwargs["history"]]
+            save_resumable(
+                path=resume_path,
+                model=kwargs["model"],
+                optimizer=kwargs["optimizer"],
+                scheduler=kwargs["scheduler"],
+                completed_epoch=kwargs["completed_epoch"],
+                epoch_budget=smoke_budget.epochs,
+                global_step=kwargs["global_step"],
+                history=kwargs["history"],
+                dependency_hashes=smoke_deps,
+                config=smoke_budget,
+            )
+            if args.epochs > 1 and kwargs["completed_epoch"] == 0 and not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt("smoke: stop after epoch 1")
+
+        try:
+            resume_report = TigerTrainer(
+                resume_model, dataset, config=smoke_budget, device="cpu"
+            ).train(checkpoint_hook=_hook)
+        except KeyboardInterrupt:
+            resume_report = None
+        except TigerError:
+            # A 1-epoch smoke cannot be interrupted mid-budget, which is fine.
+            resume_report = None
+            interrupted = False
+        check(resume_path.is_file(), "a resumable state is published every epoch")
+        check(not resume_path.with_name(resume_path.name + ".tmp").exists(),
+              "no partial resumable state is left behind")
+
+        state = load_resumable(path=resume_path, dependency_hashes=smoke_deps, config=smoke_budget)
+        check(state["completed_epoch"] == 0, "the resumable state records the completed epoch")
+        check(state["epoch_budget"] == smoke_budget.epochs,
+              "the resumable state records the TOTAL epoch budget")
+        check(bool(state["optimizer_state"]["state"]), "the optimizer state is in the resumable state")
+        continued = TigerGenerator(config=smoke_budget, layout=layout,
+                                   vocab_size=int(layout["vocab_size"]))
+        continued_report = TigerTrainer(
+            continued, dataset, config=smoke_budget, device="cpu"
+        ).train(resume_state=state)
+        check([entry["epoch"] for entry in continued_report.history] == list(range(args.epochs)),
+              "resumed training covers every epoch exactly once")
+        check(continued_report.history[: len(partial_history)]
+              == [dict(entry) for entry in partial_history],
+              "resumed history continues the interrupted run without repeating an epoch")
+        check([entry["loss"] for entry in continued_report.history] == losses,
+              "resumed training reproduces the uninterrupted loss trajectory")
+        check(continued_report.global_step == report.global_step,
+              "resumed training reaches the same optimizer-step total as the uninterrupted run")
+
+        # A resume must refuse a changed dependency or a renegotiated budget.
+        try:
+            load_resumable(
+                path=resume_path,
+                dependency_hashes={**smoke_deps, "train_exposure": "0" * 64},
+                config=smoke_budget,
+            )
+            check(False, "a resume with changed dependencies is refused")
+        except TigerError as error:
+            check("dependencies changed" in str(error),
+                  f"a resume with changed dependencies is refused: {type(error).__name__}")
+        try:
+            load_resumable(
+                path=resume_path,
+                dependency_hashes=smoke_deps,
+                config=TigerConfig(
+                    d_model=64, num_layers=2, num_heads=2, d_ff=128, dropout=0.0,
+                    max_hist_items=5, epochs=args.epochs + 3, batch_size=32,
+                    learning_rate=1e-3, bf16=False, seed=2026,
+                ),
+            )
+            check(False, "a renegotiated epoch budget is refused")
+        except TigerError as error:
+            check("TOTAL budget" in str(error),
+                  f"a renegotiated epoch budget is refused: {type(error).__name__}")
 
         # Genuine reproducibility: same seed, same config, same data -> same trained model and
         # the same generation.  Comparing an *untrained* model would be meaningless, so this
