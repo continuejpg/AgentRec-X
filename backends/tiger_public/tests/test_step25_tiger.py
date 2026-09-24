@@ -39,7 +39,6 @@ from tiger_public.generator_layout import (
     sha256_file,
 )
 from tiger_public.tiger import (
-    PAD_TOKEN,
     RESUMABLE_FORMAT,
     TigerConfig,
     TigerError,
@@ -702,10 +701,35 @@ def trained_artifacts(tmp_path_factory, layout, assignment, trie):
 
 def test_training_produces_finite_loss(trained_artifacts) -> None:
     report = trained_artifacts["report"]
+    dataset = trained_artifacts["dataset"]
+    metadata = trained_artifacts["metadata"]
     assert report.history, "no epochs were recorded"
     for entry in report.history:
         assert math.isfinite(entry["loss"])
     assert report.precision == "fp32", "a CPU run must report fp32, not claim bf16"
+    assert metadata["training"]["examples"] == report.examples == dataset.examples
+
+
+def test_trainer_padding_uses_generator_layout_pad(trained_artifacts) -> None:
+    model = trained_artifacts["model"]
+    dataset = trained_artifacts["dataset"]
+    trainer = TigerTrainer(model, dataset, config=model.config, device="cpu")
+
+    short = min(range(dataset.examples), key=lambda index: len(dataset.inputs[index]))
+    long = max(range(dataset.examples), key=lambda index: len(dataset.inputs[index]))
+    assert len(dataset.inputs[short]) < len(dataset.inputs[long])
+
+    rows, mask, _targets = trainer._collate([short, long])
+    short_width = len(dataset.inputs[short])
+    pad_token = int(model.layout["special"]["pad"])
+
+    assert rows.shape[1] == len(dataset.inputs[long])
+    assert rows[0, short_width:].tolist() == [pad_token] * (
+        rows.shape[1] - short_width
+    )
+    assert mask[0, short_width:].tolist() == [0] * (
+        rows.shape[1] - short_width
+    )
 
 
 def test_checkpoint_writes_the_documented_files(trained_artifacts) -> None:
@@ -955,6 +979,9 @@ def test_checkpoint_saves_and_loads_with_identical_generation(trained_artifacts,
         device="cpu",
     )
     assert restored.parameter_count() == model.parameter_count()
+    expected_pad = int(model.layout["special"]["pad"])
+    assert model.model.config.pad_token_id == expected_pad
+    assert restored.model.config.pad_token_id == expected_pad
     batch = torch.tensor([list(dataset.inputs[0])], dtype=torch.long)
     mask = torch.ones_like(batch)
     assert model.constrained_generate(batch, mask, trie=trie, beam=2) == restored.constrained_generate(
@@ -967,7 +994,8 @@ def test_constrained_generation_only_returns_catalogue_paths(trained_artifacts, 
     model = trained_artifacts["model"]
     rows = [list(dataset.inputs[index]) for index in range(12)]
     width = max(len(row) for row in rows)
-    batch = torch.full((len(rows), width), PAD_TOKEN, dtype=torch.long)
+    pad_token = int(model.layout["special"]["pad"])
+    batch = torch.full((len(rows), width), pad_token, dtype=torch.long)
     mask = torch.zeros((len(rows), width), dtype=torch.long)
     for position, row in enumerate(rows):
         batch[position, : len(row)] = torch.tensor(row)
@@ -1412,3 +1440,197 @@ def test_a_state_whose_history_disagrees_with_its_epoch_is_refused(resume_rig, t
         TigerTrainer(
             model, resume_rig["dataset"], config=resume_rig["config"], device="cpu"
         ).train(resume_state={**state, "completed_epoch": 0})
+
+
+# --------------------------------------------------------------------------- #
+# Gate-D remediation regression tests (R1-A / R1-B / R1-C)
+# --------------------------------------------------------------------------- #
+
+
+def test_special_token_contract_is_derived_from_the_layout(layout: dict) -> None:
+    """R1-A: every special-token identity comes from the layout, and aliasing is an error."""
+    from tiger_public.tiger import generator_special_tokens
+
+    tokens = generator_special_tokens(layout)
+    assert tokens["pad"] == int(layout["special"]["pad"])
+    assert tokens["bos"] == int(layout["special"]["bos"])
+    assert tokens["eos"] == int(layout["special"]["eos"])
+    assert tokens["sep"] == int(layout["special"]["sep"])
+    assert tokens["pad"] != tokens["bos"] != tokens["eos"] != tokens["sep"]
+
+    broken = json.loads(json.dumps(layout))
+    broken["special"]["pad"] = broken["special"]["bos"]
+    with pytest.raises(TigerError, match="alias"):
+        generator_special_tokens(broken)
+
+    inside_code_space = json.loads(json.dumps(layout))
+    inside_code_space["special"]["pad"] = 0
+    with pytest.raises(TigerError, match="code space"):
+        generator_special_tokens(inside_code_space)
+
+
+def test_model_and_trainer_use_the_layout_pad(trained_artifacts) -> None:
+    """R1-A: the T5 config and the trainer collation agree with the layout's PAD."""
+    model = trained_artifacts["model"]
+    dataset = trained_artifacts["dataset"]
+    pad = int(model.layout["special"]["pad"])
+    assert model.model.config.pad_token_id == pad
+    assert model.model.config.eos_token_id == int(model.layout["special"]["eos"])
+    assert model.model.config.decoder_start_token_id == int(model.layout["special"]["bos"])
+
+    trainer = TigerTrainer(model, dataset, config=model.config, device="cpu")
+    order = list(range(min(8, dataset.examples)))
+    rows, mask, _targets = trainer._collate(order)
+    for position, index in enumerate(order):
+        width = len(dataset.inputs[index])
+        assert rows[position, width:].tolist() == [pad] * (rows.shape[1] - width)
+        assert mask[position, width:].tolist() == [0] * (rows.shape[1] - width)
+        assert mask[position, :width].tolist() == [1] * width
+
+
+def test_targets_are_uniform_and_never_pad(trained_artifacts) -> None:
+    """R1-A: there is no label padding, and no target is ever the PAD identity."""
+    model = trained_artifacts["model"]
+    dataset = trained_artifacts["dataset"]
+    pad = int(model.layout["special"]["pad"])
+    widths = {len(target) for target in dataset.targets}
+    assert len(widths) == 1, f"targets have ragged widths {sorted(widths)}"
+    assert widths.pop() == dataset.per_item_tokens + 1
+    assert all(target[-1] == dataset.eos for target in dataset.targets)
+    assert not any(pad in target for target in dataset.targets)
+
+
+def test_training_metadata_records_the_derived_exposure(trained_artifacts) -> None:
+    """R1-B: metadata carries the runtime example count, not a serialisation literal."""
+    metadata = trained_artifacts["metadata"]
+    report = trained_artifacts["report"]
+    dataset = trained_artifacts["dataset"]
+    training = metadata["training"]
+    assert training["examples"] == report.examples == dataset.examples
+    assert training["examples_positive"] is True
+    assert training["steps_per_epoch"] == report.steps_per_epoch
+    assert training["last_batch_size"] == report.last_batch_size
+    assert training["special_tokens"]["pad"] == int(dataset_layout_pad(trained_artifacts))
+    assert training["special_tokens"]["vocab_size"] == int(
+        trained_artifacts["model"].layout["vocab_size"]
+    )
+
+
+def dataset_layout_pad(trained_artifacts):
+    return trained_artifacts["model"].layout["special"]["pad"]
+
+
+def test_production_exposure_arithmetic_matches_the_frozen_contract() -> None:
+    """R1-B: the frozen production exposure and its derived batching arithmetic."""
+    from tiger_public.tiger import (
+        EXPECTED_PRODUCTION_EXAMPLES,
+        expected_batches,
+        expected_last_batch_size,
+    )
+
+    assert EXPECTED_PRODUCTION_EXAMPLES == 2_263_252
+    assert expected_batches(EXPECTED_PRODUCTION_EXAMPLES, 512) == 4_421
+    assert expected_last_batch_size(EXPECTED_PRODUCTION_EXAMPLES, 512) == 212
+    assert expected_batches(EXPECTED_PRODUCTION_EXAMPLES, 512) * 20 == 88_420
+
+
+def test_configure_deterministic_execution_sets_the_validated_regime() -> None:
+    """R1-C: the regime H validated, and the observed state it reports."""
+    import os
+
+    import torch
+
+    from tiger_public.tiger import (
+        DETERMINISTIC_CUBLAS_WORKSPACE_CONFIG,
+        configure_deterministic_execution,
+    )
+
+    previous_det = bool(torch.are_deterministic_algorithms_enabled())
+    previous_warn = bool(torch.is_deterministic_algorithms_warn_only_enabled())
+    previous_env = os.environ.get("CUBLAS_WORKSPACE_CONFIG")
+    try:
+        observed = configure_deterministic_execution()
+        assert observed["deterministic_algorithms"] is True
+        assert observed["deterministic_algorithms_warn_only"] is False
+        assert observed["cublas_workspace_config"] == ":4096:8"
+        assert observed["cublas_workspace_config"] == DETERMINISTIC_CUBLAS_WORKSPACE_CONFIG
+        assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
+        assert bool(torch.are_deterministic_algorithms_enabled()) is True
+        assert bool(torch.is_deterministic_algorithms_warn_only_enabled()) is False
+    finally:
+        torch.use_deterministic_algorithms(previous_det, warn_only=previous_warn)
+        if previous_env is None:
+            os.environ.pop("CUBLAS_WORKSPACE_CONFIG", None)
+        else:
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = previous_env
+
+
+def test_no_code_alias_assertion_is_retained(layout: dict, assignment: list[list[int]]) -> None:
+    """R2: the accepted no-code-alias assertion is retained and still rejects aliasing."""
+    from tiger_public.generator_layout import GeneratorLayoutError, assert_no_code_alias
+
+    audit = assert_no_code_alias(layout, assignment)
+    assert audit["aliased_tokens"] == []
+    assert audit["catalogue_items"] == len(assignment) - 1
+    assert audit["distinct_sid_tokens"] > 0
+
+    # A special placed on a token the accepted Semantic IDs actually use is refused.
+    clashing = json.loads(json.dumps(layout))
+    clashing["special"]["sep"] = int(assignment[1][0])
+    with pytest.raises(GeneratorLayoutError):
+        assert_no_code_alias(clashing, assignment)
+
+
+def test_production_layout_special_tokens_are_the_frozen_identity() -> None:
+    """R2: against the REAL frozen Step-2.4F artifact - pad 1024, bos 1025, eos 1026, sep 1027.
+
+    Skipped when the frozen production artifact is not mounted; the R3 smoke asserts the same
+    identities from a live run manifest.
+    """
+    import os as _os
+    import tempfile
+
+    from tiger_public.generator_layout import derive_generator_layout
+    from tiger_public.tiger import TigerConfig, TigerGenerator, TigerTrainer, generator_special_tokens
+
+    sid_dir = Path(
+        _os.environ.get(
+            "AGENTRECX_TIGER_SID_DIR", "/root/autodl-tmp/step24f/runs/tiger_public_2026/sid"
+        )
+    )
+    if not (sid_dir / "layout.json").is_file() or not (sid_dir / "semantic_ids.json").is_file():
+        pytest.skip(f"frozen production SID artifact not present at {sid_dir}")
+
+    with tempfile.TemporaryDirectory() as scratch:
+        generator_layout = derive_generator_layout(
+            sid_dir=sid_dir, generator_layout_path=Path(scratch) / "generator_layout.json"
+        )
+    tokens = generator_special_tokens(generator_layout)
+    assert tokens == {"pad": 1024, "bos": 1025, "eos": 1026, "sep": 1027}
+    assert int(generator_layout["vocab_size"]) == 1028
+    assert int(generator_layout["code_space"]) == 1024
+
+    config = TigerConfig(epochs=20, batch_size=512, seed=2026)
+    torch.manual_seed(config.seed)
+    model = TigerGenerator(
+        config=config, layout=generator_layout, vocab_size=int(generator_layout["vocab_size"])
+    )
+    assert model.model.config.pad_token_id == 1024
+    assert model.model.config.eos_token_id == 1026
+    assert model.model.config.decoder_start_token_id == 1025
+
+    dataset = build_examples(
+        [(1, 2, 3, 4), (5, 6)],
+        assignment=json.loads((sid_dir / "semantic_ids.json").read_text())["assignment"],
+        layout=generator_layout,
+        max_hist_items=20,
+    )
+    trainer = TigerTrainer(model, dataset, config=config, device="cpu")
+    rows, mask, targets = trainer._collate(list(range(dataset.examples)))
+    shortest = min(range(dataset.examples), key=lambda index: len(dataset.inputs[index]))
+    widest = max(len(row) for row in dataset.inputs)
+    width = len(dataset.inputs[shortest])
+    if width < widest:
+        assert rows[shortest, width:].tolist() == [1024] * (widest - width)
+        assert mask[shortest, width:].tolist() == [0] * (widest - width)
+    assert 1024 not in {int(value) for target in targets.tolist() for value in target}

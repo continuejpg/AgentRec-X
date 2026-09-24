@@ -38,15 +38,16 @@ Two properties follow and both are load-bearing:
   The sequence is causal and contains no validation or test interaction.
 
 Input construction is **batch-complete**: every example's full input is embedded, with padding
-placed so padding is never distinguishable from a position the model was trained on.  Because the
-vocabulary has no pad token (special tokens sit above the code space), padding uses the *token*
-``0`` — the legal code ``(level 0, code 0)`` — and is hidden from attention by an explicit mask.
+placed so padding is never distinguishable from a position the model was trained on.  Padding uses
+the dedicated ``pad`` token declared by the derived generator layout and is hidden from attention
+by an explicit mask; it is never a catalogue target.
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import json
 import math
 import time
@@ -63,7 +64,6 @@ from tiger_public.scoring import SCORE_RULE, validate_score_rule
 from tiger_public.trie import CatalogueTrie, TrieError, item_token_path
 
 __all__ = [
-    "PAD_TOKEN",
     "RESUMABLE_FORMAT",
     "CheckpointHook",
     "TigerConfig",
@@ -84,6 +84,81 @@ __all__ = [
 #: checkpoint in ``tiger.pt``: this one exists only so an interrupted run can continue, and it is
 #: never a model-selection candidate.
 RESUMABLE_FORMAT = "agentrecx.tiger.resume.v1"
+
+
+#: Registered production training exposure (frozen): ``sum(len(history) - 1)`` over the accepted
+#: exposure.  This is an ASSERTION CONSTANT, not a serialisation source: the runtime-built dataset
+#: must equal it, and the metadata records the runtime value.
+EXPECTED_PRODUCTION_EXAMPLES = 2_263_252
+
+#: The determinism posture the accepted Gate-D remediation run executes in.  cuBLAS reads
+#: ``CUBLAS_WORKSPACE_CONFIG`` when it creates its handle, so the variable has to be set before
+#: the first cuBLAS call - i.e. before the model or any tensor reaches the CUDA device.
+DETERMINISTIC_CUBLAS_WORKSPACE_CONFIG = ":4096:8"
+
+
+def configure_deterministic_execution() -> dict[str, Any]:
+    """Enable the validated deterministic execution regime and return the OBSERVED state.
+
+    ``warn_only=False`` turns a non-deterministic operator into an error rather than a warning, so
+    a run that cannot honour the contract fails instead of silently publishing weights that a
+    replay would not reproduce.  Called at the top of the production training path, before any
+    CUDA work.
+    """
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = DETERMINISTIC_CUBLAS_WORKSPACE_CONFIG
+    torch.use_deterministic_algorithms(True, warn_only=False)
+    return {
+        "deterministic_algorithms": bool(torch.are_deterministic_algorithms_enabled()),
+        "deterministic_algorithms_warn_only": bool(
+            torch.is_deterministic_algorithms_warn_only_enabled()
+        ),
+        "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),
+    }
+
+
+def expected_batches(examples: int, batch_size: int) -> int:
+    """Batches in one epoch.  A trailing partial batch is still an optimizer step."""
+    if examples < 1 or batch_size < 1:
+        raise TigerError(f"cannot batch {examples} examples into groups of {batch_size}")
+    return -(-examples // batch_size)
+
+
+def expected_last_batch_size(examples: int, batch_size: int) -> int:
+    """Rows in the final batch of an epoch (``batch_size`` when the division is exact)."""
+    if examples < 1 or batch_size < 1:
+        raise TigerError(f"cannot batch {examples} examples into groups of {batch_size}")
+    return (examples % batch_size) or batch_size
+
+
+def generator_special_tokens(layout: Mapping[str, Any]) -> dict[str, int]:
+    """The PAD/BOS/EOS/SEP contract, derived from the generator layout and asserted here.
+
+    Every consumer of a special-token identity (T5 ``pad_token_id``/``eos_token_id``/
+    ``decoder_start_token_id``, encoder padding, the attention mask and the checkpoint metadata)
+    resolves it through this function, so the layout is the single source of truth and drift is an
+    error rather than a silent aliasing bug.
+    """
+    special = layout.get("special") or {}
+    missing = [name for name in ("pad", "bos", "eos") if name not in special]
+    if missing:
+        raise TigerError(f"the generator layout does not declare {missing}; got {sorted(special)}")
+    tokens = {name: int(special[name]) for name in ("pad", "bos", "eos", "sep") if name in special}
+    if len(set(tokens.values())) != len(tokens):
+        raise TigerError(f"generator special tokens alias each other: {tokens}")
+    code_space = int(layout.get("code_space", 0))
+    for name, token in tokens.items():
+        if token < code_space:
+            raise TigerError(
+                f"special token {name}={token} sits inside the code space [0, {code_space}); a "
+                "special token must never alias a real Semantic ID"
+            )
+    vocab_size = int(layout.get("vocab_size", 0))
+    if vocab_size and max(tokens.values()) >= vocab_size:
+        raise TigerError(
+            f"special token {max(tokens.values())} is outside the declared vocabulary "
+            f"of {vocab_size} tokens"
+        )
+    return tokens
 
 #: Where a resumable state lives inside the run directory.  One rolling file, atomically replaced,
 #: rather than twenty retained optimizer blobs: the fixed budget is the budget, and no historical
@@ -108,13 +183,6 @@ class CheckpointHook(Protocol):
 
 class TigerError(ValueError):
     """Raised when the generator is configured, built or loaded unusably."""
-
-
-#: Padding uses token ``0``, which is the legal code ``(level 0, code 0)``.  The vocabulary has
-#: no dedicated pad token (specials sit above the code space), so padding is expressed by the
-#: attention mask rather than by a reserved id.  It is never a *target*: targets are catalogue
-#: SIDs followed by EOS.
-PAD_TOKEN = 0
 
 
 # --------------------------------------------------------------------------- #
@@ -256,9 +324,6 @@ class TigerConfig:
             "batch_size": self.batch_size,
             "epochs": self.epochs,
             "bf16_requested": self.bf16,
-            "examples": 0,
-            "steps": 0,
-            "seconds": 0.0,
             "labels_from": "agentrecx.tiger.train_exposure.v3 (train_history only)",
             # An assertion, not a report field: the backend has no validation split and no code
             # path that could compute one.
@@ -476,6 +541,7 @@ class TigerGenerator(nn.Module):
                 "the backend ML requirements, or use the smoke path that does not build a model."
             ) from error
         cfg = self.config
+        special = generator_special_tokens(self.layout)
         t5 = T5Config(
             vocab_size=self.vocab_size,
             d_model=cfg.d_model,
@@ -485,12 +551,13 @@ class TigerGenerator(nn.Module):
             num_heads=cfg.num_heads,
             d_kv=cfg.d_model // cfg.num_heads,
             dropout_rate=cfg.dropout,
-            # The vocabulary has no pad token: token 0 is the legal code (level 0, code 0).
-            # Padding is expressed by the attention mask, so `pad_token_id` here is used only by
-            # the framework for its own book-keeping and never as a target.
-            pad_token_id=PAD_TOKEN,
-            eos_token_id=int(self.layout["special"]["eos"]),
-            decoder_start_token_id=int(self.layout["special"]["bos"]),
+            # PAD is the dedicated token declared by the derived generator layout; it is used
+            # for encoder batch padding and by T5 framework bookkeeping.  Targets remain
+            # catalogue SID tokens followed by EOS and never contain PAD.  The identities are
+            # resolved (and asserted) through the layout rather than repeated here.
+            pad_token_id=special["pad"],
+            eos_token_id=special["eos"],
+            decoder_start_token_id=special["bos"],
         )
         self.model = T5ForConditionalGeneration(t5)
 
@@ -608,6 +675,8 @@ class TigerTrainingReport:
     global_step: int = 0
     #: Batches per epoch, so ``global_step`` maps back to an epoch without re-deriving it.
     steps_per_epoch: int = 0
+    #: Rows in the final batch of an epoch, derived from the runtime exposure.
+    last_batch_size: int = 0
 
     @property
     def final(self) -> dict[str, Any]:
@@ -649,7 +718,8 @@ class TigerTrainer:
 
     def _collate(self, indices: Sequence[int]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         width = max(len(self.dataset.inputs[index]) for index in indices)
-        rows = torch.full((len(indices), width), PAD_TOKEN, dtype=torch.long)
+        pad_token = int(self.model.layout["special"]["pad"])
+        rows = torch.full((len(indices), width), pad_token, dtype=torch.long)
         mask = torch.zeros((len(indices), width), dtype=torch.long)
         targets = torch.stack(
             [torch.tensor(self.dataset.targets[index], dtype=torch.long) for index in indices]
@@ -678,6 +748,11 @@ class TigerTrainer:
         stays free of filesystem policy.
         """
         report = TigerTrainingReport(device=str(self.device), examples=self.dataset.examples)
+        # Derived from the runtime exposure, never carried as a literal.
+        report.last_batch_size = expected_last_batch_size(
+            self.dataset.examples, self.config.batch_size
+        )
+        report.steps_per_epoch = expected_batches(self.dataset.examples, self.config.batch_size)
         self.model.to(self.device)
         model = self.model.model
         use_bf16 = bool(self.config.bf16) and self.device.type == "cuda"
@@ -904,9 +979,24 @@ def save_generator(
             "params": model.parameter_count(),
         },
         "training": {
+            "examples_positive": bool(report.examples > 0),
             **model.config.as_training_dict(),
             "history": report.history,
+            # Derived from the runtime training report/dataset count, then asserted against the
+            # frozen production exposure.  Never a serialisation-time literal.
+            "examples": report.examples,
+            "expected_examples": EXPECTED_PRODUCTION_EXAMPLES,
+            "exposure_asserted": bool(report.examples == EXPECTED_PRODUCTION_EXAMPLES),
+            "special_tokens": {
+                **{name: int(value) for name, value in sorted(model.layout["special"].items())},
+                "vocab_size": int(model.layout["vocab_size"]),
+                "code_space": int(model.layout.get("code_space", 0)),
+            },
             "steps": report.steps,
+            "steps_per_epoch": report.steps_per_epoch,
+            "last_batch_size": report.last_batch_size,
+            "completed_epoch": report.completed_epoch,
+            "global_step": report.global_step,
             "seconds": round(report.seconds, 3),
             "device": report.device,
             "precision": report.precision,

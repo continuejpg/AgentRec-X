@@ -609,11 +609,15 @@ def stage_train(
         materialise_generator_layout,
     )
     from tiger_public.tiger import (
+        EXPECTED_PRODUCTION_EXAMPLES,
         TigerConfig,
         TigerGenerator,
         TigerTrainer,
         build_examples,
+        configure_deterministic_execution,
         describe_examples,
+        expected_batches,
+        expected_last_batch_size,
         load_resumable,
         resume_checkpoint_path,
         save_generator,
@@ -621,6 +625,10 @@ def stage_train(
     )
     from tiger_public.trie import CatalogueTrie
 
+    # First statement of the production training path, before any CUDA work: cuBLAS picks up
+    # CUBLAS_WORKSPACE_CONFIG when it creates its handle, and torch must be told to refuse (not
+    # warn about) a non-deterministic operator.
+    execution = configure_deterministic_execution()
     verify_manifest(catalogue_dir, required=("catalogue.json",))
     catalogue = read_catalogue(catalogue_dir)
     exposure = read_train_exposure(exposure_path.parent, catalogue=catalogue)
@@ -668,6 +676,42 @@ def stage_train(
         layout=generator_layout,
         max_hist_items=max_hist_items,
     )
+    # The metadata value is the RUNTIME count; it is asserted against the count the exposure
+    # artifact itself freezes.  The registered production exposure declares exactly
+    # EXPECTED_PRODUCTION_EXAMPLES (2 263 252, checked by the Gate-D runbook), so asserting
+    # "built == declared" asserts the frozen production count for a production run while leaving a
+    # deliberately synthetic exposure (the adapter/regression fixtures) trainable.  A run that
+    # silently builds a different number of examples than its own frozen exposure is refused.
+    # ``--max-examples`` is the documented smoke escape hatch and is the only way to train on a
+    # capped exposure.
+    declared_examples = int(getattr(exposure, "examples", 0) or 0)
+    if declared_examples < 1:
+        raise CliError(
+            "the training exposure artifact declares no example count; refusing to train against "
+            "an exposure whose size is not frozen"
+        )
+    if max_examples is None and dataset.examples != declared_examples:
+        raise CliError(
+            f"the runtime training exposure built {dataset.examples} examples, but the exposure "
+            f"artifact freezes {declared_examples}; refusing to train a run whose exposure does "
+            "not match its own frozen count"
+        )
+    n_batches_per_epoch = expected_batches(dataset.examples, batch_size)
+    exposure_arithmetic = {
+        "examples": int(dataset.examples),
+        "users": int(dataset.users),
+        "declared_examples": int(declared_examples),
+        "expected_production_examples": EXPECTED_PRODUCTION_EXAMPLES,
+        "exposure_asserted": bool(
+            dataset.examples == declared_examples == EXPECTED_PRODUCTION_EXAMPLES
+        ),
+        "max_examples_cap": None if max_examples is None else int(max_examples),
+        "batch_size": int(batch_size),
+        "n_batches_per_epoch": int(n_batches_per_epoch),
+        "last_batch_size": int(expected_last_batch_size(dataset.examples, batch_size)),
+        "epochs": int(epochs),
+        "scheduler_total_steps": int(n_batches_per_epoch * epochs),
+    }
     config = TigerConfig(
         d_model=d_model,
         num_layers=num_layers,
@@ -765,12 +809,16 @@ def stage_train(
         ),
     }
     metadata["resumed_from_epoch"] = report.resumed_from_epoch
+    metadata["execution"] = execution
+    metadata["exposure"] = exposure_arithmetic
     write_json(out_dir / "tiger.json", metadata)
     write_manifest(
         out_dir,
         extra={
             "stage": "train",
             "environment": environment_metadata(device=device),
+            "execution": execution,
+            "exposure": exposure_arithmetic,
             "timing": {"seconds": round(report.seconds, 3),
                        "peak_allocated_bytes": report.peak_allocated_bytes},
             "checkpoint_policy": metadata["checkpoint_policy"],
@@ -1074,6 +1122,12 @@ def environment_metadata(*, device: str) -> dict[str, Any]:
         info["cuda_version"] = torch.version.cuda
         info["cuda_available"] = bool(torch.cuda.is_available())
         info["deterministic_algorithms"] = bool(torch.are_deterministic_algorithms_enabled())
+        info["deterministic_algorithms_warn_only"] = bool(
+            torch.is_deterministic_algorithms_warn_only_enabled()
+        )
+        # Recorded from the live process, not from configuration text: cuBLAS reads this at
+        # handle-creation time, so the observed value is the one that governed the run.
+        info["cublas_workspace_config"] = os.environ.get("CUBLAS_WORKSPACE_CONFIG")
         if torch.cuda.is_available():
             info["gpu_name"] = torch.cuda.get_device_name(0)
             props = torch.cuda.get_device_properties(0)
