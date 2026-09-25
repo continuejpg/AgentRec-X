@@ -1,0 +1,60 @@
+====================================================================================================
+TWO-TOWER CANONICAL EVIDENCE RECAPTURE -- PRE-REGISTRATION
+====================================================================================================
+
+Frozen BEFORE the rerun.  No result existed when this file was written and hashed.
+
+--- 1. checkpoint selection (the ONLY corrected variable) ---
+  AUTHORISED canonical checkpoint:
+    path    runs/twotower_public_2026_full/checkpoint.pt
+    sha256  0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+  FORBIDDEN non-canonical checkpoint (a legitimate but different historical experiment):
+    path    runs/twotower_public_2026/checkpoint.pt
+    sha256  abbfecdacc71807a4860e651e6ab8355f13164986cf9c184bdc3e54ab6ada02f
+
+--- 2. provenance anchor (recorded by hash, not by filename) ---
+  anchor A  runs/twotower_benchmark_full/comparison.json  sha256 d3eebdd1166f173a80d9c6679d8db0716bd376a8bcc605d5578da1fc8d9b2421
+  anchor B  runs/genrec_benchmark/comparison.json         sha256 a1a593e59fe5f59cf79674823c686e357a5bb0f3eea46f2482b99463ee8286cf
+  Both anchors record the SAME canonical Two-Tower block:
+    Recall@5 0.0086  Recall@10 0.01435  Recall@20 0.02285
+    NDCG@5 0.005497573943270306  NDCG@10 0.007365459487290447  NDCG@20 0.009509905626322316
+    HR@5 0.0086  HR@10 0.01435  HR@20 0.02285
+    mean_target_rank 21943.8229
+  anchor agreement check: True
+
+  training exposure behind the canonical checkpoint (read from its own run.json, not inferred):
+    run_id twotower-public-gru-seed2026 | wall 3982.251s | users 412445 | pairs 1850807
+  the forbidden checkpoint's exposure, for contrast:
+    run_id twotower-public-gru-seed2026 | wall 212.353s | users 20000 | pairs 236730
+
+--- 3. protocol held completely fixed (nothing else changes) ---
+  cohort_seed 20260201 | cohort_size 20000 | same split | same test targets | same test history
+  same catalogue 156746 | same shared evaluator | same ranking | same tie-breaking
+  same seen-item masking | same PAD handling | K = 5 / 10 / 20 | batch_size 256
+  same arm factory B.arm_two_tower(checkpoint=...) | same cohort_from_cases(seed=20260201)
+  No code was changed to help reproduction: the only edit is which checkpoint path the harness
+  is pointed at, which is the corrected variable this authorisation names.
+
+--- 4. PRE-REGISTERED PREDICTION (stated before the result) ---
+  The canonical _full Two-Tower checkpoint is expected to reproduce the stored canonical
+  aggregate metrics EXACTLY:
+    Recall@5  0.0086      Recall@10  0.01435      Recall@20  0.02285
+    NDCG@5    0.005497573943270306
+    NDCG@10   0.007365459487290447
+    NDCG@20   0.009509905626322316
+    HR@5      0.0086      HR@10      0.01435      HR@20      0.02285
+    mean_target_rank  21943.8229
+  Support for the prediction, independent of any result: the two anchors agree exactly with
+  each other; benchmark_genrec.py declares TWOTOWER_DIR = runs/twotower_public_2026_full; and
+  the earlier non-canonical rerun already reproduced a DIFFERENT historical artifact exactly,
+  proving the harness faithful.
+
+  If the result disagrees: DO NOT ALIGN, DO NOT TUNE, DO NOT SUBSTITUTE.  Mark the arm
+  PER-USER EVIDENCE NOT CERTIFIED, stop, and report stored vs rerun with all hashes.
+
+--- 5. artifact handling ---
+  The existing non-canonical artifact is NOT overwritten and NOT deleted: it is renamed to
+    phase5_twotower_hits_NON_CANONICAL_20000user.{npz,json}
+  and explicitly labelled NON-CANONICAL HISTORICAL EVIDENCE, so it leaves the canonical input
+  set while remaining on disk for the record.
+====================================================================================================

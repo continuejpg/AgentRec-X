@@ -1,0 +1,382 @@
+====================================================================================================
+STEP 2.7 -- TIGER-FP32 CANDIDATESOURCE QUALIFICATION
+====================================================================================================
+
+  RESULT:  Q1-Q8 ALL PASS
+           TIGER-FP32 CandidateSource = QUALIFIED
+
+  Scope of that word: TIGER is eligible for later fusion / Agent-source experiments.  It is
+  NOT enabled in the canonical Agent runtime, NOT preferred over other sources, NOT always
+  called and NOT assigned any weight.  Step 2.7 qualified a boundary; it did not change
+  routing, did not fuse, and did not touch retrieval semantics.
+
+
+====================================================================================================
+1. MODIFIED / ADDED FILES
+====================================================================================================
+  Every path is inside the allowed scope: CandidateSource adapter, integration tests,
+  qualification utilities, Step-2.7 report/config.  No benchmark or frozen artifact was touched.
+
+  ADDED:
+    recommendation/control/tiger_source.py                   29a3d38af5a52523f7be982cfa284b430907adf1b2f41cc8a6943603a4a38712
+    experiments/step27_tiger_engines.py                      dc16fa7c6b7d8202bbfe9a34c01c85cc65b4134da03adbf813198e0050905949
+    tests/test_tiger_source.py                               481fa8dfa94f68a9f10d682930d5199eb285dadd28a99540e1249fc6cf48bd6c
+    experiments/step27_qualification.py                      fdb66f1a62b2c50c705d64cc3a3fb3f0c143921e8c7711bc56748ab8ca2e4668
+  MODIFIED (existing control-plane files; both edits are additive):
+    recommendation/control/arguments.py                      a9e753022b447b2a988c20d784add4f5fa1028d6bb491c999d7c245b43075f2b
+    recommendation/control/candidate_plane.py                f0a9b67152c6a72bf81d95813dd68d8b613c3d50819c63b7a537cab3a5fd56ce
+
+  What the two modifications are, and why they are minimal:
+    arguments.py       one enum member (CandidateSource.TIGER = "tiger") and one line adding
+                       it to CANDIDATE_PRODUCING_SOURCES.  Without both, the ledger refuses
+                       TIGER provenance by design.  No existing member or gate changed.
+    candidate_plane.py accepts tiger_tool=None and registers it exactly as two_tower_tool is
+                       registered; gives TIGER the trusted history like the other
+                       identity-keyed sources; and lets a tool expose provenance_token() so
+                       the retrieval mode and artifact hashes reach the ledger's source_query.
+                       No existing source defines provenance_token(), so their recorded
+                       provenance is byte-identical to before - proven by Q7.1/Q7.3.
+
+  git diff --stat (local worktree):
+recommendation/control/arguments.py       | 10 +++++++
+ recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++-------
+ 2 files changed, 45 insertions(+), 9 deletions(-)
+
+====================================================================================================
+2. CANDIDATESOURCE ARCHITECTURE
+====================================================================================================
+  recommendation/control/tiger_source.py
+    TIGER_SCORE_KIND      == "tiger_sid_sequence_logprob"
+    TigerProposal         per-candidate record: parent_asin, rank, score, semantic_id, item_id,
+                          retrieval_mode, checkpoint_sha256, sid_artifact_sha256, resolver,
+                          source name/version
+    TigerSourceTool       source=CandidateSource.TIGER; score_kind=TIGER_SCORE_KIND;
+                          propose(*, arguments, limit, history) -> [(parent_asin, rank, score)]
+
+  It mirrors TwoTowerSourceTool exactly at the seam: it never grounds an identity, never
+  chooses its own history, never mixes its scores with another source's, and never promotes a
+  retrieval status.  Everything identity-related stays with the trusted plane.
+
+  The full provenance list required by section 4 is retained in two places: the complete
+  record lives on the tool (last_proposals), and the mode plus artifact hashes ride into the
+  ledger through the shared source_query field as a compact token, because the shared
+  provenance schema deliberately has no TIGER-specific field and none was added.
+
+====================================================================================================
+3. EXACT TRUST-BOUNDARY MAPPING
+====================================================================================================
+  TIGER side (proposes only)                     AgentRec-X side (decides)
+  -------------------------------------------    ---------------------------------------------
+  history SID encoding                          trusted history read by the plane
+  generator forward scoring                     -
+  constrained decoding / prefix expansion       -
+  candidate SID generation                      -
+  token path -> integer item id (trie leaf)     -
+  -                                             item id -> parent_asin (frozen mappings)
+  -                                             GroundingVerifier membership decision
+  -                                             CandidateLedger provenance + dedup
+  -                                             constraint feasibility / presentability
+  -                                             ranking, tie-breaking, metrics
+
+  A TIGER Semantic ID is a PROPOSAL.  It becomes a candidate only after trusted code resolves
+  it to a parent_asin and the GroundingVerifier accepts it.  TIGER never acquires truth
+  authority, and no identity mapping is ever inferred by a model.
+
+====================================================================================================
+4. TIGER OUTPUT -> parent_asin PATH
+====================================================================================================
+  1. the plane hands the tool the run's trusted history (never the tool's own choice)
+  2. the tool maps parent_asin -> item_id through the engine's trusted mapping
+  3. the engine returns proposals carrying item_id and semantic_id, plus the artifact hashes
+  4. the tool validates every field and returns (parent_asin, rank, score) triples
+  5. the plane calls GroundingVerifier.record(...), which is the only supported path into
+     the ledger; an unknown identity becomes an UNGROUNDED audit entry, never a candidate
+  6. only grounded identities reach the renderable candidate set
+
+  The certified artifact deliberately carries NO parent_asin (boundary rule 19.2(1)); the
+  frozen trusted mappings re-attach identity on the AgentRec-X side, which is exactly what the
+  qualification exercised against real H7 output.
+
+====================================================================================================
+5. CANDIDATELEDGER INTEGRATION PROOF
+====================================================================================================
+  Verified on 64 real certified cases (1280 grounded candidates, 0 ungrounded):
+    PASS   Q3.1 source recorded as TIGER
+    PASS   Q3.2 source-local rank preserved
+    PASS   Q3.3 raw score preserved verbatim
+    PASS   Q3.4 score_kind recorded
+    PASS   Q3.5 retrieval mode recorded in provenance
+    PASS   Q3.6 checkpoint sha256 recorded in provenance
+    PASS   Q3.7 SID artifact sha256 recorded in provenance
+    PASS   Q3.8 item id recorded for identity-conflict detection
+    PASS   Q3.9 every entry carries TIGER provenance
+  sample provenance token: mode=CERTIFIED;ckpt=95e5cb6f816b;sid=6501fbe8e146;resolver=tiger_public.retrieve.SidResolver;src=tiger_fp32/v1
+  The ledger therefore preserves source, source-local rank, raw score, score kind, canonical
+  identity, retrieval provenance (mode + checkpoint + SID hash + resolver) and the grounding
+  outcome, all through the existing shared semantics.
+
+====================================================================================================
+6. MULTI-SOURCE PROVENANCE PROOF
+====================================================================================================
+    PASS   Q4.3 multi-source provenance retained
+    PASS   Q4.4 both sources present on the shared entry
+    PASS   Q4.5 no silent score substitution (each source keeps its own score)
+  A product proposed by both TIGER and another source keeps ONE ledger entry with BOTH
+  provenances, each retaining its own rank, its own raw score and its own score_kind.  Nothing
+  merges them and no score is substituted, which is what keeps a later fusion decision honest.
+
+====================================================================================================
+7. DEDUPLICATION TESTS
+====================================================================================================
+    PASS   Q4.1 repeated runs produce identical ledgers
+    PASS   Q4.2 one canonical identity for a shared parent_asin
+    PASS   Q4.3 multi-source provenance retained
+    PASS   Q4.4 both sources present on the shared entry
+    PASS   Q4.5 no silent score substitution (each source keeps its own score)
+    PASS   Q4.6 ordering is stable
+  Deterministic across three independent repetitions: identical ranked identities, identical
+  verification statuses and identical per-source provenance tuples.
+
+====================================================================================================
+8. GROUNDING / CONSTRAINT TESTS
+====================================================================================================
+    PASS   Q2.1 every returned candidate passed GroundingVerifier
+    PASS   Q2.2 zero unresolved identities
+    PASS   Q2.3 zero fabricated identities (item_id round-trips to parent_asin)
+    PASS   Q2.4 every identity is a member of the frozen trusted catalogue
+    PASS   Q2.5 candidates were actually recorded (1280 over 64 cases)
+    PASS   Q2.6 collision policy is deterministic (frozen assignment has none)
+  Unknown identities are recorded as UNGROUNDED audit entries (never dropped silently, never
+  promoted) and are excluded from the grounded set a renderer may use.  Seen-item masking,
+  PAD exclusion and constraint feasibility remain entirely on the trusted side; the tool never
+  sees a target and never masks.
+
+====================================================================================================
+9. FAILURE-ISOLATION TESTS
+====================================================================================================
+    PASS   Q5.1 backend unavailable -> source-local failure
+    PASS   Q5.2 checkpoint unavailable -> source-local failure
+    PASS   Q5.3 SID artifact unavailable -> source-local failure
+    PASS   Q5.4 invalid SID refused, nothing recorded
+    PASS   Q5.5 unresolved identity -> source-local failure
+    PASS   Q5.6 budget exhaustion -> downgrade refused
+    PASS   Q5.7 non-finite score refused, nothing recorded
+    PASS   Q5.8 timeout -> source-local failure
+    PASS   Q5.9 empty result is explicit EMPTY, not a failure
+    PASS   Q5.10 a failing TIGER never writes to the ledger
+    PASS   Q5.11 other sources remain usable after TIGER fails
+
+  per-mode outcome:
+    backend_unavailable        outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    checkpoint_unavailable     outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    sid_artifact_unavailable   outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    invalid_sid                outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    unresolved_identity        outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    budget_exhausted           outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    non_finite_score           outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    timeout                    outcome=UNAVAILABLE  ledger_after_failure=0 other_source_usable=True
+    empty_result               outcome=EMPTY        ledger_after_failure=0 other_source_usable=True
+
+  Every failure is source-local: no fabricated candidate, no partial list, no ledger mutation,
+  and the other sources keep working in the same plane.
+
+====================================================================================================
+10-11. CERTIFIED AND APPROXIMATE STATUS TESTS
+====================================================================================================
+    PASS   Q6.1 CERTIFIED is accepted and recorded
+    PASS   Q6.2 CERTIFIED mode recorded
+    PASS   Q6.3 APPROXIMATE refused under the canonical posture
+    PASS   Q6.4 refused APPROXIMATE writes nothing
+    PASS   Q6.5 APPROXIMATE allowed only when explicitly opted in
+    PASS   Q6.6 APPROXIMATE recorded as APPROXIMATE, never upgraded
+    PASS   Q6.7 the mode is inspectable downstream
+
+    CERTIFIED token   mode=CERTIFIED;ckpt=aaaaaaaaaaaa;sid=bbbbbbbbbbbb;resolver=tiger_public.retrieve.SidResolver;src=tiger_fp32/v1
+    APPROXIMATE token mode=APPROXIMATE;ckpt=aaaaaaaaaaaa;sid=bbbbbbbbbbbb;resolver=tiger_public.retrieve.SidResolver;src=tiger_fp32/v1
+
+  Under the canonical posture an APPROXIMATE retrieval is refused outright.  When it is
+  explicitly opted into, it is recorded AS APPROXIMATE and never relabelled.  A budget-exhausted
+  run reports APPROXIMATE and is therefore refused under the canonical posture - the downgrade
+  cannot be laundered into a certified result at this layer.
+
+====================================================================================================
+12. DETERMINISM TESTS
+====================================================================================================
+    PASS   repeated CandidateSource calls produce identical candidate identities, ranks and
+           provenance (three repetitions, Q4.1/Q4.6)
+    PASS   ordering is stable across repetitions
+    PASS   the retrieval itself is byte-identical on an independent re-run (2 000 cases, from
+           the Phase-5 evidence: sha256 f4ed5861699b4c120752dae1388b140f6e4e86d9ad26122aa30da807de47a24f)
+  Numerical boundary, stated rather than overclaimed: a fixed batch_prefixes is bit-identical,
+  while a DIFFERENT batch_prefixes can move final ULPs (different GEMM reduction shapes) without
+  changing the certified order.  No cross-configuration bitwise identity is claimed.
+
+====================================================================================================
+13. RUNTIME / VRAM CHARACTERIZATION (Q8)
+====================================================================================================
+  CERTIFIED retrieval (accepted H7 canonical run, 20 000 cases):
+    wall 4773.1 s (1.3259 h) | 4.1901 cases/s | peak VRAM 954 MiB | prefix expansions 15502256 (mean 775.1/case)
+    candidates/case min 21 / mean 34.745 / max 701
+  APPROXIMATE retrieval (profiling run, 64 cases, level_beam):
+    wall 15.305 s | 4.1815 cases/s | candidates/case 20.0 | status APPROXIMATE | comparison_eligible False
+  Source layer (adapter + grounding + ledger, retrieval served from frozen evidence):
+    0.000906 s per plane.execute call (1104 calls/s).  This is the integration overhead only; it
+    does not include model retrieval, which is the line above.
+  Operational reading: CERTIFIED is ~1.5 h for the full cohort and ~4.2 cases/s; APPROXIMATE
+  is the same speed class here at 20 candidates/case and is NOT comparison-eligible.  The
+  approximation policy is left unset: choosing one from recommendation metrics is out of scope.
+
+====================================================================================================
+14-21. GATE RESULTS Q1-Q8
+====================================================================================================
+
+Q1: PASS
+   PASS   Q1.1 implements the CandidateSourceTool protocol
+   PASS   Q1.2 source is CandidateSource.TIGER
+   PASS   Q1.3 score_kind is the TIGER sequence log-probability
+   PASS   Q1.4 score_kind is distinct from Two-Tower
+   PASS   Q1.5 enum member exists and is candidate-producing
+   PASS   Q1.6 plane registers the tool and lists the source
+   PASS   Q1.7 plane reports the score_kind in its status
+
+Q2: PASS
+   PASS   Q2.1 every returned candidate passed GroundingVerifier
+   PASS   Q2.2 zero unresolved identities
+   PASS   Q2.3 zero fabricated identities (item_id round-trips to parent_asin)
+   PASS   Q2.4 every identity is a member of the frozen trusted catalogue
+   PASS   Q2.5 candidates were actually recorded (1280 over 64 cases)
+   PASS   Q2.6 collision policy is deterministic (frozen assignment has none)
+
+Q3: PASS
+   PASS   Q3.1 source recorded as TIGER
+   PASS   Q3.2 source-local rank preserved
+   PASS   Q3.3 raw score preserved verbatim
+   PASS   Q3.4 score_kind recorded
+   PASS   Q3.5 retrieval mode recorded in provenance
+   PASS   Q3.6 checkpoint sha256 recorded in provenance
+   PASS   Q3.7 SID artifact sha256 recorded in provenance
+   PASS   Q3.8 item id recorded for identity-conflict detection
+   PASS   Q3.9 every entry carries TIGER provenance
+
+Q4: PASS
+   PASS   Q4.1 repeated runs produce identical ledgers
+   PASS   Q4.2 one canonical identity for a shared parent_asin
+   PASS   Q4.3 multi-source provenance retained
+   PASS   Q4.4 both sources present on the shared entry
+   PASS   Q4.5 no silent score substitution (each source keeps its own score)
+   PASS   Q4.6 ordering is stable
+
+Q5: PASS
+   PASS   Q5.1 backend unavailable -> source-local failure
+   PASS   Q5.2 checkpoint unavailable -> source-local failure
+   PASS   Q5.3 SID artifact unavailable -> source-local failure
+   PASS   Q5.4 invalid SID refused, nothing recorded
+   PASS   Q5.5 unresolved identity -> source-local failure
+   PASS   Q5.6 budget exhaustion -> downgrade refused
+   PASS   Q5.7 non-finite score refused, nothing recorded
+   PASS   Q5.8 timeout -> source-local failure
+   PASS   Q5.9 empty result is explicit EMPTY, not a failure
+   PASS   Q5.10 a failing TIGER never writes to the ledger
+   PASS   Q5.11 other sources remain usable after TIGER fails
+
+Q6: PASS
+   PASS   Q6.1 CERTIFIED is accepted and recorded
+   PASS   Q6.2 CERTIFIED mode recorded
+   PASS   Q6.3 APPROXIMATE refused under the canonical posture
+   PASS   Q6.4 refused APPROXIMATE writes nothing
+   PASS   Q6.5 APPROXIMATE allowed only when explicitly opted in
+   PASS   Q6.6 APPROXIMATE recorded as APPROXIMATE, never upgraded
+   PASS   Q6.7 the mode is inspectable downstream
+
+Q7: PASS
+   PASS   Q7.1 existing sources behave identically with and without TIGER registered
+   PASS   Q7.2 control-plane + source test suites pass
+   PASS   Q7.3 no existing source's provenance changed
+
+Q8: PASS
+   PASS   Q8.1 CERTIFIED runtime recorded
+   PASS   Q8.2 APPROXIMATE runtime recorded
+   PASS   Q8.3 source-layer latency recorded
+   PASS   Q8.4 no approximation policy chosen from recommendation metrics
+
+  ALL CORRECTNESS GATES PASS: True
+  Q8 is a characterization gate, not a correctness gate; it is reported for completeness.
+
+====================================================================================================
+22. EXISTING-SOURCE REGRESSION TESTS
+====================================================================================================
+    PASS   a plane with TIGER registered produces byte-identical ledger content for a non-TIGER
+           source as a plane without TIGER (Q7.1/Q7.3)
+    PASS   control-plane + source suites pass: tests/test_control_stage2_candidates.py,
+           tests/test_twotower_source.py, tests/test_candidate_reference_boundary.py,
+           tests/test_tiger_source.py  (86 passed in 6.91s)
+    PASS   the FULL AgentRec-X suite passes: 2171 passed, 34 skipped, 0 failed (674.9 s)
+  Adding TIGER changes no existing source's behaviour, provenance or ordering.
+
+====================================================================================================
+23. REPOSITORY / PROTECTED-ARTIFACT INTEGRITY
+====================================================================================================
+  git HEAD            6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch          master
+  git diff --stat     [recommendation/control/arguments.py       | 10 +++++++ |  recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++------- |  2 files changed, 45 insertions(+), 9 deletions(-)]
+  git status --porcelain:
+M recommendation/control/arguments.py
+ M recommendation/control/candidate_plane.py
+?? experiments/step27_qualification.py
+?? experiments/step27_tiger_engines.py
+?? recommendation/control/tiger_source.py
+?? tests/test_tiger_source.py
+
+  OK     runs/twotower_public_2026_full/checkpoint.pt             0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+  OK     runs/sasrec_canonical_2026/best.pt                       352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912
+  OK     runs/phase5_benchmark_public/arms.json                   66b591e2774db5ac44e4fe5298f7ecd0c2096c5212973053be5ba581c596e5da
+  OK     runs/genrec_benchmark/comparison.json                    a1a593e59fe5f59cf79674823c686e357a5bb0f3eea46f2482b99463ee8286cf
+  OK     recommendation/control/grounding.py                      c2f1df1644eacca6649c346a4faf14d9a7581baf9193d731aee42fe0a1bf4ee5
+  OK     recommendation/control/candidate_ledger.py               fcc65e74d0efb78d3078956e89b9b3fda2cd6281d508f9b6cba02b1be579aa62
+  OK     recommendation/evaluation/batched.py                     1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11
+  OK     runs/step26-phase5-complementarity-canonical.txt         9f8a9163052631b7da7390e0bbe1577bc2cd1a942fa6d362127bbc1dea2cbbd9
+
+  No retrain, no checkpoint change, no retrieval-semantics change (tiger.pt, FP32 config,
+  Semantic IDs, RQ-VAE/tokenizer, CERTIFIED search, APPROXIMATE search, score rule and resolver
+  are untouched and read-only).  No fusion, RRF, weighted/learned fusion, score calibration or
+  cross-source normalisation.  No Agent policy, source-selection, stopping policy,
+  CandidatePlane semantics, GroundingVerifier or shared-evaluator change.  TIGER is NOT enabled
+  in the canonical runtime.  Nothing was committed and nothing was pushed.
+
+====================================================================================================
+24. EXACT CANDIDATESOURCE QUALIFICATION STATUS
+====================================================================================================
+  TIGER-FP32 CandidateSource = QUALIFIED  (Q1-Q8 all PASS)
+
+  Meaning, precisely:
+    eligible for later fusion / Agent-source experiments      YES
+    enabled in the canonical Agent runtime                    NO
+    preferred over other sources                              NO
+    always called                                             NO
+    assigned a fusion weight                                  NO
+
+  Standing evidence this rests on (unchanged by this milestone):
+    TIGER-FP32 Recall@10 0.01385 standalone (CERTIFIED, 20 000 users, full catalogue)
+    TIGER-only hits outside SASRec u Two-Tower at K=10: 138 users (+30.0% union gain)
+
+====================================================================================================
+25. RECOMMENDED NEXT MILESTONE
+====================================================================================================
+  Recommended: a pre-registered FUSION milestone, now that a source has been qualified on
+  boundary grounds.  Concretely, and in this order:
+
+  1. Pre-register the fusion question and its criterion BEFORE any fused number exists.  The
+     natural primary quantity is oracle-union coverage after fusion, to be compared against the
+     already-frozen S u T = 460 and S u T u G = 598 at K=10.
+  2. Start with rank-only fusion (RRF), because rank is the one cross-source quantity the ledger
+     already preserves verbatim for every source.  Weighted or learned fusion would require
+     cross-source score calibration, which is a separate decision with its own risks.
+  3. Reuse the existing two-tower_fusion_controls harness so the controlled contrasts (each
+     source alone, RRF pairs, RRF triples, and the 'adding TIGER' contrast) are produced by one
+     evaluator with one protocol.
+  4. Only after fusion shows incremental value should the Agent source-selection policy be
+     changed to consider TIGER - policy change is a further, separate step.
+
+  NOT recommended: enabling TIGER in the runtime now, tuning TIGER from the metric, or
+  reopening BF16 forensics.
+====================================================================================================

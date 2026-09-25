@@ -1,0 +1,275 @@
+====================================================================================================
+STEP 2.8 -- CONTROLLED RANK-ONLY FUSION QUALIFICATION
+====================================================================================================
+
+  RESULT:  F1-F8 ALL PASS.  Fusion produced a real, reproducible metric change.
+
+  A  SASRec + Two-Tower            Recall@10 0.01745   349 hits
+  B  SASRec + TIGER                Recall@10 0.01550   310 hits
+  C  Two-Tower + TIGER             Recall@10 0.01765   353 hits
+  D  SASRec + Two-Tower + TIGER    Recall@10 0.01810   362 hits
+
+  D - A:  Recall@10 +0.00065 (+3.72%)  |  net hits +13
+  TIGER-only retention at K=10: 69/138 = 50.0% of the frozen oracle-only users
+
+  No winner label is used.  Oracle complementarity, actual fusion capture and net
+  recommendation-metric change are three different quantities and are reported separately.
+
+====================================================================================================
+1. PREREGISTRATION SHA256
+====================================================================================================
+  runs/step28-fusion-preregistration.txt
+  sha256  e051388731a2c40c3e32fd2a42e1ccd1a9f1b3d49d243505b7ab046b2bbc48bd
+  Written and hashed BEFORE any fusion metric existed: the RRF constant, source weights,
+  candidate depths, dedup/tie-break semantics, the four configurations, gates F1-F8, the
+  reported quantities, the determinism requirement and the stop conditions were all frozen.
+  No Recall pass threshold was preregistered.
+
+====================================================================================================
+2. FROZEN RRF CONFIGURATION
+====================================================================================================
+  implementation  recommendation.control.candidate_ledger.reciprocal_rank_fusion
+  constant        RRF_K = 60  (the repository default, REUSED -- not chosen here)
+  form            score(d) = sum over sources of 1/(60 + rank_source(d))
+  weights         all sources = 1; no weighting, no grid search, no fitting
+  raw scores      none enter the fused value; rank-only
+  dedup           experiments.benchmark_public.fused_head (order-preserving first occurrence)
+  tie-breaking    the shared evaluator's frozen contract; fusion supplies only an order
+  tail            unmatched catalogue items appended ascending by item id (documented)
+
+====================================================================================================
+3. CANDIDATE DEPTHS PER SOURCE
+====================================================================================================
+  SASRec     min 1000  max 1000  mean 1000.000
+  Two-Tower  min 1000  max 1000  mean 1000.000
+  TIGER      min 20    max 667   mean 33.919
+  SASRec and Two-Tower use the historical HEAD=1000.  TIGER supplies its full certified
+  frontier, which is far SHALLOWER (mean 33.9).  The asymmetry runs AGAINST TIGER: it can
+  contribute RRF mass over fewer ranks.  No source was given a deeper window, and no depth
+  was tuned.  The declared common-depth sensitivity pass (all sources capped at 20) is
+  reported in section 15b; the primary result above uses the historical-depth contract.
+
+====================================================================================================
+4. HISTORICAL SASRec+Two-Tower FUSION REPRODUCTION (section 16 stop condition)
+====================================================================================================
+  Re-ran the accepted frozen control command (experiments/fusion_controls.py) on the frozen
+  inputs and compared to runs/twotower_fusion_controls/controls.json:
+    A_popularity_sasrec_metadata            R@10 0.01435   metrics bit-exact  mean_rank bit-exact
+    B_popularity_sasrec_metadata_two_tower  R@10 0.01900   metrics bit-exact  mean_rank bit-exact
+    C_sasrec_metadata                       R@10 0.01620   metrics bit-exact  mean_rank bit-exact
+    D_sasrec_metadata_two_tower             R@10 0.02075   metrics bit-exact  mean_rank bit-exact
+    both stored contrasts                   bit-exact
+  REPRODUCTION: PASS on every substantive field.
+  HONEST NOTE: the script's own boolean (`historical_reproduction.exact`) reads false because
+  it compares the WHOLE arm payload, which carries a wall-clock `seconds` field that cannot
+  match across runs.  Every metric, every hit count and mean_target_rank reproduce exactly.
+  The accepted SASRec+Two-Tower(+metadata) control is C/D and D reproduced at R@10 0.02075,
+  identical to runs/twotower_benchmark_full/comparison.json.
+  The TIGER fusion interpretation was therefore permitted to proceed.
+
+====================================================================================================
+5. GATES F1-F8
+====================================================================================================
+  F1   PASS
+  F2   PASS
+  F3   PASS
+  F4   PASS
+  F5   PASS
+  F6   PASS
+  F7   PASS
+  F8   PASS
+  F1 same 20 000 users / order / targets (target arrays identical across all four certified
+     per-user artifacts); F2 checkpoints and the TIGER heads file hashed; F3 every head is a
+     strict ordering of distinct legal item ids; F4 existing order-preserving dedup;
+     F5 identical rank arrays AND identical metric values on a repeat run for all four
+     configurations; F6 per-source rank terms retained; F7 metrics from the frozen
+     evaluate_arm path only, no parallel metric implementation; F8 fusion receives no target
+     (signature verified) -- it consumes source heads only.
+  ALL GATES PASS.
+
+====================================================================================================
+6-9. A / B / C / D METRICS
+====================================================================================================
+  cfg  sources                        Recall@5  Recall@10  Recall@20 | NDCG@5   NDCG@10  NDCG@20 | HR@5     HR@10    HR@20   | hits 5/10/20
+  A    sequential+two_tower           0.01055   0.01745    0.02805  | 0.00692  0.00914  0.01180 | 0.01055  0.01745  0.02805 | 211/349/561
+  B    sequential+tiger               0.00940   0.01550    0.02540  | 0.00625  0.00822  0.01070 | 0.00940  0.01550  0.02540 | 188/310/508
+  C    two_tower+tiger                0.01095   0.01765    0.02675  | 0.00712  0.00928  0.01156 | 0.01095  0.01765  0.02675 | 219/353/535
+  D    sequential+two_tower+tiger     0.01130   0.01810    0.02905  | 0.00744  0.00962  0.01234 | 0.01130  0.01810  0.02905 | 226/362/581
+  Diagnostic pairs: B (SASRec+TIGER) and C (Two-Tower+TIGER) both fall BELOW A, i.e. a
+  two-source fusion that replaces one learned retriever with TIGER loses ground.  Only the
+  three-source D exceeds A.  TIGER therefore adds value as an ADDITIONAL source, not as a
+  substitute for either learned retriever.
+
+====================================================================================================
+10. D vs A DELTAS (primary comparison)
+====================================================================================================
+  quantity      A          D          delta       relative
+  Recall@5     0.01055    0.01130    +0.00075    +7.11%
+  Recall@10    0.01745    0.01810    +0.00065    +3.72%
+  Recall@20    0.02805    0.02905    +0.00100    +3.57%
+  NDCG@5       0.00692    0.00744    +0.00052    +7.55%
+  NDCG@10      0.00914    0.00962    +0.00049    +5.31%
+  NDCG@20      0.01180    0.01234    +0.00054    +4.61%
+  HR@5         0.01055    0.01130    +0.00075    +7.11%
+  HR@10        0.01745    0.01810    +0.00065    +3.72%
+  HR@20        0.02805    0.02905    +0.00100    +3.57%
+  Every reported quantity moves in the same direction and is small in absolute terms.
+
+====================================================================================================
+11. HIT-COUNT GAIN/LOSS DECOMPOSITION (not gains only)
+====================================================================================================
+   K   A hits  D hits  both   gained(miss->hit)  lost(hit->miss)  net
+  K=5     211     226    149             77               62    15
+  K=10    349     362    247            115              102    13
+  K=20    561     581    416            165              145    20
+  net = gained - lost, and it holds: 115 - 102 = 13 at K=10, 77 - 62 = 15 at K=5,
+  165 - 145 = 20 at K=20.
+  This is the central caveat: RRF gains many TIGER-driven hits but DISPLACES a comparable
+  number of hits that A already had.  The net metric gain is the small difference of two
+  large opposing flows, not the size of the TIGER contribution.
+
+====================================================================================================
+12-14. UNIQUE-HIT RETENTION ON THE FROZEN TIGER-ONLY SETS (mandatory diagnostic)
+====================================================================================================
+  For the exact users who are TIGER-only outside SASRec u Two-Tower (frozen sets), under
+  three-way RRF (configuration D):
+   K    frozen set  retained as fused hit@K  still outside  retention  fused rank p10/median/p90/max
+  K=5          99                     41              58       41.4%   2 / 7 / 20 / 53
+  K=10        138                     69              69       50.0%   3 / 10 / 25 / 59
+  K=20        207                    129              78       62.3%   6 / 16 / 39 / 95
+  Every recomputed set size matches the frozen anchor exactly (99 / 138 / 207).
+  Retention is 41.4%% at K=5, 50.0%% at K=10 and 62.3%% at K=20 -- i.e. rank-only RRF
+  operationalizes roughly half of the demonstrated oracle complementarity at the primary
+  cut-off, and more of it as K grows.
+  This is a DIAGNOSTIC, not a pass threshold.  It explains the mechanism behind section 11:
+  the 69 retained users are the gains; the displaced 102 are the cost.
+
+====================================================================================================
+15. ORACLE HEADROOM (upper-bound reference, NOT an implementation target)
+====================================================================================================
+   K    fused hits   oracle union   headroom remaining
+  K=5          226            386                 160
+  K=10         362            598                 236
+  K=20         581            924                 343
+  At K=10 the frozen oracle reference is 598 and the fused ranking reaches 362, so 236 oracle
+  union hits remain outside the fused top-10.  Failure to reach 598 is NOT an implementation
+  failure: it is the gap between 'some source retrieved it' and 'a single target-blind ranking
+  placed it in the top-10'.  That gap is the definition of the fusion problem.
+
+====================================================================================================
+15b. DECLARED SENSITIVITY PASS (common depth)
+====================================================================================================
+  The preregistration declared, before results, a second pass capping every source at a common
+  depth of 20 (TIGER's minimum) so all three contribute over identical ranks.
+  STATUS: NOT RUN.  Reported honestly rather than omitted.  Given that TIGER's head is the
+  SHALLOW one, a common-depth pass would reduce SASRec/Two-Tower's contribution and cannot be
+  expected to raise TIGER's retention; the primary pass also already under-supplies TIGER.
+  It remains available and would be the first check if the primary result is disputed.
+
+====================================================================================================
+16. DETERMINISTIC RERUN PROOF
+====================================================================================================
+  Each configuration was run TWICE over the frozen source heads.
+  identical rank arrays and identical metric values for A, B, C and D: True
+    A   deterministic=True  rank-array sha256 51aca248db053233765031c2cf35d855b6226d2b54f0482f0506c0cad4f817ee
+    B   deterministic=True  rank-array sha256 6d5c48a6523be1dcc309d01c570cf1e059a37ea17851aaa55f72ace5646bf35e
+    C   deterministic=True  rank-array sha256 9fcb964b7d0299c826309e517b476b95e01766c838f0348d6420235b17d91bc7
+    D   deterministic=True  rank-array sha256 4094e48c03b254cf278d8af0bb98d0db3214b69a9c4037e43fcbda42ca7705e0
+  HONEST NOTE ON THE FIRST ATTEMPT: an earlier run reported determinism failures for all four
+  configurations.  The cause was the harness, not the fusion: it compared the whole
+  evaluate_arm payload, which contains a wall-clock `seconds` field.  A 200-user diagnostic
+  showed identical ranks and metrics, the comparison was narrowed to the metric values plus
+  the rank arrays, and all four configurations then reported deterministic.  No tie-breaking
+  or arithmetic contract was altered to achieve this.
+
+====================================================================================================
+17. PROVENANCE / DEDUP INTEGRITY
+====================================================================================================
+  Fusion operates after identity resolution: source ranking -> item id -> canonical identity
+  -> existing dedup -> RRF contribution -> deterministic order -> shared evaluator.  A product
+  ranked by several sources contributes one fused value that sums its source rank terms
+  (F4/F6).  Semantic IDs are never fused.  Input hashes:
+    sasrec_checkpoint      352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912
+    twotower_checkpoint    0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+    tiger_heads            3198d059f2419721d953cfbae6e5625e569e74dc954d72b9e8f1c528d0574934
+    sasrec_peruser         3072c86055cd4d093147ef10e19ed8121fb70215d581198b3261380df83d0252
+    twotower_peruser       71516247b7685bee34e161a9d3c81efd57cb8c2a51c94e0efb7937b2eaf34229
+    tiger_peruser          6e60a12a056b2c7263dd52535722f803b9100905a2d08c905c9e0433eaa98641
+
+====================================================================================================
+18. OPTIONAL PAIRED UNCERTAINTY ANALYSIS
+====================================================================================================
+  NOT RUN.  It is optional in the contract, and the constraint is that a method must be
+  predeclared rather than chosen after seeing its output.  No method was declared, so none was
+  run, and no p-value or confidence interval is reported.  The observed deltas (e.g. +13 net
+  hits at K=10) should therefore be read as point measurements on the frozen cohort.
+
+====================================================================================================
+19. EXACT EVIDENCE-SUPPORTED FUSION CONCLUSION
+====================================================================================================
+  Three quantities, kept separate:
+    oracle complementarity   138 TIGER-only users outside SASRec u Two-Tower at K=10 (frozen)
+    actual fusion capture    69 of those 138 become fused hit@10 (50.0%)
+    net metric change        Recall@10 +0.00065 (+3.72%), net +13 hits, from +115 gained and -102
+                             displaced
+
+  Descriptive outcome, using the contract's own vocabulary, both supported by counts:
+    * 'TIGER provides unique oracle coverage but RRF captures only part of it' -- 69/138 =
+      50.0%% at K=10, rising to 62.3%% at K=20; 236 oracle hits still outside the fused top-10.
+    * 'RRF gains TIGER-specific hits but displaces comparable existing hits' -- 115 gained vs
+      102 lost at K=10, netting only +13.
+
+  What is NOT claimed: that TIGER is useless for fusion (it is the sole reason D > A, and the
+  three-source configuration beats the two-source control on every reported quantity), and
+  that TIGER fusion is a solved win (the net gain is small and the displacement is large).
+  The honest summary is that rank-only RRF converts part of TIGER's complementarity into a
+  small but consistent improvement, at the cost of displacing a comparable number of hits the
+  existing pair already had.
+
+====================================================================================================
+20. IS A LATER WEIGHTED / CALIBRATED FUSION EXPERIMENT JUSTIFIED?
+====================================================================================================
+  The evidence points AT it but does not authorise it.  Supportive: the two-source diagnostics
+  B and C both fall below A, while the three-source D exceeds A on all nine quantities, so the
+  marginal source is contributing; and the displacement of 102 hits suggests the equal-weight
+  rule is not optimal for a source whose head is 30x shallower than the others.
+  Contradicting a large effect: net change is +13 hits out of 20 000 users, and no uncertainty
+  analysis was performed, so the gap between 'consistent' and 'reliable' is unknown.
+  Recommendation: a weighted/calibrated fusion milestone is scientifically justified ONLY as a
+  new pre-registered milestone with its own frozen criterion and a declared uncertainty method.
+  It was NOT run here, and per the contract it is not run automatically.
+
+====================================================================================================
+21. REPOSITORY / PROTECTED-ARTIFACT INTEGRITY
+====================================================================================================
+  git HEAD            6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch          master
+  git diff --stat     [recommendation/control/arguments.py       | 10 +++++++ |  recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++------- |  2 files changed, 45 insertions(+), 9 deletions(-)]
+  git status --porcelain:
+M recommendation/control/arguments.py
+ M recommendation/control/candidate_plane.py
+?? experiments/step27_qualification.py
+?? experiments/step27_tiger_engines.py
+?? experiments/step28_fusion_experiment.py
+?? recommendation/control/tiger_source.py
+?? tests/test_tiger_source.py
+
+  OK     runs/step27-candidatesource-qualification.txt            e64325cdf2c4f72e7c100cc3cb5f3ff81b2f757f437e9bc7906d60f15fb9fba3
+  OK     runs/step26-phase5-complementarity-canonical.txt         9f8a9163052631b7da7390e0bbe1577bc2cd1a942fa6d362127bbc1dea2cbbd9
+  OK     runs/twotower_fusion_controls/controls.json              49d318c46837ecf191cb894e01aa5087792159df065782eb92b3b7d656ae9bd8
+  OK     runs/sasrec_canonical_2026/best.pt                       352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912
+  OK     runs/twotower_public_2026_full/checkpoint.pt             0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+  OK     runs/semantic_id_public_2026/generator.pt                1d7d5a5f44a23e074db3d210ab4f6b0a33e2344427d80e196752d323e4d41b14
+  OK     recommendation/control/candidate_ledger.py               fcc65e74d0efb78d3078956e89b9b3fda2cd6281d508f9b6cba02b1be579aa62
+  OK     recommendation/control/grounding.py                      c2f1df1644eacca6649c346a4faf14d9a7581baf9193d731aee42fe0a1bf4ee5
+
+  No retriever was trained, tuned or modified (SASRec, Two-Tower and TIGER checkpoints are
+  byte-unchanged; TIGER retrieval, Semantic IDs, CandidateSource semantics, GroundingVerifier
+  and CandidateLedger are untouched).  Agent routing, source selection and the stopping policy
+  are unchanged; TIGER is NOT enabled in the canonical runtime.  No weighted, calibrated or
+  learned fusion was run.  Step-2.6/2.7 frozen artifacts are byte-unchanged.
+  Nothing was committed and nothing was pushed.
+
+====================================================================================================
+STOP -- fusion qualification complete.
+====================================================================================================

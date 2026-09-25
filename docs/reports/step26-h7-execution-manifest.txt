@@ -1,0 +1,91 @@
+====================================================================================================
+STEP 2.6 / H7 -- FROZEN EXECUTION MANIFEST (written BEFORE launch, immutable)
+====================================================================================================
+
+purpose              canonical CERTIFIED catalogue retrieval over the frozen 20 000-user cohort
+authorization        H7 explicitly authorized by the project owner
+status at freeze time: H7 NOT STARTED; no TIGER Recall/NDCG/HR exists
+
+--- single changed variable vs the accepted Step-2.6 verification runs ---
+none: the accepted implementation is executed unmodified with a sized-up budget
+
+--- immutable inputs ---
+  checkpoint/tiger.pt                                        95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  sid/semantic_ids.json                                      6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  sid/layout.json                                            22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  handoff/catalogue.json                                     84f4a35dfe99c96f9b9e9c65ee2864aeed901fba0577fe221810555fe0732096
+  checkpoint/generator_layout.json                           eed4dffaccf8dfecf40ee5bc9f8206870910a8a4e31fdd941e8ac6697814a55a
+  src/retrieve.py                                            5d87aff71e5fa7ebd8c62289a8dc0337736cc1b93f9e36bda26ed264b32c06d1
+  src/retrieve_cli.py                                        a7d1a90a75095fb74920201cb81c6aaaf6ad8fe5d3a9f60d294b7147d6010999
+  arm/tiger_retrieval_arm.py                                 fd6b74fdb46c5e3339112ec8af54a7aed8442091c959ed8411a048cb8bcdf765
+  ev/step26-acceptance-and-benchmark-contract.txt            2e4a5b5f226fc8aef1587ba62891544edf425c551d91849e7d778b40948422fd
+
+--- frozen configuration ---
+  retrieval_mode                 CERTIFIED          (APPROXIMATE output is forbidden in H7)
+  producer                       tiger_public.retrieve_cli  (the Stage-4 stub is forbidden)
+  batch_prefixes                 256   <-- FIXED; identical for every H7 case
+  prefix_budget                  1000000   <-- execution safeguard only
+  k_values                       [5, 10, 20]
+  cohort_size                    20000
+  full_catalogue                 true  (156 746 items, PAD row 0 excluded)
+  --limit                        OMITTED (the whole cohort; no truncation)
+  device                         cuda (single RTX 4090, one process)
+  sharding                       NOT USED -- see below
+
+--- why batch_prefixes is frozen ---
+Cross-batch-size scoring differs in the last few ULPs (different GEMM reduction shapes) while
+the certified ORDER is unchanged.  H7 therefore fixes batch_prefixes = 256 and records it, so
+the artifact is reproducible bit-for-bit for that fixed configuration.
+
+--- why this prefix budget ---
+Measured per-case expansions on the accepted implementation (512 real cohort cases):
+  min 769   p50 769   p95 771   p99 962   max 1152   mean 772.9
+  pruning: min 0   max 5447   mean 1473.9
+  largest observed frontier 118; the full cohort's largest is 701, i.e. ~6x -> projected worst
+  case ~= 7000 expansions.  Budget 1000000 is ~870x the largest observed and ~140x the projected
+  worst case, so it cannot bind in practice.  It is a safeguard against a pathological case
+  running unbounded, NOT an approximation knob: if it ever binds, the run is downgraded and
+  H7 certification FAILS rather than being repaired in place.
+
+--- why H7 is NOT sharded ---
+Case-range sharding is available (the search is case-independent) but would require a case-range
+driver.  The accepted retrieve_cli.py exposes only --limit (a prefix), and modifying it would
+change the very hash this manifest freezes.  H7 therefore runs as ONE process over all 20 000
+cases, so the seven accepted Step-2.6 files stay byte-identical and no case index is remapped.
+Interruption semantics: a crash or stop means the artifact is incomplete and H7 is re-run from
+scratch; no partial artifact is ever treated as certified.
+
+--- fail-closed runtime invariants enforced by the implementation ---
+  all model scores finite                        (assert_next_log_probs_admissible, per call)
+  log-probability admissibility assertions pass  (every scored batch, plus G15.5 on real output)
+  all returned SIDs valid                        (every path is a complete 4-level trie path)
+  no unresolved identity / no invalid candidate  (arm refusal + G14)
+  no duplicate final identity                    (dedup by item_id, highest score kept)
+  no protocol mismatch                           (G16)
+  any violation is fail-closed: the process raises rather than skipping a case
+
+--- repository state at freeze ---
+  git commit                     634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+  git diff --stat                []
+  git status --porcelain (additions only):
+?? backends/tiger_public/src/tiger_public/retrieve.py
+?? backends/tiger_public/src/tiger_public/retrieve_cli.py
+?? backends/tiger_public/tests/test_step26_retrieval.py
+?? experiments/step26_gates.py
+?? experiments/step26_report.py
+?? experiments/step26_tiger_benchmark.py
+?? experiments/tiger_retrieval_arm.py
+
+--- H7 command (authoritative; no --limit) ---
+  cd /root/autodl-tmp/agentrec-X/backends/tiger_public
+  PYTHONPATH=src .venv/bin/python -m tiger_public.retrieve_cli \
+    --checkpoint-dir /root/autodl-tmp/gate_d_fp32_canonical_remediation \
+    --sid /root/autodl-tmp/step24f/runs/tiger_public_2026/sid \
+    --catalogue /root/autodl-tmp/gate_d_handoff_restore/runs/tiger_backend_handoff_prod \
+    --out /root/autodl-tmp/step26_h7_canonical \
+    --mode CERTIFIED --prefix-budget 1000000 --batch-prefixes 256 --device cuda
+
+--- projection at freeze time (from 512 measured cases) ---
+  4.11 cases/s  ->  ~81 min;  advisory estimate 1.4-2.0 h including the heavier frontier tail
+  the run reports its own wall time; this projection is not a commitment
+====================================================================================================

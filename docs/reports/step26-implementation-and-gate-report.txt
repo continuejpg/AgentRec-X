@@ -1,0 +1,363 @@
+====================================================================================================
+STEP 2.6 -- TIGER RETRIEVAL / SCORING / CERTIFIED EVALUATION: IMPLEMENTATION AND GATE REPORT
+====================================================================================================
+
+  STEP 2.6 IMPLEMENTATION READY
+  H7 CERTIFIED BENCHMARK READY FOR EXECUTION
+
+  H7 HAS NOT BEEN RUN.  No Recall@K / NDCG@K / HR@K for TIGER exists, and none was computed
+  anywhere in this work.  The report below is returned for review, and execution stops here.
+
+  All four gates PASS: G13, G14, G15, G16.
+
+
+====================================================================================================
+1. MODIFIED FILES
+====================================================================================================
+No pre-existing file was modified.  Six files were ADDED; every other path is untouched.
+
+  production worktree porcelain (must be additions only):
+?? backends/tiger_public/src/tiger_public/retrieve.py
+?? backends/tiger_public/src/tiger_public/retrieve_cli.py
+?? backends/tiger_public/tests/test_step26_retrieval.py
+?? experiments/step26_gates.py
+?? experiments/step26_report.py
+?? experiments/step26_tiger_benchmark.py
+?? experiments/tiger_retrieval_arm.py
+
+  git diff --stat (tracked-file modifications): []
+
+  file                                                           bytes  sha256
+  backends/tiger_public/src/tiger_public/retrieve.py             31651  5d87aff71e5fa7ebd8c62289a8dc0337736cc1b93f9e36bda26ed264b32c06d1
+  backends/tiger_public/src/tiger_public/retrieve_cli.py         11641  a7d1a90a75095fb74920201cb81c6aaaf6ad8fe5d3a9f60d294b7147d6010999
+  backends/tiger_public/tests/test_step26_retrieval.py           24351  5326924f311c1752d319b331c7dd3eb8bbf4955d183e5c196cc8eec2e46b1425
+  experiments/tiger_retrieval_arm.py                             12933  fd6b74fdb46c5e3339112ec8af54a7aed8442091c959ed8411a048cb8bcdf765
+  experiments/step26_gates.py                                    16568  a7e0d06d89cae8060ce84d33447cb83ae8567808336a99c44d64220c41a78f52
+  experiments/step26_tiger_benchmark.py                           5754  b1e05336864b56b357ea450c517538ec285c06f22e18dc29c0b26b4dd1540911
+
+  purpose of each:
+    backends/tiger_public/src/tiger_public/retrieve.py         Step 2.6 retrieval: APPROXIMATE + CERTIFIED + resolver + model binding
+    backends/tiger_public/src/tiger_public/retrieve_cli.py     backend-side producer: runs retrieval over the frozen cohort, writes the sparse artifact
+    backends/tiger_public/tests/test_step26_retrieval.py       38 tests incl. the brute-force oracle and batch parity
+    experiments/tiger_retrieval_arm.py                         AgentRec-X-side arm tiger_fp32 + identity re-attachment + grounding
+    experiments/step26_gates.py                                G13-G16 gate runner (two-phase, merge-capable)
+    experiments/step26_tiger_benchmark.py                      H8 runner (NOT RUN) wired to the shared evaluator
+
+====================================================================================================
+2. retrieve.py ARCHITECTURE
+====================================================================================================
+Layered so that the SEARCH is independent of the MODEL, which is what makes exactness testable:
+
+  NextTokenScorer (Protocol)   [batch of prefixes] -> [batch, vocab] full-vocabulary log-softmax
+      |  the only model interface; the search never touches the generator
+  SidResolver                  token path -> integer item id, via the CatalogueTrie (fail closed)
+  retrieve_certified(...)      exact branch-and-bound          -> CaseRetrieval(status=CERTIFIED)
+  retrieve_approximate(...)    bounded level beam              -> CaseRetrieval(status=APPROXIMATE)
+  retrieve(...)                dispatches on RetrievalConfig.mode; never upgrades a status
+  TigerCaseScorer              binds TigerGenerator to ONE case; encoder runs once, decoder batched
+  build_history_input(...)     encoder tokens, byte-for-byte as build_examples builds them
+  aggregate_certificate(...)   per-case diagnostics -> the section 15.2 certificate block
+
+  No torch import at module scope: the pure search, resolver and oracle tests run without the ML
+  stack.  torch is imported lazily inside the model binding only.
+
+====================================================================================================
+3. APPROXIMATE ALGORITHM
+====================================================================================================
+Level-synchronous bounded beam over the catalogue trie.
+  * start from the empty prefix; for each of per_item_tokens levels expand every legal child
+    and keep the best `beam` prefixes by (descending score, ascending token path)
+  * `prefix_budget` caps total expanded nodes; exhaustion is recorded, never hidden
+  * completed paths are ranked and resolved under the frozen score rule
+  * every result carries status = APPROXIMATE and retrieval_mode = APPROXIMATE
+  * APPROXIMATE output is NON-CANONICAL and the arm refuses it for a canonical comparison
+Purpose: iteration, smoke tests, latency and coverage profiling.  Beam 10 000 on the synthetic
+oracle catalogue reproduces the exhaustive ranking, which is the test that it is a correct
+approximation of the same rule rather than a different one.
+
+====================================================================================================
+4. CERTIFIED ALGORITHM
+====================================================================================================
+Exact branch-and-bound over the catalogue trie keyed by the admissible bound.
+  * max-heap over prefixes keyed by S(p); the empty prefix starts at bound 0
+  * pop the best prefix, score its legal children with ONE batched decoder call,
+    push each child with S(child) = S(p) + log P(child | p)
+  * a child that is a complete catalogue path is RECORDED as a candidate
+  * T = the k_prime-th best COMPLETED score, once k_prime completions exist
+  * a branch is terminated exactly when S(p) < T; the search ends globally when the best
+    remaining prefix has S(p) < T
+  * prefixes are popped in batches of `batch_prefixes`; batching changes only efficiency, and
+    pruning always uses a threshold that is <= the final one, so it stays conservative
+  * k_prime is AgentRec-X's `required_frontier` (K_max + |seen|), not a display cut-off
+  * `prefix_budget` exhaustion sets budget_exhausted and DOWNGRADES the run to APPROXIMATE
+    with comparison_eligible = false (spec 15.2) - a truncated search is never called certified
+
+Measured shape on the frozen cohort (512 cases, real model):
+  expansions/case           772.9
+  pruned by bound/case      1473.9   (the bound does real work: it removes ~2x what it expands)
+  certified items/case      {'max': 118, 'mean': 35.023438, 'min': 22}
+  budget_exhausted_cases    0
+
+====================================================================================================
+5. COMPLETENESS ARGUMENT
+====================================================================================================
+Under the frozen rule every score term is a full-vocabulary log-probability, hence <= 0, and a
+prefix's terms are unchanged by extension.  Therefore for any extension q of p:
+
+      S(q) = S(p) + SUM_{l>m} log P(.)   <=   S(p)
+
+so S(p) bounds every item in the subtree rooted at p.  The search only ever discards a branch
+when its bound is below T, and T only increases; every popped bound is >= every completion
+beneath it.  Hence no unvisited item can enter the certified frontier and the returned top-
+k_prime is the true top-k_prime over the ENTIRE valid catalogue.
+
+The precondition is enforced, not assumed: assert_next_log_probs_admissible rejects any batch
+that is non-finite or has a positive entry (i.e. is not a full-vocabulary log-softmax), and
+scoring.assert_monotone_prefix_bound is checked against real model output in G15.
+
+Exhaustive-vs-truncating is proved mechanically in two independent ways:
+  * on oracle catalogues, k_prime >= catalogue size makes the search enumerate everything:
+    prefixes_expanded == nodes - leaves, nodes_pruned_by_bound == 0, and every catalogue item
+    is returned (asserted in the test suite)
+  * against a brute-force oracle, CERTIFIED top-K == oracle top-K for K in {1,2,3,5,10,20}
+
+====================================================================================================
+6. RESOLVER AND COLLISION SEMANTICS
+====================================================================================================
+  R1 a path that is not a COMPLETE catalogue path yields NO candidate
+  R2 a complete catalogue path yields exactly the item id(s) at that trie leaf
+  R3 SID collision (several items on one leaf): the SMALLEST item id wins, and the collision is
+     counted and reported.  The frozen Step-2.4F assignment has post-dedup collisions 0, so a
+     nonzero count FAILS G14 rather than being tolerated: observed 0
+  R4 the PAD sentinel is never tokenisable, never resolvable, never a candidate
+  R5 duplicate resolved item ids are de-duplicated keeping the highest score and earliest rank
+  R6 item ids outside 1..156746 are refused (asserted in the arm before scoring)
+  R7 non-finite scores are refused (asserted in the search and again by the evaluator)
+
+BOUNDARY DISCLOSURE - where canonical identity lives, and why it is not in retrieve.py
+  The task's retention list asks for `parent_asin` per returned item.  AGENTS.md section 19.2
+  rule 1 forbids canonical identity anywhere under `backends/` or `recommendation/backends/`,
+  and contracts.py states the same absence structurally ("no parent_asin appears in any type,
+  field or artifact - canonical identity is re-attached outside this boundary").  The two are
+  reconciled by keeping the identity fields exclusively in the AgentRec-X layer:
+    * retrieve.py / retrieve_cli.py return INTEGER item ids plus resolver provenance only;
+      the artifact contains no parent_asin and no target;
+    * experiments/tiger_retrieval_arm.resolve_candidate_identities re-attaches parent_asin
+      from the frozen mappings and retains, per candidate: parent_asin, semantic_id, score,
+      rank, retrieval_mode, checkpoint sha256, SID artifact sha256 and resolver provenance.
+  If the intent was instead to carry parent_asin inside the backend, that is a change to the
+  boundary rule and needs an explicit decision; it was not assumed here.
+
+====================================================================================================
+7. CHECKPOINT AND ARTIFACT HASHES
+====================================================================================================
+Consumed read-only; every one matches the frozen value:
+  checkpoint_tiger_pt        95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  generator_layout           eed4dffaccf8dfecf40ee5bc9f8206870910a8a4e31fdd941e8ac6697814a55a
+  sid_layout                 22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  sid_semantic_ids           6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  catalogue_json             84f4a35dfe99c96f9b9e9c65ee2864aeed901fba0577fe221810555fe0732096
+  cohort_eval_cohort_json    4480139d7d94eafc5534ba0dda33ed5160dd774db5ac0c0057fbfd7f9ef257b0
+  score_rule                 {"child_renormalisation": false, "eos_in_score": false, "note": "changing any field requires a new version and a full re-benchmark", "softmax": "full_vocabulary", "terms": "sum of log P over the item's complete SID token path", "version": 1}
+  checkpoint training        {"completed_epoch": 19, "global_step": 88420, "precision": "fp32"}
+
+Frozen dependency modules (G13.6, unchanged - no substitution):
+  scoring.py                 fa4f903deb7262cf50d56d4d74bda48beb922da1bcd1867012ac3a4ff8255e41
+  trie.py                    3e0cd581cbe2a0bbb3d2ec8653ab34d88ece5dd025ab85023c5cb77cebbef7ed
+  contracts.py               c83948fcf720758000788396954f3dd87f9b5e5dabbd3d7f55f13445b25dbde9
+  generator_layout.py        64ad34fc1ee024443a101aba947532cd54d18fae2db8b5430c0122907c81f895
+  tiger.py                   fff878d0b334ec981748cdaafa31fe1a66811a44f97b3a99e4c16be9998760b6
+  acceptance document        2e4a5b5f226fc8aef1587ba62891544edf425c551d91849e7d778b40948422fd
+
+====================================================================================================
+8. UNIT / INTEGRATION TEST RESULTS
+====================================================================================================
+  full backend suite (regression): 184 passed in 18.60s
+  new Step 2.6 suite: 38 tests, all passing.  Coverage of the required list:
+    checkpoint loading (G13.7 test: hash, score_rule, fp32/88420/19, pad 1024, vocab 1028)
+    history -> SID input construction (parity with build_examples; windowing; missing SEP)
+    PAD / BOS / EOS / SEP handling; PAD is not tokenisable
+    prefix legality; invalid-prefix rejection; valid complete SID detection
+    SID collision handling (smallest id wins, counted, deterministic, collision-free case)
+    SID -> item id mapping; refusal of unknown paths
+    duplicate candidate handling; seen-item boundary (arm forwards history, never masks)
+    stable deterministic ranking (descending score, ascending id; rank numbering)
+    APPROXIMATE provenance; CERTIFIED provenance; empty result; K > available candidates
+    batch vs single-example parity (this test found a real encoder-broadcast bug)
+
+DETERMINISM FINDING (recorded because H7 depends on it):
+  scores are BIT-IDENTICAL across processes for a FIXED batch_prefixes, and identical across
+  independent whole-run invocations (two 64-case runs produced byte-identical artifacts).
+  Across DIFFERENT batch_prefixes, scores differ in the last few ULPs (different GEMM
+  reduction shapes) while the certified ORDER is unchanged.  H7 must therefore fix and report
+  batch_prefixes; the artifact records it in retrieval_config.
+
+====================================================================================================
+9. BRUTE-FORCE ORACLE TEST RESULTS
+====================================================================================================
+An independent exhaustive oracle enumerates every complete catalogue path, sums a
+hash-seeded deterministic score field, sorts by (descending score, ascending path) and resolves
+through the same resolver.  It shares nothing with the search but the published scorer contract.
+
+  synthetic catalogue (3x3 codes + 3 dedup, 5 items): CERTIFIED == oracle for K in 1,2,3,5,10,20
+  single-item catalogue: 1 candidate, certified, no crash
+  colliding catalogue: duplicates de-duplicated, smallest id kept, order still == oracle
+  real tiny model (1 layer, d_model 32) over the synthetic catalogue: CERTIFIED == oracle to
+   1e-6 on scores AND identical on item ids - i.e. exactness holds for real model output too
+  exhaustive-vs-truncating: prefixes_expanded == nodes - leaves, zero pruning, all items
+  full beam (beam >= catalogue) APPROXIMATE reproduces the exhaustive ranking
+
+  pytest: 38 passed in 4.61s
+
+====================================================================================================
+10-13. GATE RESULTS
+====================================================================================================
+
+G13: PASS
+   PASS   G13.1 tiger.pt sha256 == frozen
+   PASS   G13.2 generator_layout sha256 == frozen
+   PASS   G13.3 sid/layout.json sha256 == frozen
+   PASS   G13.3 sid/semantic_ids.json sha256 == frozen
+   PASS   G13.3 catalogue.json sha256 == frozen
+   PASS   G13.4 recorded score_rule is the frozen rule
+   PASS   G13.5 checkpoint precision is fp32
+   PASS   G13.5 checkpoint global_step is 88420
+   PASS   G13.5 checkpoint completed_epoch is 19
+   PASS   G13.6 no frozen dependency was substituted
+   PASS   G13.6 acceptance document is the frozen one
+   PASS   G13.7 production loader accepts the checkpoint (0 missing / 0 unexpected)
+   PASS   G13.7 layout and vocabulary are the accepted ones
+
+G14: PASS
+   PASS   G14.1 100% of candidates resolve to a catalogue item
+   PASS   G14.2 zero unknown catalogue identities
+   PASS   G14.3 zero invalid SIDs (every path is a 4-level catalogue path)
+   PASS   G14.4 zero SID collisions in the frozen assignment
+   PASS   G14.5 every item resolves to exactly one parent_asin
+   PASS   G14.6 GroundingVerifier accepts every resolved identity
+   PASS   G14.7 two independent runs are byte-identical
+
+G15: PASS
+   PASS   G15.1 CERTIFIED top-K == brute-force oracle top-K (pytest)
+   PASS   G15.2 oracle catalogues exercised (synthetic, real subset, single item)
+   PASS   G15.3 byte-identical determinism across independent runs
+   PASS   G15.4 complete enumeration proven on oracle catalogues (pytest)
+   PASS   G15.5 admissibility holds on real model log-probs
+   PASS   G15.6 CERTIFIED is labelled and uses branch_and_bound
+   PASS   G15.6 certificate is internally consistent
+   PASS   G15.7 frozen assignment is collision-free
+   PASS   G15.8 frontier returned exactly as requested per case
+
+G16: PASS
+   PASS   G16.1 cohort seed is 20260201
+   PASS   G16.1 cohort size is 20000
+   PASS   G16.1 protocol is agentrecx.eval_protocol.v1
+   PASS   G16.1 reported K values are 5/10/20
+   PASS   G16.3 full catalogue of 156746 items
+   PASS   G16.4 arm performs no masking (history only forwarded)
+   PASS   G16.6 shared evaluator present and hashed
+   PASS   G16.6 H8 runner calls the shared evaluate_arm (AST audit)
+   PASS   G16.7 arm is named tiger_fp32, distinct from GenRec-v0
+   PASS   G16.7 arm does not import recommendation.semantic_id (AST audit)
+   PASS   G16.8 producer is Step 2.6 retrieval, never the stub
+   PASS   G16.8 stub output cannot be certified by this arm
+
+G14 detail (real data, 64 CERTIFIED cases):
+   candidates                 2352
+   unresolved_candidates      0
+   distinct_items             940
+   distinct_parent_asins      940
+   grounded_distinct          940
+   ungrounded_distinct        0
+   grounding_all_accepted     True
+   checks_catalog             True
+   catalog_size               156746
+   artifact_status            CERTIFIED
+   comparison_eligible        True
+
+G16 detail:
+   evaluator_module           /root/autodl-tmp/agentrec-X/recommendation/evaluation/batched.py
+   evaluator_sha256           1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11
+   eval_cohort_jsonl_sha256   621108c39606efbdeff99ee488fcff6587183eb651528ba3b4b782b1557859f7
+   cohort_required_frontier_stats {'cases': 20000, 'histogram': {'(100,250]': 124, '(21,25]': 5036, '(25,50]': 13072, '(250,500]': 6, '(50,100]': 1759, '>500': 1}, 'k_max': 20, 'max': 701, 'mean': 34.745, 'min': 21, 'p95': 59, 'p99': 89}
+   artifact_producer          tiger_public.retrieve_cli
+
+====================================================================================================
+14. FROZEN BENCHMARK CRITERIA + SHA256
+====================================================================================================
+Pre-registered BEFORE any TIGER metric existed (the document was written, chmod 444 and hashed
+while the string 'no Step-2.6 metric artifact exists' was still true):
+  /root/autodl-tmp/gate_d_post_maintenance_20260924/step26-acceptance-and-benchmark-contract.txt
+  sha256  2e4a5b5f226fc8aef1587ba62891544edf425c551d91849e7d778b40948422fd
+  frozen dependency hash list: /root/autodl-tmp/gate_d_post_maintenance_20260924/step26-frozen-dependency-hashes.txt
+
+Mandatory correctness gates (all must be 0): C1 invalid_candidate_rate, C2
+unresolved_identity_rate, C3 protocol_mismatch, C4 oracle_mismatch, C5 non_finite_score_count,
+C6 duplicate_resolved_items_in_frontier, C7 sid_collision_count, C8 budget_exhausted_cases.
+CERTIFIED means: status CERTIFIED, method branch_and_bound, certificate_holds_for_all_cases
+true, budget_exhausted_cases 0, admissibility held on every scoring call used.
+K reported: 5, 10, 20.  Ties: descending score then ascending item id.  Performance is
+reported DESCRIPTIVELY; no Recall target was invented and none will be selected after the fact.
+
+====================================================================================================
+15. EXPECTED H7 COMPUTE / VRAM / RUNTIME
+====================================================================================================
+MEASURED, not guessed, on the accepted FP32 checkpoint (RTX 4090, same GPU as the training run):
+
+  8 cases    (cold)   2.26 cases/s   wall 3.5 s
+  512 cases  (warm)   4.11 cases/s   wall 124.7 s
+  64 cases, two independent runs: byte-identical artifacts
+
+  sample frontier stats   {'max': 118, 'mean': 35.023438, 'min': 22, 'p95': 61, 'p99': 85}
+  full-cohort frontier    min 21 / mean 34.745 / p95 59 / p99 89 / max 701  (frozen handoff)
+  H7 projection           ~1.35 h for 20 000 cases at the measured rate
+  recommended estimate    ~1.4-2.0 h.  The 512-case sample's frontier distribution (mean 35.0,
+                          p95 61, p99 85, max 118) is close to the full cohort's, but the full
+                          cohort has a longer tail (max 701) whose cases cost more, so the
+                          measured rate is a mild underestimate.  H7 must report its own wall
+                          time rather than be held to this projection.
+  VRAM                    ~10 GiB observed during training; retrieval adds only batched decoder
+                          calls over <=5-token sequences with an expanded encoder state, which
+                          is negligible next to training.  Peak did not approach the 24 GiB card.
+  device                  single RTX 4090, one process; no sharding was needed
+  scaling path if needed  the search is per-case independent, so sharding by case range is
+                          trivially available and would not change any result
+
+====================================================================================================
+16. PRODUCTION WORKTREE DIFF
+====================================================================================================
+  commit        634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+  branch        gate-d-remediation
+  git diff --stat (tracked modifications)   []
+  git status --porcelain (untracked additions only):
+?? backends/tiger_public/src/tiger_public/retrieve.py
+?? backends/tiger_public/src/tiger_public/retrieve_cli.py
+?? backends/tiger_public/tests/test_step26_retrieval.py
+?? experiments/step26_gates.py
+?? experiments/step26_report.py
+?? experiments/step26_tiger_benchmark.py
+?? experiments/tiger_retrieval_arm.py
+
+  NOTHING was committed and nothing was pushed, as instructed.  The four frozen dependency
+  modules (scoring.py, trie.py, contracts.py, generator_layout.py) and tiger.py are byte-
+  identical to their pre-Step-2.6 hashes, and the accepted checkpoint is unmodified.
+
+  The Stage-4 stub scorer in cli.py was deliberately NOT modified.  It remains explicitly
+  labelled ('Stage 4 - score (stub scorer)', 'The scorer is a placeholder') and it cannot feed
+  a certified TIGER metric, because the arm hard-refuses any artifact whose producer is not
+  'tiger_public.retrieve_cli' (G16.8, plus an ArmError raised at load time).  RECOMMENDATION
+  for a later, separately authorised change: make the stub itself emit status STUB rather than
+  CERTIFIED, so the hazard is closed at the producer too.
+
+====================================================================================================
+STOP
+====================================================================================================
+H7 was NOT started.  Recall@K / NDCG@K / HR@K were NOT computed.  No benchmark number for TIGER
+exists.  The next action requires explicit authorization:
+
+  1. run H7: python -m tiger_public.retrieve_cli ... --mode CERTIFIED --prefix-budget N
+     (no --limit) over the frozen 20 000-case cohort, then
+  2. run H8: python experiments/step26_tiger_benchmark.py --artifact <H7 out dir>
+
+Both are wired and gated.  Neither has been executed.
+====================================================================================================

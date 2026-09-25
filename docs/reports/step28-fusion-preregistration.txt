@@ -1,0 +1,108 @@
+====================================================================================================
+STEP 2.8 -- CONTROLLED RANK-ONLY FUSION: PRE-REGISTRATION
+====================================================================================================
+
+Written and hashed BEFORE any fusion Recall/NDCG/HR number exists.  Frozen references only.
+
+--- 0. prerequisite evidence (frozen, not recomputed here) ---
+  Step 2.7 qualification report sha256
+    e64325cdf2c4f72e7c100cc3cb5f3ff81b2f757f437e9bc7906d60f15fb9fba3
+  Phase-5 complementarity anchor sha256
+    9f8a9163052631b7da7390e0bbe1577bc2cd1a942fa6d362127bbc1dea2cbbd9
+  frozen hit counts: SASRec@10 270 | Two-Tower@10 287 | TIGER@10 277
+                     |S u T| 460 | |S u T u G| 598 | TIGER-only outside S u T 138
+  frozen unique-hit sets to be used verbatim in the retention analysis:
+    K=5  99 users   K=10 138 users   K=20 207 users
+
+--- 1. fusion rule (reused, not chosen here) ---
+  implementation   recommendation.control.candidate_ledger.reciprocal_rank_fusion
+  constant         RRF_K = 60, the repository default, REUSED unchanged
+  form             score(d) = sum over sources of 1 / (60 + rank_source(d))
+  rank-only        no raw model score enters the fused value; no normalisation, no weights
+  why              the sources score on incomparable scales; rank is the one cross-source
+                   quantity the ledger preserves verbatim for every source
+  The constant is NOT selected by inspecting TIGER fusion performance.  It is the accepted
+  value that already produced the historical controls, and the historical control is
+  reproduced bit-exactly under it as a precondition.
+
+--- 2. source weights ---
+  all source weights = 1.  No weighting, no grid search, no fitting against the target.
+
+--- 3. candidate depth per source (recorded explicitly) ---
+  SASRec      1000   the historical fusion contract (HEAD=1000, Phase-5 value)
+  Two-Tower   1000   the same
+  TIGER       full certified frontier: min 20 / mean 33.919 / max 667 (measured, per user)
+  THE ASYMMETRY IS ACKNOWLEDGED AND RUNS AGAINST TIGER: TIGER supplies a much SHALLOWER head
+  than the other two, so it can contribute RRF mass to fewer ranks.  TIGER was NOT given a
+  deeper window, and no depth was tuned.
+  SENSITIVITY ANALYSIS, DECLARED NOW: a second pass caps EVERY source at a common depth of 20
+  (TIGER's minimum), so all three contribute over identical ranks.  Both are reported; the
+  primary is the historical-depth contract and the common-depth pass is a sensitivity check,
+  never a post-hoc selection.
+
+--- 4. identity, dedup and tie-breaking ---
+  flow: source ranking -> item id -> canonical identity -> existing dedup -> RRF -> evaluator
+  dedup: experiments.benchmark_public.fused_head, order-preserving first-occurrence dedup
+  tail: unmatched catalogue items appended in ascending item id (documented convention)
+  tie-break: the shared evaluator's frozen contract; fusion only supplies an order
+  Semantic IDs are never fused; only resolved item identities are.
+
+--- 5. configurations (identical implementation, no per-configuration tuning) ---
+  A = SASRec + Two-Tower                 (primary existing-system control)
+  B = SASRec + TIGER                     (diagnostic pair)
+  C = Two-Tower + TIGER                  (diagnostic pair)
+  D = SASRec + Two-Tower + TIGER         (tests TIGER's practical fusion value)
+  GenRec-v0 is NOT part of the primary fusion.
+
+--- 6. correctness gates, frozen before any metric ---
+  F1 cohort identity PASS        same 20 000 users, same order, same targets
+  F2 source artifact identity    SASRec/Two-Tower checkpoints and the TIGER artifact match
+                                 their frozen hashes
+  F3 rank input integrity        every source head is a strict ordering of distinct legal
+                                 item ids; depths reported
+  F4 canonical dedup             one canonical item per identity; no duplicate contributions
+  F5 deterministic RRF           identical fused scores and order on a repeat run
+  F6 provenance preservation     per-source rank contributions retained
+  F7 shared evaluator parity     metrics produced by the frozen evaluate_arm path only
+  F8 no target leakage           fusion receives no target; it consumes source heads only
+  All must PASS before fusion performance is interpreted.
+
+--- 7. reported quantities (NO Recall pass threshold is preregistered) ---
+  A/B/C/D metrics at K = 5/10/20 (Recall, NDCG, HR) and exact hit counts
+  D - A deltas: Recall/NDCG/HR at K = 5/10/20, absolute and relative
+  hit-gain/loss decomposition: gained, lost, net, both-hit, hit->miss, miss->hit
+  unique-hit retention for the frozen K=5 (99) / K=10 (138) / K=20 (207) TIGER-only sets
+  oracle headroom: fused hits vs the frozen oracle union (598 at K=10)
+  A descriptive conclusion carrying its counts.  No winner label.
+
+--- 8. determinism ---
+  every configuration is run TWICE over the frozen source heads and must produce identical
+  identities, fused scores, ordering and metrics.  If floating arithmetic prevents literal
+  byte equality while ordering is deterministic, that boundary is documented precisely.
+
+--- 9. stop conditions ---
+  If the historical SASRec+Two-Tower(+metadata) fusion control cannot be reproduced exactly,
+  STOP and report; do not interpret TIGER fusion.  (Already satisfied: the historical controls
+  reproduced bit-exactly on every arm and contrast, section 4 of the report.)
+  If any of F1-F8 fails, STOP and report.
+
+--- 10. repository state at freeze ---
+  git HEAD    6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch  master
+  git diff --stat  [recommendation/control/arguments.py       | 10 +++++++ |  recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++------- |  2 files changed, 45 insertions(+), 9 deletions(-)]
+  git status --porcelain:
+M recommendation/control/arguments.py
+ M recommendation/control/candidate_plane.py
+?? experiments/step27_qualification.py
+?? experiments/step27_tiger_engines.py
+?? recommendation/control/tiger_source.py
+?? tests/test_tiger_source.py
+
+  Frozen input hashes:
+    runs/step26_tiger_hits_top10.npz                     6e60a12a056b2c7263dd52535722f803b9100905a2d08c905c9e0433eaa98641
+    runs/step26-phase5-complementarity-canonical.json    a03ec4497df3787abb562ad082022b93b2718bc27f26c3ce53f116f5bdc7abfb
+    runs/step28_tiger_heads.jsonl                        3198d059f2419721d953cfbae6e5625e569e74dc954d72b9e8f1c528d0574934
+    runs/twotower_fusion_controls/controls.json          49d318c46837ecf191cb894e01aa5087792159df065782eb92b3b7d656ae9bd8
+    runs/sasrec_canonical_2026/best.pt                   352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912
+    runs/twotower_public_2026_full/checkpoint.pt         0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+====================================================================================================

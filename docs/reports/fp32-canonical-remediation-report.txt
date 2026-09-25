@@ -1,0 +1,512 @@
+====================================================================================================
+FP32 CANONICAL REMEDIATION REPORT
+Gate D training blockage -- temporary precision remediation (disable BF16)
+====================================================================================================
+
+STATUS SUMMARY
+  FP32 canonical training           COMPLETE (20/20 epochs, global_step 88420)
+  FP32_CANONICAL_HEALTH             PASS
+  EARLY_FP32_HEALTH_GATE ep6 / ep9  PASS / PASS
+  Gate D training health            PASS UNDER FP32 REMEDIATION
+  TEMPORARY REMEDIATION             disable BF16
+  ROOT CAUSE                        not fully resolved
+  Canonical recommendation benchmark BLOCKED -- Step 2.6 retrieval implementation ABSENT
+                                    (not blocked by training health any more)
+  Recall@K / NDCG@K / HR@K          NOT RUN -- cannot be produced (see section K)
+
+READ THIS FIRST: this report proves a remediation worked. It does NOT claim a root cause,
+and it does NOT claim BF16 was the sole cause. See section L (scope limitations).
+
+
+====================================================================================================
+A. PROVENANCE
+====================================================================================================
+The frozen provenance block written before launch is reproduced verbatim at the end of this
+section. Its identity hashes:
+  fp32-canonical-provenance.txt sha256  ff8bc22e86b68ed6088928384bfe522b7ecbcb5a9e0b4b198035757c4d16ffda
+  backend git commit                    634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+  git porcelain at launch               clean (empty); production code UNMODIFIED
+  precision verification sha256         90d37663604a316130c8668d73fd329de3a124ec9cdb70d76e2e814562d37956
+  phase 8 verification sha256           571aadecfea6b5578dbb3c96fe158db5502b96ffe638d2443681a900d93001c3
+  forensic json sha256                  3a3273942724ef3e148504fe1e915649ea4c457b7f8e66159204e2cb1d3b6fab
+  attention json sha256                 ff0e355dfe84b4de911cf79ed714cf92b5251262de9454620a030f95ae3a2a3f
+  train log                             /root/autodl-tmp/gate_d_fp32_canonical_remediation_train.log
+  run dir                               /root/autodl-tmp/gate_d_fp32_canonical_remediation
+  snapshot dir                          /root/autodl-tmp/gate_d_fp32_canonical_epoch_snapshots
+
+Frozen inputs:
+  exposure sha256                       36caeb91f019c09dacbe6f4ff24a2d26da03ca7f110496077af9f8f5329bbd4d
+  semantic_ids sha256                   6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  layout sha256                         22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  audit batch sha256                    e42d92a3d20845ac9abbed84a66aa4dd71fc8fd94f489f9fc3b8686765c1078b
+  seed                                  2026
+  GPU                                   GPU-9d1dca44-bd15-a9ca-ff6a-78edb93bb1ba (same physical 4090 as R9-A/R10)
+
+Pre-registered health-gate tripwires and the disclosed calibration are in the provenance block:
+
+=================================================================================
+FP32 CANONICAL REMEDIATION -- PROVENANCE (PHASE 1 FREEZE)
+temporary remediation: disable BF16.  ROOT CAUSE: not fully resolved.
+=================================================================================
+date                 2026-09-25T13:32:02+08:00
+git commit           634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+git branch           gate-d-remediation
+git porcelain        []   (empty = clean; hard precondition)
+git diff stat        []
+GPU                  NVIDIA GeForce RTX 4090, GPU-9d1dca44-bd15-a9ca-ff6a-78edb93bb1ba, 95.02.3C.00.02, 00000000:1C:00.0, 24564 MiB
+host                 autodl-container-e0854686a9-1223c011
+stack                2.14.0+cu126 12.6 3.10.12 1.26.4 5.17.0
+driver               595.71.05
+determinism          CUBLAS_WORKSPACE_CONFIG=:4096:8 + use_deterministic_algorithms(True, warn_only=False)
+                     (set by configure_deterministic_execution() as the first statement of stage_train)
+
+--- single changed variable vs the canonical BF16 run ---
+BF16 autocast        ENABLED  ->  DISABLED   (CLI flag --no-bf16)
+tiger.py:758         use_bf16 = bool(config.bf16) and device.type == 'cuda'
+tiger.py:832-834     torch.autocast('cuda', bfloat16) if use_bf16 else torch.autocast('cpu', enabled=False)
+everything else      UNCHANGED (architecture, init, seed, data, order, batch size, optimizer,
+                     lr, scheduler, warmup, total steps, dropout, weight decay, clipping, loss,
+                     preprocessing, SID mapping, device, determinism)
+
+--- frozen inputs ---
+exposure             /root/autodl-tmp/gate_d_handoff_restore/runs/tiger_backend_handoff_prod/train_exposure.jsonl
+exposure sha256      36caeb91f019c09dacbe6f4ff24a2d26da03ca7f110496077af9f8f5329bbd4d
+catalogue sha256     84f4a35dfe99c96f9b9e9c65ee2864aeed901fba0577fe221810555fe0732096
+catalogue_items      11da5e005851e058403f6832728a1fdf303096d48f68aadffaca2cbca8b9926e
+sid layout sha256    22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+sid semantic sha256  6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+generator_layout     /root/autodl-tmp/gate_d_canonical_r1/generator_layout.json
+audit batch sha256   e42d92a3d20845ac9abbed84a66aa4dd71fc8fd94f489f9fc3b8686765c1078b
+audit batch def      last batch of epoch 4's permutation, model.eval(), no grad (212 x 101)
+
+--- config ---
+architecture         T5 encoder-decoder, d_model 256, num_layers 6, num_heads 4, d_ff 1024, d_kv 64
+                     special={pad:1024,bos:1025,eos:1026,sep:1027}, vocab 1028, per_item_tokens 4
+init                 fresh random T5Config under seed 2026; verified bit-identical to the
+                     R8/R9 step-0 anchor (sha256 73e860d4dcfc8ae0d9eebf9443c8c0d817d8ea2c540d7f71a6aa240553838419)
+seed                 2026
+max_hist_items       20
+dropout              0.1
+batch_size           512
+epochs budget        20
+examples             2263252   (sum(len(history)-1) over the accepted exposure)
+steps_per_epoch      4421      last_batch_size 212
+total_steps          88420     (canonical endpoint; 20 x 4421)
+optimizer            AdamW(lr=5e-4, weight_decay=0.0, betas=(0.9,0.999), eps=1e-8)
+grad clip            max_grad_norm 1.0
+scheduler            OneCycleLR(max_lr=5e-4, total_steps=88420, pct_start=0.05, anneal=cos)
+                     initial lr = max_lr/div_factor(25) = 2e-5; reaches max_lr at step 4421 (end of ep0)
+precision            FP32 (params FP32, optimizer state FP32, forward/backward FP32)
+
+--- pre-registered EARLY HEALTH GATE tripwires (Phase 6), evaluated at ep6 and ep9 ---
+calibration disclosed: thresholds are calibrated against the already-frozen R9-A (BF16 failure)
+and R10 (FP32 healthy) trajectories. They are tripwires, not discovery claims.
+  1 no R9-A style loss jump        loss(E) - loss(E-1) <= +0.25   (R9-A ep6 jump = +1.377)
+  2 all tensors finite             nonfinite_model == [] and nonfinite_opt == []
+  3 no deep-attention collapse     b5 entropy_mean >= 1.0          (R9-A ep6 0.1538 / R10 ep6 1.4605)
+  4 no near-one-hot burst          b5 frac_rows_near_one_hot <= 0.35 (R9-A ep6 0.8068 / R10 ep6 0.0986)
+  5 no d5q/d5k norm runaway        d5q <= 25.0 (ep6) / 40.0 (ep9); d5k <= 40.0 / 60.0
+                                                                   (R9-A d5q ep6 61.84 / R10 14.46)
+  6 no hidden-state explosion      b5 decoder hidden magnitude <= 400 (R9-A 1524.9 / R10 221.6)
+  7 scheduler accounting           step == sched_last == 4421*(E+1), sched_total == 88420
+  8 payload config.bf16 is False   in-run proof the launched process is FP32
+GATE FAILURE DOES NOT STOP THE RUN (Phase 6: record, then continue canonical training).
+
+--- references ---
+R10 FP32 healthy reference epochs 0..9 (frozen):
+  3.390090 2.661726 2.535151 2.485315 2.445172 2.417473 2.396901 2.381499 2.355170 2.339516
+R10 ep0..9 loss equality with this run is asserted at the ep9 gate (determinism cross-check).
+R9-A BF16 failure reference epochs: ep0 3.391413 ... ep5 2.433060, ep6 3.809968 (cascade)
+
+--- endpoint ---
+canonical endpoint   20 completed epochs / global_step 88420.  NOT truncated at ep9.
+resume/warm start    NONE.  Fresh process, fresh run dir, step 0.
+R10/R9-A/R11-A dirs  NOT reused.  R11-A checkpoint must never be resumed from.
+estimated wall time  ~13 min 07 s per epoch (measured over R10 ep0..ep9) => ~4 h 22 min training
+
+--- artifacts of the aborted predecessor ---
+R11-A status         USER_ABORTED_FOR_PROJECT_UNBLOCK  (/root/autodl-tmp/gate_d_post_maintenance_20260924/r11a-termination-record.txt)
+
+
+====================================================================================================
+B. PHASE 0 -- TERMINATION OF THE PREDECESSOR RUN (R11-A)
+====================================================================================================
+================================================================================
+R11-A TERMINATION RECORD  --  status: USER_ABORTED_FOR_PROJECT_UNBLOCK
+================================================================================
+This run was NOT completed inside its preregistered window, therefore it carries NO
+scientific verdict.  Explicitly NOT: FAILED / NOT_REPRODUCED / REPRODUCED.
+
+status                  USER_ABORTED_FOR_PROJECT_UNBLOCK
+reason                  user redirected the project to FP32 canonical remediation in
+                        order to unblock Gate D and the recommendation benchmark
+stop timestamp          2026-09-25T13:29:55+08:00
+termination signal      SIGTERM (graceful; SIGKILL was NOT required)
+graceful exit           YES -- training process exited 2 s after SIGTERM
+supervisor pid          84455  (SIGTERM first, so it could not act again)
+training pid            84454  (.venv/bin/python r11a_runner.py train ...)
+last completed epoch     1
+last completed step      8842
+steps in epoch           4421
+interrupted during       epoch 2 (partial work discarded by the trainer; no partial epoch published)
+last published state     epoch=1 step=8842 loss=2.612005 d5q_w=8.250154 d5k_w=17.962385
+                         d4q_w=8.259054 d0q_w=8.302147 sched_total=88420 sched_last=8842
+                         rng_keys=["cpu"]
+last published ckpt      /resume/latest.pt  (retained, NOT deleted)
+snapshots retained       /root/autodl-tmp/gate_d_r11a_epoch_snapshots  (r11a_epoch0_step4421.pt, r11a_epoch1_step8842.pt, all chmod 444)
+logs retained            /root/autodl-tmp/gate_d_r11a_scaled_bf16_train.log
+                         /root/autodl-tmp/gate_d_diag_6447d75/logs/r11a_supervisor.log
+                         /root/autodl-tmp/gate_d_r11a_epoch_snapshots/capture.log
+                         /root/autodl-tmp/gate_d_r11a_epoch_snapshots/incidents.log
+provenance retained      /root/autodl-tmp/gate_d_post_maintenance_20260924/r11a-provenance.txt
+                         /root/autodl-tmp/gate_d_post_maintenance_20260924/r11-mechanism-analysis.txt  (frozen preregistration, unmodified)
+single variable          T5Attention.scaling 1.0 -> 0.125 in-process monkeypatch; production
+                         files never modified (backend worktree porcelain empty throughout)
+observed epochs          ep0 loss 3.400512  d5q_w 5.007691
+                         ep1 loss 2.612005  d5q_w 8.250154
+                         (both healthy-looking; NO inference is drawn -- the window was not reached)
+resume prohibition       the retained R11-A checkpoint MUST NOT be used to resume or warm-start
+                         any other run
+GPU after stop           GPU-9d1dca44-bd15-a9ca-ff6a-78edb93bb1ba, 0 %, 1 MiB
+compute apps after stop  []
+================================================================================
+
+
+====================================================================================================
+C. PHASE 4 -- PRECISION VERIFICATION (zero cost, before the long run)
+====================================================================================================
+verdict: PASS
+  config_bf16_is_False                           PASS
+  use_bf16_effective_is_False                    PASS
+  autocast_inactive_in_fp32_path                 PASS
+  loss_dtype_is_float32                          PASS
+  logits_dtype_is_float32                        PASS
+  params_are_float32                             PASS
+  no_bfloat16_in_state_dict                      PASS
+  all_grads_float32                              PASS
+  bf16_contrast_autocast_was_active              PASS
+  bf16_contrast_logits_bfloat16                  PASS
+  precision_policy_materially_differs            PASS
+  init_matches_R8_R9_anchor                      PASS
+  contrast, same batch and weights:  FP32 loss 7.54916239   BF16 loss 7.53951406   delta 9.648e-03
+  in-run assertion (from the first published checkpoint payload):
+    PASS 2026-09-25T13:45:46+08:00 first published checkpoint payload config.bf16=False epoch=0 step=4421
+
+
+====================================================================================================
+D. TRAINING TRAJECTORY -- 20 epochs, FP32, deterministic
+====================================================================================================
+  ep |   global_step |  epoch mean loss |            lr | sched_last | total | nonfinite
+   0 |          4421 |         3.390090 |   0.0005000000 |       4421 | 88420 | model:0 opt:0
+   1 |          8842 |         2.661726 |   0.0004965900 |       8842 | 88420 | model:0 opt:0
+   2 |         13263 |         2.535151 |   0.0004864500 |      13263 | 88420 | model:0 opt:0
+   3 |         17684 |         2.485315 |   0.0004698600 |      17684 | 88420 | model:0 opt:0
+   4 |         22105 |         2.445172 |   0.0004472800 |      22105 | 88420 | model:0 opt:0
+   5 |         26526 |         2.417473 |   0.0004193100 |      26526 | 88420 | model:0 opt:0
+   6 |         30947 |         2.396901 |   0.0003867300 |      30947 | 88420 | model:0 opt:0
+   7 |         35368 |         2.381499 |   0.0003504200 |      35368 | 88420 | model:0 opt:0
+   8 |         39789 |         2.355170 |   0.0003113600 |      39789 | 88420 | model:0 opt:0
+   9 |         44210 |         2.339516 |   0.0002706400 |      44210 | 88420 | model:0 opt:0
+  10 |         48631 |         2.325197 |   0.0002293500 |      48631 | 88420 | model:0 opt:0
+  11 |         53052 |         2.313105 |   0.0001886200 |      53052 | 88420 | model:0 opt:0
+  12 |         57473 |         2.300993 |   0.0001495700 |      57473 | 88420 | model:0 opt:0
+  13 |         61894 |         2.291269 |   0.0001132600 |      61894 | 88420 | model:0 opt:0
+  14 |         66315 |         2.281747 |   0.0000806700 |      66315 | 88420 | model:0 opt:0
+  15 |         70736 |         2.274315 |   0.0000527100 |      70736 | 88420 | model:0 opt:0
+  16 |         75157 |         2.269259 |   0.0000301300 |      75157 | 88420 | model:0 opt:0
+  17 |         79578 |         2.264753 |   0.0000135400 |      79578 | 88420 | model:0 opt:0
+  18 |         83999 |         2.262550 |   0.0000034100 |      83999 | 88420 | model:0 opt:0
+  19 |         88420 |         2.261648 |   0.0000000000 |      88420 | 88420 | model:0 opt:0
+
+  total steps        88420   (steps_per_epoch 4421 x 20; last_batch_size 212)
+  wall clock         15538.044 s = 4.32 h
+  final loss         2.261648
+  loss monotone      True
+  max epoch-to-epoch RISE  0.000000
+  final lr           0.000e+00 (OneCycleLR annealed to ~0 exactly at the endpoint)
+  peak allocated     8.983 GiB
+
+COMPARISON WITH THE BF16 FULL CANONICAL RUN (R6, the run that failed gate D):
+  ep |     BF16 R6 loss |  FP32 canonical loss |   ratio BF16/FP32
+   0 |        3.391413 |             3.390090 |           1.0004
+   1 |        2.665424 |             2.661726 |           1.0014
+   2 |        2.548786 |             2.535151 |           1.0054
+   3 |        2.479121 |             2.485315 |           0.9975
+   4 |        2.446080 |             2.445172 |           1.0004
+   5 |        2.430547 |             2.417473 |           1.0054
+   6 |        5.489193 |             2.396901 |           2.2901
+   7 |        5.933803 |             2.381499 |           2.4916
+   8 |        7.731259 |             2.355170 |           3.2827
+   9 |        9.953830 |             2.339516 |           4.2547
+  10 |       10.920245 |             2.325197 |           4.6965
+  11 |        9.182636 |             2.313105 |           3.9698
+  12 |        8.649197 |             2.300993 |           3.7589
+  13 |        7.338983 |             2.291269 |           3.2030
+  14 |        7.980184 |             2.281747 |           3.4974
+  15 |        8.707451 |             2.274315 |           3.8286
+  16 |        8.624433 |             2.269259 |           3.8006
+  17 |       10.316350 |             2.264753 |           4.5552
+  18 |       11.851629 |             2.262550 |           5.2382
+  19 |       11.870579 |             2.261648 |           5.2486
+  BF16 R6 final (ep19) loss  11.870579   vs   FP32 final loss 2.261648
+  BF16 R6 epoch 5 -> 6 was 2.430547 -> 5.489193 (the divergence).
+  FP32 canonical epoch 5 -> 6 was 2.417473 -> 2.396901 (no divergence).
+
+
+====================================================================================================
+E. PHASE 6 -- EARLY HEALTH GATE
+====================================================================================================
+--- gate at ep6 : PASS
+      snapshot_present                               PASS
+      all_tensors_finite                             PASS
+      scheduler_accounting_correct                   PASS
+      no_R9A_style_loss_jump                         PASS
+      no_deep_attention_entropy_collapse             PASS
+      no_near_one_hot_burst                          PASS
+      no_hidden_state_explosion                      PASS
+      no_d5q_norm_runaway                            PASS
+      no_d5k_norm_runaway                            PASS
+      payload_says_bf16_False                        PASS
+      training_record_bf16_requested_False           PASS
+      loss=2.396901 d5q_w=14.4629 d5k_w=22.4750 b5_entropy=1.4605 b5_near1hot=0.0986 b5_hid5=221.616
+      R10 exact epoch-loss agreement ep0..6 : True
+--- gate at ep9 : PASS
+      snapshot_present                               PASS
+      all_tensors_finite                             PASS
+      scheduler_accounting_correct                   PASS
+      no_R9A_style_loss_jump                         PASS
+      no_deep_attention_entropy_collapse             PASS
+      no_near_one_hot_burst                          PASS
+      no_hidden_state_explosion                      PASS
+      no_d5q_norm_runaway                            PASS
+      no_d5k_norm_runaway                            PASS
+      payload_says_bf16_False                        PASS
+      training_record_bf16_requested_False           PASS
+      loss=2.339516 d5q_w=16.2113 d5k_w=23.8814 b5_entropy=1.5825 b5_near1hot=0.0927 b5_hid5=231.108
+      R10 exact epoch-loss agreement ep0..9 : True
+
+Gate outcome: the R9-A class failure did NOT recur, so per Phase 6 the run continued past
+epoch 9 to the canonical endpoint rather than stopping.
+
+
+====================================================================================================
+F. R10 DETERMINISM CROSS-CHECK (unexpected bonus, strongest internal consistency evidence)
+====================================================================================================
+R10 was also a fresh step-0 CLI run with --no-bf16 on this same physical GPU. Because the
+whole regime is deterministic, this run's epochs 0..9 must equal R10's exactly. They do:
+  ep |  this run |        R10 | equal
+   0 |  3.390090 |   3.390090 | True
+   1 |  2.661726 |   2.661726 | True
+   2 |  2.535151 |   2.535151 | True
+   3 |  2.485315 |   2.485315 | True
+   4 |  2.445172 |   2.445172 | True
+   5 |  2.417473 |   2.417473 | True
+   6 |  2.396901 |   2.396901 | True
+   7 |  2.381499 |   2.381499 | True
+   8 |  2.355170 |   2.355170 | True
+   9 |  2.339516 |   2.339516 | True
+  all 10 equal: True
+This independently confirms: same initialisation, same data order, same schedule, same
+precision path -- i.e. the only changed variable really was BF16 enabled -> disabled.
+
+
+====================================================================================================
+G. ATTENTION AND HIDDEN-STATE DIAGNOSTICS (frozen audit batch, frozen definitions)
+====================================================================================================
+same frozen audit batch, model.eval(), no grad, near-one-hot threshold 0.99 declared.
+  ep | logit_max | logit_std |  hid_b0 |  hid_b3 |  hid_b5 | b5_entropy | b5_near1hot | b5_score_max
+   0 |  20.26427 |   1.86756 |  34.058 |  91.538 | 168.598 |     1.4989 |      0.1335 |      74.8448
+   1 |  22.01521 |   2.09459 |  37.922 |  96.594 | 171.212 |     1.5598 |      0.1167 |     189.6194
+   2 |  23.61691 |   2.30375 |  44.315 | 106.904 | 182.592 |     1.4315 |      0.1370 |     294.8169
+   3 |  25.27863 |   2.58341 |  46.710 | 112.816 | 194.526 |     1.2896 |      0.1229 |     295.2881
+   4 |  25.71719 |   2.78786 |  52.028 | 122.084 | 205.383 |     1.5006 |      0.1238 |     337.9774
+   5 |  26.24322 |   2.92019 |  53.954 | 129.046 | 218.610 |     1.4055 |      0.1106 |     345.6887
+   6 |  27.41810 |   2.98838 |  55.477 | 131.444 | 221.616 |     1.4605 |      0.0986 |     347.9103
+   7 |  27.41934 |   3.08795 |  56.345 | 135.709 | 224.987 |     1.1789 |      0.1236 |     359.3450
+   8 |  27.89612 |   3.16325 |  58.593 | 140.371 | 230.979 |     1.5646 |      0.1038 |     358.7742
+   9 |  27.79212 |   3.27342 |  57.346 | 141.504 | 231.108 |     1.5825 |      0.0927 |     403.5558
+  10 |  28.09396 |   3.31829 |  54.984 | 141.130 | 232.862 |     1.4755 |      0.1031 |     382.5034
+  11 |  28.30700 |   3.31773 |  55.876 | 143.632 | 235.090 |     1.5930 |      0.0948 |     317.4567
+  12 |  28.53893 |   3.35801 |  55.572 | 142.712 | 234.111 |     1.5471 |      0.1031 |     297.8895
+  13 |  28.35931 |   3.40065 |  55.174 | 142.767 | 233.453 |     1.4878 |      0.0943 |     304.8011
+  14 |  28.44539 |   3.40033 |  55.480 | 142.866 | 233.241 |     1.5472 |      0.0903 |     316.4628
+  15 |  28.45631 |   3.39337 |  54.490 | 142.768 | 232.140 |     1.5476 |      0.0889 |     310.7048
+  16 |  28.48840 |   3.37429 |  54.701 | 142.850 | 232.411 |     1.5791 |      0.0847 |     298.6392
+  17 |  28.57439 |   3.39058 |  54.463 | 142.282 | 231.011 |     1.5469 |      0.0847 |     304.4070
+  18 |  28.52860 |   3.39029 |  54.435 | 142.656 | 231.153 |     1.5523 |      0.0844 |     304.3890
+  19 |  28.52673 |   3.38711 |  54.319 | 142.341 | 230.722 |     1.5562 |      0.0840 |     304.3466
+
+  b5 entropy range over 20 epochs       1.1789 .. 1.5930   (never below 1.0)
+  b5 near-one-hot range                 0.0840 .. 0.1370
+  b5 score_max range                    74.845 .. 403.556
+  b5 hidden magnitude range             168.598 .. 235.090
+
+
+====================================================================================================
+H. PAIRED COMPARISON: BF16 failure vs FP32 canonical, at the critical epochs
+====================================================================================================
+R9-A is the deterministic BF16 run that reproduced the cascade; it was stopped at epoch 6.
+  quantity                          |      BF16 R9-A ep6 |   FP32 canonical ep6 |  FP32 canonical ep19
+  epoch mean loss                   |            3.80997 |              2.39690 |              2.26165
+  d5q ||W||                         |           61.83979 |             14.46287 |             16.39822
+  d5k ||W||                         |           51.91137 |             22.47498 |             24.13570
+  d5q cos(dW, W_prev)               |            0.65144 |             -0.01256 |             -0.04102
+  d5q cos(dW_ep,dW_prev)            |            0.56962 |             -0.04349 |              0.11185
+  d5k cos(dW_ep,dW_prev)            |            0.39872 |             -0.03233 |              0.03547
+  d5q Adam |u|                      |            0.04594 |            167.48308 |             49.54041
+  d5q Adam m_norm                   |         5.7000e-07 |              0.00123 |           9.8466e-04
+  d5q Adam v_mean                   |         3.6668e-10 |           7.9946e-11 |           4.8706e-10
+  b5 score_max                      |       793248.31250 |            347.91031 |            304.34659
+  b5 score_std                      |       304988.03125 |             41.23924 |             45.02262
+  b5 entropy                        |            0.15383 |              1.46055 |              1.55621
+  b5 near-one-hot                   |            0.80684 |              0.09858 |              0.08396
+  b5 hidden magnitude               |         1524.92151 |            221.61633 |            230.72197
+
+  BF16 full canonical run (R6) reached epoch 19 with loss 11.870579; the FP32 canonical run
+  reached epoch 19 with loss 2.261648.
+  R9-A's d5q Adam |u| collapsed from ~66 (ep4) to 0.046 (ep6); the FP32 run's d5q |u| at ep19 is 49.5404.
+
+
+====================================================================================================
+I. PHASE 8 -- FULL-RUN HEALTH VERDICT
+====================================================================================================
+  FP32_CANONICAL_HEALTH = PASS
+  full run completed                : 20 epochs, global_step 88420
+  no NaN / Inf                      : 134 model tensors, 0 non-finite
+  no R9-A style loss divergence     : monotone decreasing, max epoch-to-epoch rise 0.000000
+  scheduler accounting correct      : step == sched_last == 4421*(E+1) at every epoch; sched_total 88420
+  checkpoint valid                  : tiger.pt sha256 == tiger.json checkpoint_sha256 -> True
+  final model loadable              : missing 0, unexpected 0 (production load path)
+  final snapshot == tiger.pt        : True
+  audit-batch inference finite      : True   loss 2.132236
+
+
+====================================================================================================
+J. ARTIFACTS AND HASHES
+====================================================================================================
+  tiger.pt                     45181927 bytes  95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  tiger.json                       7871 bytes  5d47bfd6a51635a74b7552daaec2a62f7092db5b874031e029fe834d0d280cc6
+  manifest.json                    2186 bytes  512fbbbee7bdb6d7195fbfcad3e64b21c70529d97da4a2fdd86fd0df12000c74
+  score_rule.json                   250 bytes  cb9dc4607300afeabb07e02e21ab8e54b6172db4f34e66ff67a582a37c28877d
+  generator_layout.json            1267 bytes  eed4dffaccf8dfecf40ee5bc9f8206870910a8a4e31fdd941e8ac6697814a55a
+  resume/latest.pt            138704971 bytes  5d78fa85b629f8d4e1f6cabb033ea73311b2959164d6bc63b9b52904f2482b89
+  epoch19 snapshot            138704971 bytes  5d78fa85b629f8d4e1f6cabb033ea73311b2959164d6bc63b9b52904f2482b89
+
+  final checkpoint sha256 (tiger.json)   95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  precision recorded in tiger.json       fp32
+  epochs 20, examples 2263252, params 11281664, users 412445, trie_nodes 307777, validation_used False
+  20 immutable epoch snapshots, chmod 444, at /root/autodl-tmp/gate_d_fp32_canonical_epoch_snapshots
+
+
+====================================================================================================
+K. PHASE 9 -- CANONICAL RECOMMENDATION BENCHMARK: BLOCKED (NOT A TRAINING PROBLEM)
+====================================================================================================
+Recall@K / NDCG@K / HR@K were NOT run and cannot be produced from the current repository
+state. This is a code-availability blocker, not a training-health blocker. Evidence:
+
+  K1  backends/tiger_public/src/tiger_public/ has NO retrieve.py.
+      Files present: cli.py contracts.py dedup.py features.py generator_layout.py io.py
+      quantizer.py scoring.py tiger.py trie.py.  TIGER_BACKEND.md section 11 places
+      `retrieve.py` (APPROXIMATE + CERTIFIED) in Step 2.6, which is not implemented.
+
+  K2  the backend `score` stage is an explicit STUB. cli.py header labels it
+      'Stage 4 - score (stub scorer)' and iter_score_batches' own docstring says
+      'The scorer is a placeholder...'.  It calls compute_scores(grid, case_ids), a stand-in,
+      not the generator's catalogue-constrained search. Running it would NOT be a TIGER
+      retrieval result and must never be reported as Recall@K for TIGER.
+
+  K3  the canonical benchmark has no TIGER arm. experiments/benchmark_public.py exposes
+      arm_semantic_id_genrec, but it loads artifact_dir/generator.pt through
+      recommendation.semantic_id.generator (SemanticIdGenerator / SemanticPrefixTrie /
+      build_token_layout).  That is the FROZEN HISTORICAL GenRec v0 package, which
+      AGENTS.md section 19.2 rule 10 keeps frozen and not extended. It is NOT the TIGER
+      backend (backends/tiger_public/) and it does not read this run's tiger.pt.
+      experiments/phase5_benchmark.py runs the Phase-5 arms (popularity, SASRec sequential,
+      metadata, fixed_fusion, agent_selected, two_tower) and likewise contains no TIGER arm.
+
+  K4  Step 2.6 additionally requires gates G13-G16 (synthetic hand-computable SID tree with
+      exact top-K, comparison_eligible semantics, scoring-rule consistency, empty-frontier
+      refusal) and H7 (pre-step frontier diagnostics + CERTIFIED retrieval over the frozen
+      20k cohort, 'hours, budget-dependent') before H8 (the benchmark itself, '~22 min').
+
+  K5  TIGER_BACKEND.md section 15.2 requires that any Step-2.6 criterion be pre-registered
+      BEFORE any Step-2.6 benchmark number exists. No such pre-registration exists yet.
+
+Therefore the honest benchmark status is:
+  Step 2.6 retrieval implementation  ABSENT  -> must be built as its own milestone
+  TIGER arm in the canonical benchmark ABSENT -> must be wired
+  recall/ndcg/hr for TIGER            NOT PRODUCED, NOT PRODUCIBLE TODAY
+
+What this run DOES change: the gate that motivated Step 2.6 is now cleared. There is a
+healthy, finite, deterministic, loadable 20-epoch FP32 canonical checkpoint to score against,
+so Step 2.6 is unblocked in the sense of 'no longer waiting on training'. It is not runnable
+until retrieve.py and the benchmark arm exist and their gates pass.
+
+A separate, explicit authorisation is required to implement Step 2.6, because it is a new
+development milestone (new backend module + new benchmark wiring + G13-G16 + a pre-registered
+criterion), not the act of running an existing benchmark.
+
+
+====================================================================================================
+L. SCOPE LIMITATIONS (carried regardless of the result)
+====================================================================================================
+  1  The FP32 canonical run was executed and produced a healthy 20-epoch checkpoint.
+  2  R10 established FP32 health only through epoch 9; this run extends that to the full
+     canonical endpoint, 20 epochs / 88420 steps, with no divergence.
+  3  BF16 is NOT proven to be the sole root cause and no such claim is made. The mechanistic
+     work stopped at the R11-A termination point (USER_ABORTED_FOR_PROJECT_UNBLOCK) and
+     carries no verdict.
+  4  'Root cause fixed' is NOT claimed. The correct framing is TEMPORARY REMEDIATION:
+     disable BF16. ROOT CAUSE: not fully resolved.
+  5  FP32 is a precision setting, not a proof that the architecture is correct in all
+     precision regimes.
+  6  All conclusions apply to the tested configuration, seed 2026, the accepted
+     Sports_and_Outdoors exposure and the tested hardware.
+  7  The vendor-declared abnormal GPU host status and the unresolved hardware confounder are
+     unchanged by this run; no hardware inference is drawn.
+  8  No benchmark definition, dataset split, candidate construction, filtering, decoding
+     protocol or metric implementation was modified by this remediation.
+  9  Production code was not modified. The only change is the pre-existing CLI flag --no-bf16.
+ 10  R10 epochs 0-9 and this run's epochs 0-9 are bit-identical in epoch mean loss, which
+     confirms determinism but also means epochs 0-9 are not an independent replicate.
+
+
+====================================================================================================
+M. PERMITTED WORDING (Phase 10)
+====================================================================================================
+Permitted:
+  FP32 was adopted as a temporary precision remediation after R10 showed that disabling BF16
+  prevented the deterministic early failure cascade through epoch 9. The FP32 canonical run
+  was then used to unblock training and recommendation evaluation.
+  FP32 canonical training completed without reproducing the previously observed BF16 early
+  failure mode.
+
+Forbidden and NOT written anywhere in this report:
+  BF16 was proven to be the sole root cause.
+  Root cause fixed.
+  FP32 proves the architecture is correct in all precision regimes.
+
+
+====================================================================================================
+N. GATE STATUS (Phase 11)
+====================================================================================================
+  Gate D training health          PASS UNDER FP32 REMEDIATION
+  Step 2.6                        UNBLOCKED (training side) -- implementation still absent
+  Canonical recommendation benchmark  BLOCKED on Step 2.6 implementation
+  BF16-specific remediation / root-cause work  DEFERRED
+  Attached note                    BF16-specific remediation/root-cause work remains deferred.
+
+
+====================================================================================================
+O. TIME ACCOUNTING
+====================================================================================================
+  R11-A aborted                   ~37 min of training (ep0, ep1; stopped mid-ep2)
+  FP32 precision verification     ~3 min
+  FP32 canonical training         15538.044 s = 4 h 18 m 58 s
+  per-epoch mean                  776.9 s = 12.95 min
+  post-run analysis + report      ~20 min
+  benchmark                       not started (blocked)
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

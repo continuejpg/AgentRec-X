@@ -1,0 +1,338 @@
+====================================================================================================
+PHASE-5 COMPLEMENTARITY ANALYSIS -- CANONICAL (all four arms CERTIFIED)
+====================================================================================================
+
+  DECISIVE RESULT (K=10):
+    TIGER-only hits outside SASRec u Two-Tower  =  138 users   (0.69% of the cohort)
+    |SASRec u Two-Tower|      =  460
+    |SASRec u Two-Tower u TIGER| =  598
+    absolute incremental hits   =  138
+    relative union gain         =  +30.0%
+
+  All four per-user artifacts are CERTIFIED.  No baseline was retrained, no checkpoint was
+  replaced, no hyperparameter, seed, cohort, split, catalogue, evaluator, ranking, tie-break,
+  masking or PAD handling was changed.  No fusion was run.  Step 2.7 was not started.
+
+
+====================================================================================================
+1. CANONICAL TWO-TOWER CHECKPOINT PROOF
+====================================================================================================
+  The corrected variable was WHICH checkpoint artifact is canonical.  Evidence, by hash:
+    ADDED (canonical)      runs/twotower_public_2026_full/checkpoint.pt
+      sha256               0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+      training exposure    412,445 users / 1,850,807 pairs (from its own run.json), wall 3982.3 s
+    REJECTED (non-canonical) runs/twotower_public_2026/checkpoint.pt
+      sha256               abbfecdacc71807a4860e651e6ab8355f13164986cf9c184bdc3e54ab6ada02f
+      training exposure    20,000 users / 236,730 pairs, wall 212.4 s
+  Provenance anchors, recorded by hash and NOT by filename:
+    twotower_benchmark_full/comparison.json   sha256 d3eebdd1166f173a80d9c6679d8db0716bd376a8bcc605d5578da1fc8d9b2421
+    genrec_benchmark/comparison.json          sha256 a1a593e59fe5f59cf79674823c686e357a5bb0f3eea46f2482b99463ee8286cf
+  Both anchors record the SAME canonical Two-Tower block (verified identical field by field),
+  and experiments/benchmark_genrec.py declares TWOTOWER_DIR = runs/twotower_public_2026_full.
+
+  Pre-registration frozen BEFORE the run: step26-twotower-canonical-preregistration.txt
+    sha256 cc29f6cf23062d5dc1ca53eeb63c39d14ace499d7585311efc2b83d4701e7309
+    it stated the prediction explicitly: the canonical _full checkpoint is expected to
+    reproduce the stored canonical aggregates exactly, Recall@10 0.01435 and
+    mean_target_rank 21943.8229.  The prediction is confirmed below.
+
+====================================================================================================
+2. STORED vs RERUN -- 10-METRIC REPRODUCTION TABLE
+====================================================================================================
+  Exact equality required; 'close' is not accepted.
+
+  Two-Tower (canonical _full) -> PER-USER EVIDENCE CERTIFIED
+    quantity           stored                   rerun                    verdict
+    HR@10              0.01435                  0.01435                  exact (abs diff 0)
+    HR@20              0.02285                  0.02285                  exact (abs diff 0)
+    HR@5               0.0086                   0.0086                   exact (abs diff 0)
+    NDCG@10            0.007365459487290447     0.007365459487290447     exact (abs diff 0)
+    NDCG@20            0.009509905626322316     0.009509905626322316     exact (abs diff 0)
+    NDCG@5             0.005497573943270306     0.005497573943270306     exact (abs diff 0)
+    Recall@10          0.01435                  0.01435                  exact (abs diff 0)
+    Recall@20          0.02285                  0.02285                  exact (abs diff 0)
+    Recall@5           0.0086                   0.0086                   exact (abs diff 0)
+    mean_target_rank   21943.8229               21943.8229               exact (abs diff 0)
+
+  SASRec -> PER-USER EVIDENCE CERTIFIED
+    quantity           stored                   rerun                    verdict
+    HR@10              0.0135                   0.0135                   exact (abs diff 0)
+    HR@20              0.0207                   0.0207                   exact (abs diff 0)
+    HR@5               0.0082                   0.0082                   exact (abs diff 0)
+    NDCG@10            0.006848035133373149     0.006848035133373149     exact (abs diff 0)
+    NDCG@20            0.008647496149307253     0.008647496149307253     exact (abs diff 0)
+    NDCG@5             0.005153679084558608     0.005153679084558608     exact (abs diff 0)
+    Recall@10          0.0135                   0.0135                   exact (abs diff 0)
+    Recall@20          0.0207                   0.0207                   exact (abs diff 0)
+    Recall@5           0.0082                   0.0082                   exact (abs diff 0)
+    mean_target_rank   20597.7408               20597.7408               exact (abs diff 0)
+
+  GenRec-v0 -> PER-USER EVIDENCE CERTIFIED
+    quantity           stored                   rerun                    verdict
+    HR@10              0.00185                  0.00185                  exact (abs diff 0)
+    HR@20              0.00295                  0.00295                  exact (abs diff 0)
+    HR@5               0.00175                  0.00175                  exact (abs diff 0)
+    NDCG@10            0.0014248035562116157    0.0014248035562116157    exact (abs diff 0)
+    NDCG@20            0.001691650034601968     0.001691650034601968     exact (abs diff 0)
+    NDCG@5             0.0013925399555403204    0.0013925399555403204    exact (abs diff 0)
+    Recall@10          0.00185                  0.00185                  exact (abs diff 0)
+    Recall@20          0.00295                  0.00295                  exact (abs diff 0)
+    Recall@5           0.00175                  0.00175                  exact (abs diff 0)
+    mean_target_rank   100118.32955             100118.32955             exact (abs diff 0)
+
+====================================================================================================
+3. TWO-TOWER REPRODUCTION: PASS
+====================================================================================================
+  All ten canonical quantities reproduced EXACTLY, including Recall@10 0.01435 and
+  mean_target_rank 21943.8229.  The earlier failure is fully explained by the wrong checkpoint
+  and nothing else: the previous rerun reproduced a DIFFERENT historical artifact bit-exactly
+  with the other checkpoint, and this one reproduces the canonical artifact bit-exactly with
+  the canonical checkpoint.  See step26-baseline-evidence-and-reproduction-gates.txt
+
+====================================================================================================
+4. CERTIFIED SIDECAR SHA256
+====================================================================================================
+  sasrec     phase5_sasrec_hits.npz             3072c86055cd4d093147ef10e19ed8121fb70215d581198b3261380df83d0252
+             sidecar phase5_sasrec_hits.json    4b83271a990b872965cbdfec84de3daaf013345b09f6c46758e67e9836dea60a
+  twotower   phase5_twotower_hits.npz           71516247b7685bee34e161a9d3c81efd57cb8c2a51c94e0efb7937b2eaf34229
+             sidecar phase5_twotower_hits.json  0e1002775a132dbff86fcdf62eacd4ee7276c62e9690b8ed8bba2de82d3385aa
+  genrecv0   phase5_genrecv0_hits.npz           54f59ea45d8c38ba234124c61c60b7e30914dde3494c3cac18112b86870b5e7d
+             sidecar phase5_genrecv0_hits.json  526eea9b79ec823741ed4226b55a363b8cdd1212a9bc313e7bd5b16528c8f461
+  tiger      step26_tiger_hits_top10.npz        6e60a12a056b2c7263dd52535722f803b9100905a2d08c905c9e0433eaa98641
+             v1 (no top10) step26_tiger_hits.npz 68810cbd2f8183a79e109d6b1a0b015d4f8dea4688bb49d73a17a1cc674b9160
+
+  The TIGER v2 sidecar is the SAME derivation re-emitted with the Top-10 list added; the
+  extension script asserted that target ranks and hit counts reproduce the v1 sidecar
+  bit-for-bit (hit5/10/20 = 185/277/452) before the addition was trusted.
+  schema: agentrecx.phase5.baseline_per_user.v1 (baselines)
+          step26 TIGER derivation, v1/v2 (TIGER)
+
+  The NON-CANONICAL Two-Tower artifact is retained and explicitly labelled, not deleted:
+    phase5_twotower_hits_NON_CANONICAL_20000user.{npz,json}
+    its sidecar carries LABEL = 'NON-CANONICAL HISTORICAL EVIDENCE ... not part of the current
+    Phase-5 canonical input set', with superseded_by pointing at the canonical sidecar.
+
+====================================================================================================
+5. FOUR-ARM COHORT EQUALITY
+====================================================================================================
+  sasrec     target_ids identical: True  | case_index 0..19999: True  | hit monotonicity: True 
+             hit10 == (rank<=10): True  | certified: True
+  twotower   target_ids identical: True  | case_index 0..19999: True  | hit monotonicity: True 
+             hit10 == (rank<=10): True  | certified: True
+  genrecv0   target_ids identical: True  | case_index 0..19999: True  | hit monotonicity: True 
+             hit10 == (rank<=10): True  | certified: True
+  users compared: 20000
+  TIGER: users 20000, hit5 185, hit10 277, hit20 452
+  COHORT EQUALITY GATE: PASS  (20000/20000 on all four arms, same ordering, same targets,
+  same test_history semantics: every arm hands the evaluator tuple(case.test_history))
+
+====================================================================================================
+6. PER-USER SANITY CHECKS
+====================================================================================================
+  hit shares must equal the frozen/aggregate Recall exactly, and the Top-10 must be the real
+  ranked output's first ten (checked against the frozen metrics.sorted_ranking oracle):
+  sasrec     hits  164/ 270/ 414 | shares 0.00820/0.01350/0.02070 | monotone True | recalls match True/True/True |
+             oracle Top-10: True over 200 rows (0 mismatches)
+  twotower   hits  172/ 287/ 457 | shares 0.00860/0.01435/0.02285 | monotone True | recalls match True/True/True |
+             oracle Top-10: True over 200 rows (0 mismatches)
+  genrecv0   hits   35/  37/  59 | shares 0.00175/0.00185/0.00295 | monotone True | recalls match True/True/True |
+             oracle Top-10: True over 200 rows (0 mismatches)
+  tiger      hits  185/ 277/ 452 | shares 0.00925/0.01385/0.02260 | (from the frozen certified rule)
+
+====================================================================================================
+7. K=10 STANDALONE HIT COUNTS
+====================================================================================================
+  S   SASRec       hit5  164  hit10  270  hit20  414
+  T   Two-Tower    hit5  172  hit10  287  hit20  457
+  G   TIGER-FP32   hit5  185  hit10  277  hit20  452
+  (GenRec-v0 for reference: hit5 35, hit10 37, hit20 59)
+
+====================================================================================================
+8. K=10 PAIRWISE OVERLAPS
+====================================================================================================
+  pair                    left right  both either l-only r-only neither   jaccard
+  tiger_vs_sasrec          277   270   108    439   169   162  19561  0.246014
+  tiger_vs_twotower        277   287    90    474   187   197  19526  0.189873
+  tiger_vs_genrecv0        277    37    22    292   255    15  19708  0.075342
+  sasrec_vs_twotower       270   287    97    460   173   190  19540  0.210870
+
+  conditional complementarity at K=10:
+    tiger_vs_sasrec        P(left hit | right miss) 0.008566 | P(right hit | left miss) 0.008214
+    tiger_vs_twotower      P(left hit | right miss) 0.009486 | P(right hit | left miss) 0.009988
+    tiger_vs_genrecv0      P(left hit | right miss) 0.012774 | P(right hit | left miss) 0.000761
+    sasrec_vs_twotower     P(left hit | right miss) 0.008776 | P(right hit | left miss) 0.009630
+
+====================================================================================================
+9. S/T/G 8-CELL TABLE (K=10)
+====================================================================================================
+  S = SASRec hit@10   T = Two-Tower hit@10   G = TIGER-FP32 hit@10
+    S T G |  users |  fraction
+    0 0 0 |  19402 |  0.970100
+    0 0 1 |    138 |  0.006900
+    0 1 0 |    159 |  0.007950
+    0 1 1 |     31 |  0.001550
+    1 0 0 |    124 |  0.006200
+    1 0 1 |     49 |  0.002450
+    1 1 0 |     38 |  0.001900
+    1 1 1 |     59 |  0.002950
+  cell sum check: 20000 (must be 20000)
+  marginals: S 270, T 287, G 277 (must match the standalone counts above)
+
+====================================================================================================
+10-13. TIGER-ONLY OUTSIDE S u T, UNIONS, AND INCREMENTAL GAIN
+====================================================================================================
+   K  | S=0,T=0,G=1 | |S u T| | |S u T u G| | abs gain | cohort frac | relative gain
+   5  |          99 |     287 |         386 |       99 |    0.004950 |       +34.49%
+  10  |         138 |     460 |         598 |      138 |    0.006900 |       +30.00%
+  20  |         207 |     717 |         924 |      207 |    0.010350 |       +28.87%
+
+  K=10 is the primary interpretation point.  The absolute gain equals the S=0,T=0,G=1 cell by
+  construction, which the table shows.
+
+====================================================================================================
+14-15. K=5 AND K=20 EQUIVALENT ANALYSIS
+====================================================================================================
+  --- K = 5
+    8-cell:
+      0 0 0 |  19614 |  0.980700
+      0 0 1 |     99 |  0.004950
+      0 1 0 |    103 |  0.005150
+      0 1 1 |     20 |  0.001000
+      1 0 0 |     80 |  0.004000
+      1 0 1 |     35 |  0.001750
+      1 1 0 |     18 |  0.000900
+      1 1 1 |     31 |  0.001550
+    pairwise:
+      tiger_vs_sasrec        left  185 right  164 both   66 either  283 l-only  119 r-only   98 jaccard 0.233216
+      tiger_vs_twotower      left  185 right  172 both   51 either  306 l-only  134 r-only  121 jaccard 0.166667
+      tiger_vs_genrecv0      left  185 right   35 both   22 either  198 l-only  163 r-only   13 jaccard 0.111111
+      sasrec_vs_twotower     left  164 right  172 both   49 either  287 l-only  115 r-only  123 jaccard 0.170732
+    TIGER incremental union gain: abs 99, cohort fraction 0.004950, relative +34.49%
+
+  --- K = 20
+    8-cell:
+      0 0 0 |  19076 |  0.953800
+      0 0 1 |    207 |  0.010350
+      0 1 0 |    243 |  0.012150
+      0 1 1 |     60 |  0.003000
+      1 0 0 |    183 |  0.009150
+      1 0 1 |     77 |  0.003850
+      1 1 0 |     46 |  0.002300
+      1 1 1 |    108 |  0.005400
+    pairwise:
+      tiger_vs_sasrec        left  452 right  414 both  185 either  681 l-only  267 r-only  229 jaccard 0.271659
+      tiger_vs_twotower      left  452 right  457 both  168 either  741 l-only  284 r-only  289 jaccard 0.226721
+      tiger_vs_genrecv0      left  452 right   59 both   34 either  477 l-only  418 r-only   25 jaccard 0.071279
+      sasrec_vs_twotower     left  414 right  457 both  154 either  717 l-only  260 r-only  303 jaccard 0.214784
+    TIGER incremental union gain: abs 207, cohort fraction 0.010350, relative +28.87%
+
+  Shape across K: the TIGER-only-outside contribution is largest at K=10 (138) and is
+  99 at K=5 and 207 at K=20, i.e. it is not a single-K artefact.
+
+====================================================================================================
+16. TOP-10 RECOMMENDATION-LIST OVERLAP (list diversity, a separate concept)
+====================================================================================================
+  pair                      mean  median    p25    p75    p90    p95 zero-frac mean|inter|
+  tiger_vs_sasrec         0.1121  0.1111 0.0000 0.1765 0.2500 0.3333   0.2728    1.8585
+  tiger_vs_twotower       0.0882  0.0526 0.0000 0.1111 0.2500 0.3333   0.4037    1.4584
+  sasrec_vs_twotower      0.0831  0.0526 0.0000 0.1111 0.2500 0.2500   0.4044    1.3939
+  tiger_vs_genrecv0       0.0196  0.0000 0.0000 0.0526 0.0526 0.0526   0.6613    0.3695
+
+  List overlap and target-hit complementarity are different quantities and are NOT conflated:
+  a low list Jaccard with a low union gain would mean 'different lists, same reachable
+  targets'; a low list Jaccard WITH a large union gain means genuinely different retrieval.
+  Both are reported above and neither is used as a proxy for the other.
+
+====================================================================================================
+17. PAIRED TARGET-RANK ANALYSIS (descriptive only; no winner label)
+====================================================================================================
+  --- K = 10 (users where BOTH arms hit)
+    tiger_vs_sasrec        both  108 | left earlier   42 | same   30 | right earlier   36 | mean ranks 3.48 vs 3.68
+    tiger_vs_twotower      both   90 | left earlier   38 | same   26 | right earlier   26 | mean ranks 3.33 vs 3.97
+    sasrec_vs_twotower     both   97 | left earlier   35 | same   19 | right earlier   43 | mean ranks 4.26 vs 4.16
+    tiger_vs_genrecv0      both   22 | left earlier   10 | same   10 | right earlier    2 | mean ranks 1.14 vs 1.50
+
+  --- K = 5 (users where BOTH arms hit)
+    tiger_vs_sasrec        both   66 | left earlier   21 | same   27 | right earlier   18 | mean ranks 2.06 vs 2.23
+    tiger_vs_twotower      both   51 | left earlier   18 | same   22 | right earlier   11 | mean ranks 1.88 vs 2.18
+    sasrec_vs_twotower     both   49 | left earlier   12 | same   16 | right earlier   21 | mean ranks 2.63 vs 2.35
+    tiger_vs_genrecv0      both   22 | left earlier   10 | same   10 | right earlier    2 | mean ranks 1.14 vs 1.50
+
+  --- K = 20 (users where BOTH arms hit)
+    tiger_vs_sasrec        both  185 | left earlier   80 | same   31 | right earlier   74 | mean ranks 6.51 vs 6.89
+    tiger_vs_twotower      both  168 | left earlier   66 | same   29 | right earlier   73 | mean ranks 7.39 vs 6.73
+    sasrec_vs_twotower     both  154 | left earlier   60 | same   21 | right earlier   73 | mean ranks 7.25 vs 6.83
+    tiger_vs_genrecv0      both   34 | left earlier   20 | same   10 | right earlier    4 | mean ranks 2.74 vs 5.82
+
+====================================================================================================
+18. GenRec-v0 COMPARISON
+====================================================================================================
+  GenRec-v0 remains the historical Semantic-ID baseline; it was re-run only for per-user
+  evidence, reproduced its frozen Recall@10 = 0.00185 exactly, and was not replaced or merged.
+  K=10: TIGER hit@10 277 vs GenRec-v0 hit@10 37 | both 22 | TIGER-only 255 | GenRec-only 15 |
+        Jaccard 0.075342 | neither 19708
+  TIGER strictly dominates GenRec-v0 in absolute hits and adds 255 users GenRec-v0 misses while
+  GenRec-v0 contributes only 15 TIGER misses.
+
+====================================================================================================
+19. EVIDENCE-BACKED STEP-2.7 ASSESSMENT
+====================================================================================================
+  The question this phase exists to answer: does TIGER contribute target hits that are
+  meaningfully complementary to SASRec and Two-Tower?  At K=10, on the frozen 20 000-user
+  cohort, under one shared evaluator:
+
+    TIGER-only hits outside SASRec u Two-Tower   138 users   (0.0069 of the cohort)
+    oracle union coverage  |S u T| 460  ->  |S u T u G| 598   (+138, +30.0% relative)
+    P(TIGER hit | BOTH others miss) = 138 / 19540 = 0.007062
+    standalone hits: SASRec 270, Two-Tower 287, TIGER 277
+
+  The two conclusions the instruction asks to keep apart:
+
+  * STANDALONE recommendation quality: TIGER is comparable to, not better than, the existing
+    learned retrievers (277 vs SASRec 270 and Two-Tower 287 at K=10).  On its own this would
+    NOT justify a new candidate source -- which is exactly why the decision must not be made
+    from standalone Recall.
+  * INCREMENTAL candidate-source value: strong.  TIGER reaches 138 users that BOTH existing
+    learned retrievers miss: 30.0% of their union and 0.69% of the cohort.  List-level
+    overlap is modest (Top-10 Jaccard 0.2460 vs SASRec, 0.1899 vs Two-Tower), and the unique-hit
+    contribution is stable across K (99 at K=5, 138 at K=10, 207 at K=20), so it is not a
+    head-only or tail-only artefact.
+
+  Classification, descriptive and carrying its counts: SUBSTANTIAL UNIQUE-HIT CONTRIBUTION
+  (138 unique users outside SASRec u Two-Tower; +30.0% relative oracle union gain at K=10).
+
+  Step 2.7 CandidateSource evaluation IS therefore justified on this evidence.  That is a
+  statement about incremental retrieval value, not about the model being strong in absolute
+  terms, and it does not itself authorise any integration: AGENTS.md section 19.2 rule 8 still
+  requires a separate, pre-registered step before TIGER becomes an Agent candidate source.
+
+====================================================================================================
+20. REPOSITORY / PROTECTED-ARTIFACT INTEGRITY
+====================================================================================================
+  git HEAD            6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch          master
+  git diff --stat     []
+  git status --porcelain:
+      (clean)
+
+  runs/twotower_public_2026_full/checkpoint.pt             0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab
+  runs/twotower_public_2026/checkpoint.pt                  abbfecdacc71807a4860e651e6ab8355f13164986cf9c184bdc3e54ab6ada02f
+  runs/sasrec_canonical_2026/best.pt                       352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912
+  runs/semantic_id_public_2026/generator.pt                1d7d5a5f44a23e074db3d210ab4f6b0a33e2344427d80e196752d323e4d41b14
+  runs/phase5_benchmark_public/arms.json                   66b591e2774db5ac44e4fe5298f7ecd0c2096c5212973053be5ba581c596e5da
+  runs/twotower_benchmark/comparison.json                  37535df4d97027be7ad5f9fcc49766ccf501b07042c2ce5c0f6b21bca380f8ab
+  runs/twotower_benchmark_full/comparison.json             d3eebdd1166f173a80d9c6679d8db0716bd376a8bcc605d5578da1fc8d9b2421
+  runs/genrec_benchmark/comparison.json                    a1a593e59fe5f59cf79674823c686e357a5bb0f3eea46f2482b99463ee8286cf
+  recommendation/evaluation/batched.py                     1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11
+  recommendation/evaluation/metrics.py                     5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72
+
+  No retrain, no checkpoint replacement (the canonical checkpoint was SELECTED, not altered),
+  no hyperparameter change, no new seed/cohort/split/catalogue, no evaluator, ranking,
+  tie-break, masking or PAD change, no metric reimplementation, no fusion/RRF/normalisation,
+  no Agent routing, no CandidatePlane integration, no Step-2.7 work.  TIGER, SASRec and
+  GenRec-v0 were NOT re-run.  The historical Phase-5 artifacts are byte-unchanged.  Nothing
+  was committed and nothing was pushed.
+
+====================================================================================================
+STOP -- complementarity analysis complete.
+====================================================================================================

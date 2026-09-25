@@ -1,0 +1,397 @@
+====================================================================================================
+AGENTREC-X -- PROJECT-LEVEL STRATEGIC REVIEW
+====================================================================================================
+
+  ANALYSIS ONLY.  No code change, no training, no benchmark, no fusion, no commit, no push.
+  Purpose: what remains to COMPLETE AgentRec-X as a project, rather than to keep optimizing
+  TIGER.  Every status below cites a concrete artifact; nothing is inferred from the recent
+  TIGER experiments except where stated.
+
+  HEADLINE: the project is far more complete than the recent TIGER loop suggests.  The
+  mainline recommendation backbone and the Agent control plane are implemented, tested and (for
+  the retrieval arms) measured.  Three things block research-completion, and none of them is a
+  TIGER experiment:
+    1. DURABILITY: the accepted state is unpushed and partly uncommitted -- it exists on one host.
+    2. UNCERTAINTY: every accepted attribution is a point estimate; the project's own handoff
+       document lists this as its #1 open step, and Step 2.8b showed the accepted fusion gain
+       is inside cohort noise.
+    3. THE THESIS: the project has never measured the LIVE agent policy against the fixed-fusion
+       baseline.  The only adaptive number in the canonical benchmark is a deterministic rule
+       stand-in, and it LOSES to fixed fusion.
+
+====================================================================================================
+1. ORIGINAL PROJECT OBJECTIVES (from AGENTS.md, handoffs, protocol, TIGER_BACKEND s11)
+====================================================================================================
+  Sources used: AGENTS.md s1/s2/s6/s17/s18/s19; docs/TIGER_BACKEND.md s11; docs/ARCHITECTURE.md
+  s25/s26; docs/MODEL_EXPANSION_HANDOFF.md s9/s10; docs/PHASE5_HANDOFF.md; the frozen protocol
+  agentrecx.eval_protocol.v1.  Objectives below are the ones those documents state, not new ones.
+
+  id     objective (as originally stated)                          status
+  P1     Amazon Reviews 2023 preprocessing (k-core, determinism)      CLOSED
+  P2     Real-data integration verification                           EVALUATED
+  P3     Unified evaluation protocol for all models                   CLOSED
+  P4     ItemCF baseline under the unified protocol                   PARTIAL
+  P5     SASRec: dataset, model, smoke, full training                 CLOSED
+  P6     Offline model comparison (one protocol, one cohort)          EVALUATED
+  P7     Recommendation inference engine                              IMPLEMENTED
+  P8     FastAPI recommendation service                               IMPLEMENTED
+  P9     Agent: LangGraph workflow                                    PARTIAL
+  P10    Planner / intent understanding                               IMPLEMENTED
+  P11    Recommendation Tool as an agent capability                   IMPLEMENTED
+  P12    RAG product-knowledge retrieval                              PARTIAL
+  P13    User memory                                                  IMPLEMENTED
+  P14    Recommendation explanation                                   IMPLEMENTED
+  P15    Ranking / reranking                                          IMPLEMENTED
+  P16    Critic / constraint checking                                 IMPLEMENTED
+  P17    Multi-turn interaction                                       IMPLEMENTED
+  P18    Web demo                                                     IMPLEMENTED
+  P19    Phase 4: product embeddings for GenRec                       CLOSED
+  P20    RQ-VAE / quantizer                                           CLOSED
+  P21    Semantic IDs (collision-free, dedup)                         CLOSED
+  P22    SID Transformer (public TIGER backend)                       EVALUATED
+  P23    SASRec vs Semantic-ID comparison                             EVALUATED
+  P24    External model backend boundary (Step 2.2/2.3)               CLOSED
+  P25    TIGER canonical certified benchmark (2.6)                    CLOSED
+  P26    TigerCandidateSource + fusion (2.7/2.8)                      EVALUATED
+
+  evidence, objective by objective:
+   P1  data/processed/Sports_and_Outdoors_{sequences,mappings,products}.*; iteration-free k-core
+       fixed point implemented and tested; deterministic id maps; PAD=0 reserved.
+   P2  runs/sasrec_canonical_2026/run.json records raw_data + processed_artifacts + verification.
+   P3  agentrecx.eval_protocol.v1 frozen; recommendation/evaluation/{metrics,batched,split}.py;
+       used unchanged by Phase-5, Two-Tower, GenRec-v0 and TIGER -> 2171 tests green.
+   P4  PARTIAL: experiments/itemcf_smoke.py exists, but runs/sasrec_canonical_2026/run.json
+       records itemcf_comparison = 'PENDING (no same-artifact full-data ItemCF benchmark
+       exists)'.  The roadmap's ItemCF baseline was never run under the unified protocol.
+   P5  runs/sasrec_canonical_2026/{best.pt,run.json}; full-cohort Recall@10 0.01357.
+   P6  runs/phase5_benchmark_public/arms.json (5 arms) + runs/twotower_benchmark_full/
+       comparison.json + runs/genrec_benchmark/comparison.json + runs/step26-phase5-
+       complementarity-canonical.txt (4 arms incl. TIGER, CERTIFIED).
+   P7  recommendation/inference/{sasrec,twotower}.py, ranking.py.
+   P8  recommendation/demo/agent_service.py + tests/test_demo_agent_api.py (FastAPI in
+       requirements.txt).  Implemented; not cohort-evaluated.
+   P9  PARTIAL/DEVIATED: a bounded adaptive loop exists (recommendation/control/loop.py, 93 KB)
+       with a full test surface, but **langgraph is not in requirements.txt**, so the original
+       'LangGraph workflow' objective is met by a custom controller, not by LangGraph.
+   P10 recommendation/control/{arguments,validation,model_policy,provider_adapter}.py.
+   P11 recommendation/control/capability.py (RECOMMEND_FROM_HISTORY).
+   P12 PARTIAL: recommendation/catalog/ is a local MetadataIndex with TF-IDF; ARCHITECTURE s25
+       states plainly that FIND_SIMILAR is lexical (no embedding model, no ANN index), and that
+       evidence is a reproducible local fixture, not live retrieval.
+   P13 recommendation/control/memory_proposal.py.
+   P14 recommendation/control/grounded_reasoning.py.
+   P15 recommendation/reranking/reranker.py.
+   P16 recommendation/control/constraint_eligibility.py (30 KB) + ConstraintReport in the ledger.
+   P17 turn_id / completion.py in the control schema.
+   P18 recommendation/demo/ + runs/demo_catalog/.
+   P19-P21 frozen historical GenRec v0: recommendation/semantic_id/ (commit 80f81b1),
+       runs/semantic_id_public_2026/{semantic_ids.json,generator.pt,tokenizer.pt}.
+   P22 runs/step26-h7-h8-canonical-report.txt: TIGER-FP32 Recall@10 0.01385 CERTIFIED.
+   P23 runs/genrec_benchmark/comparison.json + runs/step26-phase5-complementarity-canonical.txt.
+   P24 docs/TIGER_BACKEND.md; backends/tiger_public/{contracts.py,io.py};
+       recommendation/backends/tiger_backend.py; boundary tests.
+   P25 runs/step26-implementation-and-gate-report.txt (G13-G16 PASS) + H7 certification.
+   P26 runs/step27-candidatesource-qualification.txt (Q1-Q8 PASS) + runs/step28-*.txt.
+
+====================================================================================================
+2. PROJECT MAP AND DEPENDENCY GRAPH
+====================================================================================================
+  [preprocessing] --> [identity maps: parent_asin <-> item_id, PAD=0]
+        |
+        +--> [frozen protocol agentrecx.eval_protocol.v1] --- owns cohorts/masking/tie-break/metrics
+        |         |
+        |         +--> [GroundingVerifier] --truth authority for identity
+        |         +--> [CandidateLedger / CandidatePlane] --provenance + dedup
+        |         +--> [shared evaluator: evaluation/batched]
+        |
+        +--> RETRIEVAL ARMS (all scored by the same evaluator, same 20k cohort)
+        |     popularity ---- EVALUATED
+        |     metadata (TF-IDF lexical) ---- EVALUATED
+        |     SASRec (learned sequential) ---- EVALUATED  0.01350 (sample) / 0.01357 (full)
+        |     Two-Tower (learned dual encoder) ---- EVALUATED  0.01435
+        |     GenRec-v0 (historical generative) ---- EVALUATED  0.00185  HISTORICAL
+        |     TIGER-FP32 (certified generative) ---- EVALUATED  0.01385  QUALIFIED
+        |     ItemCF ---- ** PARTIAL (no same-artifact benchmark) **
+        |
+        +--> FUSION (rank-only RRF, RRF_K=60, equal weights)
+        |     fixed_fusion (pop+sasrec+metadata) ---- EVALUATED 0.01435
+        |     +Two-Tower controls ---- EVALUATED (bit-exact reproduction verified)
+        |     +TIGER (A/B/C/D) ---- EVALUATED  D 0.01810, delta +13 net, WIThin noise
+        |
+        +--> AGENT CONTROL PLANE (implemented, unit-tested, smoke-evaluated)
+              bounded loop -> policy (rule stand-in | model-driven) -> tools
+              -> grounding -> ledger -> constraints -> presentation
+              |
+              +--> agent_selected arm in the benchmark = DETERMINISTIC RULE STAND-IN ONLY
+                   0.01180 -- LOSES to fixed_fusion 0.01435
+              +--> live LLM policy: implemented + smoke-tested, ** NEVER EVALUATED AT SCALE **
+
+  critical-path reading: everything downstream of the evaluator is built.  The graph's only
+  UNMEASURED mainline edge is 'agent policy -> benefit over fixed fusion'.  Everything else is
+  either measured or an integrity/uncertainty gap rather than a missing component.
+
+====================================================================================================
+3. CORRECTNESS vs RESEARCH vs OPTIMIZATION
+====================================================================================================
+  CORRECTNESS BLOCKERS (must fix before any completion claim):
+   C1  DURABILITY OF THE ACCEPTED STATE.  The accepted remediation commit
+       634c37a162ab5aa0826d32d7f5751a2ba9c3b030 is ABSENT from the local repo and is on NO
+       remote branch; the backend worktree's 'origin' is a local bundle file, not GitHub, and
+       origin (github.com/continuejpg/AgentRec-X) sits at 6447d75.  Additionally 16 files in
+       the backend worktree and 6 locally are untracked/modified: the ENTIRE Step 2.6/2.7/2.8
+       implementation (retrieve.py, retrieve_cli.py, tiger_source.py, the test suites, the
+       Step-2.7 control-plane edits, step28/28b experiment code).  If the AutoDL host is lost,
+       the accepted code and the commit that produced the accepted checkpoint are not
+       reconstructible from the repository.  This violates the project's own reproducibility
+       objective and every 'no commit' instruction has deferred it.
+   C2  ItemCF baseline recorded as PENDING.  The roadmap defines ItemCF as a required baseline
+       and the unified protocol exists to make it comparable; a comparison table with a missing
+       required baseline is an incomplete correctness surface, not an optimization gap.
+  (No identity/provenance violation remains: 0 ungrounded, 0 fabricated, collisions 0, and the
+   boundary rule is enforced by tests - that was the one true correctness blocker in this area,
+   and Step 2.6/2.7 closed it.)
+
+  CORE RESEARCH EVIDENCE (missing evidence for central claims):
+   R1  Live agent-policy evaluation vs fixed fusion (the thesis; currently unsupported).
+   R2  Uncertainty intervals on every accepted attribution (documented handoff open item).
+   R3  Constraint handling measured under real (not fixture) evidence scope.
+  OPTIONAL PERFORMANCE OPTIMIZATION:
+   O1  weighted / calibrated / learned fusion; O2  candidate-depth tuning; O3  RRF constant
+   tuning; O4  TIGER hyperparameter tuning; O5  full-cohort (412k) instead of the 20k sample.
+  CLEANUP:
+   K1  Stage-4 stub should emit status=STUB rather than CERTIFIED (it cannot reach a canonical
+       metric through the accepted path - the arm refuses non-retrieve_cli producers - so this
+       is a hazard on an unprotected path, not a blocker).
+   K2  LangGraph objective is documented as LangGraph but implemented as a custom controller:
+       either align the documentation or add the dependency.  Documentation-only for now.
+   K3  docs/ARCHITECTURE.md s26 still reads 'NOT IMPLEMENTED' for external backends and s25's
+       limitation list predates Two-Tower/TIGER: the docs are behind the implementation.
+
+====================================================================================================
+4. THESIS AUDIT (implementation is NOT evaluation)
+====================================================================================================
+  * bounded adaptive agent behavior              SUPPORTED (implemented + unit-tested)
+      recommendation/control/loop.py with budgets/stopping; tests/test_llm_agent_policy.py,
+      tests/test_evaluation_agent_plane.py; runs through a real control plane in
+      experiments/agent_evaluation_smoke.py.  But 'bounded' is asserted by tests, not measured
+      as a distribution over real runs.
+  * heterogeneous tool use                       PARTIALLY SUPPORTED
+      Five tool/capability kinds exist (history recommender, catalog search, similar item, two tower,
+      tiger) and the plane dispatches per action.  Measured multi-source behavior exists ONLY as
+      the fixed-fusion and rule-stand-in arms, never as a live policy choosing tools.
+  * agent decision authority                     SUPPORTED (structurally)
+      The policy proposes; ActionValidator + ValidatedAction give the controller authority; a
+      proposal cannot carry history, a candidate identity, or a tool name (schemas.py).
+  * trusted-code truth authority                 STRONGLY SUPPORTED
+      GroundingVerifier owns identity; unknown identities become UNGROUNDED audit entries and never
+      candidates; no parent_asin crosses the backend boundary.  Qualified end-to-end in Step 2.7
+      on real TIGER output (0 ungrounded, 0 fabricated, 20 000/20 000 cohort identity).
+  * adaptive source selection                    EVALUATED AND NEGATIVE (rule stand-in only)
+      runs/phase5_benchmark_public/arms.json: agent_selected 0.01180 vs fixed_fusion 0.01435;
+      ARCHITECTURE s25 states 'threshold-based adaptive selection loses to fusing everything'.
+      This is a real, honestly-reported negative result - but for a RULE, not the LLM policy.
+  * constraint handling                          IMPLEMENTED, NOT EVALUATED AT SCALE
+      constraint_eligibility.py + ConstraintReport; ARCHITECTURE s25 states evidence is a local
+      fixture, so an uncovered constraint stays UNKNOWN.  No measured constraint-success rate.
+  * failure recovery                             IMPLEMENTED, PARTIALLY MEASURED
+      Failure isolation is now proven for a candidate source (Step 2.7 Q5: 9 failure modes,
+      source-local, ledger untouched).  Agent-loop-level recovery was measured only in the smoke
+      (per-component failure attribution, Phase-4 repetition 2 of 8 failures).
+  * benefit over fixed retrieval/fusion baselines UNSUPPORTED
+      For a rule policy the answer is measured and negative.  For the live LLM policy there is NO
+      measurement at all at cohort scale.  This is the project's central open claim.
+
+  VERDICT ON THE THESIS: the *architecture* thesis (trusted code owns truth; the model proposes)
+  is well supported and enforced by tests.  The *performance* thesis (an adaptive agent beats a
+  fixed fusion of the same sources) is currently CONTRADICTED by the only measurement that
+  exists, for a rule stand-in, and UNMEASURED for the live policy.  Any project-completion claim
+  must resolve that, positive or negative.
+
+====================================================================================================
+5. TIGER'S CURRENT ROLE (frozen evidence only)
+====================================================================================================
+  standalone performance   Recall@10 0.01385 CERTIFIED, 20 000 users, full catalogue;
+                           comparable to SASRec 0.01350, below Two-Tower 0.01435.
+  oracle complementarity   138 users at K=10 that BOTH learned retrievers miss; +30.00% relative
+                           oracle union gain.  Real and the largest of any single addition.
+  CandidateSource           QUALIFIED, Q1-Q8 PASS; retrieval-status, provenance, dedup and
+                           failure-isolation contracts all proven on real certified output.
+  fusion performance        D 0.01810 vs A 0.01745 (+0.00065, +13 net) with 115 gained and 102
+                           displaced; retention of the 138 only 69 (50.0%); paired McNemar
+                           p=0.4154 at K=10 and the NDCG bootstrap CI INCLUDES zero.
+  runtime cost              CERTIFIED 4.19 cases/s, 1.33 h for the cohort, 954 MiB peak VRAM;
+                           the source-layer overhead is ~1 ms/call.  Cheap to run, cheap to hold.
+  remaining uncertainty     (a) is the accepted-policy fusion gain real (M2 answers this);
+                            (b) would unequal weights capture more (needs validation-selected
+                            weights, i.e. a new milestone); (c) nothing about TIGER's own
+                            retrieval semantics is unknown any more.
+
+  classification of remaining TIGER work:
+    REQUIRED FOR PROJECT COMPLETION      : none.
+    USEFUL BUT OPTIONAL                  : include TIGER as one more arm in the Uncertainty and
+                                           Live-Policy milestones so the thesis test is run over
+                                           the strongest available source set; that is incidental
+                                           use of frozen TIGER results, not new TIGER research.
+    NOT CURRENTLY JUSTIFIED              : TIGER hyperparameter tuning, candidate-depth tuning,
+                                           RRF constant tuning, weighted/calibrated fusion,
+                                           BF16 root-cause work.
+
+====================================================================================================
+6. DIMINISHING-RETURN LOOPS
+====================================================================================================
+  For each chain: what NEW project-level claim would the next experiment enable?
+  * BF16 root-cause work
+      NONE.  Gate D passed under FP32 remediation; the remediation is accepted and the canonical
+      checkpoint is qualified.  A root cause would not change any accepted number.
+      -> DEFER
+  * TIGER hyperparameter tuning
+      NONE.  TIGER is frozen and measured; a better TIGER would invalidate the frozen 0.01385 and
+      the H7/H8 evidence while facing the same within-noise fusion outcome.
+      -> DEFER
+  * candidate-depth tuning
+      NONE.  Step 2.8b already ran the one preregistered common-depth control; direction held, the
+      mechanism changed, and s3 forbade choosing a policy by its test result.
+      -> DEFER
+  * RRF constant tuning
+      NONE beyond 'was c=60 suboptimal?', which is a local knob on an effect that is inside noise.
+      -> DEFER
+  * weighted fusion
+      ONE: 'do unequal weights beat equal weights?'.  But the accepted-policy base effect is not
+      established, so weights chosen on test would fit noise.  It becomes answerable only AFTER the
+      uncertainty milestone, and then only with validation-selected weights.
+      -> DEFER (until after M2; then a separate pre-registered milestone)
+  * score calibration
+      NONE.  The repository's design explicitly refuses to compare score scales across sources
+      (CandidateProvenance keeps score_kind precisely so scales are never conflated).  Calibration
+      would require repealing a deliberate design invariant to chase a within-noise gain.
+      -> DEFER (and arguably against the design)
+
+  STRUCTURAL OBSERVATION: the last several milestones have all been local optimization on ONE
+  retrieval source while the project's central agent claim has never been measured.  That is the
+  definition of a diminishing-return loop and is the reason for the critical path below.
+
+====================================================================================================
+7. ACTUAL CRITICAL PATH (ranked by dependency)
+====================================================================================================
+  M1 -- PROVENANCE AND DURABILITY FREEZE               (integrity; blocks everything)
+    objective      every accepted claim reconstructible from the repository alone
+    why necessary  C1 above: 634c37a is on no remote, is absent locally, its worktree's origin
+                   is a local bundle, and the whole Step 2.6/2.7/2.8 implementation is
+                   untracked.  Until this is fixed, no result in this project is reproducible
+                   by anyone else, which fails the project's own s17 completion standard.
+    missing evidence  a fresh clone that reproduces the frozen hashes
+    minimum action    commit the Step 2.6-2.8 files and the Step-2.7 control-plane edits;
+                      reconcile 634c37a into the canonical history (merge or replay onto
+                      6447d75); push to origin; verify by cloning and re-hashing the frozen
+                      artifacts.  No science, no experiments.
+    stop condition  a clone reproduces the artifact hashes recorded in the frozen reports
+
+  M2 -- UNCERTAINTY AND ATTRIBUTION                    (research evidence; unblocks M3 reading)
+    objective      every accepted attribution carries an interval, not a point estimate
+    why necessary  this is the handoff document's OWN #1 open step ('multi-seed / bootstrap
+                   intervals, since the current attribution is directional only'), and Step
+                   2.8b independently demonstrated the need: the accepted fusion gain has a
+                   95% CI spanning zero and exact McNemar p=0.42.  Without intervals, the Two-
+                   Tower and TIGER attributions are directional claims that could be noise.
+    missing evidence  per-user bootstrap CIs (and multi-seed variance where a seed exists) for
+                      the arm comparison and the controlled fusion contrasts
+    minimum action    apply the already-implemented paired bootstrap + exact McNemar (Step 2.8b)
+                      to the accepted arm and fusion comparisons.  The method is predeclared and
+                      the machinery exists; this is analysis, not retrieval.
+    stop condition    all accepted attributions carry an interval, and any that spans zero is
+                      restated as directional-only
+
+  M3 -- LIVE AGENT-POLICY EVALUATION VS FIXED FUSION   (the thesis; the only unmeasured mainline edge)
+    objective      measure whether the model-driven policy beats consulting every source
+    why necessary  the project's central claim is adaptive heterogeneous agent behavior; the only
+                   measured adaptive arm is a deterministic RULE that LOSES to fixed fusion
+                   (0.01180 vs 0.01435).  Implementation and smoke tests are not evidence.
+    missing evidence  any cohort-scale measurement of the LLM/model-driven policy's selection
+                      benefit under the frozen protocol
+    minimum action    run the model-driven policy through the existing control plane in
+                      recorded/replay mode over the frozen cohort (or a documented subset with a
+                      stated power argument), scored by the same evaluator, against fixed_fusion
+                      and against the rule stand-in; report per-component attribution as the
+                      smoke already does.  No routing change, no runtime enablement.
+    stop condition    a measured comparison with an interval, whatever its sign
+
+  ORDER IS A DEPENDENCY ORDER: M1 makes the numbers citable, M2 makes them interpretable, M3
+  answers the question the project exists to ask.  M3 is deliberately last because running it on
+  an unpushed tree with no intervals would repeat exactly the loop this review is stopping.
+
+====================================================================================================
+8. PROJECT COMPLETION CHECKLIST
+====================================================================================================
+  MUST HAVE (research-complete requires all of these):
+   [ ] frozen protocol respected by every reported arm                     -- DONE
+   [ ] identity/provenance/grounding invariants enforced and tested         -- DONE (2.6/2.7)
+   [ ] at least one learned sequential and one learned dual-encoder baseline-- DONE
+   [ ] a generative retriever evaluated under CERTIFIED retrieval          -- DONE (2.6)
+   [ ] controlled fusion evidence with every other source held constant     -- DONE (2.8)
+   [ ] every accepted attribution carries an uncertainty interval           -- M2
+   [ ] the live agent policy measured against the fixed-fusion baseline     -- M3
+   [ ] the accepted state committed, pushed and reconstructible             -- M1
+   [ ] the required ItemCF baseline measured under the unified protocol     -- C2
+  NICE TO HAVE:
+   [ ] full 412 445-user cohort rather than the 20 000 sample
+   [ ] learned FIND_SIMILAR (embedding/ANN) instead of TF-IDF
+   [ ] live evidence retrieval instead of a reproducibly fixture
+   [ ] multi-turn evaluation of the explanation path
+  FUTURE WORK (explicitly out of scope for completion):
+   [ ] weighted / calibrated / learned fusion   [ ] BF16 root-cause closure
+   [ ] TIGER hyperparameter search              [ ] web-demo productisation
+   [ ] documentation refresh (ARCHITECTURE s25/s26 are behind the implementation)
+
+====================================================================================================
+9. RECOMMENDED TIGER STOP POLICY
+====================================================================================================
+  RECOMMENDATION: KEEP TIGER AS A QUALIFIED OPTIONAL SOURCE.  Do not continue TIGER/fusion
+  research; do not remove TIGER from the mainline.
+
+  Why not continue: every remaining TIGER lever (depth, RRF constant, weights, calibration,
+  tuning) is local optimization that enables NO new project-level claim, the accepted fusion
+  gain is inside cohort noise, and the project's central unmeasured claim is about the AGENT,
+  not the retriever.  Continuing would be the diminishing-return loop Section 6 identifies.
+  Why not remove: TIGER is the only delivered generative retriever, it is fully qualified at the
+  CandidateSource boundary (an asset the thesis milestone should exercise), its 138-user oracle
+  complementarity is the largest single addition measured, and keeping it costs ~1 ms/call of
+  source-layer overhead with a frozen 1.33 h batch path.  Removal would delete real, previously
+  accepted evidence for no project benefit.
+  Why 'optional': it is not on the critical path.  M3 should test the agent policy over the
+  STRONGEST source set (which includes TIGER), and that is use of frozen TIGER results, not new
+  TIGER research.
+  This recommendation is NOT executed in this milestone.
+
+====================================================================================================
+10-14. DELIVERABLE SUMMARY
+====================================================================================================
+  1 original objectives          : 26 objectives enumerated in Section 1 with statuses
+  2 current project map          : Section 2, with the one unmeasured mainline edge named
+  3 objective-by-objective status : Section 1 (1 PARTIAL blocking: ItemCF; 1 PARTIAL/DEVIATED:
+                                   LangGraph; the rest IMPLEMENTED/EVALUATED/CLOSED)
+  4 classification               : Section 3 (2 correctness blockers, 3 research-evidence gaps,
+                                   5 optional optimizations, 3 cleanups)
+  5 supported central claims     : trusted-code truth authority; agent decision authority;
+                                   bounded loop; heterogeneous tool REGISTRY; controlled fusion
+  6 unsupported central claims   : adaptive selection benefit for the LIVE policy; constraint
+                                   handling at scale; failure recovery beyond source isolation;
+                                   any fusion gain as a reliable (rather than directional) effect
+  7 TIGER role assessment        : Section 5 -- qualified, evidenced, optional, off critical path
+  8 diminishing-return analysis  : Section 6 -- six chains, all DEFER
+  9 actual critical path         : Section 7
+  10 next milestones             : exactly three (M1 durability, M2 uncertainty, M3 live policy)
+  11 completion checklist        : Section 8 (MUST HAVE / NICE TO HAVE / FUTURE WORK)
+  12 deferred work               : weighted fusion, calibration, depth/RRF tuning, TIGER tuning,
+                                   BF16 root cause, ItemCF, LangGraph alignment, docs refresh
+  13 stop policy                 : KEEP AS QUALIFIED OPTIONAL SOURCE (Section 9)
+  14 next single milestone       : ** M1 -- PROVENANCE AND DURABILITY FREEZE **
+
+  Why M1 is the single next milestone and not a research step: the project's evidence is
+  currently one host failure away from being unreconstructible, and every 'do not commit'
+  instruction has compounded that.  Committing and pushing costs no science, unblocks M2 and M3,
+  and is the only item on this list that is simultaneously a correctness blocker and a
+  prerequisite for every other completion criterion.
+
+====================================================================================================
+ANALYSIS ONLY -- nothing was executed, changed, trained, committed or pushed.
+====================================================================================================

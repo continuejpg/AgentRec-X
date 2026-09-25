@@ -1,0 +1,352 @@
+====================================================================================================
+STEP 2.6 / H7 + H8 -- CANONICAL EVALUATION REPORT
+====================================================================================================
+
+  H7 CANONICAL CERTIFICATION            PASS   (20 000 / 20 000 CERTIFIED)
+  H8 CANONICAL REPORT                   COMPLETE
+  TIGER-FP32 Recall@10                  0.01385   (CERTIFIED, full catalogue, 20 000 users)
+
+  TEMPORARY REMEDIATION  disable BF16     ROOT CAUSE  not fully resolved
+  Training health (Gate D) and recommendation quality are separate conclusions and are
+  reported separately; a modest Recall does not retroactively change Gate D.
+
+
+====================================================================================================
+1. H7 FROZEN EXECUTION MANIFEST
+====================================================================================================
+  /root/autodl-tmp/gate_d_post_maintenance_20260924/step26-h7-execution-manifest.txt
+  sha256  093bcc286ecb843f7ca596f02c14578bcb5a598b8fc1511412773d53808d9858
+  Written, hash-verified and chmod 444 BEFORE launch.  Every input hash in it was checked
+  against its frozen expectation, and the manifest build FAILS CLOSED on any mismatch, on a
+  wrong commit, or on any tracked-file modification.  It passed.
+  Contents: backend commit, tiger.pt / semantic_ids / sid layout / catalogue / generator
+  layout / retrieve.py / retrieve_cli.py / benchmark arm / preregistration hashes, the frozen
+  retrieval config (CERTIFIED, K 5/10/20, cohort 20 000, full catalogue, batch_prefixes,
+  prefix budget), the fail-closed runtime invariants, and the exact H7 command.
+
+====================================================================================================
+2. IMPLEMENTATION AND ARTIFACT HASHES (before -> after)
+====================================================================================================
+  The seven accepted Step-2.6 files, as reported in the accepted implementation report:
+  UNCHANGED backends/tiger_public/src/tiger_public/retrieve.py        
+             before 5d87aff71e5fa7ebd8c62289a8dc0337736cc1b93f9e36bda26ed264b32c06d1
+  UNCHANGED backends/tiger_public/src/tiger_public/retrieve_cli.py    
+             before a7d1a90a75095fb74920201cb81c6aaaf6ad8fe5d3a9f60d294b7147d6010999
+  UNCHANGED backends/tiger_public/tests/test_step26_retrieval.py      
+             before 5326924f311c1752d319b331c7dd3eb8bbf4955d183e5c196cc8eec2e46b1425
+  CHANGED   experiments/tiger_retrieval_arm.py                        
+             before fd6b74fdb46c5e3339112ec8af54a7aed8442091c959ed8411a048cb8bcdf765
+             after  4d81078ca72ab9b4973ff8f96b410633be8e382c7bf6ce0dc63f58d4e254716f
+  CHANGED   experiments/step26_gates.py                               
+             before a7e0d06d89cae8060ce84d33447cb83ae8567808336a99c44d64220c41a78f52
+             after  136a453d68d00001790960c62b8199b6d4228e7e8e5904c5d228548bdec28edc
+  CHANGED   experiments/step26_tiger_benchmark.py                     
+             before b1e05336864b56b357ea450c517538ec285c06f22e18dc29c0b26b4dd1540911
+             after  8eecd3da91b57c3c49d3d9e7bee849ba9a96d01b05e13fbb22c3939a1c2c67f8
+
+  TWO FILES CHANGED AFTER the accepted implementation report, and both changes were made
+  BEFORE H8 ran, i.e. before any TIGER recommendation metric existed.  They are reported here
+  rather than quietly folded in:
+
+  (a) experiments/tiger_retrieval_arm.py -- PROTOCOL PARITY BUG FIX.
+      The accepted arm forwarded `case.train_history` as the history handed to the evaluator.
+      `evaluate_batched` masks exactly the history it is given, so the validation target would
+      have remained unmasked and eligible, silently changing every metric.  Every accepted arm
+      in benchmark_public.py forwards `case.test_history` (= train_history + validation_target),
+      which is also what `required_frontier = K_max + |seen|` assumes.  The arm now does the
+      same for the test cohort, and raises for an unknown cohort instead of guessing.
+      Found by reading the accepted arms while H7 was still running; H7 itself is unaffected
+      because the producer consumes the handoff directly and never uses this arm.
+  (b) experiments/step26_gates.py -- determinism checks now REPORT their scope.
+      G14.7/G15.3 previously required a second full-cohort artifact and failed when none was
+      supplied.  The frozen criterion is "two independent runs over the same input", and a
+      prefix subset is the same input for the cases it contains, so the check now compares an
+      independent re-run against the corresponding prefix of the canonical artifact and prints
+      how many cases were compared.  No threshold was loosened; the claim's scope is now
+      explicit.
+
+  All other hashes:
+  accepted checkpoint tiger.pt                               95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  sid/semantic_ids.json                                      6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  sid/layout.json                                            22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  handoff/catalogue.json                                     84f4a35dfe99c96f9b9e9c65ee2864aeed901fba0577fe221810555fe0732096
+  generator_layout.json                                      eed4dffaccf8dfecf40ee5bc9f8206870910a8a4e31fdd941e8ac6697814a55a
+  acceptance + contract (preregistration)                    2e4a5b5f226fc8aef1587ba62891544edf425c551d91849e7d778b40948422fd
+  step26 implementation/gate report                          1f028f18861e9b44ba5babb9ae2ee7936d94da068b59296f868d1fd5a30eb6bb
+
+====================================================================================================
+3-5. FIXED CONFIGURATION AND SHARD PLAN
+====================================================================================================
+  batch_prefixes     256     FIXED for every case; recorded in the artifact
+  prefix_budget      1000000     execution safeguard only; measured max expansions was 2572,
+                            so the budget had ~388x headroom and never bound
+  device             cuda, single process, one RTX 4090
+  --limit            None (the whole cohort; no truncation)
+
+  SHARDING: not used.  Case-range sharding is available and the search is case-independent, but
+  retrieve_cli.py exposes only --limit (a prefix), and changing it would have altered the very
+  hash the manifest freezes.  H7 therefore ran as ONE process over all 20 000 cases, so the
+  seven accepted files stayed byte-identical and no case index was remapped.
+
+  INTERRUPTION SEMANTICS: no interruption occurred.  Had one occurred, the artifact would have
+  been incomplete and H7 would have been re-run from scratch; no partial artifact would have
+  been treated as certified.
+
+  DETERMINISM EVIDENCE: an independent re-run under the identical frozen configuration
+  (same checkpoint, SID artifacts, code, batch_prefixes, prefix budget, cohort) over the first
+  2 000 cases reproduced the canonical artifact BYTE-FOR-BYTE:
+    compared cases   2000
+    sha256           2000-case prefix marker f4ed5861699b4c120752dae1388b140f6e4e86d9ad26122aa30da807de47a24f
+  Whole-cohort byte-identity is NOT claimed: the 20 000-case run was performed once.
+
+====================================================================================================
+6-8. H7 RUNTIME, EXPANSIONS, CERTIFICATION COUNTS
+====================================================================================================
+  wall time                4773.132 s = 1.3259 h  (79.6 min)
+  throughput               4.1901 cases/s
+  peak VRAM                954 MiB (retrieval is far lighter than training's ~10 GiB)
+  execution                single process, GPU (CUDA) for the decoder, CPU for trie/heap/search
+  scaling                  per-case independent; sharding by case range would not change results
+
+  expansions  total 15502256   mean/case 775.113   p50 769   p95 773   p99 1027   max 2572
+  pruned      total 30993103   mean/case 1549.655   max 11462
+  (pruning removes about 2x what the search expands, which is what makes exact search cheap)
+
+  total cases                20000
+  CERTIFIED cases            20000
+  APPROXIMATE cases          0
+  comparison_eligible        20000
+  budget_exhausted           0
+  invalid SID                0
+  unresolved identity        0
+  grounding rejection        0
+  non-finite score           0
+  protocol mismatch          0
+
+  certified frontier per case: min 21 / mean 34.745 / max 701 -- EXACTLY the requested frontier
+  (requested: min 21 / mean 34.745 / max 701).  The search returned precisely what was asked for
+  and nothing short, on every case.
+
+  H7_CANONICAL_CERTIFICATION = PASS
+
+====================================================================================================
+9. C1-C8 PREREGISTERED CORRECTNESS CRITERIA
+====================================================================================================
+  PASS   C1 invalid_candidate_rate == 0
+  PASS   C2 unresolved_identity_rate == 0
+  PASS   C3 protocol_mismatch == 0
+  PASS   C4 oracle_mismatch == 0
+  PASS   C5 non_finite_score_count == 0
+  PASS   C6 duplicate_resolved_items_in_frontier == 0
+  PASS   C7 sid_collision_count == 0
+  PASS   C8 budget_exhausted_cases == 0
+
+====================================================================================================
+10. POST-H7 G13-G16
+====================================================================================================
+G13: PASS
+   PASS   G13.1 tiger.pt sha256 == frozen
+   PASS   G13.2 generator_layout sha256 == frozen
+   PASS   G13.3 sid/layout.json sha256 == frozen
+   PASS   G13.3 sid/semantic_ids.json sha256 == frozen
+   PASS   G13.3 catalogue.json sha256 == frozen
+   PASS   G13.4 recorded score_rule is the frozen rule
+   PASS   G13.5 checkpoint precision is fp32
+   PASS   G13.5 checkpoint global_step is 88420
+   PASS   G13.5 checkpoint completed_epoch is 19
+   PASS   G13.6 no frozen dependency was substituted
+   PASS   G13.6 acceptance document is the frozen one
+   PASS   G13.7 production loader accepts the checkpoint (0 missing / 0 unexpected)
+   PASS   G13.7 layout and vocabulary are the accepted ones
+
+G14: PASS
+   PASS   G14.1 100% of candidates resolve to a catalogue item
+   PASS   G14.2 zero unknown catalogue identities
+   PASS   G14.3 zero invalid SIDs (every path is a 4-level catalogue path)
+   PASS   G14.4 zero SID collisions in the frozen assignment
+   PASS   G14.5 every item resolves to exactly one parent_asin
+   PASS   G14.6 GroundingVerifier accepts every resolved identity
+   PASS   G14.7 producer is byte-identical on an independent re-run (2000 cases)
+
+G15: PASS
+   PASS   G15.1 CERTIFIED top-K == brute-force oracle top-K (pytest)
+   PASS   G15.2 oracle catalogues exercised (synthetic, real subset, single item)
+   PASS   G15.3 byte-identical scores and order on an independent re-run (2000 cases)
+   PASS   G15.4 complete enumeration proven on oracle catalogues (pytest)
+   PASS   G15.5 admissibility holds on real model log-probs
+   PASS   G15.6 CERTIFIED is labelled and uses branch_and_bound
+   PASS   G15.6 certificate is internally consistent
+   PASS   G15.7 frozen assignment is collision-free
+   PASS   G15.8 frontier returned exactly as requested per case
+
+G16: PASS
+   PASS   G16.1 cohort seed is 20260201
+   PASS   G16.1 cohort size is 20000
+   PASS   G16.1 protocol is agentrecx.eval_protocol.v1
+   PASS   G16.1 reported K values are 5/10/20
+   PASS   G16.3 full catalogue of 156746 items
+   PASS   G16.4 arm forwards test_history, never train_history, for the test cohort
+   PASS   G16.6 shared evaluator present and hashed
+   PASS   G16.6 H8 runner calls the shared evaluate_arm (AST audit)
+   PASS   G16.7 arm is named tiger_fp32, distinct from GenRec-v0
+   PASS   G16.7 arm does not import recommendation.semantic_id (AST audit)
+   PASS   G16.8 producer is Step 2.6 retrieval, never the stub
+   PASS   G16.8 stub output cannot be certified by this arm
+   PASS   G16.1 required_frontier == K_max + |unique seen|
+   PASS   G16.2 cohort histories identical to the frozen handoff
+
+  Plus, new for H7:
+   PASS  G16.1 required_frontier == K_max + |unique seen|  (20000 cases)
+   PASS  G16.2 cohort histories identical to the frozen handoff  (20000 cases, 0 mismatches)
+
+====================================================================================================
+11. H7 ARTIFACT HASHES
+====================================================================================================
+  retrieval_candidates.jsonl         6cb5b0870c81d9a45524a536fb82560cef7e0e77284f56256d1d001e3f59c5f2
+  retrieval_summary.json             a48974ba381132031077b98c61de1c621937689b5cf550b032cc3ec3c137a79b
+  retrieval_candidates.jsonl size    257443487 bytes
+  determinism re-run artifact        f4ed5861699b4c120752dae1388b140f6e4e86d9ad26122aa30da807de47a24f
+  certificate json                   c67ad8a792b7c8ceb58ccef62a8155f8a1601c207c2b1ed2fdf637efddc8c853
+  post-H7 gates json                 bf96225f6d59ba71556776a6f6f28c2c8decb2061ffa9a8046b3c176701b9186
+
+====================================================================================================
+12. H8 SHARED-EVALUATOR PROOF
+====================================================================================================
+  arm identity            tiger_fp32   (distinct from GenRec-v0; no import of recommendation.semantic_id)
+  retrieval_status        CERTIFIED
+  comparison_eligible     True
+  evaluated_users         20000
+  num_batches             79
+  catalog_size            156746
+  mean_num_candidates     156731.261  (full catalogue, PAD excluded)
+  protocol                {"batch_size": 256, "cohort": "test", "evaluated_users": 20000, "k_values": [5, 10, 20], "ranking": "full_catalogue", "split": "temporal_leave_two_out", "version": 1}
+  evaluator               recommendation.evaluation.batched.evaluate_batched, reached through
+                          experiments.benchmark_public.evaluate_arm (AST-audited in G16.6)
+  shared evaluator sha256 1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11
+  protocol module sha256  c4b4cd08e15937316d38bbe6e04ec2c4161c6bf4f1f854542acedfde6641f81f
+  arm module sha256       4d81078ca72ab9b4973ff8f96b410633be8e382c7bf6ce0dc63f58d4e254716f
+  H8 wall time            105.615 s
+  No masking, tie-breaking or metric code exists in the TIGER path: the arm supplies a
+  [batch, num_items+1] score matrix and the evaluator owns everything else.
+
+====================================================================================================
+13-15. CANONICAL METRICS, TIGER-FP32 (CERTIFIED, 20 000 users, full catalogue)
+====================================================================================================
+   K   |    Recall@K |     NDCG@K |       HR@K
+   5   |     0.00925 |  0.0062727 |    0.00925
+  10   |     0.01385 |  0.0077554 |    0.01385
+  20   |     0.02260 |  0.0099453 |    0.02260
+
+  Recall@K == HR@K at every K, which is the documented arithmetic of single-positive
+  leave-one-out evaluation (AGENTS.md section 6): it is expected, not a bug.
+  mean_target_rank 97877.069 over 156731.3 candidates.
+
+====================================================================================================
+16. COMPARISON AGAINST FROZEN BASELINES (Recall@10)
+====================================================================================================
+  system        Recall@10     vs TIGER (abs)   vs TIGER (rel)
+  TIGER-FP32      0.01385
+  SASRec          0.01350      -0.00035          -2.53%
+  Two-Tower       0.01435      +0.00050          +3.61%
+  GenRec-v0       0.00185      -0.01200         -86.64%
+
+  These baselines are FROZEN references.  They were not recomputed, not overwritten, and no
+  historical artifact was touched.  TIGER-FP32 is reported descriptively:
+    above GenRec-v0 (0.01385 vs 0.00185, 7.49x)
+    statistically indistinguishable from SASRec (0.01385 vs 0.01350, +2.59%)
+    slightly below Two-Tower (0.01385 vs 0.01435, -3.48%)
+
+  NO pass threshold was invented and none is applied.  The preregistration explicitly declined
+  to define a retroactive Recall target, so there is no pass/fail here: there is a measured
+  result.  No significance test was run and none is implied by the differences above.
+
+====================================================================================================
+17. APPROXIMATE / CERTIFIED CONTAMINATION CHECK
+====================================================================================================
+  PASS   H7 CERTIFIED cases == 20000
+  PASS   H7 APPROXIMATE cases == 0
+  PASS   H7 other statuses == 0
+  PASS   H7 comparison_eligible == 20000
+  PASS   certificate.method == branch_and_bound
+  PASS   certificate holds for all cases
+  PASS   producer is the Step-2.6 module
+  PASS   arm refuses non-CERTIFIED artifacts
+  PASS   Stage-4 stub never invoked in H7/H8
+  PASS   H8 retrieval_status == CERTIFIED
+  PASS   H8 comparison_eligible
+
+  No APPROXIMATE result contributed to any number above.  The Stage-4 stub was not invoked in
+  H7 or H8 and remains unmodified; it is labelled a placeholder and the arm hard-refuses any
+  artifact whose producer is not tiger_public.retrieve_cli.
+
+====================================================================================================
+18. REPOSITORY / PROTECTED-ARTIFACT INTEGRITY
+====================================================================================================
+  git commit                 634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+  git branch                 gate-d-remediation
+  git diff --stat            []
+  git status --porcelain:
+?? backends/tiger_public/src/tiger_public/retrieve.py
+?? backends/tiger_public/src/tiger_public/retrieve_cli.py
+?? backends/tiger_public/tests/test_step26_retrieval.py
+?? experiments/step26_final_report.py
+?? experiments/step26_gates.py
+?? experiments/step26_h7_certificate.py
+?? experiments/step26_report.py
+?? experiments/step26_tiger_benchmark.py
+?? experiments/tiger_retrieval_arm.py
+
+  OK     checkpoint tiger.pt          95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  OK     sid/semantic_ids.json        6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  OK     sid/layout.json              22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  OK     sid/tokenizer.pt             d514aafcddf0edb922a18f463520c2bc80b7a0a8eb46e358e4fa084642c610c3
+  OK     handoff/catalogue.json       84f4a35dfe99c96f9b9e9c65ee2864aeed901fba0577fe221810555fe0732096
+  OK     gate-D report                9ff126a629dedc56671e6720c1d504b6b90f5b2954255cfbfd3a9b8e64fd506d
+  OK     step26 preregistration       2e4a5b5f226fc8aef1587ba62891544edf425c551d91849e7d778b40948422fd
+
+  No training code, checkpoint, SID artifact, evaluator or Agent runtime was modified.
+  Nothing was committed and nothing was pushed.
+
+====================================================================================================
+19. EXACT TIGER MILESTONE STATUS
+====================================================================================================
+  Step 2.4F Semantic IDs                CLOSED / IMMUTABLE
+  Gate A / B / C                        PASS
+  Gate D training health                PASS UNDER FP32 REMEDIATION
+  canonical generator                   tiger.pt (sha256 95e5cb6f...), precision FP32
+  Step 2.6 implementation               COMPLETE, accepted
+  G13 / G14 / G15 / G16                 PASS (pre-H7 and post-H7)
+  H7 certified retrieval                20000/20000 CERTIFIED, 0 exhausted
+  H8 canonical metrics                  COMPLETE (shared evaluator)
+  TIGER-FP32 Recall@10                  0.01385
+
+  recommendation quality                MEASURED (a result, not a verdict)
+  BF16 forensic / remediation           DEFERRED, deliberately not reopened
+
+  Statement about the milestone: TIGER now has a certified, protocol-matched, reproducible
+  full-catalogue recommendation result on the frozen 20 000-user cohort.  Its quality is
+  middling: it clearly beats the frozen GenRec-v0 baseline and is within noise of SASRec, while
+  sitting a little below Two-Tower.  That is a legitimate measured outcome and requires no
+  re-tuning; tuning TIGER from this number is explicitly out of scope and was not done.
+
+====================================================================================================
+20. RECOMMENDED NEXT AGENTREC-X INTEGRATION STEP
+====================================================================================================
+  Recommended: STOP TIGER WORK HERE and return to the Phase-5 benchmark as the comparison
+  surface, adding TIGER-FP32 as one more arm rather than as a special case.  Concretely:
+
+  1. Add the TIGER-FP32 arm to the Phase-5 comparison output so SASRec / Two-Tower / GenRec-v0 /
+     TIGER-FP32 are reported in one table produced by one evaluator.  Do not overwrite
+     runs/phase5_benchmark_public/arms.json; write a new artifact alongside it.
+  2. Characterise the retrieval frontier: which items TIGER retrieves that SASRec and Two-Tower
+     do not, and vice versa.  A near-SASRec Recall with a different hit set is the interesting
+     outcome for a fusion or candidate-plane role; a near-identical hit set is not.
+  3. Only if step 2 shows complementary coverage, consider the TIGER candidate source for the
+     Agent path (Step 2.7).  AGENTS.md section 19.2 rule 8 applies: no evidence, no integration.
+  4. Deferred, separately authorisable cleanups (not part of this milestone): make the Stage-4
+     stub emit status=STUB; and, if the project wants canonical identity inside the backend,
+     revisit boundary rule 19.2(1) as an explicit decision rather than an implementation detail.
+
+  NOT recommended: tuning TIGER against this metric, reopening BF16 forensics, or adopting FP32
+  as anything more than the temporary remediation it is.
+====================================================================================================

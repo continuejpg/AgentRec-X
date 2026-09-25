@@ -1,0 +1,245 @@
+====================================================================================================
+STEP 2.8b -- FUSION ROBUSTNESS QUALIFICATION
+====================================================================================================
+
+  RESULT:  R1-R8 ALL PASS.
+  Directional robustness: the TIGER-containing three-source fusion beats the two-source
+  control under BOTH the accepted asymmetric policy and the common-depth (20) control, on all
+  nine reported quantities.
+  Statistical robustness under the ACCEPTED policy: NOT established.  The paired evidence is
+  consistent with zero at every K (exact McNemar p = 0.42 at K=10; the paired NDCG bootstrap
+  95% CI INCLUDES zero).  This is the most important finding of this milestone and it is
+  reported plainly rather than softened.
+
+  primary comparison at K=10:
+    asymmetric (accepted)   A 0.01745 -> D 0.01810   gained 115 lost 102 net +13   p=0.4154
+    common depth 20         A20 0.01565 -> D20 0.01675 gained  86 lost  64 net +22   p=0.0861
+
+====================================================================================================
+1. PREREGISTRATION SHA256
+====================================================================================================
+  runs/step28b-preregistration.txt
+  sha256  a3285017f4ddaa7b43bab49f4157ae3f3db7f114af1a297109d59341a0da5dba
+  Frozen BEFORE any depth-sensitivity metric or uncertainty result: the single depth of 20
+  (chosen as the largest canonical evaluation K, not from performance), the exact paired
+  McNemar test, the paired user-level bootstrap (10 000 resamples, seed 20260201), the R1-R8
+  gates, and the explicit statement that point estimate, uncertainty and depth robustness are
+  interpreted separately with no post-hoc significance requirement.
+
+====================================================================================================
+2. ARTIFACT INTEGRITY (section 6 reuse)
+====================================================================================================
+  No retrieval, inference or training was re-run.  Top-20 is an exact deterministic truncation
+  of frozen ranked output:
+    heads_cache          d0361df743146461114af00b48c1e77bc0bcb3ed3bc6b37aaf85a08bbcf790dc
+    tiger_heads          3198d059f2419721d953cfbae6e5625e569e74dc954d72b9e8f1c528d0574934
+    sasrec_peruser       3072c86055cd4d093147ef10e19ed8121fb70215d581198b3261380df83d0252
+    twotower_peruser     71516247b7685bee34e161a9d3c81efd57cb8c2a51c94e0efb7937b2eaf34229
+    step28_results       c4439c839a90a46628c8b9680ddfafe1ffb224eb66ab24f724c5829acc9ea8a5
+  SASRec and Two-Tower heads: 20 000 rows x depth 1000 (from the Step-2.8 run); TIGER heads:
+  20 000 rows, min depth 20.  Cross-validation of the reuse path: the asymmetric A and D arms
+  re-derived here reproduce the FROZEN Step-2.8 rank-array hashes exactly
+  (asymmetric_rank_hash_matches_step28 = True).
+
+====================================================================================================
+3. GATES R1-R8
+====================================================================================================
+  R1  PASS
+  R2  PASS
+  R3  PASS
+  R4  PASS
+  R5  PASS
+  R6  PASS
+  R7  PASS
+  R8  PASS
+  R1 source artifact hashes match the frozen Step-2.8 inputs; R2 cohort 20 000/20 000;
+  R3 target identities identical across the certified per-user artifacts; R4 truncation to 20
+  is deterministic and yields depth 20 for every row; R5 the same reciprocal_rank_fusion with
+  RRF_K=60; R6 the same evaluate_arm -> evaluate_batched path; R7 the fusion signature carries
+  no target; R8 repeated runs give identical ranks and metrics for all four arms.
+  ALL PASS.
+
+====================================================================================================
+4-7. COMMON-DEPTH (20) CONTROL AND D20 - A20
+====================================================================================================
+  cfg   sources                     Recall@5  Recall@10  Recall@20 | NDCG@10   | hits 5/10/20
+  A20   SASRec(20)+Two-Tower(20)     0.00945   0.01565    0.02480  | 0.0082711 | 189/313/496
+  D20   SASRec(20)+Two-Tower(20)+TIGER(20) 0.01045   0.01675    0.02635  | 0.0090184 | 209/335/527
+
+  D20 - A20:
+    quantity      A20        D20        delta      relative
+    Recall@5     0.00945    0.01045    +0.00100   +10.58%
+    Recall@10    0.01565    0.01675    +0.00110   +7.03%
+    Recall@20    0.02480    0.02635    +0.00155   +6.25%
+    NDCG@5       0.00629    0.00701    +0.00072   +11.46%
+    NDCG@10      0.00827    0.00902    +0.00075   +9.03%
+    NDCG@20      0.01058    0.01142    +0.00084   +7.98%
+    HR@5         0.00945    0.01045    +0.00100   +10.58%
+    HR@10        0.01565    0.01675    +0.00110   +7.03%
+    HR@20        0.02480    0.02635    +0.00155   +6.25%
+
+  gain/loss/net (both policies):
+    policy              K    A hits  D hits  both  gained  lost  net
+    asymmetric (accepted) K=5     211     226   149      77    62   15
+    asymmetric (accepted) K=10    349     362   247     115   102   13
+    asymmetric (accepted) K=20    561     581   416     165   145   20
+    common depth 20     K=5     189     209   149      60    40   20
+    common depth 20     K=10    313     335   249      86    64   22
+    common depth 20     K=20    496     527   416     111    80   31
+  net = gained - lost holds in every row.  Under depth symmetry the two flows SHRINK
+  (86/64 vs 115/102 at K=10) while the NET grows (+22 vs +13): symmetric depth trades a
+  smaller gross churn for a better net, which is a different mechanism from TIGER's unique
+  coverage and is treated as such below.
+
+====================================================================================================
+8. TIGER-ONLY RETENTION UNDER DEPTH = 20
+====================================================================================================
+  For the frozen TIGER-only-outside-SASRec-u-Two-Tower user sets:
+   K     frozen set   retained by D (asym)   rate    retained by D20   rate
+  K=5           99                    41   41.4%                31   31.3%
+  K=10         138                    69   50.0%                50   36.2%
+  K=20         207                   129   62.3%                74   35.7%
+  Depth symmetry REDUCES TIGER's captured unique coverage (K=10: 69 -> 50, 50.0%% -> 36.2%%).
+  Yet the NET gain rises.  The dissociation is important: under depth 20 the improvement comes
+  more from re-weighting the two learned sources against each other than from TIGER's unique
+  hits.  Attributing the depth-20 net gain to TIGER's complementarity would be wrong.
+
+====================================================================================================
+9. ORIGINAL ASYMMETRIC RESULT (frozen reference, for comparison)
+====================================================================================================
+  A  SASRec(1000)+Two-Tower(1000)              Recall@10 0.01745   349 hits
+  D  SASRec(1000)+Two-Tower(1000)+TIGER(full)  Recall@10 0.01810   362 hits
+  D - A: gained 115, lost 102, net +13.  TIGER-only 138, retained 69 (50.0%).
+  Re-derived here from the frozen heads and reproduced bit-exactly (rank hashes match).
+  This policy and its results were NOT modified or overwritten.
+
+====================================================================================================
+10. EXACT PAIRED McNEMAR
+====================================================================================================
+  two-sided exact test on the discordant pairs (A hit & D miss = b, A miss & D hit = c)
+   policy             K     b     c     n=b+c   exact p
+  asymmetric (accepted) K=5      62    77      139   0.2349
+  asymmetric (accepted) K=10    102   115      217   0.4154
+  asymmetric (accepted) K=20    145   165      310   0.2805
+  common depth 20     K=5      40    60      100   0.0569
+  common depth 20     K=10     64    86      150   0.0861
+  common depth 20     K=20     80   111      191   0.0297
+
+  Under the ACCEPTED asymmetric policy NO cutoff reaches significance: p = 0.2349 / 0.4154 /
+  0.2805 at K=5/10/20.  The +13 net at K=10 comes from 217 discordant users split 102/115,
+  which is what a coin flip looks like.
+  Under common depth 20 the swings are more one-sided: p = 0.0569 / 0.0861 / 0.0297, with
+  K=20 below 0.05.  But that policy is a sensitivity control, and section 5 forbids selecting
+  a policy because its test result is better.  It is reported, not adopted.
+
+====================================================================================================
+11. PAIRED NDCG BOOTSTRAP
+====================================================================================================
+  paired user-level bootstrap, 10000 resamples, seed 20260201; per-user NDCG from the frozen metrics
+   policy             K     paired mean diff   95% CI low    95% CI high   excludes 0
+  asymmetric (accepted) K=5          +0.000522     -0.000111      +0.001178   False
+  asymmetric (accepted) K=10         +0.000485     -0.000155      +0.001125   False
+  asymmetric (accepted) K=20         +0.000544     -0.000060      +0.001169   False
+  common depth 20     K=5          +0.000721     +0.000195      +0.001277   True
+  common depth 20     K=10         +0.000747     +0.000218      +0.001294   True
+  common depth 20     K=20         +0.000845     +0.000341      +0.001360   True
+
+  Asymmetric: all three CIs CONTAIN zero.  Common depth 20: all three EXCLUDE zero, with
+  small positive lower bounds (+0.0002 to +0.0003).  The uncertainty is wide relative to the
+  point estimate either way: the K=10 asymmetric interval spans roughly -0.00016 to +0.00113
+  around a +0.00049 estimate.
+
+====================================================================================================
+12. DETERMINISTIC RERUN PROOF
+====================================================================================================
+  Every arm was run twice over the frozen heads; identical rank arrays and metric values:
+    A    deterministic=True  rank-array sha256 51aca248db053233765031c2cf35d855b6226d2b54f0482f0506c0cad4f817ee
+    D    deterministic=True  rank-array sha256 4094e48c03b254cf278d8af0bb98d0db3214b69a9c4037e43fcbda42ca7705e0
+    A20  deterministic=True  rank-array sha256 f835da446177d21ec412cb2715ff7d933dd05ed40aac65b9718d5e8e647d346e
+    D20  deterministic=True  rank-array sha256 12af262f8f87086e80fb843eb18eb2934740ecf5b63ee36d1029875ed21c3060
+  A and D rank-array hashes also match the frozen Step-2.8 values exactly, so the truncation
+  and reuse path introduced no drift.
+
+====================================================================================================
+13. EVIDENCE-BACKED ROBUSTNESS CONCLUSION
+====================================================================================================
+  Three quantities, kept separate as the contract requires:
+
+  (a) POINT ESTIMATE and DIRECTIONAL ROBUSTNESS -- POSITIVE and CONSISTENT.
+      D beats A on all nine quantities under the accepted asymmetric policy, and D20 beats A20
+      on all nine under the common-depth control.  Two independent depth policies, same
+      direction, every quantity: this is not a single-configuration artefact.
+
+  (b) UNCERTAINTY -- WIDE, and under the accepted policy not distinguishable from zero.
+      exact McNemar p = 0.4154 at K=10; paired NDCG bootstrap CI [-0.000155, +0.001125]
+      includes zero at all K.  With 20 000 users the discordant pairs still split ~50/50,
+      which is the quantitative meaning of 'the +13 net is within cohort noise'.
+
+  (c) DEPTH ROBUSTNESS -- direction robust, MECHANISM not.
+      Direction survives depth symmetry, but the mechanism changes: TIGER's captured unique
+      coverage FALLS from 50.0%% to 36.2%% at K=10 while the net gain RISES from +13 to +22.
+      So the depth-20 improvement is not more TIGER complementarity; it is RRF re-weighting
+      three sources whose heads are now equally shallow.  The two must not be conflated.
+
+  Honest summary: rank-only RRF with equal weights produces a small, directionally robust
+  improvement when TIGER joins the accepted two-source fusion, but on the accepted policy
+  that improvement is NOT statistically distinguishable from cohort noise, and the largest
+  part of the oracle complementarity (138 unique users) is only about half captured.
+
+====================================================================================================
+14. IS WEIGHTED-RRF EXPERIMENTATION JUSTIFIED?
+====================================================================================================
+  Justified as a NEW, separately pre-registered milestone -- and the evidence argues for it
+  for a different reason than Step 2.8 did.
+
+  Supportive:
+    * the direction is robust across two depth policies and nine quantities;
+    * under depth symmetry the paired NDCG CI excludes zero at every K and exact McNemar
+      reaches p = 0.0297 at K=20, so a reliably-detectable effect is plausibly reachable;
+    * the asymmetric uncertainty is wide precisely because a 30x-deeper-head source and a
+      shallow-head source are being given equal weight, which is the question weights address.
+  Constraining:
+    * on the ACCEPTED policy the effect is not established at all, so weights tuned on the test
+      cohort would be fitting noise;
+    * no uncertainty analysis can license choosing weights on test.
+
+  Therefore the recommended next step is NOT 'tune weights on test'.  It is, in order:
+    1. measure the accepted-policy fusion on the VALIDATION cohort, where the current result is
+       the only thing that matters: is the direction there too, and is it any larger;
+    2. if and only if it is, select and FREEZE weights on validation targets, hash the frozen
+       configuration, and evaluate ONCE on test;
+    3. never use the test cohort for weight search, and never report a test-selected weight as
+       a result.
+  No weighted, calibrated or learned fusion was run in this milestone.
+
+====================================================================================================
+15. REPOSITORY INTEGRITY
+====================================================================================================
+  git HEAD            6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch          master
+  git diff --stat     [recommendation/control/arguments.py       | 10 +++++++ |  recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++------- |  2 files changed, 45 insertions(+), 9 deletions(-)]
+  git status --porcelain:
+M recommendation/control/arguments.py
+ M recommendation/control/candidate_plane.py
+?? experiments/step27_qualification.py
+?? experiments/step27_tiger_engines.py
+?? experiments/step28_fusion_experiment.py
+?? experiments/step28b_depth_sensitivity.py
+?? recommendation/control/tiger_source.py
+?? tests/test_tiger_source.py
+
+  OK     runs/step28-fusion-qualification.txt                     b901fc516c938cac1668952f6a8fa426a18f44ea8955978d15a2a66270bbd179
+  OK     runs/step28-fusion-results.json                          c4439c839a90a46628c8b9680ddfafe1ffb224eb66ab24f724c5829acc9ea8a5
+  OK     runs/step28b-preregistration.txt                         a3285017f4ddaa7b43bab49f4157ae3f3db7f114af1a297109d59341a0da5dba
+  OK     runs/step27-candidatesource-qualification.txt            e64325cdf2c4f72e7c100cc3cb5f3ff81b2f757f437e9bc7906d60f15fb9fba3
+  OK     runs/step26-phase5-complementarity-canonical.txt         9f8a9163052631b7da7390e0bbe1577bc2cd1a942fa6d362127bbc1dea2cbbd9
+  OK     recommendation/control/candidate_ledger.py               fcc65e74d0efb78d3078956e89b9b3fda2cd6281d508f9b6cba02b1be579aa62
+
+  No retriever was trained, tuned or modified; no retrieval or inference was re-run; the
+  Step-2.8 asymmetric policy and its results were neither modified nor overwritten; Agent
+  routing and source selection are unchanged; TIGER is NOT enabled in the canonical runtime;
+  no weighted/calibrated/learned fusion was run.  Nothing was committed and nothing was pushed.
+
+====================================================================================================
+STOP
+====================================================================================================

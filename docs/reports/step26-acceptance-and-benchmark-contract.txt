@@ -1,0 +1,242 @@
+================================================================================
+STEP 2.6 -- PRE-REGISTERED ACCEPTANCE DOCUMENT AND BENCHMARK CONTRACT
+================================================================================
+Status at the moment of writing: NO Step-2.6 benchmark number exists.
+This document is frozen BEFORE the first Recall/NDCG/HR for TIGER is computed.
+Nothing below may be edited after any TIGER metric exists. A change requires a new
+dated document with its own hash and a full re-run.
+
+creation timestamp : written and chmod 444 before retrieve.py existed / before H7
+scope              : Step 2.6 acquisition and certified evaluation ONLY
+governing spec     : docs/TIGER_BACKEND.md sections 5, 14, 15, 16
+                     AGENTS.md section 19 (external model backend boundary rule)
+
+--------------------------------------------------------------------------------
+0. FROZEN IDENTITIES (must be asserted by G13; fail closed on any mismatch)
+--------------------------------------------------------------------------------
+accepted generator checkpoint   /root/autodl-tmp/gate_d_fp32_canonical_remediation/tiger.pt
+  sha256                        95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a
+  bytes                         45181927
+  training precision            fp32
+  global_step                   88420
+  completed epochs              20
+  epochs budget                 20
+  examples                      2263252
+  parameters                    11281664
+  users                         412445
+  trie_nodes                    307777
+
+accepted gate-D report
+  /root/autodl-tmp/gate_d_post_maintenance_20260924/fp32-canonical-remediation-report.txt
+  sha256                        9ff126a629dedc56671e6720c1d504b6b90f5b2954255cfbfd3a9b8e64fd506d
+
+backend worktree commit         634c37a162ab5aa0826d32d7f5751a2ba9c3b030
+
+frozen SID artifacts (immutable, consumed read-only)
+  sid/layout.json               22521d7b58f8538c3d3b0d8a27200a255ac62e1e9da0676c6c55ebadde101b11
+  sid/semantic_ids.json         6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e
+  sid/tokenizer.pt              d514aafcddf0edb922a18f463520c2bc80b7a0a8eb46e358e4fa084642c610c3
+  sid/tokenizer.json            57e193de6ba31fdac23b7a431c5ff2acc23c919122329fc6bf6daf8899a1fe3f
+  sid/manifest.json             a52928df340c724a31d9e458798eb88a39ba2c81cbc7e7723b7a4178755e1c8c
+
+generator layout (derived, frozen)
+  generator_layout.json         eed4dffaccf8dfecf40ee5bc9f8206870910a8a4e31fdd941e8ac6697814a55a
+
+frozen score rule (recorded by value in the checkpoint)
+  version 1 | eos_in_score false | softmax full_vocabulary | child_renormalisation false
+  terms "sum of log P over the item's complete SID token path"
+
+frozen audit batch
+  sha256                        e42d92a3d20845ac9abbed84a66aa4dd71fc8fd94f489f9fc3b8686765c1078b
+
+frozen evaluation cohort
+  cohort_seed                   20260201
+  cohort_size                   20000
+  protocol                      agentrecx.eval_protocol.v1
+  split                         temporal_leave_two_out
+  K values reported             5, 10, 20
+
+--------------------------------------------------------------------------------
+1. THE FROZEN ITEM SCORE (restated, unchanged)
+--------------------------------------------------------------------------------
+For catalogue item i with token path t(i) = (t_1..t_M), M = per_item_tokens = 4:
+
+  score(i | history) = SUM over l=1..M of log P_model(t_l | history, t_<l)
+
+P_model is the softmax over the FULL generator vocabulary (vocab_size 1028), raw logits,
+unmodified. EOS is NOT a term; it only lets the search recognise a completed path. No
+renormalisation over valid children. No length normalisation. No temperature.
+
+ADMISSIBILITY (section 5.3): every term is a log-probability, hence <= 0, and for a fixed
+prefix every extension keeps the first m terms unchanged. Therefore for any q >= p:
+
+  S(q) = S(p) + SUM_{l>m} log P(.)  <=  S(p)
+
+so S(p) is an admissible upper bound on every item in the subtree rooted at p. This is the
+entire basis of CERTIFIED mode.
+
+--------------------------------------------------------------------------------
+2. RETRIEVAL MODES
+--------------------------------------------------------------------------------
+APPROXIMATE
+  purpose       engineering iteration, smoke tests, latency profiling, coverage exploration
+  algorithm     level-synchronous bounded beam over the catalogue trie; at most `beam`
+                prefixes survive each level; `prefix_budget` caps total node expansions
+  status        "APPROXIMATE"
+  metrics from this mode are NON-CANONICAL and must never appear in the canonical table
+
+CERTIFIED
+  purpose       canonical evaluation ONLY
+  algorithm     exact branch-and-bound over the catalogue trie keyed by the admissible bound
+                S(p), max-heap, running threshold T = the required_frontier-th best COMPLETED
+                item score; a branch is terminated exactly when S(p) < T; global termination
+                when the best remaining prefix has S(p) < T
+  status        "CERTIFIED"
+  equivalence   for every case the returned top-required_frontier is the true top-
+                required_frontier over the ENTIRE valid catalogue under the score rule of
+                section 1, because no unvisited item can enter the frontier (section 5.3)
+
+BUDGET AND DOWNGRADE (section 15.2)
+  if any case exhausts `prefix_budget` before global termination, that case is recorded in
+  `budget_exhausted_cases`, the run's `retrieval_status` is REWRITTEN to APPROXIMATE, and
+  `comparison_eligible` becomes false. A budget-exhausted run is NEVER reported as CERTIFIED.
+
+--------------------------------------------------------------------------------
+3. RESOLVER AND COLLISION SEMANTICS
+--------------------------------------------------------------------------------
+flow (TIGER side, integer item-id space only):
+  token path -> CatalogueTrie.item_for_path -> backend/AgentRec-X integer item id
+
+Parent_asin NEVER appears inside backends/ or recommendation/backends/ (AGENTS.md 19.2 rule 1;
+contracts.py states the same absence structurally). Canonical identity is re-attached in the
+AgentRec-X layer outside the adapter, in the Step-2.6 arm, and that is where the
+parent_asin / resolver-provenance fields required by the task are retained.
+
+rules, all deterministic and all fail-closed:
+  R1  a token path that is not a COMPLETE catalogue path yields NO candidate
+  R2  a token path that is a complete catalogue path yields exactly the item id(s) registered
+      at that trie leaf
+  R3  SID collision (more than one item at one leaf): the SMALLEST item id is returned and the
+      collision is recorded. The frozen assignment (Step 2.4F) has post-dedup collisions 0,
+      so any nonzero collision count FAILS G14 rather than being tolerated
+  R4  a PAD sentinel is never tokenisable, never resolvable, never a candidate
+  R5  duplicate item ids in one case are de-duplicated keeping the highest score and the
+      earliest rank
+  R6  item ids outside [1, 156746] are refused
+  R7  scores that are NaN or +-Inf are refused; a non-finite score count > 0 FAILS the contract
+
+--------------------------------------------------------------------------------
+4. GATE DEFINITIONS (G13 - G16), MECHANICAL
+--------------------------------------------------------------------------------
+G13 -- checkpoint / artifact integrity                                    FAIL CLOSED
+  G13.1 tiger.pt sha256 == the frozen value in section 0
+  G13.2 generator_layout.json sha256 == frozen; it carries source_semantic_ids_sha256 and
+        source_sid_layout_sha256 that must equal the frozen SID artifact hashes
+  G13.3 sid/layout.json and sid/semantic_ids.json sha256 == frozen
+  G13.4 the checkpoint's recorded score_rule validates against scoring.SCORE_RULE (version 1)
+  G13.5 the checkpoint records training precision fp32, global_step 88420, completed_epoch 19
+  G13.6 no dependency substitution: sha256 of scoring.py, trie.py, contracts.py,
+        generator_layout.py, retrieve.py, tiger.py recorded and compared to the values frozen
+        at Step-2.6 implementation time
+  G13.7 the generator loads through the production loader and its state dict is accepted with
+        zero missing and zero unexpected keys
+
+G14 -- identity / grounding integrity                                      FAIL CLOSED
+  G14.1 100% of returned candidates resolve to an item id in [1, 156746]
+  G14.2 0 unknown catalogue identities (0 ungrounded)
+  G14.3 0 invalid SIDs accepted: every returned path passes trie.is_complete
+  G14.4 collision resolution deterministic: item_for_path is a pure function and the frozen
+        assignment reports collision_free() == True
+  G14.5 every returned item id resolves to exactly one parent_asin through the frozen
+        AgentRec-X mapping; unresolved_identity_rate == 0
+  G14.6 AgentRec-X GroundingVerifier accepts every resolved identity (grounded == all)
+  G14.7 resolver determinism: two independent runs over the same input produce byte-identical
+        candidate lists
+
+G15 -- retrieval correctness / completeness                                FAIL CLOSED
+  G15.1 brute-force oracle agreement: on catalogues where exhaustive enumeration is cheap,
+        CERTIFIED top-K == oracle top-K for K in {1,2,3,5,10,20} (ties by ascending item id)
+  G15.2 oracle catalogues used: (a) a tiny synthetic hand-computable trie; (b) a small real
+        catalogue subset built from the frozen assignment; (c) a 1-item catalogue
+  G15.3 candidate-score determinism: repeat runs are bit-identical on scores and order
+  G15.4 complete valid candidate consideration: on oracle catalogues the certified search
+        visits a set of leaves equal to the full valid set, and prefixes_expanded equals the
+        full node count, verifying enumeration rather than truncation
+  G15.5 the admissibility precondition holds on real model output:
+        scoring.assert_monotone_prefix_bound passes for the log-probs actually used
+  G15.6 APPROXIMATE is not mislabelled: APPROXIMATE output carries status APPROXIMATE and is
+        never accepted where CERTIFIED is required
+
+G16 -- protocol parity                                                      FAIL CLOSED
+  G16.1 same cohort: rebuilt 20 000-user cohort (seed 20260201) hash == the frozen cohort hash
+  G16.2 same train histories and same test targets: the arm is handed EvaluationCase objects
+        from the frozen split loader, and never sees validation_target or test_target
+  G16.3 same full catalogue: num_items == 156746, PAD row 0 excluded, item ids 1..156746
+  G16.4 seen-item masking and PAD exclusion remain AgentRec-X's: the arm returns scores/ranks
+        only and performs no masking
+  G16.5 same ranking and tie-breaking ownership: ties are resolved by the shared evaluator;
+        the arm's own ordering is descending score then ascending item id, stated explicitly
+  G16.6 same shared evaluator: metrics come from recommendation.evaluation.batched
+        .evaluate_batched through benchmark_public.evaluate_arm; sha256 of the evaluation
+        module is recorded; no TIGER-specific metric implementation exists
+  G16.7 the TIGER arm is registered distinctly as `tiger_fp32` and does not touch, import or
+        overwrite recommendation.semantic_id (frozen GenRec v0) results
+
+--------------------------------------------------------------------------------
+5. BENCHMARK ACCEPTANCE CONTRACT (correctness) -- MANDATORY
+--------------------------------------------------------------------------------
+These are correctness gates, not performance targets. All must be zero.
+
+  C1  invalid_candidate_rate          == 0
+  C2  unresolved_identity_rate        == 0
+  C3  protocol_mismatch               == 0
+  C4  oracle_mismatch                 == 0
+  C5  non_finite_score_count          == 0
+  C6  duplicate_resolved_items_in_frontier == 0
+  C7  sid_collision_count             == 0
+  C8  budget_exhausted_cases          == 0 for a run reported as CERTIFIED
+
+If any of C1..C8 is nonzero the run is NOT a canonical TIGER result. It is reported as a
+failed or APPROXIMATE run, with the offending counts, and no comparison against SASRec,
+Two-Tower or GenRec-v0 is made.
+
+CERTIFIED means, mechanically:
+  status == "CERTIFIED"
+  method == "branch_and_bound"
+  certificate_holds_for_all_cases == true
+  budget_exhausted_cases == 0
+  the admissibility predicate of section 1 held for every scoring call used
+
+--------------------------------------------------------------------------------
+6. PERFORMANCE REPORTING -- DESCRIPTIVE, NO RETROACTIVE TARGET
+--------------------------------------------------------------------------------
+Reported at K in {5, 10, 20}: Recall@K, NDCG@K, HR@K.
+Reported as frozen references ONLY, never recomputed and never overwritten:
+  SASRec     Recall@10 = 0.01350
+  Two-Tower  Recall@10 = 0.01435
+  GenRec-v0  Recall@10 = 0.00185
+TIGER is NOT characterised as better or worse until its certified metrics exist.
+No Recall target is invented. No threshold is selected after seeing TIGER's numbers.
+
+Tie handling           descending score, then ascending item id (deterministic)
+Duplicate resolved items  deduplicated, highest score kept, earliest rank kept
+SID collisions         smallest item id wins; must be 0 in the frozen assignment (else G14 fails)
+Reported per run       wall time, device, peak VRAM, users/sec, prefixes expanded, nodes
+                       pruned by bound, scoring volume, cache strategy, and the full hash chain
+
+--------------------------------------------------------------------------------
+7. STOP CONDITIONS (return the blocker, never weaken the contract)
+--------------------------------------------------------------------------------
+STOP immediately if: the accepted checkpoint hash mismatches; a SID artifact hash mismatches;
+identity resolution is not deterministic; CERTIFIED completeness cannot be proven; the shared
+evaluator would need semantic changes; the frozen cohort cannot be reproduced; or the existing
+benchmark protocol would need alteration.
+
+--------------------------------------------------------------------------------
+8. H7/H8 SEQUENCING
+--------------------------------------------------------------------------------
+G13..G16 must all PASS and this contract must be frozen and hashed BEFORE H7 runs.
+H7: 20 000-user cohort, full catalogue, CERTIFIED only, K = 5/10/20.
+H8: shared-evaluator canonical report.
+No TIGER metric is canonical unless it came from CERTIFIED mode.
+================================================================================

@@ -1,0 +1,87 @@
+====================================================================================================
+STEP 2.8b -- FUSION ROBUSTNESS: PRE-REGISTRATION
+====================================================================================================
+
+Written and hashed BEFORE any depth-sensitivity metric or uncertainty result exists.
+
+--- 1. frozen Step-2.8 policy (NOT modified, NOT overwritten) ---
+  SASRec depth 1000 | Two-Tower depth 1000 | TIGER full certified frontier | RRF_K 60 | weights 1/1/1
+  Step-2.8 report sha256 b901fc516c938cac1668952f6a8fa426a18f44ea8955978d15a2a66270bbd179
+  Step-2.8 frozen result: A R@10 0.01745 (349 hits) | D R@10 0.01810 (362 hits) |
+  gained 115, lost 102, net +13 | TIGER-only 138, retained 69 (50.0%)
+
+--- 2. the ONE common-depth diagnostic ---
+  depth = 20 for EVERY source.  Chosen because 20 is the largest canonical evaluation K in the
+  frozen protocol (K = 5/10/20), NOT from observed fusion performance.
+  A20 = SASRec(top20) + Two-Tower(top20)
+  D20 = SASRec(top20) + Two-Tower(top20) + TIGER(top20)
+  Identical RRF_K=60, weights 1, dedup, tie-breaking, cohort, evaluator.
+  NO other depth is attempted (no 10/30/50/100).  This is sensitivity analysis, not a search.
+  The asymmetric and common-depth policies are BOTH reported; neither is selected on the
+  basis of which scores better.
+
+--- 3. artifact reuse (section 6) ---
+  No retrieval, inference or training is re-run.
+    SASRec / Two-Tower source heads: /tmp/step28_heads_cache.npz, 20 000 rows x depth 1000,
+      produced by the Step-2.8 run (which reproduced the historical fusion control bit-exactly)
+    TIGER source heads: runs/step28_tiger_heads.jsonl, 20 000 rows, min depth 20
+  Top-20 is therefore an exact deterministic truncation of frozen ranked output.
+  The asymmetric A/D arms are ALSO re-derived from the same frozen heads so their per-user
+  ranks are available for the paired analysis; the resulting rank-array hashes are compared to
+  the frozen Step-2.8 values as an integrity check.
+
+--- 4. paired uncertainty method (PREDECLARED) ---
+  Binary hit/Recall comparison: EXACT paired McNemar test
+    b = A hit and D miss      c = A miss and D hit      n = b + c
+    two-sided exact p = min(1, 2 * sum_{k=0}^{min(b,c)} C(n,k) / 2^n)
+    reported at K = 5, 10, 20 for BOTH the asymmetric policy (A vs D) and the common-depth
+    policy (A20 vs D20).  No continuity correction is used because the exact test does not
+    need one.
+  NDCG comparison: PAIRED USER-LEVEL BOOTSTRAP
+    resample the 20 000 users with replacement, 10 000 resamples, seed 20260201
+    per-user NDCG@K = ndcg_at_k(rank, K) from the frozen recommendation.evaluation.metrics
+    report the observed paired mean difference and the 2.5th/97.5th percentiles as a 95% CI
+  Both are uncertainty CHARACTERIZATION.  Neither is a pass threshold and neither is a new
+  acceptance criterion.
+
+--- 5. no post-hoc threshold ---
+  Point estimate, uncertainty and depth robustness are interpreted SEPARATELY.  A positive
+  point estimate with wide uncertainty will be described as such; no significance requirement
+  is introduced after seeing the result.
+
+--- 6. correctness gates R1-R8 (frozen before results) ---
+  R1 source artifact hashes match the frozen Step-2.8 inputs
+  R2 cohort 20 000 / 20 000 identical
+  R3 target identities identical
+  R4 common-depth truncation is deterministic
+  R5 same RRF implementation (reciprocal_rank_fusion, RRF_K=60)
+  R6 same evaluator (evaluate_arm -> evaluate_batched)
+  R7 no target leakage
+  R8 repeated ranks and metrics deterministic
+  All must PASS before interpretation.
+
+--- 7. decision this milestone informs ---
+  whether a WEIGHTED-RRF study is scientifically justified.  If authorised later, weights must
+  be selected and frozen on validation targets and evaluated once on test; the test cohort must
+  never be used for weight search.  No learned or calibrated fusion is authorised here.
+
+--- 8. repository state at freeze ---
+  git HEAD   6447d7580a8f84eebaed6a76a0941c2c776e673a
+  git branch master
+  git diff --stat [recommendation/control/arguments.py       | 10 +++++++ |  recommendation/control/candidate_plane.py | 44 ++++++++++++++++++++++++------- |  2 files changed, 45 insertions(+), 9 deletions(-)]
+  git status --porcelain:
+M recommendation/control/arguments.py
+ M recommendation/control/candidate_plane.py
+?? experiments/step27_qualification.py
+?? experiments/step27_tiger_engines.py
+?? experiments/step28_fusion_experiment.py
+?? recommendation/control/tiger_source.py
+?? tests/test_tiger_source.py
+  frozen input hashes:
+    runs/step28-fusion-results.json                          c4439c839a90a46628c8b9680ddfafe1ffb224eb66ab24f724c5829acc9ea8a5
+    runs/step28_tiger_heads.jsonl                            3198d059f2419721d953cfbae6e5625e569e74dc954d72b9e8f1c528d0574934
+    runs/step26-phase5-complementarity-canonical.json        a03ec4497df3787abb562ad082022b93b2718bc27f26c3ce53f116f5bdc7abfb
+    runs/step26_baseline_evidence/phase5_sasrec_hits.npz     3072c86055cd4d093147ef10e19ed8121fb70215d581198b3261380df83d0252
+    runs/step26_baseline_evidence/phase5_twotower_hits.npz   71516247b7685bee34e161a9d3c81efd57cb8c2a51c94e0efb7937b2eaf34229
+    /tmp/step28_heads_cache.npz                              d0361df743146461114af00b48c1e77bc0bcb3ed3bc6b37aaf85a08bbcf790dc
+====================================================================================================
