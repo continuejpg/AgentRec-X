@@ -236,6 +236,9 @@ class CandidatePlane:
     similar_item_tool:
         Optional item-item similarity tool.  Absent unless explicitly registered, because
         this repository has no item-item index without a separate build step.
+    tiger_tool:
+        Optional TIGER-FP32 generative-retrieval tool.  Absent unless explicitly registered;
+        Step 2.7 qualifies it as a source but does not wire it into the canonical runtime.
     """
 
     def __init__(
@@ -247,12 +250,14 @@ class CandidatePlane:
         catalog_search: CatalogSearchSource | None = None,
         similar_item_tool: CandidateSourceTool | None = None,
         two_tower_tool: CandidateSourceTool | None = None,
+        tiger_tool: CandidateSourceTool | None = None,
     ) -> None:
         if (
             history_tool is None
             and catalog_search is None
             and similar_item_tool is None
             and two_tower_tool is None
+            and tiger_tool is None
         ):
             raise PolicyActionError(
                 "a candidate plane needs at least one trusted candidate source"
@@ -278,6 +283,12 @@ class CandidatePlane:
                     "two_tower_tool must declare source=CandidateSource.TWO_TOWER"
                 )
             self._tools[CandidateSource.TWO_TOWER] = two_tower_tool
+        if tiger_tool is not None:
+            if tiger_tool.source is not CandidateSource.TIGER:
+                raise PolicyActionError(
+                    "tiger_tool must declare source=CandidateSource.TIGER"
+                )
+            self._tools[CandidateSource.TIGER] = tiger_tool
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -379,7 +390,8 @@ class CandidatePlane:
 
         # -- execute the source -------------------------------------------- #
         try:
-            if source in (CandidateSource.HISTORY, CandidateSource.TWO_TOWER):
+            if source in (CandidateSource.HISTORY, CandidateSource.TWO_TOWER,
+                          CandidateSource.TIGER):
                 # Identity-keyed sources are given the run's trusted history, which is the only
                 # channel through which behaviour reaches them.  A source never supplies its
                 # own history, so it cannot answer for a user it was not given.
@@ -402,7 +414,7 @@ class CandidatePlane:
             source=source,
             candidates=candidates,
             score_kind=tool.score_kind,
-            source_query=self._query_for(source, arguments),
+            source_query=self._query_for(source, arguments, tool),
             step_index=step_index,
         )
 
@@ -482,11 +494,25 @@ class CandidatePlane:
     # -- internals --------------------------------------------------------- #
 
     @staticmethod
-    def _query_for(source: CandidateSource, arguments: Any) -> str | None:
-        """Return the (untrusted) query text a source was given, for provenance only."""
-        if arguments is None:
-            return None
-        terms = getattr(arguments, "terms", None)
-        if terms:
-            return " ".join(str(term) for term in terms)[:200]
+    def _query_for(source: CandidateSource, arguments: Any, tool: Any = None) -> str | None:
+        """Return the (untrusted) query text a source was given, for provenance only.
+
+        A source with no query text can still have provenance worth recording.  TIGER carries a
+        retrieval *mode* and the artifact hashes that produced a candidate, and section 5 of the
+        Step-2.7 contract requires any downstream consumer to be able to inspect the mode.  The
+        shared provenance schema has no dedicated field for that, so a tool may expose a
+        ``provenance_token()`` and it is recorded here.  No existing source defines one, so their
+        recorded provenance is byte-identical to before.
+        """
+        if arguments is not None:
+            terms = getattr(arguments, "terms", None)
+            if terms:
+                return " ".join(str(term) for term in terms)[:200]
+        token_source = tool if tool is not None else None
+        if token_source is not None and callable(getattr(token_source, "provenance_token", None)):
+            try:
+                token = token_source.provenance_token()
+            except Exception:  # noqa: BLE001 - provenance must never fail a source call
+                return None
+            return str(token)[:200] if token else None
         return None

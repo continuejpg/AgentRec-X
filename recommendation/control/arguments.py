@@ -97,6 +97,12 @@ class CandidateSource(str, Enum):
     #: (a learned cosine versus a SASRec logit) and the ledger must be able to attribute a
     #: candidate to the model that actually proposed it.
     TWO_TOWER = "two_tower"
+    #: TIGER-FP32 generative retrieval over accepted Semantic IDs (Step 2.6/2.7).  A distinct
+    #: member for the same reason as ``TWO_TOWER``: its scores are Semantic-ID sequence
+    #: log-probabilities, a third scale that must never be compared with a SASRec logit or a
+    #: Two-Tower cosine, and the ledger has to attribute a candidate to the model that proposed
+    #: it.  Whether the tool is *configured* is a separate question, answered by the plane.
+    TIGER = "tiger"
 
 
 #: Sources that produce candidate identities.  A source that is not listed here may still
@@ -109,6 +115,10 @@ CANDIDATE_PRODUCING_SOURCES: tuple[CandidateSource, ...] = (
     # having a registered tool that returns identities the grounding verifier confirms; the
     # ledger refuses an unlisted source so a typo or a spoofed name cannot write provenance.
     CandidateSource.TWO_TOWER,
+    # Step 2.7: TIGER-FP32 joins the same gate.  Listing it here is what lets the ledger accept
+    # its provenance; it is still only *reachable* when a plane registers the tool, and it is not
+    # wired into the canonical runtime by this change.
+    CandidateSource.TIGER,
 )
 
 
