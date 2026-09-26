@@ -15,6 +15,10 @@ import pytest
 
 from experiments.m3_agent_benchmark import (
     EXPECTED,
+    FROZEN_PROVIDER,
+    build_m3_provider_client,
+    m3_provider_settings,
+    provider_config_checks,
     FrozenInputs,
     HardCheckFailure,
     agent_arm_ranks,
@@ -388,3 +392,170 @@ def test_compute_statistics_handles_disjoint_and_identical() -> None:
     assert at5["agent_hit_comparator_miss"] == 0
     assert at5["agent_miss_comparator_hit"] == 0
     assert at5["mcnemar_p"] == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# provider configuration compliance with the frozen DeepSeek amendment
+# --------------------------------------------------------------------------- #
+
+#: A placeholder, never a real credential. Tests never read the environment's real key.
+_TEST_KEY = "TEST-PLACEHOLDER-NOT-A-REAL-KEY"
+
+
+class _FakeTransport:
+    """Captures the outgoing request payload; performs no network call."""
+
+    def __init__(self) -> None:
+        self.payload: dict[str, Any] | None = None
+        self.headers: dict[str, str] | None = None
+        self.url: str | None = None
+
+    def __call__(self, url: str, *, headers: Any, payload: Any, timeout: Any) -> Any:
+        self.url = url
+        self.headers = dict(headers)
+        self.payload = dict(payload)
+        import json as _json
+
+        body = _json.dumps(
+            {
+                "choices": [
+                    {"message": {"content": '{"action": "finish"}'}, "finish_reason": "stop"}
+                ],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+                "model": "deepseek-flash",
+                "id": "req-test",
+            }
+        )
+        return 200, body
+
+
+def _set_provider_env(monkeypatch: pytest.MonkeyPatch, *, profile: str = "openai_compatible") -> None:
+    """Set the endpoint, a placeholder key, and a DELIBERATELY WRONG profile."""
+    monkeypatch.setenv("AGENTRECX_LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("AGENTRECX_LLM_MODEL", "deepseek-flash")
+    monkeypatch.setenv("AGENTRECX_LLM_API_KEY", _TEST_KEY)
+    monkeypatch.setenv("AGENTRECX_LLM_PROFILE", profile)
+
+
+def test_m3_settings_force_the_deepseek_profile_over_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The environment says openai_compatible; the runner must not obey it."""
+    _set_provider_env(monkeypatch, profile="openai_compatible")
+    settings = m3_provider_settings()
+
+    assert settings.profile.name == FROZEN_PROVIDER["profile"] == "deepseek"
+    assert settings.thinking is False
+    assert settings.json_mode is True
+
+
+def test_actual_request_payload_matches_the_frozen_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The strongest check: inspect the payload the adapter would really send."""
+    _set_provider_env(monkeypatch)
+    transport = _FakeTransport()
+    client = build_m3_provider_client(transport=transport)
+
+    from recommendation.control.model_client import ModelRequest
+
+    client.complete(ModelRequest(system_prompt="s", context_payload={}, action_schema=()))
+
+    payload = transport.payload
+    assert payload is not None
+    assert transport.url is not None and transport.url.endswith("/chat/completions")
+    assert payload["model"] == FROZEN_PROVIDER["model"]
+    assert payload["thinking"] == {"type": "disabled"}, "thinking must be explicitly disabled"
+    assert payload["temperature"] == FROZEN_PROVIDER["temperature"] == 0.0
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["max_tokens"] == FROZEN_PROVIDER["max_tokens"] == 512
+    assert payload["stream"] is False
+    assert "tools" not in payload and "tool_choice" not in payload
+    # the placeholder key travels in the header, never in the body
+    assert transport.headers is not None
+    assert _TEST_KEY not in str(payload)
+
+
+def test_provider_config_checks_pass_on_the_frozen_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_provider_env(monkeypatch)
+    assert provider_config_checks() == []
+
+
+def test_provider_config_checks_detect_profile_drift() -> None:
+    """A profile that does not disable thinking must be rejected."""
+    from recommendation.control.provider_adapter import PROVIDER_PROFILES
+
+    drifted = m3_provider_settings()
+    import dataclasses
+
+    drifted = dataclasses.replace(
+        drifted, profile=PROVIDER_PROFILES["openai_compatible"], thinking=False
+    )
+    problems = provider_config_checks(drifted)
+    assert problems, "the openai_compatible profile does not send thinking=disabled"
+    assert any("thinking" in p or "profile" in p for p in problems)
+
+
+def test_provider_config_checks_detect_thinking_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dataclasses
+
+    _set_provider_env(monkeypatch)
+    drifted = dataclasses.replace(m3_provider_settings(), thinking=True)
+    problems = provider_config_checks(drifted)
+    assert any("thinking" in p for p in problems), problems
+
+
+def test_provider_config_checks_detect_json_mode_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import dataclasses
+
+    _set_provider_env(monkeypatch)
+    drifted = dataclasses.replace(m3_provider_settings(), json_mode=False)
+    problems = provider_config_checks(drifted)
+    assert any("json_mode" in p or "response_format" in p for p in problems), problems
+
+
+def test_preflight_stops_when_the_provider_config_drifts(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from experiments import m3_agent_benchmark as runner
+
+    monkeypatch.setattr(runner, "provider_config_checks", lambda settings=None: ["drifted"])
+    with pytest.raises(HardCheckFailure):
+        runner.run_preflight(
+            out=tmp_path, client_factory=lambda: _StubClient(['{"action":"finish"}']), calls=1
+        )
+
+
+def test_execute_stops_when_the_provider_config_drifts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from experiments import m3_agent_benchmark as runner
+
+    monkeypatch.setattr(runner, "provider_config_checks", lambda settings=None: ["drifted"])
+    with pytest.raises(HardCheckFailure):
+        runner.run_execute(
+            out=runner.DEFAULT_OUT,
+            client_factory=lambda: _StubClient(['{"action":"finish"}']),
+            frozen=_frozen(users=3, with_cohort=False),
+        )
+
+
+def test_unconfigured_provider_stops_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No credential must be a STOP, not a traceback."""
+    for name in (
+        "AGENTRECX_LLM_BASE_URL",
+        "AGENTRECX_LLM_MODEL",
+        "AGENTRECX_LLM_API_KEY",
+        "AGENTRECX_LLM_PROFILE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    rc = main(["--preflight", "--calls", "1"])
+    assert rc == 3
+    assert "STOP" in capsys.readouterr().err

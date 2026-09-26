@@ -77,15 +77,124 @@ EXPECTED: dict[str, Any] = {
     "prereg": "docs/M3_PREREGISTRATION.md",
 }
 
+#: The provider configuration frozen by docs/M3_DEEPSEEK_AMENDMENT.md. The runner does not
+#: inherit these from the environment: it FORCES them, and then hard-checks the payload that
+#: would actually go out. The endpoint (base URL and model) is read from the environment
+#: because the amendment fixes its value, not its storage.
+FROZEN_PROVIDER: dict[str, Any] = {
+    "profile": "deepseek",
+    "thinking": False,
+    "temperature": 0.0,
+    "json_mode": True,
+    "max_tokens": 512,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+}
+
 SEQUENCES = REPO / "data/processed/Sports_and_Outdoors_sequences.json"
 MAPPINGS = REPO / "data/processed/Sports_and_Outdoors_mappings.json"
 PRODUCTS = REPO / "data/processed/Sports_and_Outdoors_products.jsonl"
 PROJECT_STATE = REPO / "docs/PROJECT_STATE.md"
+
+from recommendation.control.provider_adapter import provider_settings  # noqa: E402
 DEFAULT_OUT = REPO / "runs" / "m3_execution"
 
 
 class HardCheckFailure(RuntimeError):
     """A hard check failed. The run must stop before any model call or evaluation."""
+
+
+def m3_provider_settings() -> Any:
+    """The settings the M3 runner uses: endpoint from the environment, the rest FORCED.
+
+    Forcing the profile matters: ``AGENTRECX_LLM_PROFILE`` unset resolves to
+    ``openai_compatible``, which never sends ``thinking`` at all — and DeepSeek enables
+    thinking by default, which would ignore the frozen ``temperature`` and return
+    ``reasoning_content``. The amendment froze the ``deepseek`` profile, so the runner
+    selects it regardless of the environment.
+    """
+    import dataclasses
+
+    from recommendation.control.provider_adapter import PROVIDER_PROFILES, ProviderSettings
+
+    profile = PROVIDER_PROFILES[FROZEN_PROVIDER["profile"]]
+    try:
+        base = provider_settings()
+    except Exception:
+        return ProviderSettings(
+            base_url="",
+            model="",
+            profile=profile,
+            timeout=30.0,
+            json_mode=bool(FROZEN_PROVIDER["json_mode"]),
+            thinking=bool(FROZEN_PROVIDER["thinking"]),
+            api_key_present=False,
+            input_price_per_million=None,
+            output_price_per_million=None,
+        )
+    return dataclasses.replace(
+        base,
+        profile=profile,
+        json_mode=bool(FROZEN_PROVIDER["json_mode"]),
+        thinking=bool(FROZEN_PROVIDER["thinking"]),
+    )
+
+
+def build_m3_provider_client(*, transport: Any = None) -> Any:
+    """Build the M3 provider client with the frozen profile and sampling configuration."""
+    from recommendation.control.provider_adapter import build_provider_client
+
+    settings = m3_provider_settings()
+    return build_provider_client(
+        settings=settings,
+        transport=transport,
+        temperature=FROZEN_PROVIDER["temperature"],
+        max_tokens=FROZEN_PROVIDER["max_tokens"],
+    )
+
+
+def provider_config_checks(settings: Any = None) -> list[str]:
+    """Verify the request the M3 client would actually send matches the frozen amendment.
+
+    Checked against the real profile's ``build_payload``, not against the constants, so a
+    profile that silently ignored a field would be caught.
+    """
+    resolved = settings if settings is not None else m3_provider_settings()
+    problems: list[str] = []
+
+    if resolved.profile.name != FROZEN_PROVIDER["profile"]:
+        problems.append(
+            f"provider profile is {resolved.profile.name!r}, frozen is "
+            f"{FROZEN_PROVIDER['profile']!r}"
+        )
+    if bool(resolved.thinking) is not bool(FROZEN_PROVIDER["thinking"]):
+        problems.append(f"thinking is {resolved.thinking}, frozen is {FROZEN_PROVIDER['thinking']}")
+    if bool(resolved.json_mode) is not bool(FROZEN_PROVIDER["json_mode"]):
+        problems.append(f"json_mode is {resolved.json_mode}, frozen is {FROZEN_PROVIDER['json_mode']}")
+
+    payload = resolved.profile.build_payload(
+        model=resolved.model or FROZEN_PROVIDER["model"],
+        messages=[{"role": "user", "content": "x"}],
+        temperature=FROZEN_PROVIDER["temperature"],
+        thinking=FROZEN_PROVIDER["thinking"],
+        json_mode=resolved.json_mode,
+        max_tokens=FROZEN_PROVIDER["max_tokens"],
+    )
+    if payload.get("thinking") != {"type": "disabled"}:
+        problems.append(f"payload thinking is {payload.get('thinking')!r}, frozen is disabled")
+    if payload.get("temperature") != FROZEN_PROVIDER["temperature"]:
+        problems.append(
+            f"payload temperature is {payload.get('temperature')!r}, frozen is "
+            f"{FROZEN_PROVIDER['temperature']}"
+        )
+    if payload.get("response_format") != {"type": "json_object"}:
+        problems.append(f"payload response_format is {payload.get('response_format')!r}")
+    if payload.get("max_tokens") != FROZEN_PROVIDER["max_tokens"]:
+        problems.append(
+            f"payload max_tokens is {payload.get('max_tokens')!r}, frozen is "
+            f"{FROZEN_PROVIDER['max_tokens']}"
+        )
+    return problems
 
 
 def _sha256(path: pathlib.Path) -> str:
@@ -443,13 +552,10 @@ def run_preflight(
     This function does not import ``evaluate_batched``, does not load the cohort and does not
     build the Agent arm, so no recommendation metric can be produced here even by accident.
     """
-    problems = artifact_checks(load_frozen_inputs(with_cohort=False))
-    guard(problems)
+    guard(artifact_checks(load_frozen_inputs(with_cohort=False)), provider_config_checks())
 
     if client_factory is None:
-        from recommendation.control.provider_adapter import build_provider_client
-
-        client_factory = build_provider_client
+        client_factory = build_m3_provider_client
     recording = UsageRecordingClient(client_factory())
     request = _smoke_request()
 
@@ -591,12 +697,10 @@ def run_execute(
     from experiments.m3_agent_harness import RealCatalogueHarnessFactory
 
     frozen = frozen or load_frozen_inputs(with_cohort=True)
-    guard(artifact_checks(frozen), cohort_checks(frozen))
+    guard(artifact_checks(frozen), cohort_checks(frozen), provider_config_checks())
 
     if client_factory is None:
-        from recommendation.control.provider_adapter import build_provider_client
-
-        client_factory = build_provider_client
+        client_factory = build_m3_provider_client
 
     recording = UsageRecordingClient(client_factory())
     from recommendation.control.model_client import ModelCallError
@@ -671,6 +775,8 @@ def run_execute(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from recommendation.control.model_client import ModelCallError
+
     parser = argparse.ArgumentParser(
         prog="python -m experiments.m3_agent_benchmark",
         description=__doc__,
@@ -699,6 +805,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = run_execute(out=out)
     except HardCheckFailure as exc:
         print(f"STOP — {exc}", file=sys.stderr)
+        return 3
+    except ModelCallError as exc:
+        # a missing or unusable provider is a stop, not a traceback
+        print(f"STOP — provider is not usable: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
