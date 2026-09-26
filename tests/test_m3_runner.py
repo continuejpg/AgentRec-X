@@ -63,16 +63,49 @@ def _frozen(*, users: int, aligned: bool = True, with_cohort: bool = True) -> Fr
 class _StubClient:
     """A minimal structured-model client: answers from a list, never touches a network."""
 
-    def __init__(self, texts: list[str]) -> None:
+    def __init__(self, texts: list[str], *, finish_reason: str | None = "stop",
+                 raises: Exception | None = None) -> None:
         self._texts = list(texts)
+        self._finish_reason = finish_reason
+        self._raises = raises
         self.calls = 0
 
     def complete(self, request: Any) -> ModelResponse:
+        if self._raises is not None:
+            self.calls += 1
+            raise self._raises
         text = self._texts[min(self.calls, len(self._texts) - 1)]
         self.calls += 1
         return ModelResponse(
-            text=text, model_id="stub", input_tokens=10, output_tokens=5, latency_ms=1.5
+            text=text, model_id="stub", input_tokens=10, output_tokens=5, latency_ms=1.5,
+            finish_reason=self._finish_reason,
         )
+
+
+def _probe_harness(client: Any) -> tuple[Any, Any]:
+    """A fixture-backed harness factory, so preflight tests stay fast and cohort-free.
+
+    The policy and the control plane are the real ones; only the catalogue is synthetic.
+    """
+    from recommendation.control.model_policy import LLMAgentPolicy
+    from tests.agent_reranking_fixture import CANDIDATE_ROWS
+    from tests.test_m3_agent_arm import _build_harness
+
+    def build(case: Any) -> Any:
+        return _build_harness(LLMAgentPolicy(client, max_attempts=2))
+
+    return build, {row[0]: row[1] for row in CANDIDATE_ROWS}
+
+
+def _preflight(tmp_path: Any, client: Any, *, calls: int = 2) -> dict[str, Any]:
+    harness_factory, item2id = _probe_harness(client)
+    return run_preflight(
+        out=tmp_path,
+        client_factory=lambda: client,
+        calls=calls,
+        harness_factory=harness_factory,
+        item2id=item2id,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -118,11 +151,7 @@ def test_preflight_never_reaches_the_evaluator(
 
     monkeypatch.setattr(batched, "evaluate_batched", _explode)
 
-    summary = run_preflight(
-        out=tmp_path,
-        client_factory=lambda: _StubClient(['{"action": "finish"}']),
-        calls=2,
-    )
+    summary = _preflight(tmp_path, _StubClient(['{"action": "finish"}']), calls=2)
 
     assert summary["evaluator_invoked"] is False
     assert summary["cohort_loaded"] is False
@@ -131,11 +160,7 @@ def test_preflight_never_reaches_the_evaluator(
 
 
 def test_preflight_reports_usage_and_no_recommendation_metrics(tmp_path: Any) -> None:
-    summary = run_preflight(
-        out=tmp_path,
-        client_factory=lambda: _StubClient(['{"action": "finish"}']),
-        calls=3,
-    )
+    summary = _preflight(tmp_path, _StubClient(['{"action": "finish"}']), calls=3)
 
     for key in (
         "provider_calls",
@@ -148,9 +173,10 @@ def test_preflight_reports_usage_and_no_recommendation_metrics(tmp_path: Any) ->
     ):
         assert key in summary, key
 
-    assert summary["provider_calls"] == 3
-    assert summary["input_tokens"] == 30
+    assert summary["provider_calls"] >= 3
+    assert summary["input_tokens"] >= 30
     assert summary["json_parse_successes"] == 3
+    assert summary["provider_connected"] is True
 
     # no recommendation metric of any kind
     blob = str(summary).lower()
@@ -159,19 +185,80 @@ def test_preflight_reports_usage_and_no_recommendation_metrics(tmp_path: Any) ->
 
 
 def test_preflight_counts_unparseable_answers(tmp_path: Any) -> None:
-    summary = run_preflight(
-        out=tmp_path,
-        client_factory=lambda: _StubClient(["not json at all"]),
-        calls=2,
-    )
-    assert summary["provider_calls"] == 2
+    summary = _preflight(tmp_path, _StubClient(["not json at all"]), calls=2)
+    assert summary["provider_calls"] >= 2
     assert summary["json_parse_successes"] == 0
     assert summary["failure_rate"] == 0.0
 
 
 def test_preflight_writes_its_sidecar(tmp_path: Any) -> None:
-    run_preflight(out=tmp_path, client_factory=lambda: _StubClient(['{"action":"finish"}']), calls=1)
+    _preflight(tmp_path, _StubClient(['{"action":"finish"}']), calls=1)
     assert (tmp_path / "preflight.json").is_file()
+
+
+# --------------------------------------------------------------------------- #
+# preflight drives the real policy and control plane
+# --------------------------------------------------------------------------- #
+
+
+def test_preflight_drives_the_real_policy_and_control_plane(tmp_path: Any) -> None:
+    client = _StubClient(['{"action": "recommend_from_history", "k": 3}', '{"action": "finish"}'])
+    summary = _preflight(tmp_path, client)
+
+    control = summary["control_plane"]
+    assert control["evaluator_invoked"] is False
+    assert control["recommendation_metrics_computed"] is False
+    assert control["action_sequence"], "the real policy proposed actions"
+    assert control["termination_status"] is not None
+    assert control["synthetic_case"]["cohort_member"] is False
+    assert control["synthetic_case"]["target_scored"] is False
+    assert client.calls > 0, "the policy actually asked the provider for decisions"
+
+
+def test_preflight_reports_schema_finish_reason_and_tokens(tmp_path: Any) -> None:
+    client = _StubClient(['{"action": "finish"}'], finish_reason="stop")
+    summary = _preflight(tmp_path, client, calls=1)
+
+    assert summary["schema_actions_validated"] is True
+    assert summary["action_schema_offered"], "the offered actions are reported"
+    assert summary["finish_reasons"] == {"stop": summary["finish_reasons"].get("stop")}
+    assert summary["finish_reasons"]["stop"] >= 1
+    assert summary["total_tokens"] >= 15
+    assert summary["latency_ms_total"] > 0
+
+
+def test_preflight_reports_retries_on_unparseable_answers(tmp_path: Any) -> None:
+    summary = _preflight(tmp_path, _StubClient(["definitely not json"]), calls=1)
+
+    control = summary["control_plane"]
+    # the policy retried and the control plane still terminated — reported, not crashed
+    assert control["termination_status"] is not None
+    assert "control_plane_error" not in control or control["control_plane_error"]
+    assert summary["json_parse_successes"] == 0
+
+
+def test_preflight_reports_provider_failure_codes(tmp_path: Any) -> None:
+    from recommendation.control.model_client import ModelCallError
+
+    client = _StubClient(['{"action": "finish"}'],
+                         raises=ModelCallError("boom", code="timeout"))
+    summary = _preflight(tmp_path, client, calls=2)
+
+    assert summary["provider_failures"] >= 1
+    assert summary["failure_codes"].get("timeout", 0) >= 1
+    assert summary["provider_connected"] is False
+    assert summary["evaluator_invoked"] is False
+
+
+def test_preflight_non_cohort_isolation(tmp_path: Any) -> None:
+    summary = _preflight(tmp_path, _StubClient(['{"action": "finish"}']), calls=1)
+
+    assert summary["cohort_loaded"] is False
+    assert summary["cohort_users"] == 0
+    assert summary["control_plane"]["synthetic_case"]["cohort_member"] is False
+    blob = str(summary).lower()
+    for banned in ("ndcg", "recall@", "hr@", "precision", "map@"):
+        assert banned not in blob, banned
 
 
 # --------------------------------------------------------------------------- #

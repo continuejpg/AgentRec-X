@@ -276,10 +276,20 @@ class UsageRecordingClient:
         self.latency_ms = 0.0
         self.failures = 0
         self.codes: dict[str, int] = {}
+        self.finish_reasons: dict[str, int] = {}
+        self.schema_actions: list[str] = []
+        self.requests_seen = 0
 
     def complete(self, request: Any) -> Any:
         from recommendation.control.model_client import ModelCallError
 
+        self.requests_seen += 1
+        if not self.schema_actions:
+            self.schema_actions = [
+                str(entry.get("action"))
+                for entry in (getattr(request, "action_schema", ()) or ())
+                if isinstance(entry, dict) and entry.get("action") is not None
+            ]
         try:
             response = self._inner.complete(request)
         except ModelCallError as exc:
@@ -288,6 +298,10 @@ class UsageRecordingClient:
             self.codes[str(code)] = self.codes.get(str(code), 0) + 1
             raise
         self.calls += 1
+        reason = getattr(response, "finish_reason", None)
+        if reason is not None:
+            key = str(reason)
+            self.finish_reasons[key] = self.finish_reasons.get(key, 0) + 1
         self.input_tokens += int(getattr(response, "input_tokens", 0) or 0)
         self.output_tokens += int(getattr(response, "output_tokens", 0) or 0)
         self.latency_ms += float(getattr(response, "latency_ms", 0.0) or 0.0)
@@ -301,6 +315,10 @@ class UsageRecordingClient:
             "attempts": total,
             "failure_rate": (self.failures / total) if total else 0.0,
             "failure_codes": dict(self.codes),
+            "finish_reasons": dict(self.finish_reasons),
+            "action_schema_offered": list(self.schema_actions),
+            "schema_actions_validated": bool(self.schema_actions),
+            "requests_seen": self.requests_seen,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.input_tokens + self.output_tokens,
@@ -341,11 +359,84 @@ def _smoke_request() -> Any:
     )
 
 
+def synthetic_case() -> Any:
+    """A synthetic, non-cohort case used only to drive the control plane.
+
+    Its ``test_target`` is never scored: preflight has no evaluator, so this case cannot
+    produce a recommendation metric. The history uses ordinary catalogue item ids.
+    """
+    from recommendation.evaluation.split import EvaluationCase
+
+    history = (1, 2, 3, 4)
+    return EvaluationCase(
+        user_id="preflight-synthetic",
+        user_int_id=1,
+        train_history=history,
+        validation_target=5,
+        test_target=5,
+        sequence_length=len(history) + 1,
+    )
+
+
+def control_plane_probe(
+    *,
+    client: Any,
+    harness_factory: Callable[[Any], Any] | None = None,
+    item2id: Any = None,
+) -> dict[str, Any]:
+    """Drive the REAL policy through the REAL bounded control plane on a synthetic case.
+
+    Real ``LLMAgentPolicy``, real ``LoopController``, real action validation — only the case and
+    the catalogue binding are synthetic. This function never imports or calls ``evaluate_batched``
+    and never loads the cohort, so it cannot compute a recommendation metric.
+    """
+    from experiments.m3_agent_arm import M3AgentRunner
+    from recommendation.control.model_policy import LLMAgentPolicy
+
+    if harness_factory is None:
+        from experiments.m3_agent_harness import RealCatalogueHarnessFactory
+
+        built = RealCatalogueHarnessFactory(
+            policy_factory=lambda: LLMAgentPolicy(client, max_attempts=2),
+            user_order=(1,),
+        )
+        harness_factory = built
+        item2id = built.shared().item2id
+
+    case = synthetic_case()
+    runner = M3AgentRunner(harness_factory=harness_factory, item2id=item2id)
+    outcome = runner.run(case)
+    behavior = outcome.behavior
+    return {
+        "synthetic_case": {
+            "user_int_id": int(case.user_int_id),
+            "history_items": len(case.test_history),
+            "cohort_member": False,
+            "target_scored": False,
+        },
+        "action_sequence": behavior["action_sequence"],
+        "termination_status": behavior["status"],
+        "termination_reason": behavior["termination_reason"],
+        "control_plane_completed": bool(behavior["succeeded"]),
+        "steps": behavior["steps"],
+        "tool_calls": behavior["tool_calls"],
+        "retries": behavior["retries"],
+        "ranking_size": behavior["ranking_size"],
+        "fallback": bool(behavior["budget_exhausted"]),
+        "failure": bool(behavior["failure"]),
+        "candidates": behavior["candidates"],
+        "evaluator_invoked": False,
+        "recommendation_metrics_computed": False,
+    }
+
+
 def run_preflight(
     *,
     out: pathlib.Path,
     client_factory: Callable[[], Any] | None = None,
     calls: int = 3,
+    harness_factory: Callable[[Any], Any] | None = None,
+    item2id: Any = None,
 ) -> dict[str, Any]:
     """Provider smoke on non-cohort inputs. Structurally cannot reach the evaluator.
 
@@ -377,6 +468,20 @@ def run_preflight(
         except (TypeError, ValueError):
             pass
 
+    from recommendation.control.model_client import ModelCallError
+
+    try:
+        control = control_plane_probe(
+            client=recording, harness_factory=harness_factory, item2id=item2id
+        )
+    except ModelCallError as exc:
+        # reported, not raised: a preflight exists to surface this
+        control = {
+            "control_plane_error": str(getattr(exc, "code", "model_error")),
+            "evaluator_invoked": False,
+            "recommendation_metrics_computed": False,
+        }
+
     out.mkdir(parents=True, exist_ok=True)
     summary = {
         "mode": "preflight",
@@ -386,6 +491,9 @@ def run_preflight(
         "recommendation_metrics_computed": False,
         "requested_calls": int(calls),
         "json_parse_successes": parsed,
+        "json_parse_rate": (parsed / int(calls)) if int(calls) else 0.0,
+        "provider_connected": recording.calls > 0,
+        "control_plane": control,
         **recording.summary(),
     }
     (out / "preflight.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
