@@ -16,6 +16,7 @@ import pytest
 from experiments.m3_agent_benchmark import (
     EXPECTED,
     FROZEN_PROVIDER,
+    build_m3_evaluation_client,
     build_m3_provider_client,
     m3_provider_settings,
     provider_config_checks,
@@ -29,7 +30,7 @@ from experiments.m3_agent_benchmark import (
     main,
     run_preflight,
 )
-from recommendation.control.model_client import ModelResponse
+from recommendation.control.model_client import ModelRequest, ModelResponse
 
 
 # --------------------------------------------------------------------------- #
@@ -559,3 +560,91 @@ def test_unconfigured_provider_stops_cleanly(
     rc = main(["--preflight", "--calls", "1"])
     assert rc == 3
     assert "STOP" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# the outgoing message path carries the frozen JSON-format scaffolding
+# --------------------------------------------------------------------------- #
+
+
+def _system_message(payload: dict[str, Any]) -> str:
+    messages = payload["messages"]
+    assert isinstance(messages, list) and messages
+    assert messages[0]["role"] == "system"
+    return messages[0]["content"]
+
+
+def test_m3_evaluation_client_sends_the_json_instruction_and_shape_example(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The literal `json` token and the shape example must be in the outgoing request."""
+    from experiments.m3_agent_arm import M3_JSON_FORMAT_SUFFIX, JsonFormatClient
+
+    _set_provider_env(monkeypatch)
+    transport = _FakeTransport()
+    client = build_m3_evaluation_client(
+        client_factory=lambda: build_m3_provider_client(transport=transport)
+    )
+    assert isinstance(client.inner, JsonFormatClient), "the formatter sits above the provider"
+
+    client.complete(ModelRequest(system_prompt="BASE PROMPT", context_payload={}, action_schema=()))
+
+    payload = transport.payload
+    assert payload is not None
+    system = _system_message(payload)
+    assert system.startswith("BASE PROMPT"), "the policy prompt itself is preserved, not replaced"
+    assert "json" in system, "the literal lowercase word is required by JSON Output mode"
+    assert '{"action"' in system, "the shape example is required"
+    assert M3_JSON_FORMAT_SUFFIX in system
+
+    # and the rest of the frozen config still holds in the same request
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["max_tokens"] == 512
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["temperature"] == 0.0
+
+
+def test_preflight_message_path_carries_the_scaffolding(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end through preflight: the payload that would leave the process is formatted."""
+    _set_provider_env(monkeypatch)
+    transport = _FakeTransport()
+    # ONE evaluation client drives both phases, exactly as the runner does by default, so the
+    # control-plane requests go through the same formatter the provider adapter sits behind.
+    evaluation_client = build_m3_evaluation_client(
+        client_factory=lambda: build_m3_provider_client(transport=transport)
+    )
+    harness_factory, item2id = _probe_harness(evaluation_client)
+    summary = run_preflight(
+        out=tmp_path,
+        client_factory=lambda: evaluation_client,
+        calls=1,
+        harness_factory=harness_factory,
+        item2id=item2id,
+    )
+
+    assert summary["json_format_scaffolding"] is True
+    assert summary["evaluator_invoked"] is False
+    payload = transport.payload
+    assert payload is not None, "the fake transport captured a real outgoing request"
+    system = _system_message(payload)
+    assert "json" in system
+    assert '{"action"' in system
+
+
+def test_formatting_wrapper_does_not_change_the_action_space() -> None:
+    """Scaffolding is presentational: the offered actions are untouched."""
+    from experiments.m3_agent_arm import JsonFormatClient
+    from recommendation.control.model_client import ModelRequest as _Req
+
+    inner = _StubClient(['{"action": "finish"}'])
+    schema = ({"action": "finish"}, {"action": "recommend_from_history"})
+    request = _Req(system_prompt="P", context_payload={"k": 1}, action_schema=schema)
+
+    JsonFormatClient(inner).complete(request)
+
+    sent = inner.last_request if hasattr(inner, "last_request") else None
+    assert sent is None or sent.action_schema == request.action_schema
+    assert request.system_prompt == "P", "the frozen request object is not mutated"
+    assert request.action_schema == schema

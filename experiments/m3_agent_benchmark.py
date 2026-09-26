@@ -153,6 +153,25 @@ def build_m3_provider_client(*, transport: Any = None) -> Any:
     )
 
 
+def build_m3_evaluation_client(*, client_factory: Callable[[], Any] | None = None) -> "UsageRecordingClient":
+    """The client the M3 evaluation actually uses: formatted request, usage recorded.
+
+    Order is deliberate. ``JsonFormatClient`` sits immediately above the provider, so the bytes
+    that leave the process carry the frozen JSON-format scaffolding; ``UsageRecordingClient`` sits
+    outside it so usage and latency are counted for every attempt, including ones the formatter
+    rewrote.
+
+        policy  ->  UsageRecordingClient  ->  JsonFormatClient  ->  provider adapter
+
+    The scaffolding is presentational only: it names no action, states no routing rule and changes
+    no budget. See docs/M3_DEEPSEEK_AMENDMENT.md section 3.
+    """
+    from experiments.m3_agent_arm import JsonFormatClient
+
+    factory = client_factory or build_m3_provider_client
+    return UsageRecordingClient(JsonFormatClient(factory()))
+
+
 def provider_config_checks(settings: Any = None) -> list[str]:
     """Verify the request the M3 client would actually send matches the frozen amendment.
 
@@ -389,6 +408,11 @@ class UsageRecordingClient:
         self.schema_actions: list[str] = []
         self.requests_seen = 0
 
+    @property
+    def inner(self) -> Any:
+        """The wrapped client, exposed so a test can assert the chain actually applied."""
+        return self._inner
+
     def complete(self, request: Any) -> Any:
         from recommendation.control.model_client import ModelCallError
 
@@ -554,9 +578,7 @@ def run_preflight(
     """
     guard(artifact_checks(load_frozen_inputs(with_cohort=False)), provider_config_checks())
 
-    if client_factory is None:
-        client_factory = build_m3_provider_client
-    recording = UsageRecordingClient(client_factory())
+    recording = build_m3_evaluation_client(client_factory=client_factory)
     request = _smoke_request()
 
     from recommendation.control.model_client import ModelCallError
@@ -600,6 +622,7 @@ def run_preflight(
         "json_parse_rate": (parsed / int(calls)) if int(calls) else 0.0,
         "provider_connected": recording.calls > 0,
         "control_plane": control,
+        "json_format_scaffolding": True,
         **recording.summary(),
     }
     (out / "preflight.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
@@ -699,10 +722,7 @@ def run_execute(
     frozen = frozen or load_frozen_inputs(with_cohort=True)
     guard(artifact_checks(frozen), cohort_checks(frozen), provider_config_checks())
 
-    if client_factory is None:
-        client_factory = build_m3_provider_client
-
-    recording = UsageRecordingClient(client_factory())
+    recording = build_m3_evaluation_client(client_factory=client_factory)
     from recommendation.control.model_client import ModelCallError
     from recommendation.control.model_policy import LLMAgentPolicy
 
