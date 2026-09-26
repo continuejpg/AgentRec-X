@@ -398,7 +398,12 @@ def run_preflight(
 
 
 def agent_arm_ranks(
-    *, cases: Sequence[Any], runner: Any, num_items: int, records: list[dict[str, Any]] | None = None
+    *,
+    cases: Sequence[Any],
+    runner: Any,
+    num_items: int,
+    records: list[dict[str, Any]] | None = None,
+    rankings: list[list[int]] | None = None,
 ) -> Any:
     """Run the Agent arm through the unmodified shared evaluator and return per-user ranks.
 
@@ -410,7 +415,9 @@ def agent_arm_ranks(
     from experiments.m3_agent_arm import arm_agent_llm
     from recommendation.evaluation.batched import evaluate_batched
 
-    batches = arm_agent_llm(num_items=num_items, runner=runner, records=records)
+    batches = arm_agent_llm(
+        num_items=num_items, runner=runner, records=records, rankings=rankings
+    )
     result = evaluate_batched(
         num_items=num_items,
         score_batches=batches(cases, EXPECTED["batch_size"]),
@@ -498,11 +505,13 @@ def run_execute(
         )
         runner = M3AgentRunner(harness_factory=factory, item2id=factory.shared().item2id)
         records: list[dict[str, Any]] = []
+        rankings: list[list[int]] = []
         agent_ranks, _result = agent_arm_ranks(
             cases=frozen.cohort,
             runner=runner,
             num_items=frozen.catalogue_records,
             records=records,
+            rankings=rankings,
         )
     except ModelCallError as exc:
         raise HardCheckFailure(f"provider call failed during --execute: {exc.code}") from exc
@@ -517,6 +526,9 @@ def run_execute(
     with (out / "agent_behavior.jsonl").open("w", encoding="utf-8") as fh:
         for record in records:
             fh.write(json.dumps(record, sort_keys=True) + "\n")
+    with (out / "agent_rankings.jsonl").open("w", encoding="utf-8") as fh:
+        for index, ranking in enumerate(rankings):
+            fh.write(json.dumps({"index": index, "ranking": ranking}, sort_keys=True) + "\n")
 
     np.savez(
         out / "paired_inputs.npz",

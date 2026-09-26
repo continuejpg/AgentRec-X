@@ -251,6 +251,18 @@ def test_execute_plumbing_reaches_the_evaluator() -> None:
     # plumbing only: no metric value is read or asserted
 
 
+def test_execute_plumbing_populates_the_ranking_sink() -> None:
+    from tests.test_m3_agent_arm import _case, _runner
+
+    rankings: list[list[int]] = []
+    agent_arm_ranks(
+        cases=[_case(), _case()], runner=_runner(), num_items=104, records=[], rankings=rankings
+    )
+    assert len(rankings) == 2, "one final ranking per user, in cohort order"
+    assert all(isinstance(r, list) for r in rankings)
+    assert any(r for r in rankings), "the run proposed candidates"
+
+
 def test_execute_plumbing_populates_the_behavior_log() -> None:
     from tests.test_m3_agent_arm import _case, _runner
 

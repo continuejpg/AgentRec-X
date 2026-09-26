@@ -289,12 +289,15 @@ def arm_agent_llm(
     num_items: int,
     runner: Any,
     records: list[dict[str, Any]] | None = None,
+    rankings: list[list[int]] | None = None,
 ) -> Callable[[Sequence[Any], int], Iterable[Any]]:
     """The Agent arm, in the batch-factory form ``evaluate_arm`` expects.
 
     Yields ``(histories, targets, scores)`` exactly like every other arm, so the shared evaluator
     applies its own seen-history masking, tie-breaking, ranking and metric code unchanged.
-    ``records``, when supplied, receives one behaviour record per case in cohort order.
+    ``records``, when supplied, receives one behaviour record per case in cohort order, and
+    ``rankings`` receives that case's final ranking item ids — the Agent's actual output, kept in a
+    separate sink because a 1000-deep ranking per user would bloat the behaviour log.
     """
     if num_items <= 0:
         raise ValueError("num_items must be positive")
@@ -315,6 +318,8 @@ def arm_agent_llm(
                     )
                 if records is not None:
                     records.append({"index": start + row, **outcome.behavior})
+                if rankings is not None:
+                    rankings.append(list(outcome.ranking))
             tail = scores[:, 1:]
             tail[tail == 0.0] = -1.0
             yield (
