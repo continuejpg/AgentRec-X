@@ -163,4 +163,16 @@ Persistence: `docs/reports/m2-paired-uncertainty.txt`, `runs/m2/m2_paired_uncert
 were force-added past the repository's `runs/` ignore rule; that rule is unchanged, so no other
 `runs/` content enters version control.
 
+## M3 status
+
+| item | status |
+|---|---|
+| fixed-fusion per-user evidence | **READY** — deterministically rebuilt and hash-recorded in `docs/M3_PREREGISTRATION.md` |
+| M3 | **BLOCKED ON LLM PROVIDER** |
+| LLM provider / model | **NOT FROZEN** — `AGENTRECX_LLM_BASE_URL`, `AGENTRECX_LLM_MODEL` and `AGENTRECX_LLM_API_KEY` are still required before any Agent run |
+
+The protocol, comparator, endpoints, statistics and stop rules are frozen in
+`docs/M3_PREREGISTRATION.md`. No Agent execution has been attempted.
+
+
 
