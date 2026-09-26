@@ -38,7 +38,7 @@ must be judged against. `NOT EXECUTED` means no run has been performed under it.
 
 | preregistration | SHA256 | status |
 |---|---|---|
-| `docs/M3_PREREGISTRATION.md` | `1c0345cebca0a995823f5a8cab5a97d89108aac122a07cb36befa350a31870b7` | **PREREGISTERED / NOT EXECUTED** |
+| `docs/M3_PREREGISTRATION.md` | `b1795c0f3ea5877274df8a96cd62d06f9eda83cd585bab69bd0867ffc30a8d36` | **PREREGISTERED / NOT EXECUTED** (incl. the pre-result interpretation amendment, §10) |
 
 ## Evaluation protocol and critical source hashes
 
@@ -178,7 +178,8 @@ were force-added past the repository's `runs/` ignore rule; that rule is unchang
 |---|---|
 | fixed-fusion per-user evidence | **READY** — deterministically rebuilt and hash-recorded in `docs/M3_PREREGISTRATION.md` |
 | M3 | **BLOCKED ON LLM PROVIDER** |
-| LLM provider / model | **NOT FROZEN** — `AGENTRECX_LLM_BASE_URL`, `AGENTRECX_LLM_MODEL` and `AGENTRECX_LLM_API_KEY` are still required before any Agent run |
+| LLM provider / model | **FROZEN** in `docs/M3_DEEPSEEK_AMENDMENT.md` (DeepSeek, `deepseek-flash`, thinking disabled, `max_tokens` 512); the **credential is still required** before any Agent run |
+| `SELECT_SOURCE` reachability | **UNREACHABLE** — the frozen `_plane_actions` rule offers it only when `SIMILAR_ITEM` is registered, which it is not. Recorded as an architectural fact, not repaired. See prereg §10. |
 
 The protocol, comparator, endpoints, statistics and stop rules are frozen in
 `docs/M3_PREREGISTRATION.md`. No Agent execution has been attempted.

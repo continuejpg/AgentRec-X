@@ -1,7 +1,8 @@
 # M3 PREREGISTRATION — live Agent policy vs accepted fixed fusion
 
-**Status: FROZEN for everything except the LLM provider identity (see §9).**
-**No M3 run may start, and no M3 result may be inspected, until §9 is filled in.**
+**Status: FROZEN and NOT EXECUTED.** §9's provider identity is recorded in
+`docs/M3_DEEPSEEK_AMENDMENT.md`; the remaining precondition is the credential itself.
+**No M3 run may start, and no M3 result may be inspected, until the provider credential is supplied.**
 
 This document is a preregistration, not a report. It exists so that the one remaining
 unmeasured claim in this project is decided by a protocol fixed in advance, and so that a
@@ -172,7 +173,11 @@ artifacts. They are not committed.
   because the accepted pipeline applies seen-history masking before taking top-K. The comparator
   must always be rebuilt through the shared evaluator, never by truncating a raw fused head.
 
-## 9. OPEN ITEM — the only thing not yet frozen
+## 9. Provider identity
+
+> The values below are now **recorded** in `docs/M3_DEEPSEEK_AMENDMENT.md` (prepared, not
+> executed). The only remaining open item is the **credential itself**, which is supplied
+> out-of-band and never written down.
 
 **The LLM provider and model identity are NOT frozen.** They must be supplied and recorded before
 any Agent execution, and they must not be selected, changed or re-tried after seeing any M3 result.
@@ -193,3 +198,90 @@ amendment that changes anything in §2–§6 after a result has been seen invali
 at least ~20 000 provider calls and up to ~2.4 M. The cohort must not be reduced to fit a budget
 (§2). If cost makes the full cohort infeasible, that is a preregistration change to be negotiated
 **before** any result is seen — not a result-driven adjustment.
+
+---
+
+## 10. AMENDMENT (pre-result) — verified architecture facts and interpretation limits
+
+**Recorded before any M3 result exists.** This section adds constraints on how M3 may be read; it
+changes nothing in §2–§6. No Agent has been executed, no provider has been called and no M3 metric
+exists.
+
+### 10.1 Verified architectural fact: `SELECT_SOURCE` is unreachable
+
+The frozen control plane offers the plane's actions from `recommendation/control/loop.py`
+(`_plane_actions`), and reads exactly:
+
+```python
+if self.candidate_plane.has_source(CandidateSource.CATALOG_SEARCH):
+    offered.append(ActionKind.SEARCH_CATALOG)
+if self.candidate_plane.has_source(CandidateSource.SIMILAR_ITEM):
+    offered.append(ActionKind.FIND_SIMILAR)
+    offered.append(ActionKind.SELECT_SOURCE)
+```
+
+`SELECT_SOURCE` is therefore offered **if and only if `SIMILAR_ITEM` is registered** — not when
+`HISTORY`, `CATALOG_SEARCH`, `TWO_TOWER` or `TIGER` are registered. This repository has no
+item-item similarity index, so in the real M3 configuration `SELECT_SOURCE` is **not reachable**.
+
+Verified empirically on the canonical 156 746-item catalogue as well as by reading the rule: with
+`CATALOG_SEARCH` registered and `SIMILAR_ITEM` absent, the rule yields `offered = ['search_catalog']`.
+
+**This is recorded as an architectural fact, not repaired.** `SELECT_SOURCE` will not be enabled,
+no item-item index will be built for M3, no new `CandidateSource` will be added, and the
+`fixed_fusion` comparator will not be changed.
+
+### 10.2 The Agent's candidate-producing paths
+
+With §10.1 in force, the Agent's reachable candidate-producing actions are:
+
+| action | path | offered when |
+|---|---|---|
+| `RECOMMEND_FROM_HISTORY` | Stage-1, executed through the capability | trusted history exists (not gated on the plane) |
+| `SEARCH_CATALOG` | candidate plane, lexical | `CATALOG_SEARCH` is registered |
+
+Plus the read-only reasoning actions and `FINISH`. The Agent cannot combine sources: rank fusion is
+not an Agent action, and with `SELECT_SOURCE` unreachable it cannot even name a second source to
+consult. **The Agent arm is structurally single-source-at-a-time.**
+
+### 10.3 The source / action-space asymmetry
+
+`fixed_fusion` fuses `popularity` + `sequential` + `metadata` in one RRF ranking. The Agent's
+action space cannot express that:
+
+| comparator source | Agent-reachable equivalent | how |
+|---|---|---|
+| `sequential` | yes | `RECOMMEND_FROM_HISTORY` (frozen sequential head) |
+| `metadata` | yes | `SEARCH_CATALOG` (lexical over catalogue text) |
+| `popularity` | **no** | no `CandidateSource` member exists, and no action names it |
+
+So the two arms do not have equal source access, and the Agent cannot produce a fused ranking. This
+asymmetry is a known, deliberate, unfixed limitation (see also
+`docs/M3_DEEPSEEK_AMENDMENT.md` §4 and `experiments/m3_agent_arm.py::UNREACHABLE_SOURCES`).
+
+### 10.4 Permitted and prohibited interpretations
+
+M3 may be interpreted as:
+
+> **the existing real Agent system vs the accepted fixed-fusion baseline**
+
+M3 must **not** be interpreted as:
+
+- "adaptive source selection vs fixed fusion" — the Agent cannot select sources (§10.1), so that
+  comparison is not what is being run;
+- a measurement of *routing* quality;
+- grounds for attributing any performance difference to routing or selection behaviour alone.
+
+Any difference observed is attributable to the whole system difference: a bounded, model-driven,
+single-source-at-a-time agent with its own prompt, tools, reasoning and completion rules, compared
+against a deterministic three-source rank fusion. Where M3 reports a difference, it must state
+that it cannot separate routing from retrieval, prompting, reasoning or completion effects.
+
+### 10.5 Status
+
+| item | status |
+|---|---|
+| interpretation limits | **FROZEN** (this section) |
+| provider / model / sampling parameters | frozen in `docs/M3_DEEPSEEK_AMENDMENT.md` |
+| Agent execution | **NOT STARTED** |
+| M3 metric | **DOES NOT EXIST** |
