@@ -238,6 +238,78 @@ _TRAILING = re.compile(
 #: Leading articles that are not part of a value.
 _LEADING = re.compile(r"^(?:a|an|the|some|any)\s+", re.IGNORECASE)
 
+#: Conjunctions that join two INDEPENDENT attributes inside one captured phrase.
+#: Deliberately limited to comma / "and" / "or": those are the forms in which a user lists
+#: separate wants ("lightweight and durable").  A slash or ampersand is left alone because it
+#: is at least as likely to be part of a single name.
+_CONJUNCTION = re.compile(r"\s*(?:,|\band\b|\bor\b)\s*", re.IGNORECASE)
+
+#: Kinds whose value may legitimately be a list of independent attributes.  Brand, category,
+#: colour, material and price values are NOT split: "Johnson and Johnson" is one brand and
+#: "hiking and camping" is one category phrase.
+_SPLITTABLE_KINDS = (PreferenceKind.FEATURE, PreferenceKind.FREE_FORM_CONSTRAINT)
+
+
+def _split_conjunctions(value: str) -> list[str]:
+    """Split a compound attribute phrase into independent terms, or return it unchanged."""
+    parts = [part.strip() for part in _CONJUNCTION.split(value)]
+    cleaned = [part for part in parts if len(part) >= 2]
+    return cleaned if len(cleaned) >= 2 else [value]
+
+
+def _expand_conjunctions(candidate: PreferenceCandidate) -> list[PreferenceCandidate]:
+    """Expand one compound candidate into one candidate per independent term.
+
+    The resolved KIND is carried over to every part.  That is the whole point: the extractor
+    classifies a bare adjective ("lightweight") as a free-form constraint, which the M10A
+    matcher can never support, while a two-word phrase is a ``feature``.  Re-resolving the kind
+    per part would silently downgrade a split part back to free-form and make the evidence
+    worse, so each part inherits the kind the user's actual statement produced.
+    """
+    if candidate.kind not in _SPLITTABLE_KINDS:
+        return [candidate]
+    parts = _split_conjunctions(candidate.value)
+    if len(parts) < 2:
+        return [candidate]
+    return [
+        PreferenceCandidate(
+            kind=candidate.kind,
+            value=part,
+            polarity=candidate.polarity,
+            source_text=candidate.source_text,
+            extractor=candidate.extractor,
+            mode=candidate.mode,
+            replaces=candidate.replaces,
+        )
+        for part in parts
+    ]
+
+
+#: Words that name a preference SLOT rather than a value inside one.
+_RETRACTION_SLOTS: dict[str, PreferenceKind] = {
+    "color": PreferenceKind.COLOR,
+    "colour": PreferenceKind.COLOR,
+    "material": PreferenceKind.MATERIAL,
+    "brand": PreferenceKind.BRAND,
+    "store": PreferenceKind.BRAND,
+    "price": PreferenceKind.PRICE_MAX,
+    "budget": PreferenceKind.PRICE_MAX,
+    "cost": PreferenceKind.PRICE_MAX,
+    "category": PreferenceKind.CATEGORY,
+    "categories": PreferenceKind.CATEGORY,
+    "feature": PreferenceKind.FEATURE,
+    "features": PreferenceKind.FEATURE,
+}
+
+#: Nouns that describe the preference rather than its value ("my lightweight PREFERENCE").
+_RETRACTION_FILLER = frozenset(
+    {
+        "preference", "preferences", "constraint", "constraints", "requirement",
+        "requirements", "filter", "filters", "setting", "settings", "stuff", "thing",
+        "things", "one",
+    }
+)
+
 #: A small product-category vocabulary, so an explicit category statement is not
 #: stored as a generic feature.  Deliberately short and curated; it is vocabulary,
 #: not inference.
@@ -388,11 +460,12 @@ class RuleBasedPreferenceExtractor:
                 # A subject before the phrase wins; otherwise use the one after it.
                 target = (leading or trailing).lower()
                 target = _LEADING.sub("", target).strip()
-                kind = self._retraction_kind(target)
-                if kind is not None:
+                kind, value = self._retraction_target(target)
+                if kind is not None or value is not None:
                     removals.append(
                         PreferenceRemoval(
                             kind=kind,
+                            value=value,
                             source_text=sentence,
                             extractor=self._name,
                         )
@@ -404,7 +477,7 @@ class RuleBasedPreferenceExtractor:
             # anything over $80") that would otherwise be mistaken for an avoidance.
             price = self._negated_price_bound(sentence) or self._price_constraint(sentence)
             if price is not None:
-                preferences.append(price)
+                preferences.extend(_expand_conjunctions(price))
 
             correction = self._phrasing(
                 sentence,
@@ -413,7 +486,7 @@ class RuleBasedPreferenceExtractor:
                 forced_mode=PreferenceMode.REPLACE,
             )
             if correction is not None:
-                preferences.append(correction)
+                preferences.extend(_expand_conjunctions(correction))
                 continue
 
             for pattern in (_BRAND_POSITIVE, _BRAND_NEGATIVE):
@@ -426,7 +499,7 @@ class RuleBasedPreferenceExtractor:
                     forced_kind=PreferenceKind.BRAND,
                 )
                 if brand is not None:
-                    preferences.append(brand)
+                    preferences.extend(_expand_conjunctions(brand))
                     break
             else:
                 category = self._phrasing(
@@ -434,21 +507,21 @@ class RuleBasedPreferenceExtractor:
                     forced_kind=PreferenceKind.CATEGORY,
                 )
                 if category is not None:
-                    preferences.append(category)
+                    preferences.extend(_expand_conjunctions(category))
                     continue
 
                 negative = self._phrasing(
                     sentence, _NEGATIVE, PreferencePolarity.AVOID
                 )
                 if negative is not None:
-                    preferences.append(negative)
+                    preferences.extend(_expand_conjunctions(negative))
                     continue
 
                 positive = self._phrasing(
                     sentence, _POSITIVE, PreferencePolarity.PREFER
                 )
                 if positive is not None:
-                    preferences.append(positive)
+                    preferences.extend(_expand_conjunctions(positive))
 
         return PreferenceExtraction(
             preferences=tuple(preferences), removals=tuple(removals)
@@ -456,24 +529,26 @@ class RuleBasedPreferenceExtractor:
 
     # -- helpers ----------------------------------------------------------- #
 
-    def _retraction_kind(self, target: str) -> PreferenceKind | None:
-        """Map a retraction target phrase to the kind it retracts."""
-        if not target:
-            # A bare "forget about it" retracts every preference.
-            return None
-        if "color" in target or "colour" in target:
-            return PreferenceKind.COLOR
-        if "material" in target:
-            return PreferenceKind.MATERIAL
-        if "brand" in target or "store" in target:
-            return PreferenceKind.BRAND
-        if "price" in target or "budget" in target or "cost" in target:
-            return PreferenceKind.PRICE_MAX
-        if "category" in target or "categories" in target:
-            return PreferenceKind.CATEGORY
-        if "feature" in target or "features" in target:
-            return PreferenceKind.FEATURE
-        return PreferenceKind.FREE_FORM_CONSTRAINT
+    def _retraction_target(self, target: str) -> tuple[PreferenceKind | None, str | None]:
+        """Resolve a retraction target to a slot ``kind`` or a concrete ``value``.
+
+        A target that names a SLOT ("color", "budget", "my category") retracts the whole slot.
+        A target that names a VALUE ("lightweight") retracts that value, wherever it is stored.
+
+        The distinction matters: retracting by kind removes every entry of that kind, while the
+        stored entry for "I prefer lightweight" may be a ``feature`` or a ``free_form_constraint``
+        depending on how the user phrased it.  Naming the value is therefore not just more
+        precise, it is the only selector that survives that representation choice.
+        """
+        words = [word for word in re.split(r"[^a-z0-9'\-]+", target) if word]
+        for word in words:
+            kind = _RETRACTION_SLOTS.get(word)
+            if kind is not None:
+                return kind, None
+        remainder = [word for word in words if word not in _RETRACTION_FILLER]
+        if not remainder:
+            return None, None
+        return None, " ".join(remainder)
 
     def _price_constraint(self, sentence: str) -> PreferenceCandidate | None:
         """Extract a price bound when the sentence clearly states one."""
