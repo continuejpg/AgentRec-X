@@ -39,6 +39,8 @@ from recommendation.memory.schemas import (
 )
 
 __all__ = [
+    "DECISION_MODES",
+    "DEFAULT_DECISION_MODE",
     "LLM_EXTRACTOR_NAME",
     "LLMPolicyError",
     "LLMPreferenceAdd",
@@ -46,7 +48,6 @@ __all__ = [
     "LLMTurnPlanner",
     "LLMPlanExtractor",
     "RouteAction",
-    "DECISION_MODES",
     "provider_availability",
 ]
 
@@ -56,6 +57,10 @@ LLM_EXTRACTOR_NAME = "llm_policy_v1"
 #: The two decision modes the browser may select.  ``deterministic`` is the default and needs
 #: no credential; ``llm`` requires a configured provider.
 DECISION_MODES: tuple[str, ...] = ("deterministic", "llm")
+
+#: The mode a session runs in unless it is explicitly switched.  Named separately from the
+#: tuple because the default is a property of the demo, not of the ordering of this list.
+DEFAULT_DECISION_MODE = "deterministic"
 
 
 class RouteAction(str, Enum):

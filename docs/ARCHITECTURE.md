@@ -26,16 +26,20 @@ The path the verified browser demo actually takes. Only components on that path 
 
 ```text
 User / Browser
-      |  same-origin HTML/CSS/JS, no build step, no CDN, no hosted LLM, no API key
+      |  same-origin HTML/CSS/JS, no build step, no CDN
+      |  default decision mode: offline, deterministic, no API key
+      |  optional decision mode: LLM Agent, opt-in, provider-configured
       v
 FastAPI app  (recommendation/api/app.py)   .   browser UI (recommendation/web)
       |
       v
 DemoSessionManager  (recommendation/demo/sessions.py)
-      |  session_id, user_key, per-session preference-memory namespace
+      |  session_id, user_key, per-session preference-memory namespace, decision mode
       v
 AgentGraph  (recommendation/agent/graph.py)
-      |  conversational orchestration; decision seam is deterministic and offline
+      |  conversational orchestration; decision seam is deterministic by default
+      |  when LLM Agent mode is selected: one validated turn plan - route + preference
+      |  values only - obtained before any trusted component runs
       v
 RecommendationTool  (recommendation/tools)
       |
@@ -89,6 +93,12 @@ layers, and the boundary is structural rather than conventional:
     - whether the recommendation flow is invoked (route)
     - presentation order, through supported preferences
 
+    the two decision policies on this side are interchangeable:
+      deterministic  the accepted keyword decision model + rule-based extractor
+      LLM Agent      one validated turn plan (route + preference values, extra="forbid")
+    the LLM plan schema has no field for a product id, a score, evidence, a rank or a
+    mutation result, so the model cannot express truth even if it tries
+
     cannot write to anything on the truth side below
 
 ----------------------------------------------------------
@@ -117,12 +127,14 @@ layers, and the boundary is structural rather than conventional:
 | Explicit preferences | `PreferenceMemoryService` |
 | Evidence | `PreferenceCandidateMatcher` (deterministic) |
 | Final preference-aware order | `PreferenceReranker` (deterministic) |
-| Conversational routing | `AgentGraph` decision seam |
+| Conversational routing | `AgentGraph` decision seam (deterministic, or the optional LLM plan) |
 | Observability | `Recommendation Trace` (read-only view) |
 
 **Deliberately not on this path:** the candidate plane, the candidate ledger, the bounded
 control plane, Two-Tower, TIGER and the fusion comparator. The browser agent consults exactly one
-candidate generator (SASRec) and performs no adaptive multi-source routing.
+candidate generator (SASRec) and performs no adaptive multi-source routing. The optional LLM
+Agent decision mode adds a decision policy, not a candidate source: it cannot reach the candidate
+plane, and it changes neither which generator runs nor how anything is scored.
 
 ---
 
@@ -816,6 +828,16 @@ layer and the real-model evaluation; see **section 24**.
   hide that, and the model policy cannot remove a candidate. Narrowing arrived in Phase 2
   (section 11) and is owned by trusted code, not by a policy.
 
+### Later reuse: the browser demo's optional LLM decision mode
+
+A later, separate feature reuses this same seam on the serving path rather than the research
+control plane: the Milestone 11 demo can serve a session with an optional **LLM Agent decision
+mode** (section 17, Web / session layer), which obtains one validated turn plan per turn. The plan
+may set the route and preference values and nothing else, the accepted `AgentGraph` still executes
+the turn, and the provider variables above are the ones it reads. It is a productisation feature:
+it is not part of the control plane, it changes no research result, and the default mode remains
+deterministic and offline.
+
 ---
 
 ## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)
@@ -1190,8 +1212,19 @@ graph does not expose candidate scoring, and the graph is reached only as a whol
 **Session model.** A session owns an opaque UUID4 `session_id`, a **session-derived**
 preference-memory `user_key` (never derived from the demo profile, so two sessions on one
 profile stay isolated), the application-owned trusted history copied from a `DemoProfile`,
-a logical creation index, a turn counter and its own `threading.Lock`. Session ids are
-capability tokens for a local demo, not an identity system.
+a logical creation index, a turn counter, its **decision mode** (`deterministic` or `llm`) and
+its own `threading.Lock`. Session ids are capability tokens for a local demo, not an identity
+system.
+
+**Decision mode.** The mode is session state, set at creation or by a later turn that names one,
+and reported by `GET /v1/demo/decision-modes` before it can be selected. `deterministic` is the
+default and is the accepted path unchanged. `llm` obtains one validated plan from the policy layer
+(`recommendation/demo/llm_policy.py`, wired by `recommendation/demo/llm_runtime.py`) **before any
+trusted component runs**, then executes it through the same accepted components: the plan's route
+travels the accepted decision-model seam and the same plan is the Milestone 9 extractor's source,
+so a turn makes exactly one provider call. A provider failure raises before anything runs, so it
+cannot leave a partial memory write, and the mode is never downgraded silently: a failed LLM turn
+leaves the session in LLM mode and returns an error code.
 
 **Turn ownership.** Turn ids are `"<session_id>:<sequence>"`, allocated by the server while
 holding that session's lock, and never accepted from a client. A failed turn still consumes
@@ -1265,6 +1298,11 @@ flowchart TD
 6. **The browser is untrusted.** Request schemas are `extra="forbid"` and contain no field
    for history, `parent_asin`s, a preference snapshot, a reranking report, a `user_key`, a
    session id or a turn id.
+7. **The optional LLM decision mode cannot express truth.** Its plan schema has fields for a
+   route and preference values and no field for a product id, a score, evidence, a rank or a
+   mutation result (`extra="forbid"`), and the plan is validated by the policy layer before
+   trusted code sees it. A plan that tries to carry one is a validation error, which the HTTP
+   layer renders as `llm_invalid_plan` with no memory mutation.
 
 ---
 
@@ -1280,6 +1318,7 @@ The system prefers explicit failure to plausible degradation.
 | Reranker | propagates; the graph never falls back to a raw-order answer presented as if the policy ran |
 | Renderer | raises `AgentGraphError` if the reranking report changed the candidate count or introduced an unknown identity |
 | Session layer | unknown/expired/reset session → explicit 404; capacity → explicit 503; the server never silently creates a session |
+| LLM decision mode | missing provider → explicit 503 before the turn; timeout → 504; invalid plan or unsupported action → 502; provider failure → 502. The turn stops before any trusted component runs, so no preference is changed, and the session is **not** switched back to the deterministic path |
 | HTTP mapping | every `5xx` detail is authored by the mapping layer, so exception text, paths and stack traces never reach a client |
 
 `DIRECT` is unaffected by any failure in the preference stages, because it never reaches

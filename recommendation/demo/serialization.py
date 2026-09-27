@@ -37,12 +37,15 @@ list position, so a reordered candidate can never inherit its neighbour's facts.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Mapping, Sequence
 
 from .schemas import (
+    DEFAULT_DECISION_MODE,
     RecommendationTrace,
     TraceEvidenceSummary,
     TraceMemoryChanges,
+    TracePreferenceAction,
     TraceRankChange,
     ActivePreferenceView,
     AuditView,
@@ -55,11 +58,32 @@ from .schemas import (
 )
 
 __all__ = [
+    "TurnDecision",
     "active_preference_views",
     "build_chat_response",
     "build_cards",
+    "build_trace",
+    "build_trace_with_decision",
     "movement_summary",
 ]
+
+
+@dataclass(frozen=True)
+class TurnDecision:
+    """How one turn's decisions were actually made, as read from execution state.
+
+    ``decision_mode`` is a fact about the run the caller performed - the deterministic path
+    reports the deterministic policy because that is what it ran, and the policy-backed path
+    reports the provider that answered - never an echo of what a request asked for.  The
+    optional fields stay ``None`` when no policy proposed anything, so the trace shows
+    "deterministic" without inventing a provider, a route or an action.
+    """
+
+    decision_mode: str = DEFAULT_DECISION_MODE
+    provider: str | None = None
+    model: str | None = None
+    proposed_route: str | None = None
+    preference_actions: tuple[TracePreferenceAction, ...] = ()
 
 
 def active_preference_views(snapshot: Any) -> tuple[ActivePreferenceView, ...]:
@@ -433,17 +457,86 @@ def build_trace(
     )
 
 
+def build_trace_with_decision(
+    trace: RecommendationTrace,
+    *,
+    decision: TurnDecision,
+    memory_update: MemoryUpdateView,
+) -> RecommendationTrace:
+    """Add this turn's decision facts to an already-built trace.
+
+    Kept separate from :func:`build_trace` so that builder stays exactly what it was - a view
+    over the values the response already carries - and so the deterministic path can pass its
+    default :class:`TurnDecision` and get a trace that says "deterministic" with no provider,
+    no proposed route and no actions.
+
+    Like every other builder in this module this is an explicit whitelist: each field is named
+    from a typed source, and nothing is dumped or copied blindly.
+
+    ``applied`` on each action is computed here from the **persisted** memory write, not from
+    the plan: an action the model proposed is reported as applied only when the accepted store
+    actually changed an ACTIVE entry for that value this turn.  Where a value is absent from the
+    write summary the flag stays ``False``, so a duplicate add or an unmatched removal is visible
+    as a proposal that did not change anything.
+    """
+    return RecommendationTrace(
+        route=trace.route,
+        candidate_count=trace.candidate_count,
+        decision_mode=decision.decision_mode,
+        provider=decision.provider,
+        model=decision.model,
+        proposed_route=decision.proposed_route,
+        preference_actions=tuple(
+            TracePreferenceAction(
+                action=action.action,
+                value=action.value,
+                kind=action.kind,
+                applied=_action_applied(action, memory_update),
+            )
+            for action in decision.preference_actions
+        ),
+        active_preferences=trace.active_preferences,
+        memory_changes=trace.memory_changes,
+        evidence=trace.evidence,
+        ranking_changes=trace.ranking_changes,
+        source=trace.source,
+        grounding=trace.grounding,
+    )
+
+
+def _action_applied(action: TracePreferenceAction, memory_update: MemoryUpdateView) -> bool:
+    """True when the persisted write stopped or started an ACTIVE entry for this value.
+
+    ============  ==================================================================
+    action        applied when the write summary reports the value as
+    ============  ==================================================================
+    ``add``       added, or superseded (the accepted REPLACE shape: new added + old
+                  superseded), so a replacement counts as having applied
+    ``remove``    removed, or superseded (the value stopped being the active entry)
+    ============  ==================================================================
+    """
+    if action.action == "add":
+        entries = list(memory_update.added) + list(memory_update.superseded)
+    else:
+        entries = list(memory_update.removed) + list(memory_update.superseded)
+    target = str(action.value).casefold()
+    return any(str(entry.value).casefold() == target for entry in entries)
+
+
 def build_chat_response(
     state: Mapping[str, Any],
     *,
     session_id: str,
     turn_id: str,
     turn_number: int,
+    decision: TurnDecision | None = None,
 ) -> ChatResponse:
     """Build the public chat response for one completed turn.
 
     ``session_id``/``turn_id``/``turn_number`` come from the server-owned session layer,
-    never from graph state, so a caller cannot influence them.
+    never from graph state, so a caller cannot influence them.  ``decision`` describes how the
+    turn's decisions were reached; the default is the deterministic policy, which is what every
+    caller that does not pass one actually ran.
     """
     cards = build_cards(state)
     audit = build_audit(state, cards)
@@ -457,6 +550,13 @@ def build_chat_response(
         acknowledgement = preference_only_acknowledgement(update, preferences)
         if acknowledgement is not None:
             message = acknowledgement
+    trace = build_trace(
+        route=route,
+        audit=audit,
+        cards=cards,
+        active_preferences=preferences,
+        memory_update=update,
+    )
     return ChatResponse(
         session_id=session_id,
         turn_id=turn_id,
@@ -467,11 +567,9 @@ def build_chat_response(
         memory_update=update,
         recommendations=cards,
         audit=audit,
-        trace=build_trace(
-            route=route,
-            audit=audit,
-            cards=cards,
-            active_preferences=preferences,
+        trace=build_trace_with_decision(
+            trace,
+            decision=decision if decision is not None else TurnDecision(),
             memory_update=update,
         ),
     )

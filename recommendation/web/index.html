@@ -30,15 +30,39 @@
   <div id="status-chips" class="statusbar" aria-label="Session status"></div>
 
   <p class="notice" role="note">
-    Local research demo. Recommendations come from the accepted SASRec checkpoint and a
-    deterministic explicit-preference policy. Scores are raw ranking scores, not probabilities.
-    No production authentication is provided.
+    Local research demo. Recommendations come from the accepted SASRec checkpoint and the accepted
+    explicit-preference policy. When the optional language-model policy is selected it chooses only
+    the route and which stated preference values are stored — never products, scores, evidence or
+    ranks. Scores are raw ranking scores, not probabilities. No production authentication is provided.
   </p>
 
   <div id="banner" class="banner" role="alert" hidden></div>
 
   <main class="layout">
     <div class="col-main">
+
+      <section class="panel mode-panel" aria-label="Decision mode">
+        <h2>Decision Mode</h2>
+        <div class="mode-choice" role="radiogroup" aria-label="Decision mode">
+          <label class="mode-option" for="mode-deterministic">
+            <input type="radio" id="mode-deterministic" name="decision-mode"
+                   value="deterministic" checked />
+            <span>Deterministic</span>
+          </label>
+          <label class="mode-option" for="mode-llm">
+            <input type="radio" id="mode-llm" name="decision-mode" value="llm" disabled />
+            <span>LLM Agent</span>
+          </label>
+        </div>
+        <p id="mode-note" class="hint">
+          Checking which decision policies this deployment can serve…
+        </p>
+        <p class="hint">
+          The decision policy chooses the route and which stated preferences are stored. Products,
+          scores, evidence and ranks always come from the accepted models and trusted code, never
+          from a language model.
+        </p>
+      </section>
 
       <section class="panel" aria-label="Active preferences">
         <h2>Active preferences</h2>

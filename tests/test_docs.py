@@ -285,12 +285,16 @@ def test_documented_environment_variables_are_read_by_the_code() -> None:
     variables = sorted(set(re.findall(r"\bAGENTRECX_[A-Z_]+\b", usage)))
     assert variables, "no environment variables documented"
 
+    # ``provider_adapter`` is included because it is the module that reads the optional LLM
+    # provider variables (``AGENTRECX_LLM_*``); the other three hold the serving and memory
+    # configuration.
     sources = "\n".join(
         _text(path)
         for path in (
             REPO_ROOT / "recommendation" / "config.py",
             REPO_ROOT / "recommendation" / "api" / "app.py",
             REPO_ROOT / "recommendation" / "memory" / "store.py",
+            REPO_ROOT / "recommendation" / "control" / "provider_adapter.py",
         )
     )
     for variable in variables:

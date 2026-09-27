@@ -84,6 +84,10 @@ All variables are optional. Defaults match the accepted repository layout.
 | `AGENTRECX_HOST` | server bind host | `127.0.0.1` | no | `0.0.0.0` |
 | `AGENTRECX_PORT` | server bind port | `8000` | no | `8011` |
 | `AGENTRECX_VERIFY_CHECKPOINT` | verify checkpoint digest at startup | `1` (enabled) | no | `0` to disable |
+| `AGENTRECX_LLM_BASE_URL` | provider base URL for the optional LLM Agent decision mode | unset (mode unavailable) | no | `https://api.deepseek.com/v1` |
+| `AGENTRECX_LLM_MODEL` | provider model identifier for that mode | unset (mode unavailable) | no | `deepseek-chat` |
+| `AGENTRECX_LLM_API_KEY` | credential for that mode, read at call time and never logged | unset (mode unavailable) | no | *(your key)* |
+| `AGENTRECX_LLM_PROFILE` | provider protocol profile | `openai_compatible` | no | `deepseek` |
 
 Notes:
 
@@ -91,7 +95,11 @@ Notes:
   (case-insensitive).
 * `AGENTRECX_DATA_DIR` is read when the configuration module is imported, so set it before
   starting a process rather than at runtime.
-* No variable accepts a secret; the demo reads no credentials.
+* The four `AGENTRECX_LLM_*` variables configure the **optional** LLM Agent decision mode and
+  are unset by default. With all of them unset the demo runs deterministically, offline and
+  with no credential, and the browser offers the mode as unavailable. They are read by
+  `recommendation/control/provider_adapter.py`; no other variable accepts a secret, and the
+  demo itself never stores one.
 
 ---
 
@@ -368,12 +376,21 @@ curl -s http://127.0.0.1:8000/v1/demo/health
 # server-owned demo profiles
 curl -s http://127.0.0.1:8000/v1/demo/profiles
 
+# which decision modes this deployment can actually serve (and why not)
+curl -s http://127.0.0.1:8000/v1/demo/decision-modes
+
 # create a session -> returns session_id
 curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions \
   -H 'Content-Type: application/json' \
   -d '{"profile_id": "demo-user-1"}'
 
-# session state (metadata, turn count, ACTIVE preferences)
+# create a session whose turns are planned by the optional LLM policy
+# (503 llm_unavailable when no provider is configured - it never falls back)
+curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"profile_id": "demo-user-1", "decision_mode": "llm"}'
+
+# session state (metadata, turn count, decision mode, ACTIVE preferences)
 curl -s http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>
 
 # one turn: ask for recommendations
@@ -386,6 +403,11 @@ curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>/chat \
   -H 'Content-Type: application/json' \
   -d '{"message": "I don'"'"'t want red.", "k": 5}'
 
+# one turn planned by the LLM policy; the mode persists for later turns of this session
+curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "I am going hiking in the rain. Drop the lightweight preference, but I would still prefer something durable.", "k": 5, "decision_mode": "llm"}'
+
 # reset the session (only that session; its id stops working)
 curl -s -X DELETE http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>
 ```
@@ -394,17 +416,25 @@ A chat response is structured, not prose-only. Top-level keys:
 
 ```text
 api_version  session_id  turn_id  turn  route  message
-active_preferences   memory_update   recommendations[]   audit
+active_preferences   memory_update   recommendations[]   audit   trace
 ```
 
 Each `recommendations[]` entry carries `reranked_rank`, `original_rank`, `parent_asin`,
 `item_id`, `sasrec_score`, `metadata_status`, `metadata`, `match_count`, `violation_count`,
 `unknown_count`, `evidence[]`, `fallback_reason` and `movement_summary`.
 
+`trace` is a consolidated view of what the turn already decided, including `decision_mode`,
+`provider`, `model`, `proposed_route` and `preference_actions[]`. `decision_mode` is
+`deterministic` or `llm`; `provider`/`model` are `null` unless a provider actually answered;
+`preference_actions[]` lists validated actions with an `applied` flag taken from the persisted
+memory write. The trace never carries prompts, model reasoning or raw provider output.
+
 Validation and error behaviour:
 
 * `message` must be a non-blank string of at most 2000 characters;
 * `k` must be a **strict** integer in `1..100` (so `"5"` and `5.0` are rejected);
+* `decision_mode` is optional and must be `deterministic` or `llm`; it is stored on the session,
+  so omitting it on later turns keeps the session's current mode;
 * request bodies forbid extra fields — sending `trusted_user_history`, `history`,
   `parent_asins`, `preference_snapshot`, `reranking`, `user_key`, `session_id`, `turn_id`
   or `route` returns **422**;
@@ -412,7 +442,11 @@ Validation and error behaviour:
 * unknown profile → **404** `unknown_profile`;
 * session capacity reached → **503** `session_capacity_exceeded`;
 * backend failures (recommendation, preference stage, agent) → **502** with an
-  authored detail. A failed turn never returns fabricated recommendation content.
+  authored detail. A failed turn never returns fabricated recommendation content;
+* LLM decision mode with no usable provider → **503** `llm_unavailable`; a provider timeout →
+  **504** `llm_timeout`; an invalid plan or unsupported action → **502** `llm_invalid_plan`; any
+  other provider failure → **502** `llm_provider_error`. Every one of these fails closed: the
+  turn makes no memory mutation and is never answered by the deterministic path instead.
 
 ---
 

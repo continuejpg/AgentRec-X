@@ -145,6 +145,34 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad)
   padding: 0.85rem 0.95rem;
 }
 
+/* ---------- decision mode ---------- */
+
+.mode-choice { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: #fff;
+}
+.mode-option input { margin: 0; accent-color: var(--accent); }
+.mode-option.unavailable {
+  cursor: not-allowed;
+  color: var(--ink-faint);
+  background: #f6f7f8;
+  border-style: dashed;
+}
+.mode-option.active { border-color: var(--accent); background: #f2f7ff; }
+.mode-option.unavailable.active { background: #f6f7f8; }
+
+.mode-note-unavailable { color: var(--warn); }
+.mode-note-available { color: var(--ok); }
+
 /* ---------- conversation ---------- */
 
 .transcript {

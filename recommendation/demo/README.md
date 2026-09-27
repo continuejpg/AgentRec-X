@@ -121,8 +121,9 @@ output. The public profile view carries only `profile_id`, `display_name` and th
 | --- | --- | --- |
 | `GET` | `/v1/demo/health` | demo readiness (`model_loaded`, `metadata_loaded`, `demo_ready`, profiles, sessions) |
 | `GET` | `/v1/demo/profiles` | the server-owned demo profiles on offer |
+| `GET` | `/v1/demo/decision-modes` | which decision modes this deployment can actually serve, and why not |
 | `POST` | `/v1/demo/sessions` | create an isolated session (`{"profile_id": "demo-user-1"}`) → `201` |
-| `GET` | `/v1/demo/sessions/{id}` | session metadata, turn count, ACTIVE preferences |
+| `GET` | `/v1/demo/sessions/{id}` | session metadata, turn count, decision mode, ACTIVE preferences |
 | `POST` | `/v1/demo/sessions/{id}/chat` | one turn (`{"message": "...", "k": 5}`) |
 | `DELETE` | `/v1/demo/sessions/{id}` | reset that session |
 | `GET` | `/demo/` | the browser demo (static assets) |
@@ -139,6 +140,8 @@ exactly the Milestone 6 service.
 * `message`: non-blank string, ≤ 2000 characters;
 * `k`: **strict** integer in `1..100` (reuses the accepted Recommendation Tool bounds);
 * `profile_id`: non-blank string;
+* `decision_mode` (optional): `deterministic` or `llm`; omitted means "keep the session's
+  current mode". An unknown value is a `422`, not a silent default;
 * `extra="forbid"` everywhere.
 
 A client cannot supply `trusted_user_history`, `history`, `parent_asins`,
@@ -156,7 +159,25 @@ ChatResponse
     recommendations[]       structured cards, in backend order
     audit                   reranking_applied, counts, original/reranked order,
                             ranked_with_preferences (what THIS turn ranked against)
+    trace                   a consolidated view of this turn's decisions (below)
 ```
+
+`trace` is additive and optional for a client, and it stays a *view*: nothing in it is
+recomputed. It carries the candidate count, the ACTIVE preferences, the persisted memory
+changes, the M10A evidence counts and the rank movements, plus five decision fields read from
+how the turn actually executed:
+
+| field | meaning |
+| --- | --- |
+| `decision_mode` | `deterministic` or `llm` — what served this turn |
+| `provider` / `model` | the provider and model the answering client declared, or `null` |
+| `proposed_route` | the route a decision policy proposed, or `null` when none did |
+| `preference_actions[]` | validated actions (`add` / `remove`, `value`, `kind`) with `applied` |
+
+`applied` is taken from the **persisted** Milestone 9 write, not from the proposal: an action
+the policy validated but the store declined (a duplicate, or a removal that matched nothing) is
+reported with `applied: false` rather than as a change. The trace never carries a prompt, model
+reasoning, raw provider output or any product identity the response does not already contain.
 
 Each card carries `reranked_rank`, `original_rank`, `parent_asin`, `item_id`,
 `sasrec_score`, grounded metadata (`title`, `store`, `main_category`, `price_text`,
@@ -181,11 +202,59 @@ sequence and never re-sorts it.
 | RecommendationTool failure | 502 | `recommendation_failed` |
 | matching / reranking failure | 502 | `preference_stage_failed` |
 | agent orchestration failure | 502 | `agent_failed` |
+| unknown decision mode | 422 | `unsupported_decision_mode` |
+| LLM mode with no usable provider | 503 | `llm_unavailable` |
+| provider call timed out | 504 | `llm_timeout` |
+| plan not valid / unsupported action | 502 | `llm_invalid_plan` |
+| any other provider failure | 502 | `llm_provider_error` |
 | anything else | 502 | `demo_backend_failed` |
 
 Every `5xx` detail is authored by the mapping layer, so an internal exception message,
 filesystem path or stack trace never reaches a client. A failed turn never returns `200`
 with fabricated recommendation content.
+
+## Decision modes (optional LLM Agent)
+
+The demo has two decision policies, selected per session from the browser (`Decision Mode`) or
+per request with `decision_mode`. **Deterministic is the default and needs no credential.**
+
+```text
+deterministic   the accepted keyword decision model + the rule-based M9 extractor
+llm             the optional LLM policy layer: one validated turn plan per turn
+```
+
+What the LLM policy may decide, and what it may not, is the whole point:
+
+```text
+may decide     the route (recommend | direct) and which preference VALUES are stored/withdrawn
+may not decide products, scores, evidence, ranks, masking, matching, reranking, metrics
+```
+
+A plan is one JSON object with exactly three fields (`route`, `add`, `remove`) and
+`extra="forbid"`, so a plan that tries to carry a `parent_asin`, a score, evidence or a rank is
+a validation error rather than an ignored key. Planned preferences travel through the **same**
+accepted Milestone 9 service as rule-extracted ones, which is what keeps validation and
+persistence in trusted code.
+
+Execution order, and why it is that order:
+
+1. the plan is obtained **before** any trusted component runs, so a provider failure cannot
+   leave a partial preference mutation behind;
+2. the accepted `AgentGraph` executes the turn, with the plan's route supplied through the
+   accepted decision-model seam and the same plan supplied to the memory service as its
+   extractor — so a turn makes **exactly one** provider call, and the route and the extraction
+   can never disagree;
+3. retrieval, masking, scoring, matching, reranking, persistence and rendering are the
+   unchanged accepted components.
+
+Failure is fail-closed, and the mode is **never** downgraded silently:
+
+* no provider configured → `/v1/demo/decision-modes` reports the mode unavailable with the real
+  reason, the browser disables it, and asking anyway is a `503`;
+* a timeout, a provider failure, malformed output or an unsupported action → an error status, no
+  memory mutation, no fabricated acknowledgement, and the session **stays** in LLM mode so the
+  next turn fails the same way instead of quietly answering from the deterministic path;
+* switching the session back to `deterministic` is an explicit request from the client.
 
 ## Preference timing (unchanged from M9)
 

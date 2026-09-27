@@ -36,7 +36,10 @@
     apiVersion: document.getElementById("api-version"),
     tracePanel: document.getElementById("trace-panel"),
     statusChips: document.getElementById("status-chips"),
-    memoryNote: document.getElementById("memory-note")
+    memoryNote: document.getElementById("memory-note"),
+    modeDeterministic: document.getElementById("mode-deterministic"),
+    modeLlm: document.getElementById("mode-llm"),
+    modeNote: document.getElementById("mode-note")
   };
 
   var state = {
@@ -46,7 +49,14 @@
     expired: false,
     turns: 0,
     ready: false,
-    lastRoute: null
+    lastRoute: null,
+    /* Which decision policy the next turn asks for.  Always one of the two modes the server
+       reported; "deterministic" until the server says otherwise, so the page never claims a
+       mode the backend did not confirm. */
+    decisionMode: "deterministic",
+    modes: null,
+    /* True when the server advertised no decision-mode list at all (an older build). */
+    modeProbeFailed: false
   };
 
   /* ------------------------------------------------------------------ */
@@ -130,6 +140,13 @@
     if (error && error.code === "session_capacity_exceeded") {
       return "The demo has reached its live-session limit. Reset an existing session first.";
     }
+    if (error && (error.code === "llm_unavailable" || error.code === "llm_timeout"
+        || error.code === "llm_invalid_plan" || error.code === "llm_provider_error")) {
+      /* The server authored this detail; it always states that no preference was changed.
+         The mode is never switched automatically: a failed LLM turn stays a failed turn. */
+      return (error.message || "The LLM decision policy could not serve this turn.")
+        + " Nothing was changed; send again, or select Deterministic.";
+    }
     if (error && error.status >= 500) {
       return "The demo backend could not complete this turn. No partial result was fabricated.";
     }
@@ -171,17 +188,139 @@
     });
   }
 
+  /* ------------------------------------------------------------------ */
+  /* decision mode                                                       */
+  /* ------------------------------------------------------------------ */
+
+  function modeView(mode) {
+    var modes = state.modes || [];
+    for (var i = 0; i < modes.length; i += 1) {
+      if (modes[i].mode === mode) { return modes[i]; }
+    }
+    return null;
+  }
+
+  function renderModeNote() {
+    var view = modeView(state.decisionMode);
+    var llm = modeView("llm");
+    clear(els.modeNote);
+    if (!view) {
+      els.modeNote.className = state.modeProbeFailed ? "hint mode-note-unavailable" : "hint";
+      els.modeNote.appendChild(document.createTextNode(state.modeProbeFailed
+        ? "LLM Agent unavailable: this server does not advertise decision modes, so the demo "
+          + "runs deterministically."
+        : "Checking which decision policies this deployment can serve…"));
+      return;
+    }
+    /* The reason an option is unavailable must be visible without selecting it, because a
+       disabled option cannot be selected at all.  The server authored the detail. */
+    if (llm && !llm.available) {
+      els.modeNote.className = "hint mode-note-unavailable";
+      els.modeNote.appendChild(document.createTextNode(
+        "LLM Agent unavailable: "
+        + (llm.detail || llm.reason || "the provider is not available") + "."));
+      return;
+    }
+    if (view.mode === "llm") {
+      els.modeNote.className = "hint mode-note-available";
+      els.modeNote.appendChild(document.createTextNode(
+        "LLM Agent ready: " + (view.provider || "provider") + " / " + (view.model || "model")
+        + ". The model chooses the route and which stated preferences are stored."));
+      return;
+    }
+    els.modeNote.className = "hint";
+    els.modeNote.appendChild(document.createTextNode(
+      "Deterministic: " + (view.detail || "runs offline.")));
+  }
+
+  function renderModeChoice() {
+    var llm = modeView("llm");
+    var llmAvailable = !!(llm && llm.available);
+    var deterministic = state.decisionMode !== "llm";
+    els.modeDeterministic.checked = deterministic;
+    els.modeLlm.checked = !deterministic;
+    els.modeLlm.disabled = !llmAvailable;
+    els.modeDeterministic.disabled = false;
+    /* A disabled control cannot show a reason by being clicked, so the reason travels on the
+       control itself as well as in the note below. */
+    els.modeLlm.setAttribute("title", llmAvailable
+      ? "LLM Agent"
+      : ("LLM Agent unavailable: "
+        + ((llm && (llm.detail || llm.reason)) || "the provider is not available")));
+    /* The wrapping label carries the unavailable styling, so a disabled option also looks
+       disabled.  Class-only work: no ordering, no scoring, nothing derived from data. */
+    var llmLabel = els.modeLlm.parentNode;
+    if (llmLabel) {
+      llmLabel.className = llmAvailable ? "mode-option" : "mode-option unavailable";
+      if (!deterministic) { llmLabel.className += " active"; }
+    }
+    var detLabel = els.modeDeterministic.parentNode;
+    if (detLabel) {
+      detLabel.className = deterministic ? "mode-option active" : "mode-option";
+    }
+    renderModeNote();
+  }
+
+  function loadDecisionModes() {
+    /* Availability comes from the server on every page load, so the LLM option is shown as
+       unavailable with the real reason instead of failing on the first turn. */
+    return request("/decision-modes").then(function (payload) {
+      state.modes = payload.modes || [];
+      state.modeProbeFailed = false;
+      var llm = modeView("llm");
+      if (state.decisionMode === "llm" && !(llm && llm.available)) {
+        state.decisionMode = "deterministic";
+      }
+      renderModeChoice();
+      renderStatusChips();
+      return payload;
+    }).catch(function () {
+      /* A server that does not advertise modes at all (an older build) must not break the
+         deterministic demo: the page continues and reports the LLM option as unavailable,
+         which is the honest reading of "no such endpoint".  It never assumes the mode works. */
+      state.modes = [];
+      state.modeProbeFailed = true;
+      state.decisionMode = "deterministic";
+      renderModeChoice();
+      renderStatusChips();
+      return null;
+    });
+  }
+
+  function selectDecisionMode(mode) {
+    var view = modeView(mode);
+    if (mode === "llm" && !(view && view.available)) {
+      showBanner("error", "LLM Agent unavailable",
+        (view && (view.detail || view.reason)) || "the provider is not available");
+      renderModeChoice();
+      return;
+    }
+    state.decisionMode = mode;
+    hideBanner();
+    renderModeChoice();
+    renderStatusChips();
+  }
+
   function createSession() {
     hideBanner();
     setState("initializing");
     setBusy(true);
     var chosen = els.profileSelect.value || state.profileId;
-    return request("/sessions", { method: "POST", body: { profile_id: chosen } })
+    var requested = state.decisionMode;
+    var body = { profile_id: chosen };
+    if (state.modes && state.modes.length) {
+      /* Sent only to a server that advertised the mode list, so a server from before the mode
+         existed still receives exactly the request it has always understood. */
+      body.decision_mode = requested;
+    }
+    return request("/sessions", { method: "POST", body: body })
       .then(function (payload) {
         state.sessionId = payload.session_id;
         state.profileId = payload.profile.profile_id;
         state.turns = payload.turn || 0;
         state.expired = false;
+        /* The session's own mode, as the server recorded it - not what the page asked for. */
+        state.decisionMode = payload.decision_mode || "deterministic";
         els.session.textContent = payload.session_id;
         els.turn.textContent = String(state.turns);
         els.route.textContent = "—";
@@ -196,6 +335,9 @@
         renderPreferences([]);
         clear(els.memoryNote);
         els.memoryNote.hidden = true;
+        clear(els.tracePanel);
+        els.tracePanel.appendChild(el("p", "muted", "Send a message to see this turn's trace."));
+        renderModeChoice();
         renderStatusChips();
         setBusy(false);
         setState("ready");
@@ -255,9 +397,13 @@
     appendTurn("user", "You", message);
     els.input.value = "";
 
+    var turnBody = { message: message, k: 5 };
+    if (state.modes && state.modes.length) {
+      turnBody.decision_mode = state.decisionMode;
+    }
     request("/sessions/" + encodeURIComponent(state.sessionId) + "/chat", {
       method: "POST",
-      body: { message: message, k: 5 }
+      body: turnBody
     })
       .then(function (payload) {
         state.turns = payload.turn;
@@ -271,7 +417,7 @@
         renderCards(payload.recommendations);
         renderAudit(payload.audit);
         renderPreferences(payload.active_preferences);
-        setState(payload.audit && payload.audit.reranking_applied ? "success" : "success");
+        setState("success");
         setBusy(false);
         els.input.focus();
       })
@@ -285,8 +431,27 @@
           return;
         }
         setState("error");
+        /* A failed turn produced no trace and no recommendation, so the panel must not keep
+           showing the previous turn's decisions as if they belonged to this one. */
+        renderTurnFailure(error);
         showBanner("error", "Turn failed", describeError(error));
       });
+  }
+
+  function renderTurnFailure(error) {
+    clear(els.tracePanel);
+    var wrap = el("div", "trace-section");
+    wrap.appendChild(el("h4", null, "Turn not completed"));
+    var ul = el("ul", "trace-list");
+    var li = el("li", "trace-move");
+    li.appendChild(el("span", "k", "result"));
+    li.appendChild(el("span", "v down", error && error.code ? error.code : "failed"));
+    ul.appendChild(li);
+    wrap.appendChild(ul);
+    wrap.appendChild(el("p", "muted",
+      "No decision plan was executed, so this turn changed no preference memory and produced "
+      + "no recommendation."));
+    els.tracePanel.appendChild(wrap);
   }
 
   /* ------------------------------------------------------------------ */
@@ -335,6 +500,13 @@
     if (state.turns) {
       els.statusChips.appendChild(el("span", "chip", "turn " + state.turns));
     }
+    if (state.decisionMode) {
+      var llm = modeView("llm");
+      var usable = state.decisionMode !== "llm" || !!(llm && llm.available);
+      els.statusChips.appendChild(el("span",
+        "chip" + (state.decisionMode === "llm" ? (usable ? " ok" : " bad") : ""),
+        state.decisionMode === "llm" ? "LLM Agent" : "deterministic"));
+    }
     if (state.lastRoute) {
       els.statusChips.appendChild(el("span", "chip",
         state.lastRoute === "recommend" ? "recommendation" : "direct"));
@@ -349,6 +521,54 @@
       return;
     }
     var sections = [];
+
+    /* Decision: how this turn's decisions were made.  Read from the trace, so the panel can
+       never claim a policy the backend did not run. */
+    var decision = el("div", "trace-section");
+    decision.appendChild(el("h4", null, "Decision"));
+    var decisionRows = [
+      {
+        key: "decision mode",
+        value: trace.decision_mode === "llm" ? "LLM Agent" : "Deterministic"
+      }
+    ];
+    if (trace.provider) {
+      decisionRows.push({
+        key: "provider",
+        value: trace.provider + (trace.model ? " / " + trace.model : "")
+      });
+    } else if (trace.decision_mode === "llm") {
+      decisionRows.push({ key: "provider", value: "not declared by the client" });
+    }
+    if (trace.proposed_route) {
+      decisionRows.push({
+        key: "proposed action",
+        value: String(trace.proposed_route).toUpperCase()
+      });
+    }
+    var decisionList = el("ul", "trace-list");
+    decisionRows.forEach(function (row) {
+      var li = el("li", "trace-move");
+      li.appendChild(el("span", "k", row.key));
+      li.appendChild(el("span", "v", row.value));
+      decisionList.appendChild(li);
+    });
+    decision.appendChild(decisionList);
+
+    var actions = trace.preference_actions || [];
+    if (actions.length) {
+      var actionList = el("ul", "trace-list");
+      actions.forEach(function (action) {
+        var adding = action.action === "add";
+        var li = el("li", "trace-move");
+        li.appendChild(el("span", "k", adding ? "+ " + action.value : "\u2212 " + action.value));
+        li.appendChild(el("span", "v " + (action.applied ? (adding ? "up" : "down") : "same"),
+          action.applied ? "applied" : "not applied"));
+        actionList.appendChild(li);
+      });
+      decision.appendChild(actionList);
+    }
+    sections.push(decision);
 
     var route = el("div", "trace-section");
     route.appendChild(el("h4", null, "Route"));
@@ -685,10 +905,18 @@
   els.profileSelect.addEventListener("change", function () {
     state.profileId = els.profileSelect.value;
   });
+  els.modeDeterministic.addEventListener("change", function () {
+    if (els.modeDeterministic.checked) { selectDecisionMode("deterministic"); }
+  });
+  els.modeLlm.addEventListener("change", function () {
+    if (els.modeLlm.checked) { selectDecisionMode("llm"); }
+  });
 
   setBusy(false);
   setState("initializing");
+  renderModeChoice();
   checkHealth()
+    .then(function () { return loadDecisionModes(); })
     .then(function () { return loadProfiles(); })
     .then(function () { return createSession(); })
     .catch(function (error) {

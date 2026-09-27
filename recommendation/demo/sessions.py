@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterator, Mapping
 
 from .profiles import DemoProfile
+from .schemas import DECISION_MODES, DEFAULT_DECISION_MODE
 
 __all__ = [
     "DEFAULT_MAX_SESSIONS",
@@ -50,6 +51,7 @@ __all__ = [
     "TurnAllocation",
     "UnknownProfile",
     "UnknownSession",
+    "UnsupportedDecisionMode",
 ]
 
 #: Bounded live-session registry: a local demo never needs unbounded sessions.
@@ -63,6 +65,16 @@ class DemoError(Exception):
     """Base class for demo-layer failures."""
 
     code = "demo_error"
+
+
+class UnsupportedDecisionMode(DemoError):
+    """The requested decision mode is not one this demo defines.
+
+    Raised by the session layer rather than assumed: a caller that bypasses the request
+    schema must be told the mode is unknown, not silently given a different one.
+    """
+
+    code = "unsupported_decision_mode"
 
 
 class UnknownProfile(DemoError):
@@ -99,6 +111,10 @@ class DemoSession:
     created_at: float
     creation_index: int
     next_turn_sequence: int = 0
+    #: Which decision policy serves this session's turns.  Session state, not a request
+    #: argument: the browser selects it once and every later turn inherits it, so a turn that
+    #: omits the field cannot silently change how the session decides.
+    decision_mode: str = DEFAULT_DECISION_MODE
     #: Serialises this session's turns only.  Repr-excluded: it is not state to display.
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -110,6 +126,22 @@ class DemoSession:
     def turn_id_for(self, sequence: int) -> str:
         """Return the server-owned turn identifier for a sequence number."""
         return f"{self.session_id}:{sequence:06d}"
+
+    def switch_decision_mode(self, mode: str) -> str:
+        """Set this session's decision mode, or refuse an unknown one.
+
+        Raises
+        ------
+        UnsupportedDecisionMode
+            ``mode`` is not one of :data:`~recommendation.demo.schemas.DECISION_MODES`.  The
+            stored mode is left unchanged.
+        """
+        if mode not in DECISION_MODES:
+            raise UnsupportedDecisionMode(
+                f"unknown decision mode {mode!r}; known: {', '.join(DECISION_MODES)}"
+            )
+        self.decision_mode = mode
+        return self.decision_mode
 
 
 @dataclass(frozen=True)
@@ -201,16 +233,27 @@ class DemoSessionManager:
 
     # -- lifecycle --------------------------------------------------------- #
 
-    def create(self, profile_id: str) -> DemoSession:
+    def create(
+        self, profile_id: str, *, decision_mode: str = DEFAULT_DECISION_MODE
+    ) -> DemoSession:
         """Create a fresh, isolated session for ``profile_id``.
+
+        ``decision_mode`` defaults to the deterministic policy, so a caller that does not
+        choose one gets exactly the behaviour this demo always had.
 
         Raises
         ------
         UnknownProfile
             No such demo profile exists.
+        UnsupportedDecisionMode
+            ``decision_mode`` is not a mode this demo defines.
         SessionCapacityExceeded
             The live registry is full.
         """
+        if decision_mode not in DECISION_MODES:
+            raise UnsupportedDecisionMode(
+                f"unknown decision mode {decision_mode!r}; known: {', '.join(DECISION_MODES)}"
+            )
         profile = self._profiles.get(profile_id)
         if profile is None:
             raise UnknownProfile(f"no demo profile {profile_id!r} is configured")
@@ -235,6 +278,7 @@ class DemoSessionManager:
                 trusted_user_history=tuple(profile.trusted_user_history),
                 created_at=self._clock(),
                 creation_index=self._creation_counter,
+                decision_mode=decision_mode,
             )
             self._sessions[session_id] = session
             return session

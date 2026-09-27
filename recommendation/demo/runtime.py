@@ -158,9 +158,15 @@ class DemoRuntime:
     max_cached_graphs: int = MAX_CACHED_GRAPHS
     #: Which control plane serves a turn: the accepted DAG (default) or the 2.0-alpha loop.
     control_plane: str = DEFAULT_CONTROL_PLANE
+    #: Injection point for the optional LLM decision mode's structured-model client.  ``None``
+    #: (the default) builds the configured provider on first use, so a deployment that never
+    #: uses the mode never constructs a provider client.  A test - or a deployment with its own
+    #: transport - may supply one instead; see :meth:`use_llm_client`.
+    llm_client_factory: Callable[[], Any] | None = None
     _graphs: dict[tuple[int, str], AgentGraph] = field(default_factory=dict, repr=False)
     _loops: dict[tuple[int, str], DemoLoopRunner] = field(default_factory=dict, repr=False)
     _agent_service: Any = field(default=None, repr=False)
+    _llm_planner: Any = field(default=None, repr=False)
     _graph_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # -- readiness --------------------------------------------------------- #
@@ -269,6 +275,75 @@ class DemoRuntime:
     def turn(self, k: int, *, user_key: str, agent_input: Any) -> Any:
         """Run one turn on the configured control plane and return its state."""
         return self.runner_for(k, user_key=user_key).invoke(agent_input)
+
+    # -- the optional LLM decision mode ------------------------------------ #
+
+    def llm_planner(self) -> Any:
+        """Return the process-scoped LLM turn planner, building it on first use.
+
+        Built lazily and memoised, so a deployment that never selects the LLM decision mode
+        never constructs a provider client, and a deployment that does builds exactly one for
+        the process.
+        """
+        with self._graph_lock:
+            if self._llm_planner is None:
+                from .llm_runtime import build_llm_planner
+
+                self._llm_planner = build_llm_planner(self.llm_client_factory)
+            return self._llm_planner
+
+    def use_llm_client(self, client: Any, *, max_attempts: int = 2) -> None:
+        """Install the structured-model client the LLM decision mode will use.
+
+        A deployment (or a test) that owns its client supplies it here instead of letting the
+        runtime build one from ``AGENTRECX_LLM_*``.  The client must satisfy the accepted
+        :class:`~recommendation.control.model_client.StructuredModelClient` seam.
+        """
+        from .llm_policy import LLMTurnPlanner
+
+        with self._graph_lock:
+            self._llm_planner = LLMTurnPlanner(client, max_attempts=max_attempts)
+
+    def llm_turn(self, k: int, *, user_key: str, agent_input: Any) -> tuple[Any, Any]:
+        """Run one turn whose decisions come from the optional LLM policy layer.
+
+        Returns ``(state, run)``: the accepted :class:`~recommendation.agent.AgentGraphState`
+        the deterministic path also returns, plus the turn's
+        :class:`~recommendation.demo.llm_runtime.LLMTurnRun` describing the validated plan - the
+        only source from which the response's decision fields may be built.
+
+        Composition, in order, and the order is the point:
+
+        1. the plan is obtained **first**, so a provider failure happens before any trusted
+           component has run and cannot leave a partial preference mutation behind;
+        2. the accepted :class:`~recommendation.agent.AgentGraph` executes the turn, with the
+           plan's route supplied through the accepted decision-model seam and the same plan
+           supplied to the accepted Milestone 9 memory service as its extractor;
+        3. everything else - retrieval, masking, scoring, matching, reranking, persistence - is
+           the unchanged accepted component set, constructed from this runtime's own
+           collaborators, so one process still holds one checkpoint, one catalogue and one store.
+
+        The graph is compiled per LLM turn rather than cached per ``(k, user_key)``: the plan is
+        turn-scoped and the graph binds its decision model at construction.  Compiling it is pure
+        Python over the same process-scoped collaborators, so no model, index or service is
+        rebuilt.
+        """
+        from .llm_runtime import LLMTurnRun
+
+        run = LLMTurnRun(
+            self.llm_planner(), k=k, user_message=agent_input.user_message
+        )
+        run.plan()
+        graph = AgentGraph(
+            run.decision_model(),
+            self.tool,
+            product_enricher=self.enricher,
+            memory_service=run.memory_service(self.memory_service.store),
+            user_key=user_key,
+            preference_matcher=self.matcher,
+            reranker=self.reranker,
+        )
+        return graph.invoke(agent_input), run
 
     def agent_service(self) -> Any:
         """Return the single-turn agent service, composing it once on first use.

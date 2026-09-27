@@ -50,6 +50,7 @@ Then open **<http://127.0.0.1:8000/demo/>**.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /v1/demo/health` | readiness: `status`, `model_loaded`, `metadata_loaded`, `demo_ready` |
+| `GET /v1/demo/decision-modes` | which decision modes this deployment can serve, and the real reason when it cannot |
 | `GET /docs` | interactive API docs |
 | `GET /demo/` | browser demo (plain HTML/CSS/JS, no build step, same-origin assets only) |
 | `POST /v1/demo/sessions` | open a session (server-owned preference-memory namespace) |
@@ -59,8 +60,10 @@ Then open **<http://127.0.0.1:8000/demo/>**.
 
 Startup loads the accepted SASRec checkpoint and the ~300 MB catalogue metadata once (expect
 roughly 20 s and an `Application startup complete.` line). Stop it with `Ctrl+C`. The demo runs in
-the foreground; there is no PID file or daemon mode. **No hosted LLM API key is required — the
-serving path is deterministic and offline.**
+the foreground; there is no PID file or daemon mode. **No hosted LLM API key is required: the
+default decision mode is deterministic and offline.** An optional LLM Agent decision mode can be
+enabled with a provider configuration — see
+[Optional LLM Agent decision mode](#optional-llm-agent-decision-mode).
 
 Full detail, including artifact verification tiers and port-override behaviour:
 [`docs/USAGE.md`](docs/USAGE.md).
@@ -184,14 +187,23 @@ The agent can ask for candidates and can constrain what is *shown*. It cannot ad
 is not in the catalogue, change a model score, expose consumed history as a recommendation, or
 report a metric.
 
+When the optional LLM Agent decision mode is selected, that boundary is unchanged — the model is
+given **decision authority only**. It proposes one structured turn plan whose schema has fields for
+a route and for preference *values* and **no field at all** for a product id, a score, evidence, a
+rank or a mutation result, with `extra="forbid"`, so an injected `parent_asin` is a validation
+error rather than an ignored key. Retrieval, masking, scoring, matching, reranking, persistence and
+metrics all still run in the same trusted code, and the plan travels through the same accepted
+Milestone 9 service a rule-extracted preference does.
+
 ---
 
 ## Recommendation Trace
 
-Each turn carries an optional, collapsible panel in the browser:
+Each turn carries an optional, permanent panel in the browser:
 
 ```text
 Recommendation Trace
+├── Decision             (Deterministic / LLM Agent, provider, proposed action, preference actions)
 ├── Route                (RECOMMENDATION / DIRECT)
 ├── Candidates           (count returned)
 ├── Active preferences
@@ -203,12 +215,46 @@ Recommendation Trace
 It is a **view of state the response already contained**: candidate counts come from the response's
 own audit block, ranks and titles from the recommendation cards, mutations from the persisted
 memory write result, and evidence is only counted — never re-matched, never re-extracted, never
-re-ranked.
+re-ranked. The decision line is read from how the turn actually executed, so the panel can never
+claim a policy the backend did not run.
 
 It does **not** expose chain-of-thought, prompts, hidden reasoning or internal state. On the
 browser path it also deliberately **omits** fields that have no authoritative value there — tool
 name, retrieval source and catalogue-grounding counts are neither shown nor hardcoded. They exist
 in the schema as optional fields so a future path can populate them honestly.
+
+---
+
+## Optional LLM Agent decision mode
+
+The browser offers two decision policies:
+
+```text
+Decision Mode
+[ Deterministic ]  [ LLM Agent ]
+```
+
+**Deterministic** is the default and needs no credential. **LLM Agent** is available only when a
+provider is configured (`AGENTRECX_LLM_BASE_URL`, `AGENTRECX_LLM_MODEL`, `AGENTRECX_LLM_API_KEY`,
+optionally `AGENTRECX_LLM_PROFILE`); `GET /v1/demo/decision-modes` reports the real availability,
+and the browser disables the option with the reason rather than failing on the first turn.
+
+When it is selected, one provider call produces one validated plan per turn. The plan decides the
+route and which preference values are stored or withdrawn, and nothing else. Two properties are
+enforced rather than promised:
+
+- **the plan is obtained before any trusted component runs**, so a provider failure cannot leave a
+  partial preference mutation behind;
+- **there is no silent fallback** — a missing key, a timeout, malformed output or an unsupported
+  action returns an error code (`llm_unavailable`, `llm_timeout`, `llm_invalid_plan`,
+  `llm_provider_error`), changes no memory, and leaves the session in LLM mode, so a failure is
+  never dressed up as a deterministic answer.
+
+This is a *productisation* feature of the browser demo. It is not the research question answered in
+[What happened when we evaluated a live LLM policy?](#what-happened-when-we-evaluated-a-live-llm-policy),
+which measured a different system (the bounded loop control plane's adaptive policy) against a
+fixed-fusion baseline under a frozen protocol. No LLM is used to produce any number in the
+[benchmark results](#frozen-benchmark-results).
 
 ---
 

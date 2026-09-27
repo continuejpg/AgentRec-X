@@ -33,6 +33,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from recommendation.api.schemas import MAX_K, MIN_K
 
 __all__ = [
+    "DECISION_MODES",
+    "DECISION_MODE_DETERMINISTIC",
+    "DECISION_MODE_LLM",
+    "DEFAULT_DECISION_MODE",
     "DEMO_API_VERSION",
     "MAX_MESSAGE_LENGTH",
     "ActivePreferenceView",
@@ -40,6 +44,9 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "CreateSessionRequest",
+    "DecisionMode",
+    "DecisionModeView",
+    "DecisionModesResponse",
     "DemoHealthResponse",
     "DemoProfileView",
     "EvidenceView",
@@ -51,10 +58,22 @@ __all__ = [
     "ResetResponse",
     "SessionResponse",
     "SessionStateResponse",
+    "TracePreferenceAction",
 ]
 
 #: Version of the demo wire contract, published in session responses.
 DEMO_API_VERSION = "1.0.0"
+
+#: The decision modes this wire contract accepts.  ``deterministic`` is the default and needs no
+#: credential, so an existing client that never sends the field keeps exactly its old behaviour.
+DECISION_MODE_DETERMINISTIC = "deterministic"
+DECISION_MODE_LLM = "llm"
+DECISION_MODES: tuple[str, ...] = (DECISION_MODE_DETERMINISTIC, DECISION_MODE_LLM)
+DEFAULT_DECISION_MODE = DECISION_MODE_DETERMINISTIC
+
+#: The wire type of a decision mode.  A closed set, so an unknown mode is a validation error
+#: rather than an unrecognised string a session would have to interpret.
+DecisionMode = Literal["deterministic", "llm"]
 
 #: Upper bound on a chat message.  A demo turn is a shopping sentence, not a document;
 #: bounding it keeps one request from carrying an unbounded amount of prompt text.
@@ -85,6 +104,14 @@ class CreateSessionRequest(BaseModel):
         description="Identifier of a server-owned demo profile. Never a trusted history.",
         examples=["demo-user-1"],
     )
+    decision_mode: DecisionMode = Field(
+        default=DEFAULT_DECISION_MODE,
+        description=(
+            "Which decision policy serves this session's turns. 'deterministic' (the default) "
+            "runs offline; 'llm' needs a configured provider and is rejected when it is not "
+            "configured, rather than falling back."
+        ),
+    )
 
     @field_validator("profile_id")
     @classmethod
@@ -99,7 +126,8 @@ class ChatRequest(BaseModel):
     """Body of ``POST /v1/demo/sessions/{session_id}/chat``.
 
     The message is untrusted display text and untrusted extraction input.  It can never
-    carry interaction history: the only fields that exist are the message and ``k``.
+    carry interaction history: the only fields that exist are the message, ``k`` and the
+    optional decision mode.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -112,6 +140,14 @@ class ChatRequest(BaseModel):
     k: StrictK = Field(
         default=5,
         description=f"Number of recommendations to request, {MIN_K}..{MAX_K} (strict integer).",
+    )
+    decision_mode: DecisionMode | None = Field(
+        default=None,
+        description=(
+            "Optional switch of this session's decision mode for this turn and every later "
+            "turn. Omitted means 'use the mode the session already has', so a client that "
+            "never sends it stays deterministic."
+        ),
     )
 
     @field_validator("message")
@@ -152,6 +188,10 @@ class SessionResponse(BaseModel):
     session_id: str = Field(..., description="Opaque demo-session capability token (UUID4).")
     profile: DemoProfileView
     turn: int = Field(..., ge=0, description="Turns completed in this session.")
+    decision_mode: DecisionMode = Field(
+        default=DEFAULT_DECISION_MODE,
+        description="The decision policy this session runs its turns with.",
+    )
 
 
 class PreferenceMutationView(BaseModel):
@@ -358,6 +398,62 @@ class TraceGroundingView(BaseModel):
     total: int = Field(default=0, ge=0)
 
 
+class TracePreferenceAction(BaseModel):
+    """One preference action a decision policy proposed for this turn.
+
+    Only a *validated* action ever appears here: when the LLM decision mode is used, an action
+    reaches this view only after the policy's plan schema accepted it.  ``applied`` is the
+    separate, stronger fact, taken from the accepted memory write: ``True`` only when the
+    trusted store actually changed an ACTIVE entry for this value this turn.  A validated
+    action that the store declined (a duplicate, or a removal that matched nothing) is
+    therefore visible as ``applied=False`` rather than being reported as a change.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    action: Literal["add", "remove"]
+    value: str
+    kind: str | None = Field(
+        default=None,
+        description="Accepted preference kind for an add; None for a removal, which is value-scoped.",
+    )
+    applied: bool = Field(
+        default=False,
+        description="True only when the persisted memory write changed an active entry for this value.",
+    )
+
+
+class DecisionModeView(BaseModel):
+    """One decision mode a browser may select, with its real availability.
+
+    ``available`` is read from execution state (is a provider configured for this deployment,
+    and can this control plane serve the mode), never hardcoded.  ``detail`` carries the
+    human-readable reason a mode is unavailable, authored by the API layer.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mode: DecisionMode
+    label: str
+    available: bool
+    reason: str | None = Field(
+        default=None, description="Stable machine-readable reason, e.g. 'missing_api_key'."
+    )
+    detail: str | None = Field(default=None, description="Human-readable explanation for a UI.")
+    provider: str | None = None
+    model: str | None = None
+
+
+class DecisionModesResponse(BaseModel):
+    """Body of ``GET /v1/demo/decision-modes``: what this deployment can actually serve."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    api_version: str = DEMO_API_VERSION
+    default: DecisionMode = DEFAULT_DECISION_MODE
+    modes: tuple[DecisionModeView, ...] = ()
+
+
 class RecommendationTrace(BaseModel):
     """A consolidated VIEW of the decisions one turn already made.
 
@@ -377,6 +473,39 @@ class RecommendationTrace(BaseModel):
     route: Literal["direct", "recommend"]
     candidate_count: int | None = Field(
         default=None, ge=0, description="Omitted when the turn produced no candidates."
+    )
+    decision_mode: str = Field(
+        default=DEFAULT_DECISION_MODE,
+        description=(
+            "Which decision policy served this turn: 'deterministic' or 'llm'. Read from how the "
+            "turn actually executed, never inferred from the request."
+        ),
+    )
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Provider that answered this turn's decision call, as declared by the client that "
+            "made it. None in deterministic mode, and None in LLM mode when the client declares "
+            "no identity - an unknown provider is never guessed."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description="Model identifier declared by the client that answered. Never a credential.",
+    )
+    proposed_route: str | None = Field(
+        default=None,
+        description=(
+            "Route the decision policy proposed this turn, when a policy proposed one. The "
+            "executed route is the separate 'route' field, so the two can be compared."
+        ),
+    )
+    preference_actions: tuple[TracePreferenceAction, ...] = Field(
+        default=(),
+        description=(
+            "Validated preference actions this turn's policy proposed, with the persisted "
+            "'applied' outcome. Never a rejected or unvalidated proposal."
+        ),
     )
     active_preferences: tuple[ActivePreferenceView, ...] = ()
     memory_changes: TraceMemoryChanges = Field(default_factory=TraceMemoryChanges)
@@ -440,6 +569,10 @@ class SessionStateResponse(BaseModel):
     session_id: str
     profile: DemoProfileView
     turn: int = Field(..., ge=0)
+    decision_mode: DecisionMode = Field(
+        default=DEFAULT_DECISION_MODE,
+        description="The decision policy this session will use for its next turn.",
+    )
     active_preferences: tuple[ActivePreferenceView, ...] = ()
     active_preference_count: int = Field(default=0, ge=0)
 
