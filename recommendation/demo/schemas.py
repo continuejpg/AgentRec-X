@@ -308,6 +308,93 @@ class AuditView(BaseModel):
     ranked_with_preferences: tuple[ActivePreferenceView, ...] = ()
 
 
+class TraceMemoryChanges(BaseModel):
+    """Persisted preference mutations for one turn, taken from the accepted write result."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    changed: bool = False
+    added: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+    superseded: tuple[str, ...] = ()
+
+
+class TraceEvidenceSummary(BaseModel):
+    """Preference evidence already computed by M10A, counted per candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    match_candidates: int = Field(default=0, ge=0)
+    violation_candidates: int = Field(default=0, ge=0)
+    unknown_candidates: int = Field(default=0, ge=0)
+
+
+class TraceRankChange(BaseModel):
+    """One candidate's movement between the SASRec order and the reranked order."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_asin: str
+    title: str | None = Field(
+        default=None,
+        description="Card title when the existing card already carried one. Never looked up here.",
+    )
+    original_rank: int = Field(..., ge=1, description="SASRec rank, unchanged from the Tool.")
+    final_rank: int = Field(..., ge=1, description="Presentation order produced by reranking.")
+    moved: bool = False
+
+
+class TraceGroundingView(BaseModel):
+    """Placeholder for catalogue-grounding counts.
+
+    Deliberately unpopulated on the browser chat path: the AgentGraph capability route has no
+    candidate plane and no ledger, so there is no authoritative grounded/verified count to
+    read. It exists so a future path with such a source can fill it without a schema change.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    verified: int = Field(default=0, ge=0)
+    total: int = Field(default=0, ge=0)
+
+
+class RecommendationTrace(BaseModel):
+    """A consolidated VIEW of the decisions one turn already made.
+
+    Every value here is copied from authoritative state that the response already carries --
+    the recommendation cards, the audit block, the persisted memory write result and the
+    accepted M10A evidence. Nothing is recomputed: candidates are not re-counted by a second
+    rule, evidence is not re-matched, preferences are not re-extracted and ranking is not
+    re-derived. The trace adds no product identity that is not already in
+    ``ChatResponse.recommendations``.
+
+    ``source`` and ``grounding`` are optional and stay None on the browser chat path, where no
+    authoritative value exists; a path that has one may populate them without a schema change.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    route: Literal["direct", "recommend"]
+    candidate_count: int | None = Field(
+        default=None, ge=0, description="Omitted when the turn produced no candidates."
+    )
+    active_preferences: tuple[ActivePreferenceView, ...] = ()
+    memory_changes: TraceMemoryChanges = Field(default_factory=TraceMemoryChanges)
+    evidence: TraceEvidenceSummary | None = Field(
+        default=None,
+        description=(
+            "Present only when the turn actually ranked against active preferences, because "
+            "the evidence was computed against the start-of-turn snapshot. Zeroes on a turn "
+            "with no preferences would look like a measurement that did not happen."
+        ),
+    )
+    ranking_changes: tuple[TraceRankChange, ...] = ()
+    source: str | None = Field(default=None, description="Unpopulated on the browser chat path.")
+    grounding: TraceGroundingView | None = Field(
+        default=None, description="Unpopulated on the browser chat path."
+    )
+
+
 class ChatResponse(BaseModel):
     """Body of a successful ``POST /v1/demo/sessions/{session_id}/chat``."""
 
@@ -335,6 +422,13 @@ class ChatResponse(BaseModel):
         ),
     )
     audit: AuditView
+    trace: RecommendationTrace | None = Field(
+        default=None,
+        description=(
+            "Optional consolidated view of this turn's deterministic decisions. Additive and "
+            "optional: a client that ignores it behaves exactly as before."
+        ),
+    )
 
 
 class SessionStateResponse(BaseModel):

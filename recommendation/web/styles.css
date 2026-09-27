@@ -178,3 +178,31 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); }
   color: var(--muted);
   font-size: 12px;
 }
+
+
+/* Recommendation Trace: a concise, read-only view of one turn's deterministic decisions. */
+.trace {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border, #d8d8d8);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  background: rgba(0, 0, 0, 0.02);
+  font-size: 0.9rem;
+}
+
+.trace > summary {
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.trace-section { margin-top: 0.5rem; }
+.trace-section h4 {
+  margin: 0 0 0.2rem 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+.trace-section ul { margin: 0; padding-left: 1.1rem; }
+.trace-section li { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

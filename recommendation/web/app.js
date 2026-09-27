@@ -221,10 +221,11 @@
   /* chat                                                                */
   /* ------------------------------------------------------------------ */
 
-  function appendTurn(kind, meta, body) {
+  function appendTurn(kind, meta, body, extra) {
     var turn = el("div", "turn " + kind);
     turn.appendChild(el("div", "turn-meta", meta));
     turn.appendChild(el("div", "turn-body", body));
+    if (extra) { turn.appendChild(extra); }
     els.transcript.appendChild(turn);
     els.transcript.scrollTop = els.transcript.scrollHeight;
   }
@@ -252,7 +253,7 @@
         state.turns = payload.turn;
         els.turn.textContent = String(payload.turn);
         els.route.textContent = payload.route;
-        appendTurn("agent", "Agent · " + payload.turn_id, payload.message);
+        appendTurn("agent", "Agent · " + payload.turn_id, payload.message, renderTrace(payload.trace));
         renderMemoryUpdate(payload.memory_update);
         renderCards(payload.recommendations);
         renderAudit(payload.audit);
@@ -278,6 +279,83 @@
   /* ------------------------------------------------------------------ */
   /* rendering                                                           */
   /* ------------------------------------------------------------------ */
+
+  /* Recommendation Trace: a read-only view of what this turn already decided.  Every value
+   * comes from the response the backend produced; nothing is recomputed here.  Sections with
+   * no authoritative value for the turn are omitted rather than shown as placeholders. */
+  function traceSection(title, lines) {
+    if (!lines || lines.length === 0) { return null; }
+    var wrap = el("div", "trace-section");
+    wrap.appendChild(el("h4", null, title));
+    var ul = el("ul");
+    lines.forEach(function (line) { ul.appendChild(el("li", null, line)); });
+    wrap.appendChild(ul);
+    return wrap;
+  }
+
+  function renderTrace(trace) {
+    if (!trace) { return null; }
+    var details = el("details", "trace");
+    details.appendChild(el("summary", null, "Recommendation Trace"));
+
+    var sections = [];
+
+    sections.push(traceSection("Route", [
+      trace.route === "recommend" ? "RECOMMENDATION" : "DIRECT"
+    ]));
+
+    if (typeof trace.candidate_count === "number") {
+      sections.push(traceSection("Candidates", [String(trace.candidate_count) + " returned"]));
+    }
+
+    var active = (trace.active_preferences || []).map(function (item) {
+      return item.value + " (" + item.kind + ")";
+    });
+    if (active.length) {
+      sections.push(traceSection("Active preferences", active));
+    }
+
+    var changes = trace.memory_changes || {};
+    if (changes.changed) {
+      var changeLines = [];
+      if ((changes.added || []).length) { changeLines.push("added: " + changes.added.join(", ")); }
+      if ((changes.removed || []).length) { changeLines.push("removed: " + changes.removed.join(", ")); }
+      if ((changes.superseded || []).length) { changeLines.push("replaced: " + changes.superseded.join(", ")); }
+      sections.push(traceSection("Memory changes", changeLines));
+    }
+
+    if (trace.evidence) {
+      var ev = trace.evidence;
+      sections.push(traceSection("Evidence", [
+        "MATCH      " + ev.match_candidates + " candidates",
+        "VIOLATION  " + ev.violation_candidates + " candidates",
+        "UNKNOWN    " + ev.unknown_candidates + " candidates"
+      ]));
+    }
+
+    var moves = trace.ranking_changes || [];
+    if (moves.length) {
+      sections.push(traceSection("Reranking", moves.map(function (row) {
+        var arrow = row.moved ? (row.final_rank < row.original_rank ? " \u2191" : " \u2193") : "";
+        var label = row.title || row.parent_asin;
+        return "#" + row.original_rank + " \u2192 #" + row.final_rank + arrow + "  " + label;
+      })));
+    }
+
+    /* Deliberately absent on the browser path: source and grounding.  Rendered ONLY if a
+     * future path supplies an authoritative value, so no placeholder can look factual. */
+    if (trace.source) {
+      sections.push(traceSection("Source", [trace.source]));
+    }
+    if (trace.grounding) {
+      sections.push(traceSection("Grounding", [
+        trace.grounding.verified + " / " + trace.grounding.total + " verified"
+      ]));
+    }
+
+    sections.forEach(function (section) { if (section) { details.appendChild(section); } });
+    return details;
+  }
 
   function renderPreferences(preferences) {
     clear(els.preferences);
