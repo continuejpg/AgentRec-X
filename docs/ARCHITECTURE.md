@@ -1743,12 +1743,30 @@ others retrieved. Full detail, including the leakage evidence and the sample-ver
 
 ---
 
-## 26. External model backends (Step 2.2 specification, NOT IMPLEMENTED)
+## 26. External model backends (Step 2.2 specification; implemented in Steps 2.3–2.7)
 
 Custom **GenRec v0** (`recommendation/semantic_id/`, commit `80f81b1`) is **frozen as a historical
 baseline**. It is not extended: no content embeddings, no k-means++ initialisation, no
 collision-deduplication digit, no architecture change. The next generative-retrieval work is a
 **separate public-TIGER backend**, specified in [`TIGER_BACKEND.md`](TIGER_BACKEND.md).
+
+### Status: specification (Step 2.2) versus repository state today
+
+Everything below the status note is the **original Step 2.2 specification**, kept as written. The
+work it planned was carried out later, so the "not implemented" list at the end of this section
+describes the state **at Step 2.2** — it is history, not the current state of this repository:
+
+| Component | At Step 2.2 (as specified below) | Repository state today |
+| --- | --- | --- |
+| backend code | none | `backends/tiger_public/` — tracked: content features, RQ-VAE quantizer, collision-free Semantic IDs, generator, retrieval, scoring, `PROVENANCE.md` |
+| adapter (L2, `item_id` only) | none | `recommendation/backends/tiger_backend.py` |
+| certified retrieval | none | **CERTIFIED** — H7 20000/20000; `docs/reports/step26-h7-h8-canonical-report.txt` |
+| Agent candidate source | none | `recommendation/control/tiger_source.py`; Step 2.7 **QUALIFIED** (Q1–Q8) and **not enabled in runtime** |
+| fusion | none | rank-only RRF evaluated (Steps 2.8/2.8b); the TIGER increment is classified **DIRECTIONAL ONLY** |
+
+The authority split described next is unchanged and still enforced: the backend supplies **raw
+scores only**, and `parent_asin` never crosses the boundary. Frozen numbers and their sources live
+in [`PROJECT_STATE.md`](PROJECT_STATE.md); this section deliberately carries no results table.
 
 The boundary exists so AgentRec-X keeps every authority it already owns:
 
@@ -1789,15 +1807,20 @@ Steps: **2.3** skeleton and handoff bridge (no ML) → **2.4** content embedding
 collision-free Semantic IDs → **2.5** TIGER generator → **2.6** certified retrieval and the
 canonical benchmark → **2.7** Agent integration, only once 2.6 establishes value.
 
-### Not implemented (documented, not claimed)
+### Not implemented at Step 2.2 (historical state, not the current repository)
+
+The four bullets below were written when this section was the specification. They are kept verbatim
+so the specification's own claim is not silently rewritten; superseded items are marked.
 
 * **No backend code, artifact or measurement exists yet.** Step 2.2 produced the specification
-  only.
+  only. — *Superseded: Steps 2.3–2.6 produced the backend, the artifacts and the certified
+  measurement (see the status table above).*
 * **No item-content encoder, RQ-VAE, Semantic ID, TIGER or retrieval module is implemented**
-  under `backends/`.
+  under `backends/`. — *Superseded for the same reason.*
 * **No `CandidateSource` member, no Agent tool and no fusion change** is introduced, and none is
-  planned before Step 2.7.
-* **No replacement of the frozen protocol, cohort, evaluator or identity mapping.**
+  planned before Step 2.7. — *Superseded by Step 2.7 (QUALIFIED) and Steps 2.8/2.8b. No
+  `CandidateSource` member was ever added for TIGER, and none of it is enabled in the runtime.*
+* **No replacement of the frozen protocol, cohort, evaluator or identity mapping.** — *Still true.*
 
 ---
 

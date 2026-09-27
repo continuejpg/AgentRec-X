@@ -47,6 +47,20 @@ knowledge, alter the model's scores, mask history, or invent a canonical product
 
 Then open **<http://127.0.0.1:8000/demo/>**.
 
+Two paths, and the difference matters to a reviewer:
+
+| Path | Command | Needs |
+| --- | --- | --- |
+| **Offline quick start** (recommended first) | `./scripts/run_demo.sh` | nothing: it generates a small synthetic catalogue and a **randomly initialised** checkpoint |
+| **Full demo** (the measured configuration) | `./scripts/start_demo.sh` | the accepted SASRec checkpoint and the ~300 MB catalogue metadata |
+
+**What a fresh clone can and cannot do.** The source, the protocols, the frozen reports and their
+hash manifest are in-repo, and the offline path above is one command. The real checkpoints and the
+catalogue are deliberately **not** distributed from this repository — eleven large artifacts, all
+`durable_uri: NONE` ([`docs/ARTIFACT_STORAGE.md`](docs/ARTIFACT_STORAGE.md)) — so a fresh clone can
+**inspect and verify** the recorded results but **cannot recompute every reported benchmark number
+or serve the real-data demo** without those artifacts supplied out-of-band.
+
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /v1/demo/health` | readiness: `status`, `model_loaded`, `metadata_loaded`, `demo_ready` |

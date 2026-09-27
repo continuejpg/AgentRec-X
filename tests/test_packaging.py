@@ -272,7 +272,11 @@ def test_entrypoint_refuses_llm_mode_without_a_provider_script(tmp_path: Path):
 def test_entrypoint_offline_mode_clears_provider_variables_without_printing_them(tmp_path: Path):
     """In the default mode the entrypoint unsets provider variables and never echoes a value."""
     entrypoint = REPO_ROOT / "scripts" / "entrypoint.sh"
-    secret = "sk-THIS-MUST-NOT-BE-LOGGED-0123456789"
+    # A deliberately non-key-shaped value: this test asserts the entrypoint never prints the
+    # credential it was handed, and any unique value proves that.  Keeping the fixture
+    # un-key-shaped means a credential scanner is not asked to reason about a value that is not
+    # a credential.  (The secret-*detection* fixtures are elsewhere and must stay key-shaped.)
+    secret = "example-not-a-key"
     # Point the generated artifacts at a directory this test owns, and give the script an
     # explicit interpreter (``AGENTRECX_PYTHON``) so it runs the same code this suite runs.  An
     # invalid device then makes the server exit immediately instead of binding a port.

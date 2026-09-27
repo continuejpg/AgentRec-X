@@ -182,6 +182,30 @@ Portions are `REIMPLEMENTED_FROM`:
   `id_entropy` diagnostics. **Changed:** the coverage/entropy pair is computed inline and the
   `>20%` dead-code rule is a *catastrophic-collapse refusal*, not a comparative quality gate.
 
+### `src/tiger_public/retrieve.py`
+`ORIGINAL`.  The Step-2.6 retrieval search: level-synchronous bounded beam (`APPROXIMATE`) and
+exact branch-and-bound over the accepted catalogue trie (`CERTIFIED`), both ranking under the
+frozen item-score rule it **imports** from `src/tiger_public/scoring.py` rather than restating.
+The search functions take a plain `NextTokenScorer` callable and never touch the generator, which
+is what makes CERTIFIED checkable against an exhaustive oracle with no model in the loop.
+**No absorbed element:** the module contains no citation and introduces nothing beyond the
+constrained-beam material already attributed under `src/tiger_public/tiger.py`; the admissible
+bound and the exact termination rule are derived here, and the derivation is stated in the module
+docstring and tested by `tests/test_step26_retrieval.py`.
+
+### `src/tiger_public/retrieve_cli.py`
+`ORIGINAL`.  The Step-2.6 producer and its filesystem contract: it runs inside the backend virtual
+environment, reads only the frozen handoff artifacts, and writes a sparse candidate artifact
+(the certified frontier plus a documented floor for everything else).  It never masks, never ranks
+for presentation and computes no metric, so the evaluator's ownership of PAD exclusion, masking,
+tie-breaking and metrics is unchanged.  No absorbed element.
+
+### `tests/test_step26_retrieval.py`
+`ORIGINAL`.  Model-free and model-backed Step-2.6 tests: the search under both modes, the resolver,
+ranking, collisions, budget handling, the *exactness* of CERTIFIED against an independent
+exhaustive oracle, batched/single parity, and the G13.7 accepted-checkpoint gate, which skips when
+the frozen artifact is absent.  No absorbed element.
+
 ### `REPRODUCIBILITY.md`, `requirements-ml.txt`
 `ORIGINAL`.  The pinned ML runtime and the two separate decisions it records: package versions
 (frozen to what Step 2.4 actually exercised) and the CUDA wheel/index (deliberately chosen on

@@ -782,6 +782,11 @@ def test_failed_extraction_does_not_corrupt_existing_memory() -> None:
 
 
 def test_secret_like_values_are_rejected_by_the_schema() -> None:
+    # NOTE: the strings here are deliberately secret-*shaped* and must stay that way.  They are
+    # inputs to the detector in recommendation/memory/schemas.py, and the test asserts that each
+    # one is REFUSED; replacing them with neutral text would delete the coverage while still
+    # passing.  They are fixtures, not credentials, and no real key appears anywhere in this
+    # suite.
     with pytest.raises(ValidationError):
         PreferenceCandidate(
             kind=PreferenceKind.FREE_FORM_CONSTRAINT,
@@ -799,6 +804,7 @@ def test_secret_like_values_are_rejected_by_the_schema() -> None:
 @pytest.mark.parametrize(
     "secret",
     [
+        # One entry per shape the detector must cover; each is a synthetic fixture.
         "sk-abcdef1234567890",
         "api_key=sk-abc123456789",
         "AKIAIOSFODNN7EXAMPLE",

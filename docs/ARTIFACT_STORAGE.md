@@ -14,6 +14,18 @@ producer milestone and required consumer.
     out-of-band (from the host named in `local_path`) can be integrity-checked against the
     recorded SHA256, but the artifact itself must be transported manually.
 
+## What a reviewer can do from a fresh clone
+
+| | |
+| --- | --- |
+| **In-repo** | all source; the frozen evaluation protocol, cohort definition and preregistrations; the frozen reports; and the SHA256 of every accepted artifact in the table below |
+| **Verifiable from the clone alone** | that each report matches the hash recorded for it, and that the recorded protocol and source hashes are unchanged |
+| **Not possible from the clone alone** | recomputing the reported benchmark numbers, or serving the real-data demo — both need the large artifacts below, which are not distributed from this repository |
+| **Still available offline** | the synthetic quick start (`./scripts/run_demo.sh`) and the whole test suite: no downloaded artifact, no credential and no network call |
+
+The synthetic path makes the pipeline, the trust boundaries and the HTTP/demo contract runnable. It
+is not evidence about recommendation quality, and none of the reported numbers comes from it.
+
 ## Corrected artifact location record
 
 The locations below were verified by direct measurement during the M1 durability audit

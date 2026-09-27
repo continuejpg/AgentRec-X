@@ -94,6 +94,26 @@ def _python_files(root: Path) -> list[Path]:
     return [path for path in _walk(root) if path.suffix == ".py"]
 
 
+def _assigns_score_rule(path: Path) -> bool:
+    """True when ``path`` **assigns** ``SCORE_RULE`` somewhere, rather than only importing it.
+
+    The distinction is the whole point of the rule's single-source invariant: reading the frozen
+    constant from :mod:`tiger_public.scoring` is the intended arrangement, while assigning it - or
+    annotating it - anywhere else would create a second declaration that can drift.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "SCORE_RULE" for target in targets):
+            return True
+    return False
+
+
 def _module_level_imports(path: Path) -> set[str]:
     """Top-level module names imported at *module scope*, via the AST.
 
@@ -429,20 +449,25 @@ def test_t8_score_rule_lives_in_exactly_one_module() -> None:
 
     Splitting it across beam search, branch-and-bound and exhaustive scoring is precisely how
     two algorithms come to disagree about what "score" means and the certified comparison
-    silently stops being comparable.  ``cli.py`` may only *record* it; the backend's own tests
-    may reference it.
+    silently stops being comparable.  Every other module may only *read* the constant - by
+    importing it, or by recording it into the checkpoint it writes - and must not restate its
+    values.
+
+    The check is on the **assignment**, not on the text.  A module that does
+    ``from tiger_public.scoring import SCORE_RULE`` is doing the right thing, and matching the
+    bare name would flag that import as a second declaration.  That is what happened when the
+    Step-2.6 retrieval modules arrived, so the detection is AST-based: the invariant it protects
+    ("exactly one definition") is unchanged, and stronger than the text match it replaces, which
+    also had to allow-list two legitimate readers by filename.
     """
     definitions = [
-        path
-        for path in _python_files(BACKEND_SRC)
-        if "SCORE_RULE" in path.read_text(encoding="utf-8")
+        path for path in _python_files(BACKEND_SRC) if _assigns_score_rule(path)
     ]
     names = sorted(path.name for path in definitions)
-    # ``scoring.py`` declares the rule.  ``cli.py`` and ``tiger.py`` only *record* it into the
-    # checkpoint they write, and must not define a second copy - which the next assertion checks.
-    assert names == ["cli.py", "scoring.py", "tiger.py"], f"the score rule is declared in {names}"
+    assert names == ["scoring.py"], f"the score rule is defined in {names}"
     scoring = (BACKEND_SRC / "scoring.py").read_text(encoding="utf-8")
-    for other in ("cli.py", "tiger.py"):
+    # Every module that reads the rule must read it, not restate it.
+    for other in ("cli.py", "tiger.py", "retrieve.py", "retrieve_cli.py"):
         source = (BACKEND_SRC / other).read_text(encoding="utf-8")
         assert '"eos_in_score": False' not in source, f"{other} duplicates the rule's values"
         assert '"child_renormalisation": False' not in source, f"{other} duplicates the rule"

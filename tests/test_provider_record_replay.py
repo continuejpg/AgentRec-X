@@ -337,7 +337,10 @@ def test_configuration_is_read_from_the_environment(monkeypatch: pytest.MonkeyPa
     """Every documented variable is honoured, and the credential is never read into the report."""
     monkeypatch.setenv(ENV_BASE_URL, "https://api.deepseek.com")
     monkeypatch.setenv(ENV_MODEL, "deepseek-flash")
-    monkeypatch.setenv(ENV_API_KEY, "sk-secret-value")
+    # Non-key-shaped, but still containing the word "secret": the last assertion below checks that
+    # the *description* leaks no part of the credential, and that check is only meaningful while
+    # the credential contains something worth finding.  No real credential is involved.
+    monkeypatch.setenv(ENV_API_KEY, "not-a-real-secret-canary")
     monkeypatch.setenv(ENV_TIMEOUT, "12.5")
     monkeypatch.setenv(ENV_PROFILE, "deepseek")
     monkeypatch.setenv(ENV_INPUT_PRICE, "0.30")
@@ -852,7 +855,10 @@ def test_no_credential_can_reach_a_recording(tmp_path: Path) -> None:
     The credential is only ever placed in a request header by the adapter, and the recording
     stores the request *body* - so this asserts the separation rather than trusting it.
     """
-    secret = "sk-LEAK-CANARY-0123456789"
+    # A canary, not a credential: the assertions below scan the recording and the serialized
+    # response for this exact string, so any unique value proves the same separation.  Keeping it
+    # un-key-shaped avoids asking a credential scanner to triage a fixture.
+    secret = "example-not-a-key"
     store = _store(tmp_path)
     adapter = _adapter(
         _RecordingTransport(
@@ -1137,7 +1143,7 @@ def test_the_dry_run_calls_nothing_and_reports_that(
 
     monkeypatch.setenv(ENV_BASE_URL, "https://api.deepseek.com")
     monkeypatch.setenv(ENV_MODEL, "deepseek-flash")
-    monkeypatch.setenv(ENV_API_KEY, "sk-should-not-be-used")
+    monkeypatch.setenv(ENV_API_KEY, "example-not-a-key")  # configured, but must never be used
     SUMMARY.clear()
     code = run(live=False, transport=None, mode=None)
     assert code == 0

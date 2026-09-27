@@ -48,11 +48,44 @@ Presenter checklist:
 - [ ] **Click "New session".** A new session gets a brand-new, empty preference namespace, so no
       earlier demonstration can leak preferences into this one.
 - [ ] Confirm **Active preferences** shows *No active preferences yet.* before Turn 1.
-- [ ] Confirm the **Recommendation Trace** block opens and is readable (it is collapsed by
-      default under each agent turn).
-- [ ] Do **not** start DeepSeek, vLLM, Ollama or any hosted provider. The serving path needs no
-      API key and no network.
-- [ ] Leave the browser at a normal width so the trace block is comfortably readable.
+- [ ] Confirm the **Recommendation Trace** panel in the right-hand column is visible and readable.
+      It is permanent (not collapsible) and is rewritten on every turn.
+- [ ] Choose the decision mode for this run. The default is **Deterministic**: no provider, no API
+      key, no network. The optional **LLM Agent** mode needs the configuration below — do not
+      start vLLM, Ollama or any other local provider for either mode.
+- [ ] Leave the browser at a normal width so the trace panel stays comfortably readable.
+
+### Optional: presenting the LLM Agent mode
+
+Only needed if you intend to demo the second decision mode. Export these **in the same terminal
+that starts the server**, then restart it:
+
+```bash
+export AGENTRECX_LLM_BASE_URL=https://api.deepseek.com
+export AGENTRECX_LLM_MODEL=deepseek-flash
+export AGENTRECX_LLM_PROFILE=deepseek
+read -rs AGENTRECX_LLM_API_KEY && export AGENTRECX_LLM_API_KEY
+
+./scripts/start_demo.sh
+curl -s http://127.0.0.1:8000/v1/demo/decision-modes   # expect llm: available true
+```
+
+Then reload the page, and the **LLM Agent** half of the Decision Mode selector becomes selectable.
+If the mode is unavailable the page shows the server's own reason instead of failing on the first
+turn.
+
+Three things to keep straight:
+
+* **Deterministic remains the default.** An unconfigured deployment is fully usable offline; the
+  LLM mode is a per-session choice, never a fallback and never silent.
+* **`AGENTRECX_AGENT_POLICY=llm` is a different switch.** It selects the control-plane model
+  policy for the single-turn `POST /v1/demo/agent/recommend` endpoint. The browser Decision Mode
+  does not need it.
+* **Do not set `AGENTRECX_CONTROL_PLANE=loop`** for a browser LLM-mode run: the browser's LLM mode
+  composes the accepted graph path and reports itself unavailable under a loop control plane.
+
+The mode is session state: switching it mid-session applies from the next turn, and a failed LLM
+turn leaves the session in LLM mode (it fails again rather than quietly answering deterministically).
 
 Startup loads the checkpoint and catalogue once (roughly 20 s). If an artifact is missing the
 process exits with an explicit error rather than starting a broken server.
@@ -260,7 +293,8 @@ Which is the project's architecture statement in one line:
 | Reranking is deterministic and inspectable | Evidence uses general semantic understanding |
 | Original SASRec ranks remain visible and auditable | This is production-ready |
 | Recommendation Trace reflects authoritative response state | The live Agent improves recommendation accuracy |
-| The serving path needs no hosted LLM API key and no network | The LLM policy beat the fixed-fusion baseline |
+| The serving path needs no hosted LLM API key and no network **by default** | The LLM policy beat the fixed-fusion baseline |
+| The optional LLM Agent mode decides only the route and which preference values are stored | The LLM produces candidates, scores, evidence or ranking |
 | Two-Tower and TIGER belong to the offline research track | Any claim that the browser path is "intelligent" or "autonomous" |
 
 ---
@@ -275,7 +309,8 @@ These differences do **not** mean the demo failed:
   history.** A different profile, or a different product set, legitimately moves different cards.
 - **The exact candidate products** can differ from the example above; only the trace/card
   agreement is required.
-- **Trace panels are collapsed by default** and may need a click; expansion state is cosmetic.
+- **The trace panel is rewritten every turn**, so it shows only the most recent turn; an earlier
+  turn's trace is no longer on screen. That is not a failure.
 
 Genuine failures — stop and say so rather than working around them:
 
@@ -290,12 +325,16 @@ Genuine failures — stop and say so rather than working around them:
 
 ## 7. If the interviewer asks "Where is the LLM?"
 
-> The interview serving path deliberately uses the original deterministic, offline decision seam —
-> there is no hosted model in it and no API key. The repository also contains a later bounded
-> LLM control-plane research track, kept separate from the demo. We did evaluate a live
-> LLM policy there, once, on the frozen 20,000-user cohort; in that specific configuration it
-> underperformed the fixed-fusion comparator on the primary endpoint. So: an LLM exists in the
-> repository, it is not what serves this demo, and it did not win when we measured it.
+> The browser demo has two decision modes. The default is **Deterministic** — no provider, no API
+> key, no network, and that is what serves a normal demo run. The optional **LLM Agent** mode calls
+> DeepSeek to propose one validated turn plan: the route, and which stated preference values are
+> stored or withdrawn. That is its entire authority — products, product identity, scores, evidence,
+> whether a preference was actually persisted, and the final ranking all stay owned by trusted code,
+> and the plan schema has no field that could carry any of them.
+>
+> Separately, the repository has a bounded LLM control-plane research track. We evaluated a live LLM
+> policy there once, on the frozen 20,000-user cohort, and in that configuration it underperformed
+> the fixed-fusion comparator on the primary endpoint.
 
 Keep it to those sentences. Do not open the M3 report during the demo.
 
@@ -312,7 +351,8 @@ Keep it to those sentences. Do not open the M3 report during the demo.
 > The determinism of the current decision seam is a design choice; the seam is injectable, which
 > is exactly why a model-driven policy could be evaluated later behind it.
 
-*Do not* define "agent" as "it uses an LLM" — the browser serving path does not.
+*Do not* define "agent" as "it uses an LLM" — bounded orchestration and a narrow decision authority
+define it, and the default mode uses no model at all.
 
 ---
 
