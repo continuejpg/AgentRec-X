@@ -144,6 +144,9 @@ SQLite, per user_key         MATCH / VIOLATION / UNKNOWN
 One model generates candidates, and the browser path consults exactly that one model. Some of the
 research extensions described further down are deliberately **not** on this path.
 
+Canonical diagrams for both stacks — serving and offline research, with the trust boundary drawn
+explicitly — are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ---
 
 ## Trust boundary

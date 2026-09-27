@@ -9,6 +9,206 @@ Cross-references: [README](../README.md) · [Experiments](EXPERIMENTS.md) ·
 
 ---
 
+## 0. Canonical diagrams (start here)
+
+These two diagrams are the **canonical shape** of the repository. Everything below this section
+is the detailed reference; where the two disagree, the diagrams are the summary and the numbered
+sections are the detail.
+
+They describe **two stacks that live in one repository but are not one identical runtime stack**:
+the browser serving path, and the offline research/evaluation path.
+
+---
+
+### Diagram A — Serving / interview architecture
+
+The path the verified browser demo actually takes. Only components on that path appear here.
+
+```text
+User / Browser
+      |  same-origin HTML/CSS/JS, no build step, no CDN, no hosted LLM, no API key
+      v
+FastAPI app  (recommendation/api/app.py)   .   browser UI (recommendation/web)
+      |
+      v
+DemoSessionManager  (recommendation/demo/sessions.py)
+      |  session_id, user_key, per-session preference-memory namespace
+      v
+AgentGraph  (recommendation/agent/graph.py)
+      |  conversational orchestration; decision seam is deterministic and offline
+      v
+RecommendationTool  (recommendation/tools)
+      |
+      v
+SASRecInferenceEngine  (recommendation/inference/sasrec.py)
+      |  the accepted checkpoint - the ONE candidate generator on this path
+      v
+Trusted candidate set
+      |  canonical identity parent_asin <-> item_id; PAD = 0 is never a candidate
+      |
+      +-------------------------------+---------------------------------+
+      |                                                                 |
+      v                                                                 v
+MetadataIndex + ProductEnricher                          PreferenceMemoryService
+(recommendation/catalog, recommendation/rag)             (recommendation/memory)
+catalogue facts, candidate-scoped evidence               SQLite, per user_key
+                                                         explicit preferences (ADD / REPLACE / REMOVE)
+      |                                                                 |
+      +-------------------------------+---------------------------------+
+                                      v
+                     PreferenceCandidateMatcher  (recommendation/preference_matching)
+                     per-preference evidence: MATCH / VIOLATION / UNKNOWN
+                                      |
+                                      v
+                     PreferenceReranker  (recommendation/reranking)
+                     deterministic lexicographic policy
+                     (fewer violations, then more matches, then original order)
+                                      |
+                                      v
+                     Grounded, preference-aware recommendation
+                     original SASRec rank preserved alongside the final rank
+                                      |
+                                      v
+                     Response serialization  (recommendation/demo/serialization.py)
+                                      |
+                     +----------------+----------------+
+                     v                                 v
+              ChatResponse (JSON)          Recommendation Trace   <-- OBSERVABILITY ONLY
+                                           a view over the response's own state
+                                           never an input to ranking
+```
+
+**Authority split on this path.** The conversational layer and the truth owners are different
+layers, and the boundary is structural rather than conventional:
+
+```text
+===================== TRUST BOUNDARY =====================
+
+[ CONVERSATIONAL / DECISION SIDE ]  may influence:
+    - which supported preferences are stored
+    - whether the recommendation flow is invoked (route)
+    - presentation order, through supported preferences
+
+    cannot write to anything on the truth side below
+
+----------------------------------------------------------
+
+[ TRUSTED CODE ]  owns and decides:
+    - the user's behavioural history      (application-owned, read-only to the agent)
+    - canonical product identity          (parent_asin <-> item_id; PAD = 0 excluded)
+    - catalogue facts                     (MetadataIndex)
+    - recommendation model output         (SASRec scores)
+    - evidence truth                      (PreferenceCandidateMatcher)
+    - the final preference-aware order    (PreferenceReranker)
+    - evaluation metrics                  (shared evaluator)
+
+==========================================================
+```
+
+**Decision authority is narrower than truth authority.**
+
+### Component ownership
+
+| Responsibility | Owner |
+| --- | --- |
+| Behavioural history | trusted application state |
+| Candidate generation | SASRec (`SASRecInferenceEngine`) |
+| Product facts | catalogue metadata (`MetadataIndex`) |
+| Explicit preferences | `PreferenceMemoryService` |
+| Evidence | `PreferenceCandidateMatcher` (deterministic) |
+| Final preference-aware order | `PreferenceReranker` (deterministic) |
+| Conversational routing | `AgentGraph` decision seam |
+| Observability | `Recommendation Trace` (read-only view) |
+
+**Deliberately not on this path:** the candidate plane, the candidate ledger, the bounded
+control plane, Two-Tower, TIGER and the fusion comparator. The browser agent consults exactly one
+candidate generator (SASRec) and performs no adaptive multi-source routing.
+
+---
+
+## 0b. Diagram B — Offline research / evaluation architecture
+
+Everything here is **offline**. Nothing in this diagram runs inside the browser demo.
+
+```text
+Frozen dataset + protocol
+  Amazon Reviews 2023 . Sports & Outdoors . chronological temporal leave-two-out
+  frozen 20,000-user cohort (deterministic seed) . full catalogue . seen-item masking
+                              |
+     +--------------+---------+---------+-------------------+
+     |              |                   |                   |
+     v              v                   v                   v
+  SASRec       Two-Tower            TIGER-FP32        popularity and
+  (also the    (dual encoder)       (Semantic-ID      metadata retrieval
+   serving     RESEARCH ONLY        generative)       (lexical / non-personalised)
+   model)                          RESEARCH ONLY      RESEARCH-ONLY ARMS
+     +--------------+-------------------+-------------------+
+                    |
+        Offline benchmark arms  (experiments/, recommendation/evaluation)
+                    |
+          +---------+---------+
+          v                   v
+    Single-source         Fixed fusion
+    evaluation            (rank fusion over popularity + sequential + metadata)
+          +---------+---------+
+                    v
+          Shared evaluator  - one implementation for every arm
+                    |
+          Recall / HR / NDCG at K = 5/10/20
+                    |
+                    v
+          Paired uncertainty  (exact McNemar . paired user bootstrap)
+                    |
+                    v
+          Research conclusions and frozen reports  (docs/reports/)
+```
+
+A separate, later experiment sits alongside the benchmark arms and is **not** part of the browser
+serving path:
+
+```text
+Bounded LLM control plane  (recommendation/control - a SECOND orchestration stack)
+                    |
+                    v
+  existing real Agent system  (LLMAgentPolicy + LoopController, bounded step/tool budget)
+                    |
+                    vs
+                    |
+  fixed-fusion comparator  (same cohort, same evaluator, same protocol)
+                    |
+                    v
+  Paired evaluation on the frozen 20,000-user cohort
+                    |
+                    v
+  Result: the bounded policy underperformed the comparator on the primary endpoint.
+  Behavioural reason: 19,999 of 20,000 trajectories were `recommend_from_history -> finish`;
+  catalogue search was never invoked, source selection was unavailable in that frozen
+  configuration, and the policy returned four candidates.
+
+  This is a result about ONE system configuration under a frozen protocol.
+  It is NOT a claim that LLM agents do not work for recommendation.
+```
+
+---
+
+## 0c. How the two diagrams relate
+
+The **serving stack** is the interview/demo product surface. It is what `/demo/` runs.
+
+The **research stack** evaluates alternative retrievers, fusion strategies and a bounded LLM
+policy under the same frozen recommendation protocol, using the same dataset, cohort and
+evaluator.
+
+Research findings can inform design decisions, but most research sources are deliberately **not**
+wired into the browser serving path: the serving path uses SASRec and the original conversational
+stack only.
+
+The repository therefore contains **two orchestration stacks** — the original browser `AgentGraph`
+stack and the later bounded control-plane stack. They share data, protocol and provenance
+conventions; they are not interchangeable, and they are not one identical serving architecture.
+
+---
+
 ## 1. Architectural goals
 
 1. **One trained model, everything else inspectable.** SASRec is the only learned component.
