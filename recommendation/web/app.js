@@ -33,7 +33,10 @@
     rankedWith: document.getElementById("ranked-with-value"),
     originalOrder: document.getElementById("original-order"),
     rerankedOrder: document.getElementById("reranked-order"),
-    apiVersion: document.getElementById("api-version")
+    apiVersion: document.getElementById("api-version"),
+    tracePanel: document.getElementById("trace-panel"),
+    statusChips: document.getElementById("status-chips"),
+    memoryNote: document.getElementById("memory-note")
   };
 
   var state = {
@@ -41,7 +44,9 @@
     profileId: null,
     sending: false,
     expired: false,
-    turns: 0
+    turns: 0,
+    ready: false,
+    lastRoute: null
   };
 
   /* ------------------------------------------------------------------ */
@@ -160,6 +165,8 @@
       if (!payload.demo_ready || !payload.model_loaded) {
         throw new Error(payload.detail || "the demo backend is not ready");
       }
+      state.ready = true;
+      renderStatusChips();
       return payload;
     });
   }
@@ -187,6 +194,9 @@
         clear(els.cards);
         els.cards.appendChild(el("p", "muted", "Send a message that asks for recommendations to see cards here."));
         renderPreferences([]);
+        clear(els.memoryNote);
+        els.memoryNote.hidden = true;
+        renderStatusChips();
         setBusy(false);
         setState("ready");
         els.input.focus();
@@ -253,7 +263,10 @@
         state.turns = payload.turn;
         els.turn.textContent = String(payload.turn);
         els.route.textContent = payload.route;
-        appendTurn("agent", "Agent · " + payload.turn_id, payload.message, renderTrace(payload.trace));
+        state.lastRoute = payload.route;
+        appendTurn("agent", "Agent · " + payload.turn_id, payload.message);
+        renderTrace(payload.trace);
+        renderStatusChips();
         renderMemoryUpdate(payload.memory_update);
         renderCards(payload.recommendations);
         renderAudit(payload.audit);
@@ -293,95 +306,146 @@
     return wrap;
   }
 
-  function renderTrace(trace) {
-    if (!trace) { return null; }
-    var details = el("details", "trace");
-    details.appendChild(el("summary", null, "Recommendation Trace"));
+  function traceRows(title, rows) {
+    if (!rows || rows.length === 0) { return null; }
+    var wrap = el("div", "trace-section");
+    wrap.appendChild(el("h4", null, title));
+    var ul = el("ul", "trace-list");
+    rows.forEach(function (row) {
+      var li = el("li", row.className || null);
+      li.appendChild(el("span", "k", row.key));
+      li.appendChild(el("span", "v", row.value));
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    return wrap;
+  }
 
+  function renderStatusChips() {
+    clear(els.statusChips);
+    if (state.ready) {
+      els.statusChips.appendChild(el("span", "chip ok", "backend ready"));
+    }
+    if (state.profileId) {
+      els.statusChips.appendChild(el("span", "chip", "profile " + state.profileId));
+    }
+    if (state.sessionId) {
+      els.statusChips.appendChild(el("span", "chip", "session " + state.sessionId.slice(0, 8)));
+    }
+    if (state.turns) {
+      els.statusChips.appendChild(el("span", "chip", "turn " + state.turns));
+    }
+    if (state.lastRoute) {
+      els.statusChips.appendChild(el("span", "chip",
+        state.lastRoute === "recommend" ? "recommendation" : "direct"));
+    }
+  }
+
+  function renderTrace(trace) {
+    /* Renders into the permanent panel, from the response's own trace object only. */
+    clear(els.tracePanel);
+    if (!trace) {
+      els.tracePanel.appendChild(el("p", "muted", "No trace for this turn."));
+      return;
+    }
     var sections = [];
 
-    sections.push(traceSection("Route", [
-      trace.route === "recommend" ? "RECOMMENDATION" : "DIRECT"
-    ]));
+    var route = el("div", "trace-section");
+    route.appendChild(el("h4", null, "Route"));
+    route.appendChild(el("div", "trace-value",
+      trace.route === "recommend" ? "RECOMMENDATION" : "DIRECT"));
+    sections.push(route);
 
     if (typeof trace.candidate_count === "number") {
-      sections.push(traceSection("Candidates", [String(trace.candidate_count) + " returned"]));
+      sections.push(traceRows("Candidates", [
+        { key: "returned", value: String(trace.candidate_count) }
+      ]));
     }
 
-    var active = (trace.active_preferences || []).map(function (item) {
-      return item.value + " (" + item.kind + ")";
-    });
-    if (active.length) {
-      sections.push(traceSection("Active preferences", active));
+    var active = trace.active_preferences || [];
+    var prefs = el("div", "trace-section");
+    prefs.appendChild(el("h4", null, "Active preferences"));
+    var chips = el("div", "trace-chips");
+    if (active.length === 0) {
+      chips.appendChild(el("span", "chip empty", "none"));
     }
+    active.forEach(function (item) {
+      chips.appendChild(el("span", "chip pref", item.value));
+    });
+    prefs.appendChild(chips);
+    sections.push(prefs);
 
     var changes = trace.memory_changes || {};
-    if (changes.changed) {
-      var changeLines = [];
-      if ((changes.added || []).length) { changeLines.push("added: " + changes.added.join(", ")); }
-      if ((changes.removed || []).length) { changeLines.push("removed: " + changes.removed.join(", ")); }
-      if ((changes.superseded || []).length) { changeLines.push("replaced: " + changes.superseded.join(", ")); }
-      sections.push(traceSection("Memory changes", changeLines));
+    var memRows = [];
+    if ((changes.added || []).length) {
+      memRows.push({ key: "+ added", value: changes.added.join(", ") });
     }
+    if ((changes.removed || []).length) {
+      memRows.push({ key: "\u2212 removed", value: changes.removed.join(", ") });
+    }
+    if ((changes.superseded || []).length) {
+      memRows.push({ key: "\u21bb replaced", value: changes.superseded.join(", ") });
+    }
+    if (memRows.length) { sections.push(traceRows("Memory changes", memRows)); }
 
     if (trace.evidence) {
       var ev = trace.evidence;
-      sections.push(traceSection("Evidence", [
-        "MATCH      " + ev.match_candidates + " candidates",
-        "VIOLATION  " + ev.violation_candidates + " candidates",
-        "UNKNOWN    " + ev.unknown_candidates + " candidates"
+      sections.push(traceRows("Evidence", [
+        { key: "\u2713 MATCH", value: String(ev.match_candidates) },
+        { key: "! VIOLATION", value: String(ev.violation_candidates) },
+        { key: "? UNKNOWN", value: String(ev.unknown_candidates) }
       ]));
     }
 
     var moves = trace.ranking_changes || [];
     if (moves.length) {
-      sections.push(traceSection("Reranking", moves.map(function (row) {
-        var arrow = row.moved ? (row.final_rank < row.original_rank ? " \u2191" : " \u2193") : "";
-        var label = row.title || row.parent_asin;
-        return "#" + row.original_rank + " \u2192 #" + row.final_rank + arrow + "  " + label;
-      })));
+      var wrap = el("div", "trace-section");
+      wrap.appendChild(el("h4", null, "Rank movement"));
+      var ul = el("ul", "trace-list");
+      moves.forEach(function (row) {
+        var li = el("li", "trace-move");
+        var up = row.moved && row.final_rank < row.original_rank;
+        var arrow = row.moved ? (up ? "\u2191" : "\u2193") : "\u2014";
+        li.appendChild(el("span", "k", "#" + row.original_rank + " \u2192 #" + row.final_rank));
+        li.appendChild(el("span", "v " + (row.moved ? (up ? "up" : "down") : "same"), arrow));
+        ul.appendChild(li);
+      });
+      wrap.appendChild(ul);
+      sections.push(wrap);
     }
 
     /* Deliberately absent on the browser path: source and grounding.  Rendered ONLY if a
      * future path supplies an authoritative value, so no placeholder can look factual. */
     if (trace.source) {
-      sections.push(traceSection("Source", [trace.source]));
+      sections.push(traceRows("Source", [{ key: "source", value: trace.source }]));
     }
     if (trace.grounding) {
-      sections.push(traceSection("Grounding", [
-        trace.grounding.verified + " / " + trace.grounding.total + " verified"
+      sections.push(traceRows("Grounding", [
+        { key: "verified", value: trace.grounding.verified + " / " + trace.grounding.total }
       ]));
     }
 
-    sections.forEach(function (section) { if (section) { details.appendChild(section); } });
-    return details;
+    sections.forEach(function (section) {
+      if (section) { els.tracePanel.appendChild(section); }
+    });
   }
 
   function renderPreferences(preferences) {
     clear(els.preferences);
     var list = preferences || [];
     if (list.length === 0) {
-      els.preferences.appendChild(el("p", "muted", "No active preferences yet."));
+      els.preferences.appendChild(el("span", "chip empty", "none yet"));
       return;
     }
-    var groups = { Avoid: [], Prefer: [], Budget: [] };
     list.forEach(function (item) {
-      if (item.kind === "price_max") {
-        groups.Budget.push("\u2264 " + item.value);
-      } else if (item.kind === "price_min") {
-        groups.Budget.push("\u2265 " + item.value);
-      } else if (item.polarity === "avoid") {
-        groups.Avoid.push(item.value + " (" + item.kind + ")");
-      } else {
-        groups.Prefer.push(item.value + " (" + item.kind + ")");
-      }
-    });
-    Object.keys(groups).forEach(function (name) {
-      if (groups[name].length === 0) { return; }
-      els.preferences.appendChild(el("h3", null, name));
-      var ul = el("ul");
-      groups[name].forEach(function (text) { ul.appendChild(el("li", null, text)); });
-      els.preferences.appendChild(ul);
+      var label;
+      if (item.kind === "price_max") { label = "\u2264 " + item.value; }
+      else if (item.kind === "price_min") { label = "\u2265 " + item.value; }
+      else if (item.polarity === "avoid") { label = "avoid " + item.value; }
+      else { label = item.value; }
+      var chip = el("span", "chip pref", label);
+      chip.setAttribute("title", item.kind);
+      els.preferences.appendChild(chip);
     });
   }
 
@@ -398,7 +462,26 @@
       parts.push("Removed preference: " + item.value);
     });
     if (parts.length === 0) { return; }
-    showBanner("info", "Memory updated", parts.join(" · "));
+    showBanner("info", "Memory updated", parts.join(" \u00b7 "));
+
+    clear(els.memoryNote);
+    var onlyRemoved = (update.removed || []).length > 0
+      && (update.added || []).length === 0
+      && (update.superseded || []).length === 0;
+    els.memoryNote.hidden = false;
+    els.memoryNote.appendChild(el("div", "memory-note-title",
+      onlyRemoved ? "Preference removed" : "Preference updated"));
+    var chips = el("div", "chips");
+    (update.added || []).forEach(function (item) {
+      chips.appendChild(el("span", "chip ok", "+ " + item.value));
+    });
+    (update.superseded || []).forEach(function (item) {
+      chips.appendChild(el("span", "chip", "\u21bb " + item.value));
+    });
+    (update.removed || []).forEach(function (item) {
+      chips.appendChild(el("span", "chip bad", "\u2212 " + item.value));
+    });
+    els.memoryNote.appendChild(chips);
   }
 
   function mark(status) {
@@ -436,46 +519,33 @@
   }
 
   function buildCard(card) {
-    var node = el("article", "card");
+    var finalRank = card.reranked_rank || card.original_rank;
+    var reranked = card.reranked_rank !== null && card.reranked_rank !== undefined;
+    var moved = reranked && card.reranked_rank !== card.original_rank;
+    var node = el("article", "card" + (moved ? " moved" : ""));
 
     var head = el("div", "card-head");
-    head.appendChild(el("span", "card-rank", "#" + (card.reranked_rank || card.original_rank)));
+    head.appendChild(el("span", "card-rank", "#" + finalRank));
     head.appendChild(el("span", "card-title", cardTitle(card)));
     node.appendChild(head);
     node.appendChild(el("div", "card-asin", card.parent_asin));
 
-    var facts = el("div", "card-facts");
-    facts.appendChild(factRow("Store", card.metadata && card.metadata.store, "Store unavailable"));
-    facts.appendChild(factRow("Category", category(card), "Category unavailable"));
-    facts.appendChild(factRow("Price", card.metadata && card.metadata.price_text, "Price unavailable"));
-    node.appendChild(facts);
-
-    var ranks = el("div", "card-ranks");
-    var rankText = "Original SASRec rank " + card.original_rank;
-    if (card.reranked_rank !== null && card.reranked_rank !== undefined) {
-      rankText += " · final rank " + card.reranked_rank;
+    if (moved) {
+      var up = card.reranked_rank < card.original_rank;
+      node.appendChild(el("span", "card-move " + (up ? "up" : "down"),
+        (up ? "\u2191" : "\u2193") + " from #" + card.original_rank + " (SASRec)"));
+    } else if (reranked) {
+      node.appendChild(el("span", "card-move same", "\u2014 unchanged"));
     }
-    ranks.appendChild(el("div", null, rankText));
-    ranks.appendChild(el("div", null, "Raw SASRec ranking score " + formatScore(card.sasrec_score)
-      + " (a ranking score, not a probability)"));
-    node.appendChild(ranks);
-
-    if (card.movement_summary) {
-      node.appendChild(el("div", "card-move", card.movement_summary));
-    }
-
-    var counts = el("div", "card-counts");
-    counts.appendChild(el("span", "pill match", card.match_count + " match"));
-    counts.appendChild(el("span", "pill violation", card.violation_count + " violation"));
-    counts.appendChild(el("span", "pill unknown", card.unknown_count + " unknown"));
-    node.appendChild(counts);
 
     if (card.evidence && card.evidence.length) {
       var list = el("ul", "evidence");
       card.evidence.forEach(function (record) {
         var item = el("li", "status-" + record.status);
         item.appendChild(el("span", "mark", mark(record.status)));
-        item.appendChild(el("span", null, evidenceLabel(record)));
+        item.appendChild(el("span", null,
+          (record.polarity === "avoid" ? "avoid " : "") + record.value));
+        item.setAttribute("title", evidenceLabel(record));
         list.appendChild(item);
       });
       node.appendChild(list);
@@ -486,12 +556,39 @@
       var ul = el("ul", "snippets");
       snippets.forEach(function (text) { ul.appendChild(el("li", null, text)); });
       node.appendChild(ul);
-    } else if (card.metadata_status === "missing") {
-      node.appendChild(el("p", "muted", "No supported metadata evidence for this item."));
     } else {
       node.appendChild(el("p", "muted", "No supported metadata evidence for this item."));
     }
 
+    var details = el("details");
+    details.appendChild(el("summary", null, "Show more catalogue details"));
+
+    var ranks = el("div", "card-ranks");
+    ranks.appendChild(el("div", null, "Original SASRec rank: #" + card.original_rank));
+    ranks.appendChild(el("div", null, "Raw SASRec ranking score " + formatScore(card.sasrec_score)
+      + " (a ranking score, not a probability)"));
+    if (card.movement_summary) { ranks.appendChild(el("div", null, card.movement_summary)); }
+    details.appendChild(ranks);
+
+    var facts = el("div", "card-facts");
+    facts.appendChild(factRow("Store", card.metadata && card.metadata.store, "Store unavailable"));
+    facts.appendChild(factRow("Category", category(card), "Category unavailable"));
+    facts.appendChild(factRow("Price", card.metadata && card.metadata.price_text, "Price unavailable"));
+    details.appendChild(facts);
+
+    var counts = el("div", "card-counts");
+    counts.appendChild(el("span", "pill match", card.match_count + " match"));
+    counts.appendChild(el("span", "pill violation", card.violation_count + " violation"));
+    counts.appendChild(el("span", "pill unknown", card.unknown_count + " unknown"));
+    details.appendChild(counts);
+
+    var rest = remainingMetadata(card);
+    if (rest.length) {
+      var meta = el("ul", "snippets");
+      rest.forEach(function (text) { meta.appendChild(el("li", null, text)); });
+      details.appendChild(meta);
+    }
+    node.appendChild(details);
     return node;
   }
 
@@ -521,16 +618,47 @@
     return (score >= 0 ? "+" : "") + score.toFixed(4);
   }
 
-  function evidenceSnippets(card) {
-    var snippets = [];
-    if (!card.metadata) { return snippets; }
+  var RELEVANT_KEYS = /description|feature|material|color|colour|brand|item|product|size|weight/i;
+
+  /* The card view carries exactly one free-text field: metadata.details.  No .filter/.sort is
+     used anywhere in this client -- the frontend renders the API sequence verbatim. */
+  function detailPairs(card) {
+    var out = [];
+    if (!card.metadata) { return out; }
     var details = card.metadata.details || [];
-    details.forEach(function (pair) {
-      if (pair && pair.length === 2) {
-        snippets.push(pair[0] + ": " + pair[1]);
-      }
-    });
-    return snippets.slice(0, 6);
+    for (var i = 0; i < details.length; i += 1) {
+      var pair = details[i];
+      if (pair && pair.length === 2) { out.push(pair); }
+    }
+    return out;
+  }
+
+  /* Show the 1-2 metadata pairs most likely to explain a preference verdict. */
+  function evidenceSnippets(card) {
+    var pairs = detailPairs(card);
+    var relevant = [];
+    for (var i = 0; i < pairs.length; i += 1) {
+      if (RELEVANT_KEYS.test(String(pairs[i][0]))) { relevant.push(pairs[i]); }
+    }
+    var chosen = relevant.length ? relevant : pairs;
+    var out = [];
+    for (var j = 0; j < chosen.length && out.length < 2; j += 1) {
+      out.push(chosen[j][0] + ": " + chosen[j][1]);
+    }
+    return out;
+  }
+
+  function remainingMetadata(card) {
+    var shown = {};
+    var snippets = evidenceSnippets(card);
+    for (var i = 0; i < snippets.length; i += 1) { shown[snippets[i]] = true; }
+    var pairs = detailPairs(card);
+    var out = [];
+    for (var j = 0; j < pairs.length && out.length < 10; j += 1) {
+      var text = pairs[j][0] + ": " + pairs[j][1];
+      if (!shown[text]) { out.push(text); }
+    }
+    return out;
   }
 
   function renderAudit(audit) {

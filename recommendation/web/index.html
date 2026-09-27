@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AgentRec-X — multi-turn demo</title>
+  <title>AgentRec-X — conversational recommendation demo</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <!--
-    AgentRec-X Milestone 11 demo.
+    AgentRec-X interview demo.
 
-    This page is a thin client: it renders exactly the structured data the API returns.
-    It performs no scoring, no filtering and no re-ordering of recommendations, and it
-    never writes user or metadata text with innerHTML.
+    A thin client: it renders exactly the structured data the API returns.  It performs no
+    scoring, no filtering and no re-ordering of recommendations, and it never writes user or
+    metadata text with innerHTML.
   -->
   <header class="topbar">
     <div class="brand">
       <span class="brand-name">AgentRec-X</span>
-      <span class="brand-sub">multi-turn shopping agent demo</span>
+      <span class="brand-sub">Trustworthy Conversational Product Recommendation</span>
     </div>
     <div class="session-controls">
       <label for="profile-select">Demo profile</label>
@@ -27,41 +27,67 @@
     </div>
   </header>
 
+  <div id="status-chips" class="statusbar" aria-label="Session status"></div>
+
   <p class="notice" role="note">
     Local research demo. Recommendations come from the accepted SASRec checkpoint and a
-    deterministic explicit-preference policy. Scores are raw ranking scores, not
-    probabilities. No production authentication is provided.
+    deterministic explicit-preference policy. Scores are raw ranking scores, not probabilities.
+    No production authentication is provided.
   </p>
 
   <div id="banner" class="banner" role="alert" hidden></div>
 
   <main class="layout">
-    <section class="panel conversation" aria-label="Conversation">
-      <h2>Conversation</h2>
-      <div id="transcript" class="transcript" aria-live="polite"></div>
-      <form id="chat-form" class="composer" autocomplete="off">
-        <input
-          id="message-input"
-          type="text"
-          name="message"
-          maxlength="2000"
-          placeholder="Recommend some hiking gear."
-          aria-label="Message"
-          disabled
-        />
-        <button id="send-button" type="submit" disabled>Send</button>
-      </form>
-      <p class="hint">
-        Stating a preference stores it for <strong>future</strong> turns — the accepted
-        memory contract applies a preference from the following turn onward.
-      </p>
-    </section>
+    <div class="col-main">
 
-    <aside class="sidebar">
       <section class="panel" aria-label="Active preferences">
         <h2>Active preferences</h2>
-        <div id="preferences" class="preferences">
-          <p class="muted">No active preferences yet.</p>
+        <div id="preferences" class="chips">
+          <span class="chip empty">none yet</span>
+        </div>
+        <div id="memory-note" class="memory-note" hidden></div>
+      </section>
+
+      <section class="panel conversation" aria-label="Conversation">
+        <h2>Conversation</h2>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+        <form id="chat-form" class="composer" autocomplete="off">
+          <input
+            id="message-input"
+            type="text"
+            name="message"
+            maxlength="2000"
+            placeholder="Recommend some useful gear for a weekend camping trip."
+            aria-label="Message"
+            disabled
+          />
+          <button id="send-button" type="submit" disabled>Send</button>
+        </form>
+        <p class="hint">
+          Stating a preference stores it for <strong>future</strong> turns — the accepted memory
+          contract applies a preference from the following turn onward.
+        </p>
+      </section>
+
+      <section class="panel recommendations" aria-label="Recommendations">
+        <h2>Recommendation cards</h2>
+        <p class="hint">
+          Cards appear in the exact order the backend produced. The page never re-sorts them, and
+          every rank shown here is the one the response carried.
+        </p>
+        <div id="cards" class="cards">
+          <p class="muted">Send a message that asks for recommendations to see cards here.</p>
+        </div>
+      </section>
+
+    </div>
+
+    <aside class="col-trace">
+
+      <section class="panel trace-panel" aria-label="Recommendation Trace">
+        <h2>Recommendation Trace</h2>
+        <div id="trace-panel" class="trace-body">
+          <p class="muted">Send a message to see this turn's trace.</p>
         </div>
       </section>
 
@@ -84,18 +110,9 @@
           <ol id="reranked-order" class="order-list"></ol>
         </details>
       </section>
+
     </aside>
   </main>
-
-  <section class="panel recommendations" aria-label="Recommendations">
-    <h2>Recommendation cards</h2>
-    <p class="hint">
-      Cards appear in the exact order the backend produced. The page never re-sorts them.
-    </p>
-    <div id="cards" class="cards">
-      <p class="muted">Send a message that asks for recommendations to see cards here.</p>
-    </div>
-  </section>
 
   <footer class="footer">
     <span id="api-version">api —</span>
