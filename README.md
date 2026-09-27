@@ -62,6 +62,9 @@ Full detail, including artifact verification tiers and port-override behaviour:
 [`docs/USAGE.md`](docs/USAGE.md).
 
 > No screenshot is committed. Run the demo locally at `/demo/`.
+>
+> Presenting it live? Use the prepared operator script:
+> [`docs/INTERVIEW_DEMO.md`](docs/INTERVIEW_DEMO.md).
 
 ---
 
