@@ -1,0 +1,182 @@
+====================================================================================================
+M3 — THE EXISTING REAL AGENT SYSTEM vs THE ACCEPTED FIXED-FUSION BASELINE
+FINAL REPORT
+====================================================================================================
+
+  Protocol        docs/M3_PREREGISTRATION.md, SHA256
+                  b1795c0f3ea5877274df8a96cd62d06f9eda83cd585bab69bd0867ffc30a8d36
+  Provider        DeepSeek, model deepseek-flash, profile deepseek, thinking disabled,
+                  temperature 0.0, JSON mode, max_tokens 512
+                  (config frozen in docs/M3_DEEPSEEK_AMENDMENT.md; the runner forces it)
+  Cohort          the frozen 20 000-user cohort, used IN FULL — no reduction, no sampling
+  Catalogue       156 746 items
+  Evaluator       recommendation.evaluation.batched.evaluate_batched (unmodified)
+  NDCG semantics  recommendation.evaluation.metrics.ndcg_at_k (existing; no parallel metric)
+  Statistics      exact paired McNemar + paired user-level percentile bootstrap,
+                  10 000 resamples, seed 20260201 (as preregistered)
+
+  Execution       ONE run. No re-run, no prompt tuning, no routing change, no budget change,
+                  no model swap, no post-result adjustment of any kind.
+  Provider usage  39 998 calls, 1 failure (timeout), 52 341 815 input tokens,
+                  1 528 578 output tokens, mean latency 816.0 ms
+  Offline phase   the primary endpoint was computed afterwards from the landed evidence
+                  alone: no provider call, no Agent user re-executed.
+
+----------------------------------------------------------------------------------------------------
+1. PRIMARY ENDPOINT — ΔNDCG@10 (preregistered)
+----------------------------------------------------------------------------------------------------
+
+  NDCG@10 agent                 0.0045540572
+  NDCG@10 fixed fusion          0.0074335018
+  ΔNDCG@10                     -0.0028794446
+  paired bootstrap 95% CI      [-0.0036454951, -0.0021236081]
+
+  The interval lies ENTIRELY BELOW ZERO. Under the frozen M3 protocol the existing Agent
+  system **detectably underperforms** the accepted fixed-fusion baseline on the primary
+  endpoint. This is not a directional-only result: the CI excludes 0.
+
+----------------------------------------------------------------------------------------------------
+2. SECONDARY ENDPOINTS — NDCG@5/10/20
+----------------------------------------------------------------------------------------------------
+
+  K    agent NDCG      comparator NDCG   ΔNDCG           95% CI                        CI
+   5   0.0045540572    0.0055895988     -0.0010355416   [-0.0017984613, -0.0002822342]  below 0
+  10   0.0045540572    0.0074335018     -0.0028794446   [-0.0036454951, -0.0021236081]  below 0
+  20   0.0045540572    0.0096801992     -0.0051261419   [-0.0059374175, -0.0043413422]  below 0
+
+  The agent's NDCG is identical at every K because its ranking holds 4 items, so every hit it
+  achieves is already within K=5. The comparator improves with K as its deeper ranking reaches
+  more targets — which is the whole shape of the result.
+
+  Independent cross-check: the comparator's NDCG@5/10/20 reproduce the accepted Phase-5
+  fixed_fusion aggregates exactly (0.00558959879834106, 0.007433501843982532,
+  0.009680199162667791). The M3 comparator arm is therefore the accepted baseline, not a
+  re-derivation of it.
+
+----------------------------------------------------------------------------------------------------
+3. SECONDARY ENDPOINTS — Recall@K / hit@K, exact McNemar
+----------------------------------------------------------------------------------------------------
+
+  K    agent hits   comparator hits   gained/lost   ΔRecall      exact McNemar p
+   5      133            172            54 / 93     -0.00195     1.6313112527077745e-03
+  10      133            287            28 / 182    -0.00770     7.516255230127073e-29
+  20      133            465             7 / 339    -0.01660     1.5784654489008472e-90
+
+  Recall@10 agent 0.00665 | comparator 0.01435 | delta -0.00770
+  Every K is detectable, and the agent's hit count never rises above 133 because it only ever
+  surfaces four candidates.
+
+----------------------------------------------------------------------------------------------------
+4. AGENT BEHAVIOUR — what the policy actually did
+----------------------------------------------------------------------------------------------------
+
+  users                          20 000
+  completed                      19 999      (completion rate 0.99995)
+  failure                        1           (rate 0.00005; one provider timeout, terminating
+                                              as no_available_action)
+  fallback                       0           (budget exhaustion never occurred)
+  empty ranking                  1
+  mean tool calls                0.99995     (total 19 999)
+  mean ranking size              3.9998
+  ranking-size distribution      4 -> 19 999 users;  0 -> 1 user
+
+  action frequency               recommend_from_history 19 999
+                                 finish                 19 999
+                                 search_catalog              0
+                                 select_source               0
+
+  action sequence distribution   "recommend_from_history,finish" 19 999
+                                 "none"                              1
+
+  Reading: for all 20 000 users the policy chose one history recommendation and then finished.
+  It NEVER invoked catalog search, despite SEARCH_CATALOG being offered in the action schema
+  (offered actions: recommend_from_history, search_catalog, ask_clarification, finish). The
+  Agent arm was therefore, in practice, a single-source sequential recommender returning four
+  candidates, evaluated against a three-source rank fusion.
+
+  source_selection_distribution = none for every user. This is NOT an execution failure.
+  SELECT_SOURCE is structurally unreachable in the frozen control plane: loop.py::_plane_actions
+  offers it only when CandidateSource.SIMILAR_ITEM is registered, and no item-item index exists
+  (prereg §10.1). It does NOT mean no retrieval tool ran — recommend_from_history executes
+  through the candidate plane and the capability, and it ran 19 999 times.
+
+----------------------------------------------------------------------------------------------------
+5. INTERPRETATION — what M3 does and does not establish
+----------------------------------------------------------------------------------------------------
+
+  M3 compares THE EXISTING FROZEN REAL AGENT SYSTEM against the preregistered fixed-fusion
+  baseline. That is the claim it supports.
+
+  M3 must NOT be interpreted as:
+  - a clean test of adaptive source selection versus fusion — SELECT_SOURCE is structurally
+    unreachable, so that comparison was never run;
+  - a measurement of routing quality;
+  - grounds for attributing the difference to routing or selection behaviour alone.
+
+  The arms have a documented source/action-space asymmetry: fixed_fusion fuses popularity +
+  sequential + metadata in one RRF ranking, while the Agent can reach a single source at a time
+  and cannot express fusion at all, and cannot name popularity at all. The measured difference
+  is attributable to the whole system difference — a bounded model-driven agent with its own
+  prompt, actions, reasoning and completion rules versus a deterministic three-source rank
+  fusion. M3 cannot separate routing from retrieval, prompting, reasoning or completion effects,
+  and it does not claim to.
+
+  The Agent was NOT modified in response to this result, and no second execution was run.
+
+----------------------------------------------------------------------------------------------------
+6. INTEGRITY — consistency check and frozen evidence
+----------------------------------------------------------------------------------------------------
+
+  Every figure already published by the frozen execution was recomputed from the same paired
+  per-user arrays before any new statistic was produced. All reproduced EXACTLY:
+  comparator hits 172/287/465; ΔRecall -0.00195/-0.00770/-0.01660; McNemar p 1.6313112527077745e-03
+  / 7.516255230127073e-29 / 1.5784654489008472e-90; gained/lost 54/93, 28/182, 7/339.
+  The comparator ranks are byte-identical to the frozen fixed_fusion artifact.
+
+  Landed execution artifacts (frozen by SHA256; originals NOT overwritten):
+
+    agent_ranks.npz            480 780 B  b624dde3a716eade048e984060e9454423a533bf9d34174ceb2868416f33bb71
+    paired_inputs.npz          480 788 B  d2a2a81b71c43b4a045acdebd471cacb797a65bd69f9835d3de7caf8e8256404
+    agent_behavior.jsonl     8 988 860 B  3104f8fffcf41d9747adf115e7c926f4ca43ae95298cb278bfe8487e3a805910
+    agent_rankings.jsonl     1 205 402 B  8194d7da0cc041a830d161b892f7ed53a44343c3b039e5caa0382c1749b217dd
+    m3_statistics.json             890 B  ce91b06d7ef7c6896ce48b0e1348dd467d621a6c97322fc95f73959b15ce01ec
+    run_summary.json             1 182 B  f4a9160d4b2e3634be64b8a0c6cbbe72cd3325c6ac34b51b27ed360b700773b5
+    run_provenance.json          1 221 B  b4c977d207bf97d7d5e14c05227186e1618e2c495a6a6523abb3438c925c1540
+
+  Derived offline (new file, originals untouched):
+    m3_ndcg_statistics.json            — the primary endpoint, NDCG per K, bootstrap CIs,
+                                          behaviour summary, artifact hashes
+    ARTIFACT_SHA256.json               — the hash record above
+
+  Producer: runs/m3/m3_final_statistics.py (committed). It reads only landed evidence and the
+  frozen comparator artifact, calls no provider, and re-runs no Agent user.
+
+----------------------------------------------------------------------------------------------------
+7. THESIS WORDING — updated to match the measurement
+----------------------------------------------------------------------------------------------------
+
+  Previous status: the project's central claim — that an adaptive agent beats fixed multi-source
+  fusion — was the one unmeasured claim (M2 recorded it as EVIDENCE MISSING).
+
+  Measured status: under the frozen M3 protocol, on the frozen 20 000-user cohort, with the
+  preregistered primary endpoint and a paired 95% CI that lies entirely below zero, the existing
+  real Agent system **detectably underperforms** the accepted fixed-fusion baseline
+  (ΔNDCG@10 = -0.0028794446, CI [-0.0036454951, -0.0021236081]; ΔRecall@10 = -0.00770, exact
+  McNemar p = 7.52e-29). The central claim is therefore NOT supported by this measurement.
+
+  Scope of that statement, stated as strongly as the evidence allows and no more strongly:
+  - it is a statement about THIS agent system as it exists, at this prompt, action space, budget
+    and provider configuration — not about adaptive agents in general;
+  - it is NOT evidence that source selection is a bad idea, because selection was never
+    reachable and was never tested;
+  - the dominant observed behaviour is that the policy exhausted one recommendation action and
+    finished, never invoking catalog search — so the comparison is closer to "single-source,
+    four-candidate sequential recommendation vs three-source RRF" than to "agentic control vs
+    fusion".
+
+  M3 = COMPLETE: the preregistered protocol was executed in full and its statistics completed.
+  That is what "PASS" means here. It does NOT mean the Agent beat the comparator — it did not.
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

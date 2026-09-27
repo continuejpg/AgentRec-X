@@ -38,7 +38,8 @@ must be judged against. `NOT EXECUTED` means no run has been performed under it.
 
 | preregistration | SHA256 | status |
 |---|---|---|
-| `docs/M3_PREREGISTRATION.md` | `b1795c0f3ea5877274df8a96cd62d06f9eda83cd585bab69bd0867ffc30a8d36` | **PREREGISTERED / NOT EXECUTED** (incl. the pre-result interpretation amendment, §10) |
+| `docs/M3_PREREGISTRATION.md` | `b1795c0f3ea5877274df8a96cd62d06f9eda83cd585bab69bd0867ffc30a8d36` | **EXECUTED** (incl. the pre-result interpretation amendment, §10) |
+| `docs/reports/m3-agent-vs-fixed-fusion.txt` | `87d6148f0be5c010fc5d487bb8e73774e0131c2866ce22279f6add5e1fa0e7f7` | **EXECUTED / COMPLETE** |
 
 ## Evaluation protocol and critical source hashes
 
@@ -107,7 +108,7 @@ Oracle complementarity (K=10, frozen): TIGER-only outside SASRec ∪ Two-Tower =
 | accepted code pushed to the canonical remote | **YES** |
 | remote commit reachable | **YES** |
 | fresh clone succeeds and is self-contained | YES (verified from a clone taken from GitHub) |
-| project-state manifest verifies in a fresh clone | YES — 27/27, zero drift (25 at M1; the M2 report row and the M3 preregistration row were added later) |
+| project-state manifest verifies in a fresh clone | YES — 28/28, zero drift (25 at M1; the M2 report row and the M3 preregistration row were added later) |
 | no accepted implementation exists only on the old host worktree | YES — all transferred and committed |
 
 | durability dimension | status |
@@ -118,7 +119,7 @@ Oracle complementarity (K=10, frozen): TIGER-only outside SASRec ∪ Two-Tower =
 **M1 research-critical gate = PASS.** Every accepted *result* is reconstructible from the
 canonical remote: the accepted code, the frozen protocol and metric primitives, the accepted
 reports, and the manifest that binds them to their hashes are all reachable from a fresh clone,
-and that manifest verifies 27/27 with zero drift.
+and that manifest verifies 28/28 with zero drift.
 
 Artifact archival durability is **not** part of that gate and does not block it. The 11 large
 artifacts are `VERIFY-ONLY` **11/11**: a copy obtained out-of-band can be integrity-checked
@@ -177,12 +178,34 @@ were force-added past the repository's `runs/` ignore rule; that rule is unchang
 | item | status |
 |---|---|
 | fixed-fusion per-user evidence | **READY** — deterministically rebuilt and hash-recorded in `docs/M3_PREREGISTRATION.md` |
-| M3 | **BLOCKED ON LLM PROVIDER** |
-| LLM provider / model | **FROZEN** in `docs/M3_DEEPSEEK_AMENDMENT.md` (DeepSeek, `deepseek-flash`, thinking disabled, `max_tokens` 512); the **credential is still required** before any Agent run |
+| M3 | **COMPLETE — protocol executed in full, statistics finished** |
+| LLM provider / model | **FROZEN and used** — DeepSeek `deepseek-flash`, thinking disabled, temperature 0.0, JSON mode, `max_tokens` 512 (`docs/M3_DEEPSEEK_AMENDMENT.md`) |
 | `SELECT_SOURCE` reachability | **UNREACHABLE** — the frozen `_plane_actions` rule offers it only when `SIMILAR_ITEM` is registered, which it is not. Recorded as an architectural fact, not repaired. See prereg §10. |
 
-The protocol, comparator, endpoints, statistics and stop rules are frozen in
-`docs/M3_PREREGISTRATION.md`. No Agent execution has been attempted.
+### M3 outcome
+
+| milestone | status |
+|---|---|
+| M1 persistence | **PASS** |
+| M2 paired uncertainty | **PASS** |
+| M3 Agent vs fixed fusion | **PASS — protocol completed** |
+| research-critical blocker | **NONE** |
+
+M3 ran ONCE on the frozen 20 000-user cohort and was not re-run, re-tuned or adjusted in
+response to its result. Primary endpoint: **ΔNDCG@10 = -0.0028794446, paired bootstrap 95% CI
+[-0.0036454951, -0.0021236081]** — the interval lies entirely below zero, so under the frozen
+protocol the existing real Agent system **detectably underperforms** the accepted fixed-fusion
+baseline (ΔRecall@10 = -0.00770, exact McNemar p = 7.516255230127073e-29, gained/lost 28/182).
+
+**M3 PASS means the preregistered experiment was executed in full and its statistics completed.
+It does NOT mean the Agent beat the comparator — it did not.** The behaviour log shows the
+policy chose `recommend_from_history` then `finish` for 19 999 of 20 000 users and never invoked
+`search_catalog`, so the measured comparison is closer to "single-source four-candidate
+sequential recommendation vs three-source RRF" than to "agentic control vs fusion".
+`SELECT_SOURCE` remained unreachable and unrepaired, so M3 does not test adaptive source
+selection and must not be read as doing so.
+
+Full report: `docs/reports/m3-agent-vs-fixed-fusion.txt`.
 
 
 
