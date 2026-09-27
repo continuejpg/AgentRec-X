@@ -52,6 +52,10 @@ Then open **<http://127.0.0.1:8000/demo/>**.
 | `GET /v1/demo/health` | readiness: `status`, `model_loaded`, `metadata_loaded`, `demo_ready` |
 | `GET /docs` | interactive API docs |
 | `GET /demo/` | browser demo (plain HTML/CSS/JS, no build step, same-origin assets only) |
+| `POST /v1/demo/sessions` | open a session (server-owned preference-memory namespace) |
+| `POST /v1/demo/sessions/{session_id}/chat` | one conversational turn |
+| `GET /v1/demo/sessions/{session_id}` | session state and active preferences |
+| `DELETE /v1/demo/sessions/{session_id}` | reset the session |
 
 Startup loads the accepted SASRec checkpoint and the ~300 MB catalogue metadata once (expect
 roughly 20 s and an `Application startup complete.` line). Stop it with `Ctrl+C`. The demo runs in
@@ -238,7 +242,10 @@ Same cohort, same protocol, same evaluator:
 | TIGER-FP32 (generative) | 0.01385 | 0.007755 |
 | **Fixed rank fusion (comparator)** | **0.01435** | **0.007434** |
 
-The standalone models sit within a few percent of one another on this cohort. These are small
+The standalone models sit within a few percent of one another on this cohort. An ItemCF baseline exists
+(`recommendation/baselines/itemcf.py`), but it is deliberately **not comparable** on this artifact:
+it is recorded as `itemcf_comparison = "PENDING (no same-artifact full-data ItemCF benchmark
+exists)"`, so no ItemCF number is shown beside the table above. These are small
 differences on a frozen offline benchmark; they are **not** presented as wins, and the fusion
 increment was previously characterised as *directional only*.
 
@@ -353,8 +360,16 @@ Deep-dive documentation, if you want the research detail:
   are offline evaluation extensions.
 - **Single-candidate-generator serving.** The browser agent uses SASRec; it does not perform
   adaptive multi-source routing.
+- **Automated tests run on synthetic fixtures.** The suite never needs the real catalogue, the
+  trained checkpoint or a provider, so it runs offline; only the live demo loads the accepted
+  artifacts.
 - **Offline recommendation only.** No live inventory, pricing, cart, or CTR/CVR optimisation, and
   no online A/B-tested uplift claims.
+- **No relevance claim is made for explicit preferences.** The preference pipeline is evaluated
+  for *policy adherence* — that a stored preference is applied as configured — not for whether the
+  user liked the result. This repository measures no preference-conditioned relevance labels, and no
+  reported figure is a satisfaction or recommendation-quality claim. Preference-conditioned
+  relevance labels would require user feedback this project does not collect.
 
 ---
 
