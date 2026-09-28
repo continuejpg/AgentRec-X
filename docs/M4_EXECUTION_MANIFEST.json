@@ -1,0 +1,130 @@
+{
+  "code": {
+    "commit": "775dbf8dcb20a836d422864c4fc3bbca040d4882",
+    "commit_subject": "M4: make the frozen four-source universe genuinely reachable",
+    "file_hashes": {
+      "experiments/m4_benchmark.py": "4b88eaa3f6823ff230839874cc3b86b9574f61df7901a6ff397ed0da2a141cf5",
+      "experiments/m4_conformance.py": "4324674e83e4af1c2fa5963acfe1949fcad14d6b59c90342596d9b050fb94e87",
+      "experiments/m4_frozen_sources.py": "a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057",
+      "experiments/m4_harness.py": "798a454eb180fa5e392ffb0f6a2533bcdaf86be72ace46de6f8b9ad0d45f250f",
+      "experiments/m4_materialize_heads.py": "cf1936b5ded08fa1e64611da2bf616815fb3c2599dbd25d0cf1591f3265a365b",
+      "experiments/m4_policies.py": "21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302",
+      "experiments/m4_query_rules.py": "def08969084aaad0b35e736ec4213e931300f77f1a54ade6f938bbb3950cf7fb",
+      "experiments/m4_schema_projection.py": "e8e1248ac209078ac1e4a42e81fe0967f272b9abd3f05bfafe0d46dd08ef27ab",
+      "experiments/m4_sharding.py": "ace82753b5f337b3baf74607f38949b030ab7113f4ec480a154678b25d8a4bdd",
+      "experiments/m4_similar_neighbours.py": "da60c8fe2b00ae2d028b185959ac3b65b91a502bacc8f73bdd4e76dcb5a4a0a7",
+      "recommendation/control/candidate_ledger.py": "fcc65e74d0efb78d3078956e89b9b3fda2cd6281d508f9b6cba02b1be579aa62",
+      "recommendation/control/candidate_plane.py": "9e69b9d792d1322dfc50b98ead4be8e2452d32f6a11820a9fdac30fca16a2857",
+      "recommendation/control/loop.py": "1a509df86d3cac87e40e9d9c51e2bd3cfcd2cd3a3aeb4a92c62966bda9a44a8b",
+      "recommendation/control/model_policy.py": "e6c4c795c7257342eb693e4b69b640db6feb468b37078be9f816bd64488290f2",
+      "recommendation/evaluation/batched.py": "1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11",
+      "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
+      "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08"
+    },
+    "remote_head": "775dbf8dcb20a836d422864c4fc3bbca040d4882",
+    "worktree_dirty": true
+  },
+  "complete": false,
+  "evaluator": {
+    "catalog_size": 156746,
+    "implementation": "recommendation.evaluation.batched.evaluate_batched",
+    "k_values": [
+      5,
+      10,
+      20
+    ],
+    "protocol": "temporal_leave_two_out",
+    "protocol_version": "agentrecx.eval_protocol.v1"
+  },
+  "frozen_cohort": {
+    "selection": "benchmark_public.cohort_from_cases(size=20000, seed=20260201)",
+    "source": "runs/m3_execution/paired_inputs.npz",
+    "targets_sha256": "99dbaf7396913303fa1497c908a95e61239a29ad14a6a8f4e51d0b37fa8e99d4",
+    "users": "20000"
+  },
+  "fusion": {
+    "implementation": "candidate_ledger.reciprocal_rank_fusion",
+    "rrf_k": 60
+  },
+  "generated_utc": "2026-09-28T17:30:28Z",
+  "heads": {
+    "assembled_artifact": "runs/m4_evidence/heads.npz",
+    "assembled_sha256": "PENDING",
+    "per_source": {
+      "catalog_search": {
+        "users_with_head": "PENDING"
+      },
+      "history": {
+        "users_with_head": "PENDING"
+      },
+      "similar_item": {
+        "users_with_head": "PENDING"
+      },
+      "two_tower": {
+        "users_with_head": "PENDING"
+      }
+    },
+    "provenance_sha256": "PENDING"
+  },
+  "milestone": "M4",
+  "pending_fields": [
+    "heads.assembled_sha256",
+    "heads.provenance_sha256",
+    "heads.per_source.history.users_with_head",
+    "heads.per_source.catalog_search.users_with_head",
+    "heads.per_source.similar_item.users_with_head",
+    "heads.per_source.two_tower.users_with_head"
+  ],
+  "preregistration": {
+    "amended": false,
+    "path": "docs/M4_PREREGISTRATION.md",
+    "sha256": "7a18ea7258a3a175227a270ee38177c58bde66eadd51af8ccb02c91f83b981af"
+  },
+  "provider": {
+    "base_url": "https://api.deepseek.com",
+    "json_mode": true,
+    "max_tokens": 512,
+    "model": "deepseek-flash",
+    "policy_identifier": "GuardedAdaptivePolicy(inner=LLMAgentPolicy)",
+    "profile": "deepseek",
+    "prompt_identifier": "M4_GUARDED_ADAPTIVE_V1",
+    "temperature": 0.0,
+    "thinking": "disabled",
+    "tool_budget": {
+      "max_steps": 6,
+      "max_tool_calls": 4
+    }
+  },
+  "sharding": {
+    "implementation": "experiments/m4_sharding.py",
+    "merge": "sort on frozen cohort position; duplicate/missing user is an error",
+    "sha256": "ace82753b5f337b3baf74607f38949b030ab7113f4ec480a154678b25d8a4bdd"
+  },
+  "similar_item_index": {
+    "path": "runs/m4_evidence/similar_item_index.pkl",
+    "sha256": "e45bbe23ede062046f3740c400d5f2f17c693efeeda49db76ceee97a8aecf551"
+  },
+  "source_universe": {
+    "depth": 100,
+    "excluded": {
+      "popularity/metadata_retrieval": "not CandidateSource members",
+      "tiger": "not wired into the runtime; artifacts absent"
+    },
+    "members": [
+      "history",
+      "catalog_search",
+      "similar_item",
+      "two_tower"
+    ]
+  },
+  "statistics": {
+    "bootstrap": {
+      "resamples": 10000,
+      "seed": 20260201,
+      "unit": "user"
+    },
+    "delta_convention": "adaptive - fixed",
+    "mcnemar": "exact paired, two-sided, no continuity correction",
+    "primary_endpoint": "NDCG@10"
+  }
+}

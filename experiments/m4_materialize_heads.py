@@ -70,6 +70,8 @@ OUT = REPO / "runs/m4_evidence"
 SHARDS = OUT / "shards"
 ASSEMBLED = OUT / "heads.npz"
 PROVENANCE = OUT / "heads_provenance.json"
+#: The persisted TF-IDF index built once by experiments.m4_build_similar_index.
+SIMILAR_INDEX = OUT / "similar_item_index.pkl"
 
 #: The four frozen sources, in the frozen traversal order (§7.1).
 SOURCE_ORDER: tuple[CandidateSource, ...] = (
@@ -141,18 +143,28 @@ class CohortSlice:
 
 
 def load_cohort(*, limit: int | None = None) -> list[CohortSlice]:
-    """Load the frozen cohort in its canonical order and map each history to identities.
+    """Load the **frozen 20,000-user cohort** in its canonical order.
 
-    The order is the one ``split_cohort`` produces (sorted by ``(user_int_id, user_id)``), which is
-    what the preregistration's cohort definition fixes. ``limit`` exists only for the non-cohort
-    preflight; a limited load must never be assembled into the frozen artifact.
+    The cohort is not "every eligible user": preregistration §12.2 fixes it as the deterministic
+    history-length-stratified sample of ``COHORT_SEED = 20260201`` and size ``20_000``, selected by
+    the repository's own frozen :func:`~experiments.benchmark_public.cohort_from_cases`. This loader
+    calls that function rather than re-implementing the selection, so the materialised heads are
+    keyed to exactly the users the evaluator will score.
+
+    ``limit`` exists only for the non-cohort preflight and truncates *after* the frozen selection,
+    so a limited run is still a prefix of the frozen order.
     """
     from recommendation.evaluation.split import load_cohort_from_artifacts
 
+    from experiments.benchmark_public import cohort_from_cases
+
     cases, _report = load_cohort_from_artifacts(SEQUENCES, MAPPINGS)
+    selection = cohort_from_cases(cases)
+    cohort_cases = selection["cases"]
+    _assert_frozen_cohort(cohort_cases)
     identity = build_identity_map(MAPPINGS)
     out: list[CohortSlice] = []
-    for position, case in enumerate(cases):
+    for position, case in enumerate(cohort_cases):
         if limit is not None and position >= limit:
             break
         history: list[str] = []
@@ -169,6 +181,41 @@ def load_cohort(*, limit: int | None = None) -> list[CohortSlice]:
             )
         )
     return out
+
+
+#: The frozen M3 comparator artifact whose ``target_ids`` pin the cohort's identity *and* order.
+M3_PAIRED_INPUTS = REPO / "runs/m3_execution/paired_inputs.npz"
+
+
+def _assert_frozen_cohort(cohort_cases: Sequence[Any]) -> None:
+    """Refuse to materialise unless the cohort matches the frozen 20,000, in the frozen order.
+
+    Being the right *size* is not enough: a differently-ordered or differently-selected cohort of
+    20,000 users would materialise heads for the wrong users and silently produce a meaningless
+    evaluation. The M3 comparator artifact stores the per-user test targets in frozen cohort order,
+    so comparing them checks identity **and** order in one step.
+
+    This guard exists because the first version of this loader selected all 412,445 eligible users
+    instead of the frozen sample; that was caught before any shard was written, and this makes the
+    failure mode impossible to repeat silently.
+    """
+    if not M3_PAIRED_INPUTS.is_file():
+        raise SystemExit(f"missing frozen cohort reference {M3_PAIRED_INPUTS}")
+    import numpy as np
+
+    frozen = np.load(M3_PAIRED_INPUTS)["target_ids"]
+    mine = np.asarray([int(case.test_target) for case in cohort_cases], dtype=frozen.dtype)
+    if mine.shape != frozen.shape:
+        raise SystemExit(
+            f"frozen cohort has {frozen.shape[0]} users but this selection has {mine.shape[0]}"
+        )
+    if not np.array_equal(frozen, mine):
+        first = int(np.flatnonzero(frozen != mine)[0])
+        raise SystemExit(
+            "cohort identity/order does not match the frozen M3 artifact "
+            f"(first mismatch at index {first}: frozen={int(frozen[first])} "
+            f"selected={int(mine[first])}); refusing to materialise heads for the wrong users"
+        )
 
 
 # -- per-source materialisers ---------------------------------------------- #
@@ -279,41 +326,60 @@ def materialise_catalog_search(
 
 def materialise_similar_item(
     cohort: Sequence[CohortSlice], identity: Any, *, progress: bool
-) -> tuple[dict[int, list[tuple[str, int, float]]], str]:
-    """Live TF-IDF similar-item retrieval with the frozen history-derived seed (§5).
+) -> SourceHeads:
+    """Frozen TF-IDF similar-item retrieval with the frozen history-derived seed (§5).
 
-    The reference implementation scans the whole catalogue per query (2.39 s measured); the
-    accelerated path in :mod:`experiments.m4_similar_neighbours` is used when it is bit-identical
-    for the seeds in play, otherwise the reference is used. Either way the head is what the trusted
+    Loads the persisted index built once by :mod:`experiments.m4_build_similar_index`, so this
+    process never pays the ~5.93 GiB build peak and can therefore be chunked and resumed. Every
+    index object is the frozen class's own state, so retrieval is unchanged.
+
+    The accelerated neighbour path is used only when it is **bit-identical** to the reference on a
+    probe of this index; otherwise the reference is used. Either way the head is what the trusted
     tool would have produced.
     """
-    from recommendation.catalog.metadata import MetadataIndex
-    from recommendation.control.similar_item import (
-        SimilarItemSource,
-        build_similar_item_index,
-    )
+    import pickle
+    import random
+
+    from recommendation.control.similar_item import SimilarItemIndex, SimilarItemSource
 
     from experiments.m4_similar_neighbours import SparseNeighbourIndex
 
+    if not SIMILAR_INDEX.is_file():
+        raise SystemExit(
+            f"missing {SIMILAR_INDEX}; run `python -m experiments.m4_build_similar_index` first"
+        )
     started = time.time()
-    catalogue = MetadataIndex.load(PRODUCTS)
-    index = build_similar_item_index(catalogue)
+    with open(SIMILAR_INDEX, "rb") as handle:
+        payload = pickle.load(handle)
+    # Rebuild the frozen index object from its own persisted state, without re-tokenising the
+    # catalogue: the vectors, norms, idf and document frequencies are the built values.
+    index = SimilarItemIndex.__new__(SimilarItemIndex)
+    index._identities = tuple(payload["identities"])  # noqa: SLF001
+    index._documents = {}  # noqa: SLF001 - raw text is not needed for retrieval
+    index._document_frequency = payload["document_frequency"]  # noqa: SLF001
+    index._idf = payload["idf"]  # noqa: SLF001
+    index._vectors = payload["vectors"]  # noqa: SLF001
+    index._norms = payload["norms"]  # noqa: SLF001
     print(
-        f"  similar index built in {time.time() - started:.1f}s, vocab={index.vocabulary_size}, "
-        f"peakRSS={_peak_rss_gib():.2f} GiB",
+        f"  similar index loaded in {time.time() - started:.1f}s, vocab={index.vocabulary_size}, "
+        f"docs={len(index.identities)}, peakRSS={_peak_rss_gib():.2f} GiB",
         flush=True,
     )
+
     accelerated = SparseNeighbourIndex(index)
     source = SimilarItemSource(index)
-    import random
-
     rng = random.Random(20260201)
     probe = [index.identities[rng.randrange(len(index.identities))] for _ in range(8)]
     mismatches = sum(
-        1 for s in probe if index.neighbours(s, limit=DEPTH) != accelerated.neighbours(s, limit=DEPTH)
+        1
+        for seed in probe
+        if index.neighbours(seed, limit=DEPTH) != accelerated.neighbours(seed, limit=DEPTH)
     )
     if mismatches:
-        print(f"  WARNING: accelerated path mismatched {mismatches}/8 probes -> using reference", flush=True)
+        print(
+            f"  WARNING: accelerated path mismatched {mismatches}/8 probes -> using reference",
+            flush=True,
+        )
         accelerated = None  # type: ignore[assignment]
     else:
         print("  accelerated path verified bit-identical on 8 probes", flush=True)
@@ -402,7 +468,9 @@ def shard_path(source: CandidateSource, chunk: int) -> pathlib.Path:
 _FULL_COHORT = True
 
 
-def run_source(source: CandidateSource, *, chunk_size: int, limit: int | None) -> None:
+def run_source(
+    source: CandidateSource, *, chunk_size: int, limit: int | None, force: bool = False
+) -> None:
     """Materialise one source in this process, chunk by chunk, resuming completed shards."""
     global _FULL_COHORT
     _FULL_COHORT = limit is None
@@ -413,7 +481,7 @@ def run_source(source: CandidateSource, *, chunk_size: int, limit: int | None) -
     started = time.time()
     for chunk, start in enumerate(range(0, len(cohort), chunk_size)):
         path = shard_path(source, chunk)
-        if path.is_file():
+        if path.is_file() and not force:
             print(f"  chunk {chunk} already complete, skipping", flush=True)
             continue
         piece = cohort[start : start + chunk_size]
@@ -440,6 +508,7 @@ def assemble(*, limit: int | None = None) -> None:
     order = [slice_.user_int_id for slice_ in cohort]
     arrays: dict[str, Any] = {}
     score_kinds: dict[str, str] = {}
+    source_lengths: dict[str, dict[str, Any]] = {}
     for source in SOURCE_ORDER:
         per_user: dict[int, list[tuple[str, int, float]]] = {}
         per_user_query: dict[int, str] = {}
@@ -477,6 +546,13 @@ def assemble(*, limit: int | None = None) -> None:
             [per_user_query.get(uid, "") for uid in order], dtype=object
         )
         score_kinds[source.value] = score_kind
+        source_lengths[source.value] = {
+            "users_with_head": int((lengths > 0).sum()),
+            "min": int(lengths.min()),
+            "mean": round(float(lengths.mean()), 4),
+            "max": int(lengths.max()),
+            "total_rows": int(lengths.sum()),
+        }
         print(
             f"[{source.value}] users={len(order)} with_head={int((lengths > 0).sum())} "
             f"min={int(lengths.min())} mean={lengths.mean():.2f} max={int(lengths.max())}",
@@ -493,6 +569,7 @@ def assemble(*, limit: int | None = None) -> None:
         "users": len(order),
         "source_order": [s.value for s in SOURCE_ORDER],
         "score_kinds": score_kinds,
+        "source_lengths": source_lengths,
         "inputs": {
             "sequences": {"path": str(SEQUENCES.relative_to(REPO)), "sha256": _sha256(SEQUENCES)},
             "mappings": {"path": str(MAPPINGS.relative_to(REPO)), "sha256": _sha256(MAPPINGS)},
@@ -513,6 +590,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--assemble", action="store_true")
     parser.add_argument("--chunk-size", type=int, default=250)
     parser.add_argument("--limit", type=int, default=None, help="non-cohort preflight only")
+    parser.add_argument(
+        "--force", action="store_true", help="recompute existing shards (preflight measurement)"
+    )
     args = parser.parse_args(argv)
 
     if args.assemble:
@@ -520,7 +600,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if not args.source:
         parser.error("either --source or --assemble is required")
-    run_source(CLI_SOURCES[args.source], chunk_size=args.chunk_size, limit=args.limit)
+    run_source(
+        CLI_SOURCES[args.source],
+        chunk_size=args.chunk_size,
+        limit=args.limit,
+        force=args.force,
+    )
     return 0
 
 
