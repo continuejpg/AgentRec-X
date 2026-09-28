@@ -212,10 +212,27 @@ class _CatalogSearchSourceTool:
         arguments: Any,
         limit: int,
     ) -> list[tuple[str, int, float]]:
-        """Run the query the arguments carry.  Blank queries yield zero candidates."""
+        """Run the query the arguments carry.  Blank queries yield zero candidates.
+
+        One narrow exception, and it is a conformance repair rather than a behaviour change.  A
+        caller that has **already fixed the query as trusted input** cannot express it through
+        ``arguments``: :class:`~recommendation.control.arguments.SelectSourceArguments` carries only
+        ``source`` and ``limit``, because ``SELECT_SOURCE`` is specified to choose the *source* and
+        not the query.  Such a caller marks its search object with a non-empty ``frozen_query``
+        attribute, and only then is the blank query delegated instead of short-circuited.
+
+        Everything without that marker behaves exactly as before: a blank query still yields zero
+        candidates, because a real :class:`CatalogSearchSource` has no stored query to fall back on.
+        That marker is what keeps this from being an implicit "no query means every query"
+        relaxation for the rest of the repository.
+        """
         terms = tuple(getattr(arguments, "terms", ()) or ())
         if not terms:
-            return []
+            # `frozen_query` is never present on CatalogSearchSource, so the default path is
+            # byte-for-byte the previous behaviour.
+            if not getattr(self._search, "frozen_query", ""):
+                return []
+            return self._search.candidates("", limit=limit)
         return self._search.candidates(" ".join(terms), limit=limit)
 
 
