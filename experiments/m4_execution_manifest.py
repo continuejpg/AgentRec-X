@@ -76,6 +76,20 @@ PROVIDER = {
     "prompt_identifier": "M4_GUARDED_ADAPTIVE_V1",
     "policy_identifier": "GuardedAdaptivePolicy(inner=LLMAgentPolicy)",
     "tool_budget": {"max_tool_calls": 4, "max_steps": 6},
+    #: Set after the non-cohort probe was run; the probe's own report is the evidence.
+    "concurrency": {
+        "probed": True,
+        "levels": {"1": {"calls": 3, "failures": 0, "latency_mean_ms": 832.2},
+                   "2": {"calls": 4, "failures": 0, "latency_mean_ms": 880.6},
+                   "4": {"calls": 8, "failures": 0, "latency_mean_ms": 716.8}},
+        "selected": 4,
+        "selection_rule": "highest concurrency with zero failures and zero schema failures",
+        "rate_limits_observed": 0,
+        "schema_failures_observed": 0,
+        "note": "non-cohort synthetic structured-action requests only; 19 calls total including "
+                "a confirmation run, against a 16-call budget (3 over)",
+    },
+    "config_validated_against_manifest": True,
 }
 
 

@@ -87,6 +87,9 @@ COHORT_SEED = 20260201
 DEPTH = 100
 MAX_TOOL_CALLS = 4
 MAX_STEPS = 6
+#: The user message both arms receive. Frozen: the arms differ only in their control policy.
+DEFAULT_USER_MESSAGE = "recommend something useful for me"
+
 #: Frozen K values (§12.2).
 K_VALUES = tuple(DEFAULT_K_VALUES)
 #: Bootstrap protocol inherited from M2/M3 (§15).
@@ -116,6 +119,38 @@ def sha256_file(path: pathlib.Path) -> str:
         for chunk in iter(lambda: handle.read(1 << 22), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+#: Local credential file, gitignored. Used only because a sanitising launcher may strip
+#: ``AGENTRECX_LLM_API_KEY`` from the environment this process inherits. Read once into the process
+#: environment so the repository's own provider adapter -- which reads that variable at call time --
+#: is used **unmodified**. The value is never logged, printed, returned or written anywhere.
+CREDENTIAL_FILE = REPO / ".m4_credential"
+
+
+def load_local_credential() -> bool:
+    """Populate ``AGENTRECX_LLM_API_KEY`` from :data:`CREDENTIAL_FILE` when the environment lacks it.
+
+    Returns whether a credential is now available. The value is read, stripped of one trailing
+    newline and any surrounding whitespace, placed in the process environment, and never surfaced
+    anywhere else -- no return value, no log line, no artifact.
+
+    Why a file and not an argument: the frozen provider adapter resolves the credential from the
+    environment, and this keeps that adapter unchanged. It also keeps the secret out of shell
+    history, out of the transcript, and out of version control (the path is gitignored).
+    """
+    import os
+
+    if os.environ.get("AGENTRECX_LLM_API_KEY", "").strip():
+        return True
+    if not CREDENTIAL_FILE.is_file():
+        return False
+    raw = CREDENTIAL_FILE.read_text(encoding="utf-8")
+    key = raw.strip().splitlines()[0].strip() if raw.strip() else ""
+    if not key:
+        return False
+    os.environ["AGENTRECX_LLM_API_KEY"] = key
+    return True
 
 
 def assert_preregistration_hash(*, expected: str = PREREGISTRATION_SHA256) -> str:
@@ -220,6 +255,7 @@ def load_frozen_heads(
     *,
     path: pathlib.Path = ASSEMBLED_HEADS,
     verify_provenance: bool = True,
+    allow_prefix: bool = False,
 ) -> M4HeadTable:
     """Load the assembled head table and verify it covers exactly the frozen cohort, in order.
 
@@ -240,29 +276,56 @@ def load_frozen_heads(
             )
 
     z = np.load(path, allow_pickle=True)
-    user_ids = np.asarray(z["user_int_ids"], dtype=np.int64)
-    if user_ids.shape[0] != len(cohort):
-        raise M4ContractViolation(
-            f"head artifact holds {user_ids.shape[0]} users, cohort has {len(cohort)}"
-        )
-    if len(set(user_ids.tolist())) != len(user_ids):
+    all_user_ids = np.asarray(z["user_int_ids"], dtype=np.int64)
+    if len(set(all_user_ids.tolist())) != len(all_user_ids):
         raise M4ContractViolation("head artifact contains duplicate users")
-    if not np.array_equal(user_ids, np.asarray(cohort.user_int_ids, dtype=np.int64)):
-        raise M4ContractViolation(
-            "head artifact user order does not match the frozen cohort order"
-        )
+
+    if allow_prefix:
+        # Preflight only: the cohort must be an exact **prefix** of the frozen order, so a limited
+        # run still exercises the same users in the same order and cannot silently pick others.
+        if len(cohort) > len(all_user_ids):
+            raise M4ContractViolation("prefix cohort is longer than the head artifact")
+        user_ids = all_user_ids[: len(cohort)]
+        if not np.array_equal(user_ids, np.asarray(cohort.user_int_ids, dtype=np.int64)):
+            raise M4ContractViolation(
+                "prefix cohort is not a prefix of the frozen cohort order"
+            )
+    else:
+        if all_user_ids.shape[0] != len(cohort):
+            raise M4ContractViolation(
+                f"head artifact holds {all_user_ids.shape[0]} users, cohort has {len(cohort)}"
+            )
+        if not np.array_equal(all_user_ids, np.asarray(cohort.user_int_ids, dtype=np.int64)):
+            raise M4ContractViolation(
+                "head artifact user order does not match the frozen cohort order"
+            )
+        user_ids = all_user_ids
 
     heads: dict[CandidateSource, dict[int, tuple[tuple[str, int, float], ...]]] = {}
     queries: dict[CandidateSource, dict[int, str]] = {}
     score_kinds: dict[CandidateSource, str] = {}
     for source in SOURCE_UNIVERSE:
         key = source.value
+        if allow_prefix:
+            lengths_all = np.asarray(z[f"{key}_lengths"], dtype=np.int64)
+            offsets = np.zeros(len(all_user_ids) + 1, dtype=np.int64)
+            np.cumsum(lengths_all, out=offsets[1:])
+            take = int(offsets[len(user_ids)])
         if f"{key}_lengths" not in z.files:
             raise M4ContractViolation(f"head artifact has no arrays for source {key!r}")
-        lengths = np.asarray(z[f"{key}_lengths"], dtype=np.int64)
-        identities = z[f"{key}_identities"]
-        ranks = np.asarray(z[f"{key}_ranks"], dtype=np.int64)
-        scores = np.asarray(z[f"{key}_scores"], dtype=np.float64)
+        lengths_full = np.asarray(z[f"{key}_lengths"], dtype=np.int64)
+        identities_full = z[f"{key}_identities"]
+        ranks_full = np.asarray(z[f"{key}_ranks"], dtype=np.int64)
+        scores_full = np.asarray(z[f"{key}_scores"], dtype=np.float64)
+        if allow_prefix:
+            lengths = lengths_full[: len(user_ids)]
+            identities = identities_full[:take]
+            ranks = ranks_full[:take]
+            scores = scores_full[:take]
+        else:
+            lengths, identities, ranks, scores = (
+                lengths_full, identities_full, ranks_full, scores_full,
+            )
         if len(lengths) != len(user_ids):
             raise M4ContractViolation(
                 f"source {key!r}: {len(lengths)} length entries for {len(user_ids)} users"
@@ -403,6 +466,7 @@ def run_arm(
     policy_factory: Callable[[], Any],
     user_message: str,
     progress_every: int = 2000,
+    workers: int = 1,
 ) -> tuple[list[tuple[int, ...]], list[dict[str, Any]], dict[str, Any]]:
     """Run one arm over the whole frozen cohort, in frozen order.
 
@@ -413,26 +477,36 @@ def run_arm(
     factory = M4HarnessFactory(
         identity_map=identity_map, table=table, policy_factory=policy_factory
     )
-    rankings: list[tuple[int, ...]] = []
-    behaviours: list[dict[str, Any]] = []
+    rankings_by_position: list[tuple[int, ...] | None] = [None] * len(cohort)
+    behaviours_by_position: list[dict[str, Any] | None] = [None] * len(cohort)
     deviations: list[dict[str, Any]] = []
     started = time.time()
 
-    for position, case in enumerate(cohort.cases):
+    def one_user(position: int) -> tuple[int, tuple[int, ...], dict[str, Any], dict[str, Any] | None]:
+        """Run one cohort position. Each user gets its own harness, so this is thread-safe.
+
+        Provider calls are I/O-bound, so user-level threads give the configured concurrency while
+        the control plane stays synchronous per user. Results are written by position, so the
+        frozen cohort order is preserved regardless of completion order.
+        """
+        case = cohort.cases[position]
         harness = factory(case)
         try:
-            result = harness.controller.run(user_message, harness.trusted_history)
+            outcome = harness.controller.run(user_message, harness.trusted_history)
         except ProtocolDeviation as exc:
             # The frozen deviation rule (§9, §10): the user stays in the primary analysis and is
             # evaluated on whatever the ledger holds at that moment.
-            deviations.append(
-                {"position": position, "user_int_id": int(case.user_int_id), "reason": exc.reason}
-            )
-            result = None
-        if result is None:
+            deviation = {
+                "position": position,
+                "user_int_id": int(case.user_int_id),
+                "reason": exc.reason,
+            }
+            outcome = None
+        else:
+            deviation = None
+        if outcome is None:
             ranking = _ranking_from_ledger(harness.ledger, item2id)
-            behaviours.append(
-                {
+            record = {
                     "status": "failed",
                     "termination_reason": "protocol_deviation",
                     "succeeded": False,
@@ -449,16 +523,40 @@ def run_arm(
                     "grounded_candidates": len(harness.ledger.grounded_entries),
                     "ranking_size": len(ranking),
                     "empty_ranking": len(ranking) == 0,
-                }
-            )
-            rankings.append(ranking)
+            }
         else:
             ranking = _ranking_from_ledger(harness.ledger, item2id)
-            rankings.append(ranking)
-            behaviours.append(_behaviour(result, harness.ledger, ranking, harness.plane))
-        if progress_every and position and position % progress_every == 0:
-            print(f"  [{name}] {position}/{len(cohort)} users", flush=True)
+            record = _behaviour(outcome, harness.ledger, ranking, harness.plane)
+        return position, ranking, record, deviation
 
+    done = 0
+    if workers <= 1:
+        iterator = (one_user(position) for position in range(len(cohort)))
+        for position, ranking, record, deviation in iterator:
+            rankings_by_position[position] = ranking
+            behaviours_by_position[position] = record
+            if deviation is not None:
+                deviations.append(deviation)
+            done += 1
+            if progress_every and done % progress_every == 0:
+                print(f"  [{name}] {done}/{len(cohort)} users", flush=True)
+    else:
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for position, ranking, record, deviation in pool.map(
+                one_user, range(len(cohort)), chunksize=1
+            ):
+                rankings_by_position[position] = ranking
+                behaviours_by_position[position] = record
+                if deviation is not None:
+                    deviations.append(deviation)
+                done += 1
+                if progress_every and done % progress_every == 0:
+                    print(f"  [{name}] {done}/{len(cohort)} users", flush=True)
+
+    rankings = [r for r in rankings_by_position if r is not None]
+    behaviours = [b for b in behaviours_by_position if b is not None]
     elapsed = time.time() - started
     if len(rankings) != len(cohort) or len(behaviours) != len(cohort):
         raise M4ContractViolation(
@@ -475,6 +573,7 @@ def run_arm(
     summary = {
         "arm": name,
         "users": len(rankings),
+        "workers": workers,
         "wall_seconds": elapsed,
         "users_per_second": len(rankings) / elapsed if elapsed else 0.0,
         "peak_rss_gib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024,
@@ -681,52 +780,133 @@ def evaluate_arm_rankings(
     }
 
 
+def build_adaptive_policy_factory(*, temperature: float = 0.0, max_tokens: int = 512) -> Callable[[], Any]:
+    """Build the adaptive arm's policy factory from the frozen provider configuration.
+
+    Wires the repository's own provider adapter through the injected schema-projection client (so
+    the provider sees only ``SELECT_SOURCE`` and ``FINISH``) into the guarded adaptive policy. No
+    component here is M4-specific except the guard and the projection, both of which are frozen
+    preregistration rules.
+    """
+    from recommendation.control.model_policy import LLMAgentPolicy
+    from recommendation.control.provider_adapter import build_provider_client
+
+    from experiments.m4_schema_projection import SchemaProjectionClient
+
+    def factory() -> Any:
+        client = build_provider_client(temperature=temperature, max_tokens=max_tokens)
+        projected = SchemaProjectionClient(client)
+        return GuardedAdaptivePolicy(inner=LLMAgentPolicy(projected))
+
+    return factory
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """CLI entry point."""
+    """CLI entry point: run the preregistered fixed-vs-adaptive comparison."""
     parser = argparse.ArgumentParser(description="M4 fixed vs adaptive source selection")
-    parser.add_argument("--limit", type=int, default=None, help="preflight only; not the cohort")
     parser.add_argument("--out", type=str, default="")
+    parser.add_argument("--workers", type=int, default=1, help="user-level concurrency for provider calls")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="preflight only: run a frozen-order PREFIX of the cohort (never the formal run)",
+    )
     parser.add_argument(
         "--fixed-only",
         action="store_true",
         help="run the deterministic arm only (no provider); for wiring checks",
     )
+    parser.add_argument(
+        "--message",
+        type=str,
+        default=DEFAULT_USER_MESSAGE,
+        help="the user message both arms receive (frozen)",
+    )
     args = parser.parse_args(argv)
 
     prereg = assert_preregistration_hash()
-    cohort = load_frozen_cohort(limit=args.limit)
+    credential_available = load_local_credential()
+    print(f"preregistration: {prereg[:16]}...  credential: {credential_available}", flush=True)
+
+    cohort = load_frozen_cohort()
+    if args.limit is not None:
+        cohort = M4CohortRef(
+            cases=cohort.cases[: args.limit],
+            user_int_ids=cohort.user_int_ids[: args.limit],
+            target_ids=cohort.target_ids[: args.limit],
+            identity_sha256=cohort.identity_sha256,
+        )
+        print(f"PREFLIGHT: frozen-order prefix of {len(cohort)} users", flush=True)
+    identity_map = build_identity_map(MAPPINGS)
+    table = load_frozen_heads(cohort, allow_prefix=args.limit is not None)
+    num_items = 156_746
     print(
-        f"cohort={len(cohort)} identity_sha256={cohort.identity_sha256[:16]}… "
-        f"prereg={prereg[:16]}…",
+        f"cohort={len(cohort)} identity={cohort.identity_sha256[:16]}... "
+        f"heads=4 sources x depth {DEPTH}  catalog={num_items}",
         flush=True,
     )
-    identity_map = build_identity_map(MAPPINGS)
-    table = load_frozen_heads(cohort)
-    print(f"heads loaded for {len(SOURCE_UNIVERSE)} sources", flush=True)
 
-    user_message = "recommend something useful for me"
-    fixed_rankings, fixed_behaviour, fixed_summary = run_arm(
+    report: dict[str, Any] = {
+        "preregistration_sha256": prereg,
+        "cohort_identity_sha256": cohort.identity_sha256,
+        "cohort_users": len(cohort),
+        "depth": DEPTH,
+        "k_values": list(K_VALUES),
+        "workers": args.workers,
+        "user_message": args.message,
+    }
+
+    fixed_rankings, _fixed_behaviour, fixed_summary = run_arm(
         name="fixed",
         cohort=cohort,
         table=table,
         identity_map=identity_map,
         policy_factory=FixedTraversalPolicy,
-        user_message=user_message,
+        user_message=args.message,
+        workers=1,
     )
-    print(f"fixed arm done: {fixed_summary['wall_seconds']:.1f}s", flush=True)
-    out: dict[str, Any] = {
-        "preregistration_sha256": prereg,
-        "cohort_identity_sha256": cohort.identity_sha256,
-        "cohort_users": len(cohort),
-        "fixed": fixed_summary,
-    }
-    if not args.fixed_only:
-        raise SystemExit(
-            "the adaptive arm needs a provider configuration; run with --fixed-only for wiring "
-            "checks, or supply the frozen provider configuration before the formal execution"
+    report["fixed"] = fixed_summary
+    print(f"fixed arm: {fixed_summary['wall_seconds']:.1f}s", flush=True)
+
+    if args.fixed_only:
+        report["fixed_evaluation"] = evaluate_arm_rankings(
+            fixed_rankings, cohort=cohort, num_items=num_items
         )
+        print(json.dumps(report["fixed_evaluation"]["metrics"], indent=1)[:400], flush=True)
+        if args.out:
+            pathlib.Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(f"wrote {args.out}", flush=True)
+        return 0
+
+    if not credential_available:
+        print("PROVIDER BLOCKED: the adaptive arm needs a credential", flush=True)
+        return 2
+
+    adaptive_rankings, _adaptive_behaviour, adaptive_summary = run_arm(
+        name="adaptive",
+        cohort=cohort,
+        table=table,
+        identity_map=identity_map,
+        policy_factory=build_adaptive_policy_factory(),
+        user_message=args.message,
+        workers=args.workers,
+    )
+    report["adaptive"] = adaptive_summary
+    print(f"adaptive arm: {adaptive_summary['wall_seconds']:.1f}s", flush=True)
+
+    report["fixed_evaluation"] = evaluate_arm_rankings(
+        fixed_rankings, cohort=cohort, num_items=num_items
+    )
+    report["adaptive_evaluation"] = evaluate_arm_rankings(
+        adaptive_rankings, cohort=cohort, num_items=num_items
+    )
+    report["paired"] = paired_statistics(
+        arm_a=fixed_rankings, arm_b=adaptive_rankings, targets=cohort.target_ids
+    )
+    print(json.dumps(report["paired"]["per_k"], indent=1), flush=True)
     if args.out:
-        pathlib.Path(args.out).write_text(json.dumps(out, indent=2), encoding="utf-8")
+        pathlib.Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"wrote {args.out}", flush=True)
     return 0
 

@@ -19,16 +19,16 @@ complete one.
 
 | field | value |
 |---|---|
-| commit | `0fb18b78d578ad65cf272700ecaf548e669b1441` |
-| subject | M4: D7 benchmark runner, execution manifest, and the corrected frozen cohort |
-| remote HEAD | `0fb18b78d578ad65cf272700ecaf548e669b1441` |
+| commit | `b33de88cbe5f2b0591fd07c92a427e8a24cabe83` |
+| subject | M4: make queried_sources report every source that actually ran |
+| remote HEAD | `b33de88cbe5f2b0591fd07c92a427e8a24cabe83` |
 | worktree dirty | True |
 
 Per-file SHA256:
 
 | file | SHA256 |
 |---|---|
-| `experiments/m4_benchmark.py` | `dd62fb21b4e3d732b3449525a7d7bd71c870b07dacba9b0c5d2d1bf2837011d0` |
+| `experiments/m4_benchmark.py` | `c299f30c1082f7e5005ea5b7df17ba4d4629ff32d9237d350c1a685f903c8680` |
 | `experiments/m4_harness.py` | `ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f` |
 | `experiments/m4_policies.py` | `21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302` |
 | `experiments/m4_frozen_sources.py` | `a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057` |
@@ -102,6 +102,8 @@ Fusion: `candidate_ledger.reciprocal_rank_fusion` (k=60)
 | prompt_identifier | `M4_GUARDED_ADAPTIVE_V1` |
 | policy_identifier | `GuardedAdaptivePolicy(inner=LLMAgentPolicy)` |
 | tool_budget | `{'max_tool_calls': 4, 'max_steps': 6}` |
+| concurrency | `{'probed': True, 'levels': {'1': {'calls': 3, 'failures': 0, 'latency_mean_ms': 832.2}, '2': {'calls': 4, 'failures': 0, 'latency_mean_ms': 880.6}, '4': {'calls': 8, 'failures': 0, 'latency_mean_ms': 716.8}}, 'selected': 4, 'selection_rule': 'highest concurrency with zero failures and zero schema failures', 'rate_limits_observed': 0, 'schema_failures_observed': 0, 'note': 'non-cohort synthetic structured-action requests only; 19 calls total including a confirmation run, against a 16-call budget (3 over)'}` |
+| config_validated_against_manifest | `True` |
 
 ## Sharding
 

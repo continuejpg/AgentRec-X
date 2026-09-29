@@ -67,3 +67,6 @@ wandb/
 
 # OS
 .DS_Store
+
+# M4 provider credential (local only, never committed)
+.m4_credential

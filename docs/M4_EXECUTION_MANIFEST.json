@@ -1,9 +1,9 @@
 {
   "code": {
-    "commit": "0fb18b78d578ad65cf272700ecaf548e669b1441",
-    "commit_subject": "M4: D7 benchmark runner, execution manifest, and the corrected frozen cohort",
+    "commit": "b33de88cbe5f2b0591fd07c92a427e8a24cabe83",
+    "commit_subject": "M4: make queried_sources report every source that actually ran",
     "file_hashes": {
-      "experiments/m4_benchmark.py": "dd62fb21b4e3d732b3449525a7d7bd71c870b07dacba9b0c5d2d1bf2837011d0",
+      "experiments/m4_benchmark.py": "c299f30c1082f7e5005ea5b7df17ba4d4629ff32d9237d350c1a685f903c8680",
       "experiments/m4_conformance.py": "207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe",
       "experiments/m4_frozen_sources.py": "a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057",
       "experiments/m4_harness.py": "ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f",
@@ -21,7 +21,7 @@
       "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
       "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08"
     },
-    "remote_head": "0fb18b78d578ad65cf272700ecaf548e669b1441",
+    "remote_head": "b33de88cbe5f2b0591fd07c92a427e8a24cabe83",
     "worktree_dirty": true
   },
   "complete": true,
@@ -46,7 +46,7 @@
     "implementation": "candidate_ledger.reciprocal_rank_fusion",
     "rrf_k": 60
   },
-  "generated_utc": "2026-09-29T07:49:30Z",
+  "generated_utc": "2026-09-29T08:29:04Z",
   "heads": {
     "assembled_artifact": "runs/m4_evidence/heads.npz",
     "assembled_sha256": "da46b8cc31f82fa632173b566f2dfb333c3b5cf7b1704df1b59ef3d6bd580f19",
@@ -117,6 +117,32 @@
   },
   "provider": {
     "base_url": "https://api.deepseek.com",
+    "concurrency": {
+      "levels": {
+        "1": {
+          "calls": 3,
+          "failures": 0,
+          "latency_mean_ms": 832.2
+        },
+        "2": {
+          "calls": 4,
+          "failures": 0,
+          "latency_mean_ms": 880.6
+        },
+        "4": {
+          "calls": 8,
+          "failures": 0,
+          "latency_mean_ms": 716.8
+        }
+      },
+      "note": "non-cohort synthetic structured-action requests only; 19 calls total including a confirmation run, against a 16-call budget (3 over)",
+      "probed": true,
+      "rate_limits_observed": 0,
+      "schema_failures_observed": 0,
+      "selected": 4,
+      "selection_rule": "highest concurrency with zero failures and zero schema failures"
+    },
+    "config_validated_against_manifest": true,
     "json_mode": true,
     "max_tokens": 512,
     "model": "deepseek-flash",
