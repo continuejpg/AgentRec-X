@@ -53,6 +53,7 @@ from recommendation.control.catalog_search import (
 
 __all__ = [
     "FrozenQueryCatalogSearch",
+    "QueryRecordingPlane",
     "SourceLabelMismatch",
     "TruthfulSourcePlane",
 ]
@@ -262,4 +263,62 @@ class TruthfulSourcePlane:
 
     def __getattr__(self, name: str) -> Any:
         """Delegate any remaining attribute to the wrapped plane."""
+        return getattr(self._plane, name)
+
+
+class QueryRecordingPlane:
+    """Wrap a plane and record **which sources were actually dispatched**, per user.
+
+    Why this exists
+    ---------------
+    ``queried_sources`` used to be derived from ``FrozenHeadTool.consumed``. That signal is
+    incomplete by construction: ``catalog_search`` is served by :class:`FrozenQueryCatalogSearch`,
+    which the plane wraps in its own adapter, so the ``FrozenHeadTool`` sitting in
+    ``harness.tools[CATALOG_SEARCH]`` is never called and never reports consumption. The behaviour
+    record therefore listed three sources while four tool calls had actually run.
+
+    Deriving the record from the *dispatch* is the honest fix: a source counts as queried when the
+    plane was asked to execute it, regardless of how many candidates it returned. That also keeps a
+    legitimately empty result distinguishable from "never consulted".
+
+    Accounting only: ``execute`` is delegated unchanged, so nothing about which source is called,
+    in what order, with what arguments, or what it returns is affected.
+    """
+
+    def __init__(self, plane: Any) -> None:
+        self._plane = plane
+        self._queried: list[CandidateSource] = []
+
+    @property
+    def queried_sources(self) -> tuple[CandidateSource, ...]:
+        """The sources actually dispatched, in call order, without duplicates."""
+        seen: list[CandidateSource] = []
+        for source in self._queried:
+            if source not in seen:
+                seen.append(source)
+        return tuple(seen)
+
+    def _source_of(self, action: Any) -> CandidateSource | None:
+        """The source an action dispatches to, from the action itself."""
+        from recommendation.control.schemas import ActionKind
+
+        kind = getattr(action, "action", None)
+        if kind is ActionKind.SELECT_SOURCE:
+            declared = getattr(getattr(action, "arguments", None), "source", None)
+            return declared if isinstance(declared, CandidateSource) else None
+        return {
+            ActionKind.RECOMMEND_FROM_HISTORY: CandidateSource.HISTORY,
+            ActionKind.SEARCH_CATALOG: CandidateSource.CATALOG_SEARCH,
+            ActionKind.FIND_SIMILAR: CandidateSource.SIMILAR_ITEM,
+        }.get(kind)
+
+    def execute(self, action: Any, **kwargs: Any) -> Any:
+        """Record the dispatch, then delegate unchanged."""
+        source = self._source_of(action)
+        if source is not None:
+            self._queried.append(source)
+        return self._plane.execute(action, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate every other attribute to the wrapped plane."""
         return getattr(self._plane, name)

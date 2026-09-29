@@ -356,15 +356,20 @@ def _ranking_from_ledger(ledger: Any, item2id: Mapping[str, int]) -> tuple[int, 
     return tuple(ranked)
 
 
-def _behaviour(result: Any, ledger: Any, ranking: Sequence[int], tools: Mapping[Any, Any]) -> dict[str, Any]:
-    """Per-user behaviour record, read from the run. Every field is read, none is inferred."""
+def _behaviour(result: Any, ledger: Any, ranking: Sequence[int], plane: Any) -> dict[str, Any]:
+    """Per-user behaviour record, read from the run. Every field is read, none is inferred.
+
+    ``queried_sources`` comes from the plane's dispatch record, so it names every source the run
+    actually asked -- including one that returned zero candidates. It used to be derived from a
+    per-tool consumption flag, which the catalog-search slot does not carry, so that source was
+    silently omitted from the report while still being called.
+    """
     control = result.control
     reason = control.termination_reason
     reason_value = None if reason is None else str(getattr(reason, "value", reason))
     sources_present = sorted(str(s.value) for s in ledger.sources_present())
-    queried = sorted(
-        str(source.value) for source, tool in tools.items() if getattr(tool, "consumed", False)
-    )
+    recorded = getattr(plane, "queried_sources", ()) or ()
+    queried = sorted(str(getattr(source, "value", source)) for source in recorded)
     actions: list[str] = []
     for step in getattr(result.trajectory, "steps", ()) or ():
         proposal = getattr(step, "action_proposal", None)
@@ -450,7 +455,7 @@ def run_arm(
         else:
             ranking = _ranking_from_ledger(harness.ledger, item2id)
             rankings.append(ranking)
-            behaviours.append(_behaviour(result, harness.ledger, ranking, harness.tools))
+            behaviours.append(_behaviour(result, harness.ledger, ranking, harness.plane))
         if progress_every and position and position % progress_every == 0:
             print(f"  [{name}] {position}/{len(cohort)} users", flush=True)
 

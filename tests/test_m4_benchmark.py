@@ -277,3 +277,150 @@ def test_cohort_identity_hash_covers_identity_and_order() -> None:
 
 def test_the_frozen_source_order_is_the_universe() -> None:
     assert set(FIXED_SOURCE_ORDER) == set(SOURCES)
+
+
+# --------------------------------------------------------------------------- #
+# the queried_sources accounting repair: accounting only, nothing else moves
+# --------------------------------------------------------------------------- #
+
+ALL_FOUR = ("catalog_search", "history", "similar_item", "two_tower")
+
+
+def _tiny_harness(tmp_path: Any = None):
+    """A three-user harness over synthetic heads that cover all four sources."""
+    from experiments.m4_harness import M4HarnessFactory, M4HeadTable, M4IdentityMap
+    from experiments.m4_policies import FixedTraversalPolicy
+
+    ids = [f"B{i:04d}" for i in range(1, NUM_ITEMS + 1)]
+    identity = M4IdentityMap({v: i + 1 for i, v in enumerate(ids)}, [None, *ids])
+    heads = {
+        source: {
+            uid: tuple(
+                (ids[(uid + rank) % NUM_ITEMS], rank + 1, 1.0 / (rank + 1)) for rank in range(4)
+            )
+            for uid in USERS
+        }
+        for source in SOURCES
+    }
+    table = M4HeadTable(
+        heads=heads,
+        score_kinds={s_: "k" for s_ in SOURCES},
+        queries={CandidateSource.CATALOG_SEARCH: {uid: "camping lantern" for uid in USERS}},
+        indexed_records=NUM_ITEMS,
+        search_fields=("title",),
+    )
+    return M4HarnessFactory(
+        identity_map=identity, table=table, policy_factory=FixedTraversalPolicy
+    )
+
+
+def test_queried_sources_names_every_source_that_was_dispatched() -> None:
+    """The defect: a source that ran but carries no consumption flag was omitted.
+
+    ``tool_calls`` proves four sources were asked; ``queried_sources`` must therefore name four.
+    """
+    factory = _tiny_harness()
+    harness = factory(type("C", (), {"user_int_id": USERS[0], "test_history": (1, 2), "test_target": 3})())
+    result = harness.controller.run("recommend something", harness.trusted_history)
+    from experiments.m4_benchmark import _behaviour, _ranking_from_ledger
+
+    item2id = {f"B{i:04d}": i for i in range(1, NUM_ITEMS + 1)}
+    ranking = _ranking_from_ledger(harness.ledger, item2id)
+    record = _behaviour(result, harness.ledger, ranking, harness.plane)
+
+    assert record["tool_calls"] == len(SOURCES)
+    assert record["queried_sources"] == sorted(ALL_FOUR), (
+        f"queried_sources={record['queried_sources']} but {record['tool_calls']} sources ran"
+    )
+    _ = result
+
+
+def test_the_dispatch_record_equals_the_ledger_sources_for_a_full_traversal() -> None:
+    """Two independent signals must agree: what was dispatched, and what reached the ledger."""
+    factory = _tiny_harness()
+    harness = factory(type("C", (), {"user_int_id": USERS[0], "test_history": (1, 2), "test_target": 3})())
+    harness.controller.run("recommend something", harness.trusted_history)
+    dispatched = sorted(s.value for s in harness.plane.queried_sources)
+    present = sorted(s.value for s in harness.ledger.sources_present())
+    assert dispatched == present == sorted(ALL_FOUR)
+
+
+def test_accounting_is_invariant_to_reruns() -> None:
+    """Accounting must be a pure function of one run: repeating it changes nothing.
+
+    The fixed arm is deterministic, so every scientific output is identical across runs; only a
+    broken accounting path could differ. This is the invariance evidence for the repair.
+    """
+    def once() -> dict[str, Any]:
+        factory = _tiny_harness()
+        harness = factory(
+            type("C", (), {"user_int_id": USERS[1], "test_history": (2, 3), "test_target": 4})()
+        )
+        result = harness.controller.run("recommend something", harness.trusted_history)
+        item2id = {f"B{i:04d}": i for i in range(1, NUM_ITEMS + 1)}
+        from experiments.m4_benchmark import _behaviour, _ranking_from_ledger
+
+        ranking = _ranking_from_ledger(harness.ledger, item2id)
+        record = _behaviour(result, harness.ledger, ranking, harness.plane)
+        return {
+            "ranking": tuple(ranking),
+            "ranking_size": record["ranking_size"],
+            "action_sequence": tuple(record["action_sequence"]),
+            "tool_calls": record["tool_calls"],
+            "steps": record["steps"],
+            "ledger_sources": tuple(record["sources_present"]),
+            "candidates": record["candidates"],
+            "grounded": record["grounded_candidates"],
+            "queried_sources": tuple(record["queried_sources"]),
+        }
+
+    first, second = once(), once()
+    # Scientific outputs: candidates, ranking, trajectory, ledger contents.
+    for field in ("ranking", "ranking_size", "action_sequence", "tool_calls", "steps",
+                  "ledger_sources", "candidates", "grounded"):
+        assert first[field] == second[field], f"{field} is not stable across runs"
+    # The accounting field is stable too, and now complete.
+    assert first["queried_sources"] == second["queried_sources"] == tuple(sorted(ALL_FOUR))
+
+
+def test_a_legitimately_empty_source_is_still_reported_as_queried() -> None:
+    """An empty result must remain distinguishable from 'never consulted'."""
+    from experiments.m4_harness import M4HarnessFactory, M4HeadTable, M4IdentityMap
+    from experiments.m4_policies import FixedTraversalPolicy
+
+    ids = [f"B{i:04d}" for i in range(1, NUM_ITEMS + 1)]
+    identity = M4IdentityMap({v: i + 1 for i, v in enumerate(ids)}, [None, *ids])
+    heads = {
+        source: {
+            uid: (
+                ()
+                if source is CandidateSource.SIMILAR_ITEM
+                else tuple((ids[(uid + r) % NUM_ITEMS], r + 1, 1.0 / (r + 1)) for r in range(4))
+            )
+            for uid in USERS
+        }
+        for source in SOURCES
+    }
+    table = M4HeadTable(
+        heads=heads,
+        score_kinds={s_: "k" for s_ in SOURCES},
+        queries={CandidateSource.CATALOG_SEARCH: {uid: "q" for uid in USERS}},
+        indexed_records=NUM_ITEMS,
+        search_fields=("title",),
+    )
+    factory = M4HarnessFactory(
+        identity_map=identity, table=table, policy_factory=FixedTraversalPolicy
+    )
+    harness = factory(
+        type("C", (), {"user_int_id": USERS[0], "test_history": (1, 2), "test_target": 3})()
+    )
+    result = harness.controller.run("recommend something", harness.trusted_history)
+    from experiments.m4_benchmark import _behaviour, _ranking_from_ledger
+
+    item2id = {f"B{i:04d}": i for i in range(1, NUM_ITEMS + 1)}
+    ranking = _ranking_from_ledger(harness.ledger, item2id)
+    record = _behaviour(result, harness.ledger, ranking, harness.plane)
+
+    assert "similar_item" in record["queried_sources"], "an empty source was hidden"
+    assert "similar_item" not in record["sources_present"], "an empty source reached the ledger"
+    assert record["tool_calls"] == len(SOURCES)

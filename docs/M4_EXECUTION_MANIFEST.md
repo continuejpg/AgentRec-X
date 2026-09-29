@@ -19,24 +19,24 @@ complete one.
 
 | field | value |
 |---|---|
-| commit | `775dbf8dcb20a836d422864c4fc3bbca040d4882` |
-| subject | M4: make the frozen four-source universe genuinely reachable |
-| remote HEAD | `775dbf8dcb20a836d422864c4fc3bbca040d4882` |
+| commit | `0fb18b78d578ad65cf272700ecaf548e669b1441` |
+| subject | M4: D7 benchmark runner, execution manifest, and the corrected frozen cohort |
+| remote HEAD | `0fb18b78d578ad65cf272700ecaf548e669b1441` |
 | worktree dirty | True |
 
 Per-file SHA256:
 
 | file | SHA256 |
 |---|---|
-| `experiments/m4_benchmark.py` | `4b88eaa3f6823ff230839874cc3b86b9574f61df7901a6ff397ed0da2a141cf5` |
-| `experiments/m4_harness.py` | `798a454eb180fa5e392ffb0f6a2533bcdaf86be72ace46de6f8b9ad0d45f250f` |
+| `experiments/m4_benchmark.py` | `dd62fb21b4e3d732b3449525a7d7bd71c870b07dacba9b0c5d2d1bf2837011d0` |
+| `experiments/m4_harness.py` | `ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f` |
 | `experiments/m4_policies.py` | `21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302` |
 | `experiments/m4_frozen_sources.py` | `a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057` |
 | `experiments/m4_query_rules.py` | `def08969084aaad0b35e736ec4213e931300f77f1a54ade6f938bbb3950cf7fb` |
 | `experiments/m4_schema_projection.py` | `e8e1248ac209078ac1e4a42e81fe0967f272b9abd3f05bfafe0d46dd08ef27ab` |
 | `experiments/m4_sharding.py` | `ace82753b5f337b3baf74607f38949b030ab7113f4ec480a154678b25d8a4bdd` |
-| `experiments/m4_conformance.py` | `4324674e83e4af1c2fa5963acfe1949fcad14d6b59c90342596d9b050fb94e87` |
-| `experiments/m4_materialize_heads.py` | `cf1936b5ded08fa1e64611da2bf616815fb3c2599dbd25d0cf1591f3265a365b` |
+| `experiments/m4_conformance.py` | `207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe` |
+| `experiments/m4_materialize_heads.py` | `053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b` |
 | `experiments/m4_similar_neighbours.py` | `da60c8fe2b00ae2d028b185959ac3b65b91a502bacc8f73bdd4e76dcb5a4a0a7` |
 | `recommendation/control/candidate_plane.py` | `9e69b9d792d1322dfc50b98ead4be8e2452d32f6a11820a9fdac30fca16a2857` |
 | `recommendation/control/loop.py` | `1a509df86d3cac87e40e9d9c51e2bd3cfcd2cd3a3aeb4a92c62966bda9a44a8b` |
@@ -66,15 +66,15 @@ Fusion: `candidate_ledger.reciprocal_rank_fusion` (k=60)
 | field | value |
 |---|---|
 | artifact | `runs/m4_evidence/heads.npz` |
-| artifact SHA256 | `PENDING` |
-| provenance SHA256 | `PENDING` |
+| artifact SHA256 | `da46b8cc31f82fa632173b566f2dfb333c3b5cf7b1704df1b59ef3d6bd580f19` |
+| provenance SHA256 | `c2666070b73afc165d2450b53cb5ef349f080776f1a3b64a992161e0ce8cedc5` |
 
 | source | users with head | min | mean | max |
 |---|---|---|---|---|
-| `history` | PENDING | PENDING | PENDING | PENDING |
-| `catalog_search` | PENDING | PENDING | PENDING | PENDING |
-| `similar_item` | PENDING | PENDING | PENDING | PENDING |
-| `two_tower` | PENDING | PENDING | PENDING | PENDING |
+| `history` | 20000 | 100 | 100.0 | 100 |
+| `catalog_search` | 20000 | 100 | 100.0 | 100 |
+| `similar_item` | 20000 | 100 | 100.0 | 100 |
+| `two_tower` | 20000 | 100 | 100.0 | 100 |
 
 ## Evaluator and statistics
 

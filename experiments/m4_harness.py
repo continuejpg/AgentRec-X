@@ -49,7 +49,11 @@ from recommendation.tools.schemas import (
     ToolRecommendation,
 )
 
-from experiments.m4_conformance import FrozenQueryCatalogSearch, TruthfulSourcePlane
+from experiments.m4_conformance import (
+    FrozenQueryCatalogSearch,
+    QueryRecordingPlane,
+    TruthfulSourcePlane,
+)
 from experiments.m4_frozen_sources import (
     AccountedSources,
     DuplicateSourceQuery,
@@ -245,6 +249,7 @@ class UserHarness:
     ledger: CandidateLedger
     trusted_history: tuple[str, ...]
     tools: dict[CandidateSource, FrozenHeadTool]
+    plane: Any = None
 
     def queried_sources(self) -> tuple[str, ...]:
         """Which sources this user's run actually queried, in a deterministic source order."""
@@ -347,6 +352,9 @@ class M4HarnessFactory:
         # SELECT_SOURCE observation is labelled `catalog_search`. Metadata only -- candidates,
         # scores, ranking, policy decisions and completion are untouched.
         plane = TruthfulSourcePlane(plane)
+        # Records which sources were dispatched, so the behaviour record is derived from what
+        # actually ran rather than from a consumption flag the catalog slot does not carry.
+        plane = QueryRecordingPlane(plane)
         capability = RecommendFromHistoryCapability(history_tool)
         controller = LoopController(
             self.policy_factory(),
@@ -360,6 +368,7 @@ class M4HarnessFactory:
             ledger=ledger,
             trusted_history=self.trusted_history(case),
             tools=tools,
+            plane=plane,
         )
 
 

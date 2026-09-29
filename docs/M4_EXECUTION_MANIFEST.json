@@ -1,13 +1,13 @@
 {
   "code": {
-    "commit": "775dbf8dcb20a836d422864c4fc3bbca040d4882",
-    "commit_subject": "M4: make the frozen four-source universe genuinely reachable",
+    "commit": "0fb18b78d578ad65cf272700ecaf548e669b1441",
+    "commit_subject": "M4: D7 benchmark runner, execution manifest, and the corrected frozen cohort",
     "file_hashes": {
-      "experiments/m4_benchmark.py": "4b88eaa3f6823ff230839874cc3b86b9574f61df7901a6ff397ed0da2a141cf5",
-      "experiments/m4_conformance.py": "4324674e83e4af1c2fa5963acfe1949fcad14d6b59c90342596d9b050fb94e87",
+      "experiments/m4_benchmark.py": "dd62fb21b4e3d732b3449525a7d7bd71c870b07dacba9b0c5d2d1bf2837011d0",
+      "experiments/m4_conformance.py": "207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe",
       "experiments/m4_frozen_sources.py": "a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057",
-      "experiments/m4_harness.py": "798a454eb180fa5e392ffb0f6a2533bcdaf86be72ace46de6f8b9ad0d45f250f",
-      "experiments/m4_materialize_heads.py": "cf1936b5ded08fa1e64611da2bf616815fb3c2599dbd25d0cf1591f3265a365b",
+      "experiments/m4_harness.py": "ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f",
+      "experiments/m4_materialize_heads.py": "053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b",
       "experiments/m4_policies.py": "21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302",
       "experiments/m4_query_rules.py": "def08969084aaad0b35e736ec4213e931300f77f1a54ade6f938bbb3950cf7fb",
       "experiments/m4_schema_projection.py": "e8e1248ac209078ac1e4a42e81fe0967f272b9abd3f05bfafe0d46dd08ef27ab",
@@ -21,10 +21,10 @@
       "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
       "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08"
     },
-    "remote_head": "775dbf8dcb20a836d422864c4fc3bbca040d4882",
+    "remote_head": "0fb18b78d578ad65cf272700ecaf548e669b1441",
     "worktree_dirty": true
   },
-  "complete": false,
+  "complete": true,
   "evaluator": {
     "catalog_size": 156746,
     "implementation": "recommendation.evaluation.batched.evaluate_batched",
@@ -46,35 +46,70 @@
     "implementation": "candidate_ledger.reciprocal_rank_fusion",
     "rrf_k": 60
   },
-  "generated_utc": "2026-09-28T17:30:28Z",
+  "generated_utc": "2026-09-29T07:49:30Z",
   "heads": {
     "assembled_artifact": "runs/m4_evidence/heads.npz",
-    "assembled_sha256": "PENDING",
-    "per_source": {
-      "catalog_search": {
-        "users_with_head": "PENDING"
+    "assembled_sha256": "da46b8cc31f82fa632173b566f2dfb333c3b5cf7b1704df1b59ef3d6bd580f19",
+    "depth": 100,
+    "inputs": {
+      "fusion_heads": {
+        "path": "runs/m3_evidence/phase5_fusion_source_heads.npz",
+        "sha256": "c4c0fdd6bc1e70fd4d1ffc0387c3afbe6e0642d2d0c6c0184ee440bdef5165d4"
       },
-      "history": {
-        "users_with_head": "PENDING"
+      "mappings": {
+        "path": "data/processed/Sports_and_Outdoors_mappings.json",
+        "sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912"
       },
-      "similar_item": {
-        "users_with_head": "PENDING"
+      "products": {
+        "path": "data/processed/Sports_and_Outdoors_products.jsonl",
+        "sha256": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd"
+      },
+      "sequences": {
+        "path": "data/processed/Sports_and_Outdoors_sequences.json",
+        "sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81"
       },
       "two_tower": {
-        "users_with_head": "PENDING"
+        "path": "runs/twotower_public_2026_full/checkpoint.pt",
+        "sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab"
       }
     },
-    "provenance_sha256": "PENDING"
+    "per_source": {
+      "catalog_search": {
+        "max": 100,
+        "mean": 100.0,
+        "min": 100,
+        "users_with_head": 20000
+      },
+      "history": {
+        "max": 100,
+        "mean": 100.0,
+        "min": 100,
+        "users_with_head": 20000
+      },
+      "similar_item": {
+        "max": 100,
+        "mean": 100.0,
+        "min": 100,
+        "users_with_head": 20000
+      },
+      "two_tower": {
+        "max": 100,
+        "mean": 100.0,
+        "min": 100,
+        "users_with_head": 20000
+      }
+    },
+    "provenance_sha256": "c2666070b73afc165d2450b53cb5ef349f080776f1a3b64a992161e0ce8cedc5",
+    "score_kinds": {
+      "catalog_search": "bm25",
+      "history": "sasrec_logit",
+      "similar_item": "item_item_similarity",
+      "two_tower": "two_tower_cosine"
+    },
+    "users": 20000
   },
   "milestone": "M4",
-  "pending_fields": [
-    "heads.assembled_sha256",
-    "heads.provenance_sha256",
-    "heads.per_source.history.users_with_head",
-    "heads.per_source.catalog_search.users_with_head",
-    "heads.per_source.similar_item.users_with_head",
-    "heads.per_source.two_tower.users_with_head"
-  ],
+  "pending_fields": [],
   "preregistration": {
     "amended": false,
     "path": "docs/M4_PREREGISTRATION.md",
