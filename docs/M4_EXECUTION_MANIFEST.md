@@ -21,7 +21,7 @@ complete one.
 |---|---|
 | commit | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
 | subject | M4: provider validation, concurrency probe, and parallel arm execution |
-| remote HEAD | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
+| remote HEAD | `858b7af1bfe1ed5d894379967551882af82441c4` |
 | worktree dirty | True |
 
 Per-file SHA256:

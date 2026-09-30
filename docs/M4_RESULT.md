@@ -156,11 +156,26 @@ would be worse than documenting them.
 4. **The pre-amendment 12-user adaptive preflight is invalid as an efficacy result.** It measured
    the broken action contract (11 of 12 users failed, 10 empty rankings) and must never be quoted as
    a quality finding. It is retained only as before-fix evidence in Amendment 1 §4.
-5. **Manifest timing circularity.** The manifest was regenerated while the formal run was in
-   progress, so its per-file code hashes describe the working tree during the run rather than a
-   snapshot frozen before it. The code did not change during the run, so this holds semantically,
-   but the strict ordering should be: freeze protocol → freeze amendment → freeze code hashes →
-   execute.
+5. **Manifest timing circularity — recorded, and its root cause repaired at seal time.** The
+   manifest was regenerated while the formal run was in progress, so its per-file code hashes
+   describe the working tree during the run rather than a snapshot frozen before it. The code did
+   not change during the run, so this holds semantically, but the strict ordering should be: freeze
+   protocol → freeze amendment → freeze code hashes → execute.
+
+   Two structural causes were found while sealing and are now fixed rather than merely noted, since
+   both were defects in the *manifest tooling*, not in the experiment:
+
+   - The manifest derived `code.commit` from `git rev-parse HEAD`. Writing the manifest changes the
+     working tree, so committing it produced a commit the field could never name; the manifest was
+     therefore stale the instant it was committed, and each regeneration rewrote the field to the
+     previous commit. The field is now the pinned constant `EXECUTED_COMMIT`, the commit that
+     carried the code the run executed, with `commit_note` stating that the manifest deliberately
+     does not name its own containing commit. The sealing commit is named here instead, where it can
+     be observed rather than predicted.
+   - `--check` rewrote both manifest files, so every invocation dirtied the tree and the check could
+     never be idempotent — a verification that edits the thing it verifies is not a verification.
+     `--check` now writes nothing. Verified by running it three times: zero working-tree changes
+     each time.
 6. **Protocol defects found during preflight and repaired before execution** (see Amendment 1 §3 and
    §9): a blank `SELECT_SOURCE{catalog_search}` query silently returned zero candidates; the
    projected schema omitted `select_source`'s legal values, so the model answered `"default"` in

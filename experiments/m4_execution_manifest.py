@@ -44,6 +44,15 @@ M3_PAIRED_INPUTS = REPO / "runs/m3_execution/paired_inputs.npz"
 
 PENDING = "PENDING"
 
+#: The commit that carried the code this manifest hashes -- i.e. the code the formal run executed.
+#: Pinned as a constant **on purpose**. Deriving it from ``git rev-parse HEAD`` is self-referential:
+#: writing the manifest changes the working tree, so committing the manifest produces a new commit
+#: that the field can never name, and the file is stale the moment it is committed. Pinning the
+#: executed commit keeps the record stable and reproducible. The *sealing* commit is named in
+#: docs/M4_RESULT.md, where it can be observed rather than predicted.
+EXECUTED_COMMIT = "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055"
+EXECUTED_COMMIT_SUBJECT = "M4: provider validation, concurrency probe, and parallel arm execution"
+
 #: Modules whose exact content the run depends on. Hashed so the manifest pins the code, not just
 #: the commit.
 CODE_FILES = (
@@ -219,8 +228,15 @@ def build() -> dict[str, Any]:
             "control-plane behaviour changed"
         ),
         "code": {
-            "commit": git("rev-parse", "HEAD"),
-            "commit_subject": git("log", "-1", "--format=%s"),
+            # Not ``git rev-parse HEAD``: see EXECUTED_COMMIT for why that is self-referential.
+            "commit": EXECUTED_COMMIT,
+            "commit_subject": EXECUTED_COMMIT_SUBJECT,
+            "commit_note": (
+                "The commit carrying the code this manifest hashes, i.e. the code the formal run "
+                "executed. The manifest deliberately does not name the commit that contains it: "
+                "recording a commit changes the commit, so the seal commit cannot be determined "
+                "from inside itself. The sealing commit is named in docs/M4_RESULT.md."
+            ),
             "remote_head": git("rev-parse", "origin/master"),
             "worktree_dirty": bool(git("status", "--porcelain") != PENDING and git("status", "--porcelain")),
             "file_hashes": {name: sha256_file(REPO / name) for name in CODE_FILES},
@@ -392,7 +408,11 @@ def pending_fields(manifest: dict[str, Any]) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(description="M4 execution manifest")
-    parser.add_argument("--check", action="store_true", help="fail while any field is PENDING")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="report status and fail while any field is PENDING; writes nothing",
+    )
     args = parser.parse_args(argv)
 
     manifest = build()
@@ -400,10 +420,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifest["pending_fields"] = pending
     manifest["complete"] = not pending
 
-    JSON_OUT.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    MD_OUT.write_text(render_markdown(manifest), encoding="utf-8")
-    print(f"wrote {MD_OUT.relative_to(REPO)}")
-    print(f"wrote {JSON_OUT.relative_to(REPO)}")
+    # --check must not mutate. It used to rewrite both files, so every invocation dirtied the
+    # working tree and the check could never be idempotent: a "verification" that edits the thing
+    # it verifies is not a verification. Regenerating is the default mode only.
+    if not args.check:
+        JSON_OUT.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        MD_OUT.write_text(render_markdown(manifest), encoding="utf-8")
+        print(f"wrote {MD_OUT.relative_to(REPO)}")
+        print(f"wrote {JSON_OUT.relative_to(REPO)}")
+    else:
+        print("check mode: no files written")
     if pending:
         print(f"PENDING fields ({len(pending)}):")
         for name in pending:
