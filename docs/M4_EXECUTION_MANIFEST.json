@@ -1,9 +1,9 @@
 {
   "amendment_1_subject": "select_source.source is exposed to the provider as a closed enum of the four frozen source names; M4-scoped in the injected schema-projection client; no shared control-plane behaviour changed",
   "code": {
-    "commit": "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055",
-    "commit_note": "The commit carrying the code this manifest hashes, i.e. the code the formal run executed. The manifest deliberately does not name the commit that contains it: recording a commit changes the commit, so the seal commit cannot be determined from inside itself. The sealing commit is named in docs/M4_RESULT.md.",
-    "commit_subject": "M4: provider validation, concurrency probe, and parallel arm execution",
+    "executed_code_commit": "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055",
+    "executed_code_commit_note": "The commit carrying the code this manifest hashes -- the code the formal experiment actually executed. This is NOT the archive/seal commit. A manifest cannot record the hash of the commit that contains it, because recording it changes it, so the seal commit is expressed as a Git ref instead.",
+    "executed_code_commit_subject": "M4: provider validation, concurrency probe, and parallel arm execution",
     "file_hashes": {
       "experiments/m4_benchmark.py": "354b2e9d2ef5f3965c135aa321627d4b2bcd3ba94006d65373b185b8f16a00b0",
       "experiments/m4_conformance.py": "207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe",
@@ -23,8 +23,8 @@
       "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
       "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08"
     },
-    "remote_head": "858b7af1bfe1ed5d894379967551882af82441c4",
-    "worktree_dirty": true
+    "seal_ref": "M4-sealed",
+    "seal_ref_note": "Annotated tag naming the archive/seal commit. Resolve it with 'git rev-list -n1 M4-sealed'. The manifest does not embed the hash because that would be self-referential."
   },
   "complete": true,
   "evaluator": {
@@ -48,7 +48,7 @@
     "implementation": "candidate_ledger.reciprocal_rank_fusion",
     "rrf_k": 60
   },
-  "generated_utc": "2026-09-30T13:14:01Z",
+  "generated_utc": "2026-09-30T13:29:44Z",
   "heads": {
     "assembled_artifact": "runs/m4_evidence/heads.npz",
     "assembled_sha256": "da46b8cc31f82fa632173b566f2dfb333c3b5cf7b1704df1b59ef3d6bd580f19",
@@ -178,7 +178,7 @@
     "direction": "adaptive worse than fixed",
     "document": {
       "path": "docs/M4_RESULT.md",
-      "sha256": "ed2b395c6bdccd497c086c110c5000e76ee407322b4c6ac6c4574ee4be8b59b7"
+      "sha256": "bd1cf8fa92cf8bcad23ade73cc9ee55506e2511859c92ae812f7665ec4b7d933"
     },
     "executed_once": true,
     "primary_endpoint": "NDCG@10",

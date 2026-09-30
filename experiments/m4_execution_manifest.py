@@ -53,6 +53,11 @@ PENDING = "PENDING"
 EXECUTED_COMMIT = "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055"
 EXECUTED_COMMIT_SUBJECT = "M4: provider validation, concurrency probe, and parallel arm execution"
 
+#: The annotated Git tag that names the archive/seal commit. The manifest points at the *ref* on
+#: purpose: a manifest cannot record the hash of the commit that contains it, so the seal commit is
+#: expressed as a Git ref, which Git itself resolves authoritatively. Use ``git rev-list -n1 M4-sealed``.
+SEAL_REF = "M4-sealed"
+
 #: Modules whose exact content the run depends on. Hashed so the manifest pins the code, not just
 #: the commit.
 CODE_FILES = (
@@ -228,17 +233,28 @@ def build() -> dict[str, Any]:
             "control-plane behaviour changed"
         ),
         "code": {
-            # Not ``git rev-parse HEAD``: see EXECUTED_COMMIT for why that is self-referential.
-            "commit": EXECUTED_COMMIT,
-            "commit_subject": EXECUTED_COMMIT_SUBJECT,
-            "commit_note": (
-                "The commit carrying the code this manifest hashes, i.e. the code the formal run "
-                "executed. The manifest deliberately does not name the commit that contains it: "
-                "recording a commit changes the commit, so the seal commit cannot be determined "
-                "from inside itself. The sealing commit is named in docs/M4_RESULT.md."
+            # Renamed from the ambiguous ``commit``: this is the commit whose code the run used,
+            # NOT the commit containing this manifest. Deliberately a pinned constant, not
+            # ``git rev-parse HEAD`` (see EXECUTED_COMMIT).
+            "executed_code_commit": EXECUTED_COMMIT,
+            "executed_code_commit_subject": EXECUTED_COMMIT_SUBJECT,
+            "executed_code_commit_note": (
+                "The commit carrying the code this manifest hashes -- the code the formal experiment "
+                "actually executed. This is NOT the archive/seal commit. A manifest cannot record "
+                "the hash of the commit that contains it, because recording it changes it, so the "
+                "seal commit is expressed as a Git ref instead."
             ),
-            "remote_head": git("rev-parse", "origin/master"),
-            "worktree_dirty": bool(git("status", "--porcelain") != PENDING and git("status", "--porcelain")),
+            # The seal/archive commit lives in Git, not in a self-referential field.
+            "seal_ref": SEAL_REF,
+            "seal_ref_note": (
+                "Annotated tag naming the archive/seal commit. Resolve it with "
+                "'git rev-list -n1 " + SEAL_REF + "'. The manifest does not embed the hash because "
+                "that would be self-referential."
+            ),
+            # Removed on purpose: ``remote_head`` and ``worktree_dirty`` were both volatile and
+            # self-referential -- a manifest cannot meaningfully record the remote state or the
+            # cleanliness of the tree at the moment of its own future commit. The binding that
+            # matters is ``file_hashes``, which pins the exact module contents.
             "file_hashes": {name: sha256_file(REPO / name) for name in CODE_FILES},
         },
         "frozen_cohort": cohort_hash(),
@@ -307,10 +323,10 @@ def render_markdown(manifest: dict[str, Any]) -> str:
         "",
         "| field | value |",
         "|---|---|",
-        f"| commit | `{code['commit']}` |",
-        f"| subject | {code['commit_subject']} |",
-        f"| remote HEAD | `{code['remote_head']}` |",
-        f"| worktree dirty | {code['worktree_dirty']} |",
+        f"| executed code commit | `{code['executed_code_commit']}` |",
+        f"| executed code subject | {code['executed_code_commit_subject']} |",
+        f"| seal ref (Git) | `{code['seal_ref']}` |",
+
         "",
         "Per-file SHA256:",
         "",

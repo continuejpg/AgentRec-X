@@ -19,10 +19,9 @@ complete one.
 
 | field | value |
 |---|---|
-| commit | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
-| subject | M4: provider validation, concurrency probe, and parallel arm execution |
-| remote HEAD | `858b7af1bfe1ed5d894379967551882af82441c4` |
-| worktree dirty | True |
+| executed code commit | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
+| executed code subject | M4: provider validation, concurrency probe, and parallel arm execution |
+| seal ref (Git) | `M4-sealed` |
 
 Per-file SHA256:
 

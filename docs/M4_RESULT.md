@@ -14,6 +14,21 @@ Governing documents: **original preregistration + Amendment 1**.
 
 ## 1. Provenance
 
+**Two different commits matter, and they are not the same commit.**
+
+| role | identity |
+|---|---|
+| **executed code commit** — the code the formal experiment actually ran | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` ("M4: provider validation, concurrency probe, and parallel arm execution") |
+| **archive / seal commit** — the commit that froze this record | the annotated Git tag **`M4-sealed`**; resolve with `git rev-list -n1 M4-sealed` |
+
+The execution manifest names the first as `code.executed_code_commit` (renamed from the ambiguous
+`code.commit`) and names the second only as the ref `code.seal_ref`. A manifest **cannot** record
+the hash of the commit that contains it: writing the manifest changes the working tree, so recording
+the seal commit changes the seal commit. The seal is therefore expressed as a Git ref, which Git
+resolves authoritatively, and the manifest deliberately embeds no self-referential hash.
+`code.remote_head` and `code.worktree_dirty` were removed for the same reason — a manifest cannot
+meaningfully record the remote state or the tree cleanliness at the moment of its own future commit.
+
 | item | SHA256 |
 |---|---|
 | original preregistration, `docs/M4_PREREGISTRATION.md` | `7a18ea7258a3a175227a270ee38177c58bde66eadd51af8ccb02c91f83b981af` |
@@ -168,10 +183,12 @@ would be worse than documenting them.
    - The manifest derived `code.commit` from `git rev-parse HEAD`. Writing the manifest changes the
      working tree, so committing it produced a commit the field could never name; the manifest was
      therefore stale the instant it was committed, and each regeneration rewrote the field to the
-     previous commit. The field is now the pinned constant `EXECUTED_COMMIT`, the commit that
-     carried the code the run executed, with `commit_note` stating that the manifest deliberately
-     does not name its own containing commit. The sealing commit is named here instead, where it can
-     be observed rather than predicted.
+     previous commit. The field is now the pinned constant `code.executed_code_commit` — renamed
+     from the ambiguous `code.commit` — naming the commit that carried the code the run executed.
+     The seal commit is expressed as the Git ref `code.seal_ref` (`M4-sealed`) rather than an
+     embedded hash, because embedding it is exactly the self-reference that caused the defect.
+     `code.remote_head` and `code.worktree_dirty` were removed for the same reason: a manifest
+     cannot record the remote state or the tree cleanliness at the moment of its own future commit.
    - `--check` rewrote both manifest files, so every invocation dirtied the tree and the check could
      never be idempotent — a verification that edits the thing it verifies is not a verification.
      `--check` now writes nothing. Verified by running it three times: zero working-tree changes
@@ -190,4 +207,46 @@ would be worse than documenting them.
   empty rankings in the adaptive arm, all retained in the analysis.
 - Evaluation: one shared evaluator call per arm after both arms completed, over the full 156,746-item
   catalogue, with the frozen protocol, seen-item masking and deterministic tie-breaking.
-- Tests at seal time: the M4 and control-plane suites pass (see the sealing commit).
+- Tests at seal time: the M4 and control-plane suites pass (259 passed, 0 failed).
+- Manifest check is a pure verification: `--check` writes nothing and repeated runs leave the working
+  tree unchanged (verified by three consecutive runs with zero modifications).
+- **Credential history audit: CLEAN.** See §8.
+
+## 8. Credential history audit
+
+Run with `python -m experiments.credential_audit`, which is committed so the check is repeatable
+rather than a one-off. It is deliberately stronger than a filename search.
+
+**Method.** Every blob in the object database is scanned via `git cat-file --batch-all-objects`, not
+just reachable history — a credential that was committed and later removed still sits in the object
+database until garbage collection prunes it, and a history walk would miss it. Two passes run over
+those blobs:
+
+1. a literal search for the **real** value from the gitignored `.m4_credential`;
+2. a search for common credential **shapes**: provider keys (`sk-…`, `sk-ant-…`), bearer tokens, AWS
+   access key ids, GitHub / Google / Slack tokens, private-key headers, JWTs, and generic
+   `secret = …` assignments.
+
+**Result: no leak.**
+
+| check | result |
+|---|---|
+| blobs scanned (incl. unreachable objects) | 737 |
+| **real credential value hits** | **0** |
+| secret-shape hits | 16 |
+| of those, inside expected synthetic-fixture context (`tests/`) | 16 |
+| shape hits outside fixture context | 0 |
+| `.env.example` contains the real value | no |
+| verdict | **CLEAN** |
+
+The 16 shape hits are all in `tests/test_memory_service.py`, `tests/test_packaging.py` and
+`tests/test_provider_record_replay.py`, and they are **synthetic fixtures by construction**:
+`test_secret_like_shapes_are_rejected` is parametrised over one example per shape the credential
+detector must catch (its comment reads "each is a synthetic fixture"), and
+`test_provider_record_replay.py` asserts that a fake key does **not** appear in a logged settings
+description. The fake values were confirmed different from the real credential, and the earliest of
+them entered at `c03582b` ("milestone9: add preference memory"). No real value appears anywhere.
+Per the redaction rule, only a few leading characters of any match are ever reported.
+
+`runs/m4_formal_result.json` and `.m4_credential` are both gitignored, so neither can enter history
+by accident; the audit confirms neither ever did.
