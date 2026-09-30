@@ -436,3 +436,133 @@ def test_every_universe_source_has_a_materialised_head() -> None:
     for source in UNIVERSE:
         assert table.heads[source], f"{source.value} has no head"
         assert all(rows for rows in table.heads[source].values())
+
+
+# --------------------------------------------------------------------------- #
+# amendment 1: the frozen source values must be visible to the provider
+# --------------------------------------------------------------------------- #
+
+
+def _projected_select_source() -> dict[str, Any]:
+    from recommendation.control.model_policy import build_action_schema
+    from recommendation.control.schemas import ActionKind
+
+    from experiments.m4_schema_projection import M4_SOURCE_VALUES, project_action_schema
+
+    full = build_action_schema((ActionKind.SELECT_SOURCE, ActionKind.FINISH))
+    projected = project_action_schema(full)
+    entry = next(e for e in projected if e["action"] == "select_source")
+    argument = next(a for a in entry["arguments"] if a["name"] == "source")
+    assert M4_SOURCE_VALUES == ("history", "catalog_search", "similar_item", "two_tower")
+    return argument
+
+
+def test_the_projected_schema_exposes_the_frozen_source_enum() -> None:
+    """Amendment 1: the provider must be told the four legal source values."""
+    argument = _projected_select_source()
+    assert argument.get("enum") == ["history", "catalog_search", "similar_item", "two_tower"]
+    assert argument.get("allowed_values") == argument["enum"]
+
+
+def test_the_enum_contains_exactly_four_values_and_no_default() -> None:
+    """No fifth value, and specifically no 'default' escape hatch."""
+    values = _projected_select_source()["enum"]
+    assert len(values) == 4
+    assert len(set(values)) == 4
+    assert "default" not in values
+    assert set(values) == {s.value for s in UNIVERSE}
+
+
+def test_the_annotation_does_not_mutate_the_input_schema() -> None:
+    """M4-scoped means the shared schema builder's output is left alone."""
+    from recommendation.control.model_policy import build_action_schema
+    from recommendation.control.schemas import ActionKind
+
+    from experiments.m4_schema_projection import project_action_schema
+
+    full = build_action_schema((ActionKind.SELECT_SOURCE, ActionKind.FINISH))
+    project_action_schema(full)
+    for entry in full:
+        for argument in entry.get("arguments", ()) or ():
+            assert "enum" not in argument, "the shared schema object was mutated"
+
+
+def test_the_original_schema_never_carried_an_enum() -> None:
+    """Pins the defect: the frozen builder emits name/type/required only."""
+    from recommendation.control.model_policy import build_action_schema
+    from recommendation.control.schemas import ActionKind
+
+    full = build_action_schema((ActionKind.SELECT_SOURCE,))
+    argument = next(
+        a for e in full for a in e.get("arguments", ()) or () if a["name"] == "source"
+    )
+    assert argument.get("enum") is None
+    assert set(argument) == {"name", "type", "required"}
+
+
+@pytest.mark.parametrize("source", [s.value for s in UNIVERSE])
+def test_the_validator_accepts_each_frozen_source(source: str) -> None:
+    """All four legal values must be proposable."""
+    from recommendation.control.arguments import CandidateSource, SelectSourceArguments
+    from recommendation.control.schemas import ActionKind, ActionProposal
+
+    proposal = ActionProposal(
+        action=ActionKind.SELECT_SOURCE,
+        arguments=SelectSourceArguments(source=CandidateSource(source), limit=100),
+        rationale="enum test",
+    )
+    assert proposal.arguments.source.value == source
+
+
+@pytest.mark.parametrize("bad", ["default", "", "HISTORY", "catalog", "all", "tigerx"])
+def test_an_unknown_source_string_is_rejected(bad: str) -> None:
+    """Anything that is not a CandidateSource member must be refused, including 'default'.
+
+    ``tiger`` is deliberately NOT in this list: it IS a CandidateSource member, so the enum admits
+    it and the M4 guard is what refuses it (see the next test). Conflating the two would hide which
+    layer is responsible for keeping the universe closed.
+    """
+    from pydantic import ValidationError
+
+    from recommendation.control.arguments import CandidateSource, SelectSourceArguments
+
+    with pytest.raises((ValidationError, ValueError)):
+        SelectSourceArguments(source=CandidateSource(bad), limit=100)
+
+
+def test_the_enum_is_a_superset_of_the_frozen_universe_not_a_replacement() -> None:
+    """The enum annotates legal values; the frozen-universe check stays with the guard."""
+    from recommendation.control.arguments import CandidateSource
+
+    enum_values = set(_projected_select_source()["enum"])
+    assert enum_values == {s.value for s in UNIVERSE}
+    # `tiger` is a real member the enum would admit if annotated with all members, which is exactly
+    # why M4 annotates only its four and keeps the guard as the second line of defence.
+    assert "tiger" not in enum_values
+    assert CandidateSource("tiger") is CandidateSource.TIGER
+
+
+def test_the_guard_also_refuses_a_source_outside_the_frozen_four() -> None:
+    """Defence in depth: even a well-formed enum member outside M4's universe is a deviation."""
+    from recommendation.control.arguments import CandidateSource, SelectSourceArguments
+    from recommendation.control.schemas import ActionKind, ActionProposal
+
+    from experiments.m4_policies import GuardedAdaptivePolicy, ProtocolDeviation
+
+    proposal = ActionProposal(
+        action=ActionKind.SELECT_SOURCE,
+        arguments=SelectSourceArguments(source=CandidateSource.TIGER, limit=100),
+        rationale="outside universe",
+    )
+
+    class _Inner:
+        def choose(self, context: Any) -> ActionProposal:
+            return proposal
+
+    class _Ctx:
+        available_actions = (ActionKind.SELECT_SOURCE, ActionKind.FINISH)
+
+    policy = GuardedAdaptivePolicy(inner=_Inner(), universe=UNIVERSE)
+    with pytest.raises(ProtocolDeviation) as excinfo:
+        policy.choose(_Ctx())
+    assert excinfo.value.reason == "protocol_deviation:source_outside_universe"

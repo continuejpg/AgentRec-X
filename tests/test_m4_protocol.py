@@ -217,13 +217,18 @@ def test_c4_2_a_source_outside_the_frozen_universe_is_a_deviation() -> None:
 
 
 def test_c4_2_a_duplicate_source_is_a_deviation() -> None:
-    """PR §8 C4-2(b) / §9: a second query of the same source must be refused."""
+    """PR §8 C4-2(b) / §9: a second query of the same source must be refused.
+
+    The refusal terminates the run rather than raising: §10 keeps the user in the primary analysis
+    and evaluates the ranking they already hold, and an escaping exception would turn that into an
+    execution failure with no ranking at all.
+    """
     policy = _guarded(_select(CandidateSource.HISTORY))
     first = policy.choose(_Ctx())
     assert first.action is ActionKind.SELECT_SOURCE
-    with pytest.raises(ProtocolDeviation) as excinfo:
-        policy.choose(_Ctx())
-    assert excinfo.value.reason == "protocol_deviation:duplicate_source"
+    second = policy.choose(_Ctx())
+    assert second.action is ActionKind.FINISH, "the duplicate must not execute"
+    assert [d.reason for d in policy.deviations] == ["protocol_deviation:duplicate_source"]
     assert policy.terminated
 
 

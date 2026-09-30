@@ -1,16 +1,17 @@
 {
+  "amendment_1_subject": "select_source.source is exposed to the provider as a closed enum of the four frozen source names; M4-scoped in the injected schema-projection client; no shared control-plane behaviour changed",
   "code": {
-    "commit": "b33de88cbe5f2b0591fd07c92a427e8a24cabe83",
-    "commit_subject": "M4: make queried_sources report every source that actually ran",
+    "commit": "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055",
+    "commit_subject": "M4: provider validation, concurrency probe, and parallel arm execution",
     "file_hashes": {
-      "experiments/m4_benchmark.py": "c299f30c1082f7e5005ea5b7df17ba4d4629ff32d9237d350c1a685f903c8680",
+      "experiments/m4_benchmark.py": "354b2e9d2ef5f3965c135aa321627d4b2bcd3ba94006d65373b185b8f16a00b0",
       "experiments/m4_conformance.py": "207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe",
       "experiments/m4_frozen_sources.py": "a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057",
       "experiments/m4_harness.py": "ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f",
       "experiments/m4_materialize_heads.py": "053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b",
-      "experiments/m4_policies.py": "21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302",
+      "experiments/m4_policies.py": "7fc96f62820d16067980d4a4802f30d44e8fc4722b9f685d90d48bee9ee0882f",
       "experiments/m4_query_rules.py": "def08969084aaad0b35e736ec4213e931300f77f1a54ade6f938bbb3950cf7fb",
-      "experiments/m4_schema_projection.py": "e8e1248ac209078ac1e4a42e81fe0967f272b9abd3f05bfafe0d46dd08ef27ab",
+      "experiments/m4_schema_projection.py": "3dac13f5b2a1084bf4073c2763fd11bb93c4dad3b4553d006380a69fa1b4b514",
       "experiments/m4_sharding.py": "ace82753b5f337b3baf74607f38949b030ab7113f4ec480a154678b25d8a4bdd",
       "experiments/m4_similar_neighbours.py": "da60c8fe2b00ae2d028b185959ac3b65b91a502bacc8f73bdd4e76dcb5a4a0a7",
       "recommendation/control/candidate_ledger.py": "fcc65e74d0efb78d3078956e89b9b3fda2cd6281d508f9b6cba02b1be579aa62",
@@ -21,7 +22,7 @@
       "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
       "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08"
     },
-    "remote_head": "b33de88cbe5f2b0591fd07c92a427e8a24cabe83",
+    "remote_head": "0e6a7e82f8a03f6081c62ca317df9a6e95bb3055",
     "worktree_dirty": true
   },
   "complete": true,
@@ -46,7 +47,7 @@
     "implementation": "candidate_ledger.reciprocal_rank_fusion",
     "rrf_k": 60
   },
-  "generated_utc": "2026-09-29T08:29:04Z",
+  "generated_utc": "2026-09-30T13:12:01Z",
   "heads": {
     "assembled_artifact": "runs/m4_evidence/heads.npz",
     "assembled_sha256": "da46b8cc31f82fa632173b566f2dfb333c3b5cf7b1704df1b59ef3d6bd580f19",
@@ -111,7 +112,17 @@
   "milestone": "M4",
   "pending_fields": [],
   "preregistration": {
-    "amended": false,
+    "amended": true,
+    "amendments": [
+      {
+        "formal_cohort_previously_run": false,
+        "path": "docs/M4_PREREGISTRATION_AMENDMENT_1.md",
+        "scientific_design_changed": false,
+        "sha256": "c2915cd4158eb5cec13e17fe8d1a94debb09e8b438616ea2fd66b59cef85e5da",
+        "subject": "expose the four frozen source values in the action contract",
+        "version": 1
+      }
+    ],
     "path": "docs/M4_PREREGISTRATION.md",
     "sha256": "7a18ea7258a3a175227a270ee38177c58bde66eadd51af8ccb02c91f83b981af"
   },
@@ -155,6 +166,23 @@
       "max_steps": 6,
       "max_tool_calls": 4
     }
+  },
+  "result": {
+    "artifact": {
+      "committed": false,
+      "note": "gitignored per AGENTS.md \u00a78; contents transcribed into the document above",
+      "path": "runs/m4_formal_result.json",
+      "sha256": "f99ac820d9d7853279d0f611d9a68e66fd77b7bfbbbd0f7f068e00f4d0f352af"
+    },
+    "direction": "adaptive worse than fixed",
+    "document": {
+      "path": "docs/M4_RESULT.md",
+      "sha256": "d3eae1c60a39b97c7f92736aa658b0cf7e1342975f87b2b3af8b18954fc40dab"
+    },
+    "executed_once": true,
+    "primary_endpoint": "NDCG@10",
+    "rerun_after_results_seen": false,
+    "verdict": "SUPPORTED"
   },
   "sharding": {
     "implementation": "experiments/m4_sharding.py",

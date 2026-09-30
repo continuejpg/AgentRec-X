@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from recommendation.control.arguments import CandidateSource
 from recommendation.control.model_client import ModelRequest
 
 __all__ = [
@@ -41,8 +42,52 @@ __all__ = [
 #: The only actions M4's adaptive arm may show its provider (preregistration §7.3).
 ADAPTIVE_PROVIDER_ACTIONS: tuple[str, ...] = ("select_source", "finish")
 
+#: The four frozen sources, as the values the provider must be able to choose between. This is the
+#: amendment-1 repair: the frozen universe was always these four, but ``build_action_schema``
+#: emits only name/type/required, so the provider was never told the legal names and consistently
+#: answered ``"default"``, which is not a member. Making the already-valid values visible changes
+#: nothing about what may be selected -- only whether the provider can know it.
+M4_SOURCE_VALUES: tuple[str, ...] = tuple(
+    source.value for source in (
+        CandidateSource.HISTORY,
+        CandidateSource.CATALOG_SEARCH,
+        CandidateSource.SIMILAR_ITEM,
+        CandidateSource.TWO_TOWER,
+    )
+)
+
 #: Defensive alias kept for tests and provenance records.
 M4_PROVIDER_VISIBLE_ACTIONS = ADAPTIVE_PROVIDER_ACTIONS
+
+
+def annotate_source_values(
+    schema: Iterable[dict[str, Any]],
+    values: tuple[str, ...] = M4_SOURCE_VALUES,
+) -> tuple[dict[str, Any], ...]:
+    """Add the closed value set to ``select_source``'s ``source`` argument.
+
+    The trusted argument model already restricts ``source`` to :class:`CandidateSource` members;
+    this only makes that existing restriction *visible* in the provider-facing contract. No new
+    value is introduced and none is removed.
+
+    Applied to a **copy** of each entry, so the caller's schema object is untouched.
+    """
+    allowed = list(values)
+    annotated: list[dict[str, Any]] = []
+    for entry in schema:
+        copied = dict(entry)
+        if str(copied.get("action")) == "select_source":
+            arguments = []
+            for argument in copied.get("arguments", ()) or ():
+                item = dict(argument)
+                if str(item.get("name")) == "source":
+                    item["type"] = "string"
+                    item["enum"] = allowed
+                    item["allowed_values"] = allowed
+                arguments.append(item)
+            copied["arguments"] = arguments
+        annotated.append(copied)
+    return tuple(annotated)
 
 
 def project_action_schema(
@@ -55,9 +100,12 @@ def project_action_schema(
     new one, so the projected schema is a strict subsequence of what the system offered.
     """
     permitted = frozenset(allowed)
-    return tuple(
+    filtered = tuple(
         dict(entry) for entry in schema if str(entry.get("action")) in permitted
     )
+    # Amendment 1: make the already-valid source values visible to the provider. M4-scoped: this
+    # runs inside the injected client, so no shared control-plane behaviour changes.
+    return annotate_source_values(filtered)
 
 
 class SchemaProjectionClient:

@@ -157,6 +157,8 @@ class GuardedAdaptivePolicy:
     deviations: list[DeviationRecord] = field(default_factory=list)
     #: True once the run has terminated under the frozen deviation rule.
     terminated: bool = False
+    #: True once the terminating FINISH has been issued, so the policy is not asked again.
+    _finished: bool = field(default=False, repr=False)
     _step: int = field(default=0, init=False, repr=False)
 
     @property
@@ -165,10 +167,16 @@ class GuardedAdaptivePolicy:
         return frozenset(self.universe)
 
     def _deviation(self, reason: str, detail: str) -> ProtocolDeviation:
+        """Record a deviation and return the exception to raise.
+
+        Recording and "the run is over" are separate concerns: the duplicate-source path records a
+        deviation and still completes normally (via FINISH), while the other guard paths raise and
+        therefore mark the run terminated. Setting ``terminated`` here would misreport the first as
+        the second.
+        """
         self.deviations.append(
             DeviationRecord(reason=reason, detail=detail, step_index=self._step)
         )
-        self.terminated = True
         return ProtocolDeviation(reason, detail=detail)
 
     def _guard(self, proposal: ActionProposal) -> ActionProposal:
@@ -182,6 +190,7 @@ class GuardedAdaptivePolicy:
 
         # C4-1: only SELECT_SOURCE and FINISH may proceed.
         if action not in M4_ALLOWED_ACTIONS:
+            self.terminated = True
             raise self._deviation(
                 "protocol_deviation:action_not_allowed",
                 f"parsed action {action.value!r} is outside the frozen M4 action space "
@@ -192,6 +201,7 @@ class GuardedAdaptivePolicy:
             # §9: FINISH with zero sources queried is prohibited. An empty ledger can only produce
             # an empty ranking, which is a guaranteed miss.
             if not self.queried:
+                self.terminated = True
                 raise self._deviation(
                     "zero_source_finish",
                     "FINISH proposed before any source was queried",
@@ -208,6 +218,7 @@ class GuardedAdaptivePolicy:
                 else CandidateSource(str(raw_source))
             )
         except ValueError:
+            self.terminated = True
             raise self._deviation(
                 "protocol_deviation:source_outside_universe",
                 f"source {raw_source!r} is not a CandidateSource member",
@@ -215,6 +226,7 @@ class GuardedAdaptivePolicy:
 
         # C4-2(a): the source must be inside the frozen universe.
         if source not in self.universe_set:
+            self.terminated = True
             raise self._deviation(
                 "protocol_deviation:source_outside_universe",
                 f"source {source.value!r} is not in the frozen M4 universe "
@@ -223,9 +235,21 @@ class GuardedAdaptivePolicy:
 
         # C4-2(b): the source must not already have been queried.
         if source in self.queried:
-            raise self._deviation(
+            # Frozen deviation rule (§9, §10): the duplicate must not execute, must not reach the
+            # ledger, and the run terminates **at once** with the user's then-current ledger
+            # ranking evaluated. The guard therefore records the deviation and substitutes FINISH
+            # rather than raising, because raising would surface as an execution failure and lose
+            # the ranking. The loop's own deviation handling only catches PolicyActionError, so a
+            # ProtocolDeviation escaping choose() would terminate the whole run -- the opposite of
+            # what §10 requires (the user stays in the primary analysis).
+            self._deviation(
                 "protocol_deviation:duplicate_source",
                 f"source {source.value!r} was already queried; a second query double-counts in RRF",
+            )
+            self.terminated = True
+            return ActionProposal(
+                action=ActionKind.FINISH,
+                rationale="duplicate source refused; terminating with the candidates already held",
             )
 
         # Pin the depth to the frozen value regardless of what the model asked for, so depth is an
@@ -239,11 +263,19 @@ class GuardedAdaptivePolicy:
         )
 
     def choose(self, context: Any) -> ActionProposal:
-        """Ask the inner policy, guard the answer, and record any deviation."""
+        """Ask the inner policy, guard the answer, and record any deviation.
+
+        After a terminating deviation the policy yields one ``FINISH`` so the run ends cleanly on
+        its own ranking; a further call is a programming error and raises.
+        """
         self._step += 1
+        if self._finished:
+            raise ProtocolDeviation("the run already ended under the frozen deviation rule")
         if self.terminated:
-            raise ProtocolDeviation(
-                "the run already terminated under the frozen deviation rule"
+            self._finished = True
+            return ActionProposal(
+                action=ActionKind.FINISH,
+                rationale="terminating after a protocol deviation, on the candidates already held",
             )
         proposal = self.inner.choose(context)
         guarded = self._guard(proposal)

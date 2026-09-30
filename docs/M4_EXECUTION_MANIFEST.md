@@ -13,27 +13,27 @@ complete one.
 |---|---|
 | path | `docs/M4_PREREGISTRATION.md` |
 | SHA256 | `7a18ea7258a3a175227a270ee38177c58bde66eadd51af8ccb02c91f83b981af` |
-| amended | False |
+| amended | True |
 
 ## Code
 
 | field | value |
 |---|---|
-| commit | `b33de88cbe5f2b0591fd07c92a427e8a24cabe83` |
-| subject | M4: make queried_sources report every source that actually ran |
-| remote HEAD | `b33de88cbe5f2b0591fd07c92a427e8a24cabe83` |
+| commit | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
+| subject | M4: provider validation, concurrency probe, and parallel arm execution |
+| remote HEAD | `0e6a7e82f8a03f6081c62ca317df9a6e95bb3055` |
 | worktree dirty | True |
 
 Per-file SHA256:
 
 | file | SHA256 |
 |---|---|
-| `experiments/m4_benchmark.py` | `c299f30c1082f7e5005ea5b7df17ba4d4629ff32d9237d350c1a685f903c8680` |
+| `experiments/m4_benchmark.py` | `354b2e9d2ef5f3965c135aa321627d4b2bcd3ba94006d65373b185b8f16a00b0` |
 | `experiments/m4_harness.py` | `ee8113a8741476c321274e39cc14a77521c88d0ee6bc55c24b2c7542fd4aa88f` |
-| `experiments/m4_policies.py` | `21cc8e8f41d255e95c95e91d5ecf893be7ec007b16d2572431420c089d369302` |
+| `experiments/m4_policies.py` | `7fc96f62820d16067980d4a4802f30d44e8fc4722b9f685d90d48bee9ee0882f` |
 | `experiments/m4_frozen_sources.py` | `a2fb099004a8129ad03536e9e7fc897f44538a2aedf9e2faed5e4f29c05c3057` |
 | `experiments/m4_query_rules.py` | `def08969084aaad0b35e736ec4213e931300f77f1a54ade6f938bbb3950cf7fb` |
-| `experiments/m4_schema_projection.py` | `e8e1248ac209078ac1e4a42e81fe0967f272b9abd3f05bfafe0d46dd08ef27ab` |
+| `experiments/m4_schema_projection.py` | `3dac13f5b2a1084bf4073c2763fd11bb93c4dad3b4553d006380a69fa1b4b514` |
 | `experiments/m4_sharding.py` | `ace82753b5f337b3baf74607f38949b030ab7113f4ec480a154678b25d8a4bdd` |
 | `experiments/m4_conformance.py` | `207d70af76bcf38664ee74f920f1c46a337a5eab338a3cb65c95701f5b6924fe` |
 | `experiments/m4_materialize_heads.py` | `053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b` |

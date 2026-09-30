@@ -33,6 +33,9 @@ MD_OUT = REPO / "docs/M4_EXECUTION_MANIFEST.md"
 JSON_OUT = REPO / "docs/M4_EXECUTION_MANIFEST.json"
 
 PREREGISTRATION = REPO / "docs/M4_PREREGISTRATION.md"
+AMENDMENT_1 = REPO / "docs/M4_PREREGISTRATION_AMENDMENT_1.md"
+RESULT_DOC = REPO / "docs/M4_RESULT.md"
+FORMAL_ARTIFACT = REPO / "runs/m4_formal_result.json"
 CANDIDATE_PLANE = REPO / "recommendation/control/candidate_plane.py"
 HEADS = REPO / "runs/m4_evidence/heads.npz"
 HEADS_PROVENANCE = REPO / "runs/m4_evidence/heads_provenance.json"
@@ -173,8 +176,48 @@ def build() -> dict[str, Any]:
         "preregistration": {
             "path": str(PREREGISTRATION.relative_to(REPO)),
             "sha256": sha256_file(PREREGISTRATION),
-            "amended": False,
+            # The original document is never edited. Amendments are separate, hashed documents, so
+            # a run is bound to both and the history stays visible.
+            "amended": AMENDMENT_1.is_file(),
+            "amendments": (
+                [
+                    {
+                        "version": 1,
+                        "path": str(AMENDMENT_1.relative_to(REPO)),
+                        "sha256": sha256_file(AMENDMENT_1),
+                        "subject": "expose the four frozen source values in the action contract",
+                        "scientific_design_changed": False,
+                        "formal_cohort_previously_run": False,
+                    }
+                ]
+                if AMENDMENT_1.is_file()
+                else []
+            ),
         },
+        #: The sealed outcome. The artifact itself is gitignored (AGENTS.md §8), so the committed
+        #: result document is what carries the numbers, and both are hashed here.
+        "result": {
+            "document": {
+                "path": str(RESULT_DOC.relative_to(REPO)),
+                "sha256": sha256_file(RESULT_DOC) if RESULT_DOC.is_file() else None,
+            },
+            "artifact": {
+                "path": str(FORMAL_ARTIFACT.relative_to(REPO)),
+                "sha256": sha256_file(FORMAL_ARTIFACT) if FORMAL_ARTIFACT.is_file() else None,
+                "committed": False,
+                "note": "gitignored per AGENTS.md §8; contents transcribed into the document above",
+            },
+            "executed_once": True,
+            "rerun_after_results_seen": False,
+            "primary_endpoint": "NDCG@10",
+            "verdict": "SUPPORTED",
+            "direction": "adaptive worse than fixed",
+        },
+        "amendment_1_subject": (
+            "select_source.source is exposed to the provider as a closed enum of the four frozen "
+            "source names; M4-scoped in the injected schema-projection client; no shared "
+            "control-plane behaviour changed"
+        ),
         "code": {
             "commit": git("rev-parse", "HEAD"),
             "commit_subject": git("log", "-1", "--format=%s"),
