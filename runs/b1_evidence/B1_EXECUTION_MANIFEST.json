@@ -1,0 +1,170 @@
+{
+  "artifacts": {
+    "large_binary": [
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/two_tower_head.npz",
+        "sha256": "0cb88e14d89d050be28ae079dc2acd1f73611a76831c1ea23666c413353cac20",
+        "size_bytes": 54264458
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/arm_A_hits.npz",
+        "sha256": "e26771f03e55f0b8cc0f7e8fd3d9b3867ffbff78f55e8c4a861b919f136aeb11",
+        "size_bytes": 151481
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/arm_B_hits.npz",
+        "sha256": "6c87d5593f3c04f3537f910f5cd8768322bcd65dd578ce8d00f2875c19095137",
+        "size_bytes": 151330
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/arm_C_hits.npz",
+        "sha256": "a18f547a45df4cc2283417898f963e9b42ea99063712ddfd23ec31be0ea9c322",
+        "size_bytes": 151468
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/arm_D_hits.npz",
+        "sha256": "b7ce10e89f9b3fb2702ee4b91ee47213585ddf99a3835e2cecc61e8c76549569",
+        "size_bytes": 151333
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/paired_inputs.npz",
+        "sha256": "8fc2ee94d8022b31eec534e1b1ce069327ea27e63c064400fd561c726c8b96ce",
+        "size_bytes": 324187
+      },
+      {
+        "durable_storage_pending": true,
+        "path": "runs/b1_evidence/paired_bootstrap.npz",
+        "sha256": "ff2e25063b07251e762f5f24c2f8646ea64bb8d6c10269b124c48bd90f617f24",
+        "size_bytes": 535853
+      }
+    ],
+    "small_text_json": [
+      {
+        "durable_storage_pending": false,
+        "path": "runs/b1_evidence/mcnemar.json",
+        "sha256": "474a9d65ea2dfe560321e4ecce3b3507ffb48010b4e014b6e30cb3bb3859a8ef",
+        "size_bytes": 601
+      },
+      {
+        "durable_storage_pending": false,
+        "path": "runs/b1_evidence/b1_paired_statistics.json",
+        "sha256": "fa6507fcd8bbcbb7794b384a72289c8d65a370516fcba20a2bef50ad0c49410c",
+        "size_bytes": 4455
+      },
+      {
+        "durable_storage_pending": false,
+        "path": "docs/reports/b1-fusion-paired-evidence.txt",
+        "sha256": "f8b83cb15eaad50bb4a10adddd2472b375c6d2d894b0e4d694822c54c97ccafb",
+        "size_bytes": 3558
+      }
+    ]
+  },
+  "checkpoint": {
+    "path": "runs/twotower_public_2026_full/checkpoint.pt",
+    "sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab"
+  },
+  "classification": {
+    "B_minus_A": "SUPPORTED",
+    "D_minus_C": "SUPPORTED"
+  },
+  "format": "agentrecx.b1.execution_manifest.v1",
+  "freeze_note": "Written before execution. The runner completes this file in place and refuses to start if status is already COMPLETE.",
+  "gates": {
+    "G1_arm_A_reproduces_frozen": {
+      "mismatches": 0,
+      "users": 20000,
+      "verdict": "PASS"
+    },
+    "G2_G5_input_digests": {
+      "verdict": "PASS"
+    },
+    "G3_cohort_identity": {
+      "sha256": "99dbaf7396913303fa1497c908a95e61239a29ad14a6a8f4e51d0b37fa8e99d4",
+      "verdict": "PASS"
+    },
+    "G4_two_tower_head": {
+      "depth_max": 1000,
+      "depth_min": 1000,
+      "verdict": "PASS"
+    },
+    "G6_metadata_head_not_recomputed": {
+      "verdict": "PASS"
+    }
+  },
+  "inputs_sha256": {
+    "data/processed/Sports_and_Outdoors_mappings.json": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912",
+    "data/processed/Sports_and_Outdoors_products.jsonl": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd",
+    "data/processed/Sports_and_Outdoors_sequences.json": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
+    "recommendation/evaluation/batched.py": "1721ae7bf60ef3dfb43f8d0f96b49cb3562865ac4eca9e178d8bb7b277832f11",
+    "recommendation/evaluation/metrics.py": "5f84e87dff75f159218cae3e270ac331f12c08237472d229766a0c4a9db6ae72",
+    "recommendation/evaluation/split.py": "054211a685c8653237fa7a6602832de07607bf2345930cffa25fcea9af20ef08",
+    "runs/m3_evidence/phase5_fixed_fusion_hits.npz": "62c2bc7c8013dfd651e4773e6dc328ae645e49f42af59d71fa421834a464b23f",
+    "runs/m3_evidence/phase5_fusion_source_heads.npz": "c4c0fdd6bc1e70fd4d1ffc0387c3afbe6e0642d2d0c6c0184ee440bdef5165d4",
+    "runs/twotower_public_2026_full/checkpoint.pt": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab"
+  },
+  "milestone": "B1",
+  "preregistration": {
+    "amendment": "A1 (artifact persistence policy), recorded before execution",
+    "amendment_scope": "no change to cohort, checkpoint, source heads, arms, depth, RRF rule, evaluator, bootstrap, McNemar or the promotion criterion",
+    "path": "docs/B1_PREREGISTRATION.md",
+    "sha256": "3377ec062fa877ccccafa005c6f8cbc0afc175da5c1f9654eaa19ca803b4d976"
+  },
+  "protocol": {
+    "arms": {
+      "A": [
+        "popularity",
+        "sequential",
+        "metadata"
+      ],
+      "B": [
+        "popularity",
+        "sequential",
+        "metadata",
+        "two_tower"
+      ],
+      "C": [
+        "sequential",
+        "metadata"
+      ],
+      "D": [
+        "sequential",
+        "metadata",
+        "two_tower"
+      ]
+    },
+    "catalogue_items": 156746,
+    "cohort_seed": 20260201,
+    "cohort_target_ids_sha256": "99dbaf7396913303fa1497c908a95e61239a29ad14a6a8f4e51d0b37fa8e99d4",
+    "cohort_users": 20000,
+    "existing_heads_source": "runs/m3_evidence/phase5_fusion_source_heads.npz",
+    "head_depth": 1000,
+    "k_values": [
+      5,
+      10,
+      20
+    ],
+    "metadata_head_note": "ragged (min 99 / mean 456.53 / max 496), used exactly as stored",
+    "metadata_head_recomputed": false,
+    "new_computation": "two_tower head only, depth 1000, exact full-catalogue, CPU float32",
+    "primary": "B_minus_A @ K=10 (NDCG)",
+    "replication": "D_minus_C @ K=10 (NDCG)",
+    "resamples": 10000,
+    "rrf_k": 60,
+    "rrf_rule": "recommendation.control.candidate_ledger.reciprocal_rank_fusion",
+    "seed": 20260201
+  },
+  "status": "COMPLETE",
+  "storage_policy": "amendment A1: large binaries stay on disk with path/size/sha256 recorded here and durable_storage_pending=true; storage status does not affect any verdict",
+  "verdicts": {
+    "execution_pass": true,
+    "promotion_reason": "primary SUPPORTED with a positive \u0394NDCG@10 and a same-sign replication",
+    "promotion_support": true
+  },
+  "wall_seconds": 773.2
+}

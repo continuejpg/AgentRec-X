@@ -49,5 +49,173 @@
       "sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
       "verified_at_runtime": false
     }
-  ]
+  ],
+  "recoverability": {
+    "format": "agentrecx.artifact_recovery.v1",
+    "scope": "B0",
+    "backend": "huggingface",
+    "endpoint": "https://huggingface.co",
+    "repo_type": "dataset",
+    "artifacts": [
+      {
+        "role": "two_tower_checkpoint",
+        "path": "runs/twotower_public_2026_full/checkpoint.pt",
+        "description": "Canonical Two-Tower checkpoint consumed by TwoTowerInferenceEngine",
+        "size_bytes": 162221222,
+        "sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab",
+        "required_for": [
+          "two_tower_serving_smoke"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "remote_path": "serving/twotower/checkpoint.pt",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T09:56:31Z",
+          "upload_verified_sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab",
+          "commit_oid": "794f5d90180432c7fdf097457396cdf36a399d04",
+          "verified_at": "2026-10-01T10:07:03Z",
+          "restore_sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab",
+          "smoke_result": "PASS (B0-c fresh-clone restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, engine loaded, recommend(k=10) with PAD excluded and parent_asin round-trip)"
+        }
+      },
+      {
+        "role": "two_tower_metadata_categories",
+        "path": "runs/twotower_public_2026_full/metadata_categories.json",
+        "description": "Categorical metadata vocabulary the Two-Tower checkpoint was trained with; TwoTowerInferenceEngine resolves it as a sibling of the checkpoint and cannot construct without it",
+        "size_bytes": 2741318,
+        "sha256": "46469955655b8c552a172cb324e724455c72ae4bc10c9fe3d53a35c83b882a9d",
+        "required_for": [
+          "two_tower_serving_smoke"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "remote_path": "serving/twotower/metadata_categories.json",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T10:05:46Z",
+          "upload_verified_sha256": "46469955655b8c552a172cb324e724455c72ae4bc10c9fe3d53a35c83b882a9d",
+          "commit_oid": "668a2d44b7112102c138e5b681563988c2c90831",
+          "verified_at": "2026-10-01T10:07:03Z",
+          "restore_sha256": "46469955655b8c552a172cb324e724455c72ae4bc10c9fe3d53a35c83b882a9d",
+          "smoke_result": "PASS (B0-c fresh-clone restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, engine loaded, recommend(k=10) with PAD excluded and parent_asin round-trip)",
+          "scope_note": "added to the B0 scope by the B0-c restore itself: the engine resolves this file as a sibling of the checkpoint and cannot construct without it"
+        }
+      },
+      {
+        "role": "sasrec_checkpoint",
+        "path": "runs/sasrec_canonical_2026/best.pt",
+        "description": "Accepted SASRec checkpoint; the sequential source of Serving V1",
+        "size_bytes": 121675470,
+        "sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912",
+        "required_for": [
+          "serving_fusion_v1"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "remote_path": "serving/sasrec/best.pt",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T10:33:00Z",
+          "upload_verified_sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912",
+          "commit_oid": "04a055bf8c4ca0bacb4f52ab314a8f16eba4b949",
+          "verified_at": "2026-10-01T10:52:00Z",
+          "restore_sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912",
+          "smoke_result": "PASS (B0-c fresh-clone restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, engine loaded, recommend(k=10) with PAD excluded and parent_asin round-trip)"
+        }
+      },
+      {
+        "role": "mappings",
+        "path": "data/processed/Sports_and_Outdoors_mappings.json",
+        "description": "Canonical parent_asin <-> integer item id mappings (also a demo runtime artifact)",
+        "size_bytes": 39670810,
+        "sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912",
+        "required_for": [
+          "two_tower_serving_smoke",
+          "demo_runtime"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "remote_path": "serving/catalog/Sports_and_Outdoors_mappings.json",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T09:56:41Z",
+          "upload_verified_sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912",
+          "commit_oid": "647c65f2fe7c70ccb67e9ccbb92a3516a11ec942",
+          "verified_at": "2026-10-01T10:07:03Z",
+          "restore_sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912",
+          "smoke_result": "PASS (B0-c fresh-clone restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, engine loaded, recommend(k=10) with PAD excluded and parent_asin round-trip)"
+        }
+      },
+      {
+        "role": "catalogue",
+        "path": "data/processed/Sports_and_Outdoors_products.jsonl",
+        "description": "Normalized catalogue metadata; the Serving V1 lexical source and the candidate-scoped enricher both read it",
+        "size_bytes": 307500147,
+        "sha256": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd",
+        "required_for": [
+          "serving_fusion_v1"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "remote_path": "serving/catalog/Sports_and_Outdoors_products.jsonl",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T11:20:00Z",
+          "upload_verified_sha256": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd",
+          "commit_oid": "c3cc44950e438c79611eca76ccd0d305525897b0",
+          "distribution": "private disaster recovery",
+          "not_public_redistribution": true,
+          "third_party_public_reproducibility_claimed": false,
+          "distribution_note": "Amazon-derived catalogue text. Private disaster-recovery copy only: NOT a public redistribution, and no third-party reproducibility is claimed.",
+          "verified_at": "2026-10-01T12:20:00Z",
+          "restore_sha256": "175c83caa3523704319f5a5adf1531f0d839d26ba0604be646c9dfdfb21e71dd",
+          "smoke_result": "PASS (P2-F clean restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, then the full demo server started there with active_engine=fusion_rrf and fallback_used=false, POST /v1/demo/sessions returned 201 and a chat turn returned 5 recommendations carrying engine provenance; 0 tracebacks)"
+        }
+      },
+      {
+        "role": "sequences",
+        "path": "data/processed/Sports_and_Outdoors_sequences.json",
+        "description": "Processed interaction sequences; the demo runtime builds its profiles from it, so the full demo cannot start without it",
+        "size_bytes": 348683134,
+        "sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
+        "required_for": [
+          "demo_runtime"
+        ],
+        "durable": {
+          "backend": "huggingface",
+          "repo_id": "autorec/agent-rec-x-artifacts",
+          "revision": "main",
+          "status": "READY",
+          "uploaded_at": "2026-10-01T12:05:00Z",
+          "upload_verified_sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
+          "commit_oid": "f526754f99ee3fe6d3f4df126801a5891eb6a304",
+          "distribution": "private disaster recovery",
+          "not_public_redistribution": true,
+          "third_party_public_reproducibility_claimed": false,
+          "blocker": null,
+          "remote_path": "serving/demo/Sports_and_Outdoors_sequences.json",
+          "verified_at": "2026-10-01T12:20:00Z",
+          "restore_sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81",
+          "smoke_result": "PASS (P2-F clean restore: fetched over the network into a workspace with no local copy, size+SHA256 verified, then the full demo server started there with active_engine=fusion_rrf and fallback_used=false, POST /v1/demo/sessions returned 201 and a chat turn returned 5 recommendations carrying engine provenance; 0 tracebacks)",
+          "xet_note": "Uploaded over classic LFS, not the Xet CAS path, which is unreachable from this host. The Xet-disable flag was set in the process environment before the hub client was imported; setting it inside Python after the import has no effect, which is why two earlier attempts failed. No credential value appears here by design."
+        }
+      }
+    ],
+    "note": [
+      "Durable-restore plan. Metadata only: no artifact bytes and no credential.",
+      "Status lifecycle: PENDING (no remote location) -> UPLOADED_UNVERIFIED (uploaded, remotely",
+      "queryable, NO clean restore proven) -> READY (a clean restore has been proven).",
+      "uploaded_at is the remote commit timestamp read back from the repository; commit_oid is the full id.",
+      "Distribution: the catalogue and sequences artifacts are Amazon-derived. They are held as PRIVATE",
+      "disaster-recovery copies: not a public redistribution, and no third-party public reproducibility",
+      "is claimed for them.",
+      "The download URI is derived, never stored: <endpoint>/datasets/<repo_id>/resolve/<revision>/<remote_path>."
+    ]
+  }
 }

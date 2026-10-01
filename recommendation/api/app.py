@@ -77,6 +77,17 @@ DEFAULT_CHECKPOINT = project_config.REPO_ROOT / "runs" / "sasrec_canonical_2026"
 DEFAULT_MANIFEST = project_config.REPO_ROOT / "runs" / "sasrec_canonical_2026" / "run.json"
 DEFAULT_MAPPINGS = project_config.DATA_DIR / "processed" / "Sports_and_Outdoors_mappings.json"
 
+#: Serving V1 collaborators.  The Two-Tower directory holds ``checkpoint.pt`` and the
+#: ``metadata_categories.json`` the engine resolves as its sibling; the catalogue is the same
+#: normalized artifact the enricher reads.
+DEFAULT_TWOTOWER_DIR = project_config.REPO_ROOT / "runs" / "twotower_public_2026_full"
+DEFAULT_CATALOG = project_config.DATA_DIR / "processed" / "Sports_and_Outdoors_products.jsonl"
+
+#: ``auto`` uses Serving V1 when its artifacts are present and falls back to SASRec-only **with a
+#: logged reason**; ``rrf3`` demands fusion and reports the process unready rather than degrading;
+#: ``sasrec`` keeps the accepted single-source engine.
+SERVING_FUSION_MODES: tuple[str, ...] = ("auto", "rrf3", "sasrec")
+
 #: Digest of the accepted formal checkpoint, used for startup identity verification.
 ACCEPTED_CHECKPOINT_SHA256 = (
     "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912"
@@ -101,6 +112,10 @@ class ServiceSettings:
     host: str = "127.0.0.1"
     port: int = 8000
     verify_checkpoint_sha256: bool = True
+    #: Serving V1: ``auto`` | ``rrf3`` | ``sasrec`` (see :data:`SERVING_FUSION_MODES`).
+    serving_fusion: str = "auto"
+    two_tower_dir: Path | None = DEFAULT_TWOTOWER_DIR
+    catalog_path: Path | None = DEFAULT_CATALOG
 
     @classmethod
     def from_env(cls) -> ServiceSettings:
@@ -131,6 +146,11 @@ class ServiceSettings:
                 "AGENTRECX_VERIFY_CHECKPOINT", "1"
             ).lower()
             not in ("0", "false", "no"),
+            serving_fusion=os.environ.get("AGENTRECX_SERVING_FUSION", "auto").strip().lower(),
+            two_tower_dir=Path(
+                os.environ.get("AGENTRECX_TWOTOWER_DIR", DEFAULT_TWOTOWER_DIR)
+            ),
+            catalog_path=Path(os.environ.get("AGENTRECX_CATALOG_PATH", DEFAULT_CATALOG)),
         )
 
     def to_inference_config(self) -> InferenceConfig:
@@ -150,8 +170,11 @@ class ServiceSettings:
 class ServiceState:
     """Mutable runtime state: whether the model actually loaded."""
 
-    engine: SASRecInferenceEngine | None = None
+    engine: Any | None = None
     error: str | None = None
+    #: Which engine is actually serving, and whether a fallback occurred.  Surfaced by /health so a
+    #: degraded deployment is visible over HTTP rather than only in a log line.
+    serving: dict[str, Any] | None = None
     loaded_at: float | None = None
     settings: ServiceSettings | None = None
 
@@ -161,20 +184,123 @@ class ServiceState:
         return self.engine is not None and self.engine.is_ready()
 
 
-def build_engine(settings: ServiceSettings) -> tuple[SASRecInferenceEngine | None, str | None]:
-    """Construct the inference engine, returning ``(engine, error_message)``.
+def _build_sequential_engine(settings: ServiceSettings) -> Any:
+    """The accepted single-source engine (SASRec), unchanged."""
+    return SASRecInferenceEngine(
+        settings.to_inference_config(),
+        verify_checkpoint_sha256=settings.verify_checkpoint_sha256,
+    )
+
+
+def _build_fusion_engine(settings: ServiceSettings) -> Any:
+    """Serving V1: SASRec + Two-Tower + catalogue lexical, fused with the accepted RRF.
+
+    Raises on any missing collaborator.  Nothing here degrades quietly; the caller decides what a
+    failure means for the configured mode.
+    """
+    from recommendation.catalog import MetadataIndex
+    from recommendation.inference.fusion import FusionInferenceEngine
+    from recommendation.inference.lexical import CatalogueLexicalIndex
+    from recommendation.inference.twotower import (
+        TwoTowerInferenceConfig,
+        TwoTowerInferenceEngine,
+    )
+
+    sequential = _build_sequential_engine(settings)
+    if settings.two_tower_dir is None:
+        raise RuntimeError("no Two-Tower artifact directory is configured")
+    two_tower = TwoTowerInferenceEngine(
+        TwoTowerInferenceConfig(
+            checkpoint_path=Path(settings.two_tower_dir) / "checkpoint.pt",
+            mappings_path=settings.mappings_path,
+            device=settings.device,
+        )
+    )
+    if settings.catalog_path is None:
+        raise RuntimeError("no catalogue artifact is configured")
+    records = MetadataIndex.load(settings.catalog_path).records
+    lexical = CatalogueLexicalIndex.build(records)
+    return FusionInferenceEngine(
+        sequential=sequential,
+        two_tower=two_tower,
+        lexical=lexical,
+        catalogue=records,
+        item_id_for=sequential.parent_asin_to_item_id,
+        is_known_identity=sequential.has_parent_asin,
+    )
+
+
+def build_engine_report(
+    settings: ServiceSettings,
+) -> tuple[Any | None, str | None, dict[str, Any]]:
+    """Like :func:`build_engine`, but also return what actually happened.
+
+    The third element is the serving report exposed over HTTP, so an operator never has to read a
+    log to discover which engine is answering or that a fallback occurred.
+    """
+    mode = (settings.serving_fusion or "auto").strip().lower()
+    report: dict[str, Any] = {
+        "requested_engine": mode,
+        "active_engine": None,
+        "fallback_used": False,
+        "fallback_reason": None,
+        "fusion_sources": None,
+        "rrf_k": None,
+        "source_head": None,
+    }
+    engine, error = build_engine(settings)
+    if engine is not None:
+        metadata = getattr(engine, "model_metadata", None)
+        described = metadata() if callable(metadata) else {}
+        report["active_engine"] = described.get("active_engine", "sasrec")
+        if report["active_engine"] == "fusion_rrf":
+            report["fusion_sources"] = list(described.get("fusion_sources") or [])
+            report["rrf_k"] = described.get("rrf_k")
+            report["source_head"] = described.get("source_head_depth")
+        if mode != "sasrec" and report["active_engine"] != "fusion_rrf":
+            report["fallback_used"] = True
+            report["fallback_reason"] = (
+                "Serving V1 was requested but could not be built; SASRec-only is serving"
+            )
+    else:
+        report["fallback_reason"] = error
+    return engine, error, report
+
+
+def build_engine(settings: ServiceSettings) -> tuple[Any | None, str | None]:
+    """Construct the serving engine, returning ``(engine, error_message)``.
 
     Never raises: a startup failure is recorded so ``/health`` can report
     ``model_loaded: false`` instead of the process claiming readiness.
+
+    Mode ``sasrec`` builds the accepted single-source engine.  Modes ``auto`` and ``rrf3`` build
+    Serving V1; ``rrf3`` refuses to degrade, while ``auto`` falls back to SASRec-only and **logs
+    why**, so an operator can always see which engine is actually serving.
     """
-    try:
-        engine = SASRecInferenceEngine(
-            settings.to_inference_config(),
-            verify_checkpoint_sha256=settings.verify_checkpoint_sha256,
+    mode = (settings.serving_fusion or "auto").strip().lower()
+    if mode not in SERVING_FUSION_MODES:
+        return None, (
+            f"unknown AGENTRECX_SERVING_FUSION {settings.serving_fusion!r}; "
+            f"expected one of {SERVING_FUSION_MODES}"
         )
-    except Exception as exc:  # noqa: BLE001 - surface any startup failure as unready
-        return None, f"{type(exc).__name__}: {exc}"
-    return engine, None
+    if mode == "sasrec":
+        try:
+            return _build_sequential_engine(settings), None
+        except Exception as exc:  # noqa: BLE001 - surface any startup failure as unready
+            return None, f"{type(exc).__name__}: {exc}"
+    try:
+        return _build_fusion_engine(settings), None
+    except Exception as exc:  # noqa: BLE001 - classified below, never swallowed
+        detail = f"{type(exc).__name__}: {exc}"
+        if mode == "rrf3":
+            return None, f"AGENTRECX_SERVING_FUSION=rrf3 but Serving V1 could not be built: {detail}"
+        LOGGER.warning(
+            "Serving V1 unavailable; serving SASRec only. reason=%s", detail
+        )
+        try:
+            return _build_sequential_engine(settings), None
+        except Exception as inner:  # noqa: BLE001
+            return None, f"{type(inner).__name__}: {inner}"
 
 
 def create_app(
@@ -221,9 +347,10 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         nonlocal owns_demo
         if state.engine is None and load_on_startup:
-            built, error = build_engine(settings)
+            built, error, serving = build_engine_report(settings)
             state.engine = built
             state.error = error
+            state.serving = serving
             state.loaded_at = time.time() if built is not None else None
             if built is not None and warmup:
                 # Warm one bounded inference path so the first real request is not
@@ -317,14 +444,29 @@ def create_app(
     async def health() -> HealthResponse:
         """Readiness: distinguishes "process running" from "model loaded"."""
         loaded = state.model_loaded
+        serving = state.serving or {}
         return HealthResponse(
             status="ok" if loaded else "unavailable",
             model_loaded=loaded,
             device=str(state.engine.device) if state.engine is not None else None,
             detail=None if loaded else (state.error or "model not loaded"),
+            requested_engine=serving.get("requested_engine"),
+            active_engine=serving.get("active_engine"),
+            fallback_used=bool(serving.get("fallback_used")),
+            fallback_reason=serving.get("fallback_reason") if serving.get("fallback_used") else None,
+            fusion_sources=serving.get("fusion_sources"),
+            rrf_k=serving.get("rrf_k"),
+            source_head=serving.get("source_head"),
         )
 
-    @app.get("/v1/model", response_model=ModelInfoResponse, tags=["service"])
+    @app.get(
+        "/v1/model",
+        response_model=ModelInfoResponse,
+        # Serving V1 fields are null for a single-source engine; omitting them keeps the accepted
+        # response identical and adds the fusion description only when fusion actually serves.
+        response_model_exclude_none=True,
+        tags=["service"],
+    )
     async def model_info() -> ModelInfoResponse:
         """Non-sensitive model metadata, including device and checkpoint identity."""
         if not state.model_loaded:

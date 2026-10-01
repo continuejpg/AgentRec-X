@@ -101,6 +101,22 @@ class HealthResponse(BaseModel):
         default=None,
         description="Present when the process is running but the model is not ready.",
     )
+    # -- Which engine is actually serving, visible over HTTP (never only in a log). -- #
+    requested_engine: str | None = Field(
+        default=None, description="What AGENTRECX_SERVING_FUSION asked for."
+    )
+    active_engine: str | None = Field(
+        default=None, description="'fusion_rrf' or 'sasrec': what is actually answering."
+    )
+    fallback_used: bool = Field(
+        default=False, description="True when fusion was requested but SASRec-only is serving."
+    )
+    fallback_reason: str | None = Field(
+        default=None, description="Why the fallback happened. Present only when it did."
+    )
+    fusion_sources: list[str] | None = None
+    rrf_k: int | None = None
+    source_head: int | None = None
 
 
 class ModelInfoResponse(BaseModel):
@@ -120,6 +136,34 @@ class ModelInfoResponse(BaseModel):
     parameter_count: int = Field(
         ..., description="Total parameters in the served model (frozen for inference)."
     )
+    # -- Serving V1 (P2-A).  Absent when a single-source engine serves. -- #
+    active_engine: str | None = Field(
+        default=None,
+        description=(
+            "'fusion_rrf' when several sources are fused, absent for the accepted single-source "
+            "engine. Makes the engine that actually answered discoverable over HTTP."
+        ),
+    )
+    serving_fusion: str | None = Field(default=None, description="'rrf', or absent.")
+    fusion_sources: list[str] | None = Field(
+        default=None, description="The fixed source set, in the order they are consulted."
+    )
+    source_score_kinds: dict[str, str] | None = Field(
+        default=None, description="What each source's own score means; never a fused score."
+    )
+    rrf_k: int | None = Field(default=None, description="The fusion constant (60). Not a knob.")
+    source_head_depth: int | None = Field(
+        default=None,
+        description=(
+            "How deep each source's ranking is read before fusion (100, the deepest the accepted "
+            "serving engines permit)."
+        ),
+    )
+    score_kind: str | None = Field(
+        default=None, description="'rrf_rank_fusion' when scores are fused."
+    )
+    lexical_documents: int | None = None
+    catalogue_size: int | None = None
     model_parameters_frozen: bool = Field(
         ...,
         description=(

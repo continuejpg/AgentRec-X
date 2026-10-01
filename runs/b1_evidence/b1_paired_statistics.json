@@ -1,0 +1,172 @@
+{
+  "contrasts": {
+    "B_minus_A": {
+      "added": [
+        "two_tower"
+      ],
+      "after": "B",
+      "before": "A",
+      "classification": "SUPPORTED",
+      "held_constant": [
+        "metadata",
+        "popularity",
+        "sequential"
+      ],
+      "per_k": [
+        {
+          "k": 5,
+          "mcnemar_b": 43,
+          "mcnemar_c": 104,
+          "mcnemar_p": 5.195289743459175e-07,
+          "ndcg_after": 0.007440939660462615,
+          "ndcg_before": 0.0055895987983410654,
+          "ndcg_ci": [
+            0.0011663121240056912,
+            0.002550430825021621
+          ],
+          "ndcg_delta": 0.001851340862121549,
+          "recall_after": 0.01165,
+          "recall_before": 0.0086,
+          "recall_ci": [
+            0.00185,
+            0.00425
+          ],
+          "recall_delta": 0.00305
+        },
+        {
+          "k": 10,
+          "mcnemar_b": 59,
+          "mcnemar_c": 152,
+          "mcnemar_p": 1.2039751647019154e-10,
+          "ndcg_after": 0.009815294400546714,
+          "ndcg_before": 0.007433501843982545,
+          "ndcg_ci": [
+            0.001731262239479163,
+            0.0030716486018581173
+          ],
+          "ndcg_delta": 0.002381792556564169,
+          "recall_after": 0.019,
+          "recall_before": 0.01435,
+          "recall_ci": [
+            0.00325,
+            0.0061
+          ],
+          "recall_delta": 0.00465
+        },
+        {
+          "k": 20,
+          "mcnemar_b": 78,
+          "mcnemar_c": 212,
+          "mcnemar_p": 1.7748670214074585e-15,
+          "ndcg_after": 0.012566476835752672,
+          "ndcg_before": 0.00968019916266781,
+          "ndcg_ci": [
+            0.002249628991638694,
+            0.0035359545985137034
+          ],
+          "ndcg_delta": 0.0028862776730848656,
+          "recall_after": 0.02995,
+          "recall_before": 0.02325,
+          "recall_ci": [
+            0.00505,
+            0.0084
+          ],
+          "recall_delta": 0.0067
+        }
+      ],
+      "removed": []
+    },
+    "D_minus_C": {
+      "added": [
+        "two_tower"
+      ],
+      "after": "D",
+      "before": "C",
+      "classification": "SUPPORTED",
+      "held_constant": [
+        "metadata",
+        "sequential"
+      ],
+      "per_k": [
+        {
+          "k": 5,
+          "mcnemar_b": 101,
+          "mcnemar_c": 143,
+          "mcnemar_p": 0.008536290190835856,
+          "ndcg_after": 0.00849212427119523,
+          "ndcg_before": 0.00714306627666217,
+          "ndcg_ci": [
+            0.0003555525234890738,
+            0.0023847084750195737
+          ],
+          "ndcg_delta": 0.0013490579945330623,
+          "recall_after": 0.0128,
+          "recall_before": 0.0107,
+          "recall_ci": [
+            0.0006,
+            0.00365
+          ],
+          "recall_delta": 0.0021
+        },
+        {
+          "k": 10,
+          "mcnemar_b": 127,
+          "mcnemar_c": 218,
+          "mcnemar_p": 1.1024188202185014e-06,
+          "ndcg_after": 0.011047486604397114,
+          "ndcg_before": 0.00887458543411445,
+          "ndcg_ci": [
+            0.0011792296258218177,
+            0.003195815430477819
+          ],
+          "ndcg_delta": 0.0021729011702826652,
+          "recall_after": 0.02075,
+          "recall_before": 0.0162,
+          "recall_ci": [
+            0.00275,
+            0.00645
+          ],
+          "recall_delta": 0.00455
+        },
+        {
+          "k": 20,
+          "mcnemar_b": 166,
+          "mcnemar_c": 320,
+          "mcnemar_p": 2.5878413007707017e-12,
+          "ndcg_after": 0.014114496706402847,
+          "ndcg_before": 0.0111288382930701,
+          "ndcg_ci": [
+            0.002036613233162003,
+            0.003959461143062031
+          ],
+          "ndcg_delta": 0.002985658413332745,
+          "recall_after": 0.03295,
+          "recall_before": 0.02525,
+          "recall_ci": [
+            0.0056,
+            0.00985
+          ],
+          "recall_delta": 0.0077
+        }
+      ],
+      "removed": []
+    }
+  },
+  "execution_pass": true,
+  "format": "agentrecx.b1.paired_statistics.v1",
+  "preregistration": "docs/B1_PREREGISTRATION.md",
+  "primary": {
+    "contrast": "B_minus_A",
+    "endpoint": "ndcg",
+    "k": 10
+  },
+  "promotion_reason": "primary SUPPORTED with a positive \u0394NDCG@10 and a same-sign replication",
+  "promotion_support": true,
+  "replication": {
+    "contrast": "D_minus_C",
+    "endpoint": "ndcg",
+    "k": 10
+  },
+  "resamples": 10000,
+  "seed": 20260201
+}

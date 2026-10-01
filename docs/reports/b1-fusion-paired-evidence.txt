@@ -1,0 +1,54 @@
+B1 - TWO-TOWER FUSION PAIRED EVIDENCE (frozen protocol, executed once)
+============================================================================================
+
+Protocol      docs/B1_PREREGISTRATION.md (incl. amendment A1, persistence policy)
+Cohort        20,000 users, seed 20260201, target_ids sha256 99dbaf7396913303fa1497c908a95e61239a29ad14a6a8f4e51d0b37fa8e99d4
+Catalogue     156,746 items, full-catalogue ranking, PAD = 0 never a candidate
+Fusion        reciprocal_rank_fusion, RRF_K = 60, head = 1000
+Statistics    paired user bootstrap, 10,000 resamples, seed 20260201; exact McNemar
+
+Arm metrics through the shared evaluator
+--------------------------------------------------------------------------------------------
+  A = popularity + sequential + metadata
+      R@5/10/20 = 0.00860 / 0.01435 / 0.02325    NDCG@5/10/20 = 0.005590 / 0.007434 / 0.009680
+  B = popularity + sequential + metadata + two_tower
+      R@5/10/20 = 0.01165 / 0.01900 / 0.02995    NDCG@5/10/20 = 0.007441 / 0.009815 / 0.012566
+  C = sequential + metadata
+      R@5/10/20 = 0.01070 / 0.01620 / 0.02525    NDCG@5/10/20 = 0.007143 / 0.008875 / 0.011129
+  D = sequential + metadata + two_tower
+      R@5/10/20 = 0.01280 / 0.02075 / 0.03295    NDCG@5/10/20 = 0.008492 / 0.011047 / 0.014114
+
+Paired contrasts
+--------------------------------------------------------------------------------------------
+  B_minus_A  (SUPPORTED)
+    K= 5  ΔNDCG +0.001851 CI [+0.001166, +0.002550]   Δhit +0.00305 CI [+0.00185, +0.00425]   McNemar b=43 c=104 p=5.19529e-07
+    K=10  ΔNDCG +0.002382 CI [+0.001731, +0.003072]   Δhit +0.00465 CI [+0.00325, +0.00610]   McNemar b=59 c=152 p=1.20398e-10
+    K=20  ΔNDCG +0.002886 CI [+0.002250, +0.003536]   Δhit +0.00670 CI [+0.00505, +0.00840]   McNemar b=78 c=212 p=1.77487e-15
+  D_minus_C  (SUPPORTED)
+    K= 5  ΔNDCG +0.001349 CI [+0.000356, +0.002385]   Δhit +0.00210 CI [+0.00060, +0.00365]   McNemar b=101 c=143 p=0.00853629
+    K=10  ΔNDCG +0.002173 CI [+0.001179, +0.003196]   Δhit +0.00455 CI [+0.00275, +0.00645]   McNemar b=127 c=218 p=1.10242e-06
+    K=20  ΔNDCG +0.002986 CI [+0.002037, +0.003959]   Δhit +0.00770 CI [+0.00560, +0.00985]   McNemar b=166 c=320 p=2.58784e-12
+
+Verdicts (independent)
+--------------------------------------------------------------------------------------------
+  EXECUTION PASS      = YES  (protocol executed; all gates passed; statistics produced)
+  PROMOTION SUPPORT   = YES  (primary SUPPORTED with a positive ΔNDCG@10 and a same-sign replication)
+
+  EXECUTION PASS does not imply PROMOTION SUPPORT.
+  A NO here is a result, not a failure: it means the predeclared promotion criterion was
+  not met, and Serving Fusion V1 stays NO-GO at P1'.
+
+Gates
+--------------------------------------------------------------------------------------------
+  G1 arm A reproduced the frozen Phase-5 target ranks exactly (0 mismatches / 20,000)
+  G2/G5 all frozen input digests matched
+  G3 cohort target_ids sha256 = 99dbaf7396913303fa1497c908a95e61239a29ad14a6a8f4e51d0b37fa8e99d4
+  G4 Two-Tower head depth/legality verified
+  G6 metadata head read from the frozen artifact; never recomputed
+
+Instrument note
+--------------------------------------------------------------------------------------------
+  The popularity, SASRec and metadata heads were READ from
+  runs/m3_evidence/phase5_fusion_source_heads.npz, not recomputed. The only new retrieval
+  is the Two-Tower head. Statistics are the tracked M2 implementation, imported verbatim,
+  and the stored bootstrap draws were asserted equal to it.

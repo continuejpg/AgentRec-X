@@ -240,12 +240,14 @@ class RecommendationTool:
         item ids, ``parent_asin`` values and raw scores are copied through unchanged, as
         is candidate-exhaustion behaviour.
         """
+        score_kind = getattr(result, "score_kind", None)
         recommendations = [
             ToolRecommendation(
                 rank=item.rank,
                 parent_asin=item.parent_asin,
                 item_id=item.item_id,
                 score=item.score,
+                score_kind=score_kind,
             )
             for item in result.recommendations
         ]
@@ -258,6 +260,8 @@ class RecommendationTool:
             history_truncated=result.history_truncated,
             eligible_candidates=result.eligible_candidates,
             timings_ms=dict(result.timings_ms),
+            score_kind=score_kind,
+            provenance=dict(getattr(result, "provenance", {}) or {}),
         )
 
 

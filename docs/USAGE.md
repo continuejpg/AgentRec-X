@@ -181,6 +181,37 @@ the artifacts themselves stay git-ignored). Inspect it with:
 .venv/bin/python -m recommendation.local_demo manifest-verify
 ```
 
+### Restoring artifacts from durable storage (opt-in, separate from the demo)
+
+The same manifest also carries a `recoverability` section: the artifacts whose durable restore has
+been prepared, each with its size, SHA-256 and durable status. Nothing in the demo, the launcher or
+the test suite reads it, and **no command below runs automatically** — `list` and `verify` are
+offline, and only `fetch` and `smoke` use the network.
+
+```bash
+.venv/bin/python scripts/fetch_artifacts.py list          # manifest view; offline
+.venv/bin/python scripts/fetch_artifacts.py verify        # size + SHA-256 of local copies; offline
+.venv/bin/python scripts/fetch_artifacts.py probe         # lightweight network validation; network
+.venv/bin/python scripts/fetch_artifacts.py fetch --all   # download + verify; network
+.venv/bin/python scripts/fetch_artifacts.py smoke         # fresh-clone contract; network
+```
+
+Serving V1 is selected with `AGENTRECX_SERVING_FUSION` (`auto` by default, `rrf3` to require it,
+`sasrec` for the accepted single-source engine). `/health` reports which engine is actually serving
+(`requested_engine`, `active_engine`, `fallback_used`, `fallback_reason`).
+
+Startup times with fusion, measured on this CPU host: fusion **engine** initialisation ≈ **44 s**;
+the **full demo/server** reaching `Application startup complete.` ≈ **128 s** (two checkpoints, the
+~300 MB catalogue, the BM25 index and the demo runtime). Request median ≈ **1.45 s**.
+
+The three artifacts the Two-Tower serving smoke needs are currently `READY`: a clean restore from
+the private repository has been proven (B0-c fetched them over the network into a workspace with no
+local copy, re-verified size and SHA-256, loaded the engine and served `recommend(k=10)`). A
+`PENDING` entry is still refused, with no local-copy fallback. The restore procedure, the derived-URI
+rule, the configuration precedence (`HF_REPO_ID`, `HF_REVISION`, `HF_TOKEN`), the probe's error
+classification and the definition of a smoke PASS are in
+[`ARTIFACT_STORAGE.md`](ARTIFACT_STORAGE.md).
+
 ---
 
 ## Running the Web Demo

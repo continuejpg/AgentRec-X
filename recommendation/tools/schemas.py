@@ -14,7 +14,7 @@ rather than by convention.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -109,9 +109,19 @@ class ToolRecommendation(BaseModel):
     score: float = Field(
         ...,
         description=(
-            "Raw SASRec model score, preserved from the engine. This is NOT a "
-            "probability, confidence, relevance score, CTR, or conversion likelihood; "
-            "it is only meaningful for ordering candidates."
+            "The score the engine reported, preserved unchanged, whose meaning is given by "
+            "``score_kind``: the accepted single-model score when it is null, or a "
+            "reciprocal-rank-fusion score when it is 'rrf_rank_fusion'. A fused score is NOT a "
+            "model score. In no case is this a probability, confidence, relevance score, CTR or "
+            "conversion likelihood; it is only meaningful for ordering candidates."
+        ),
+    )
+    score_kind: str | None = Field(
+        default=None,
+        description=(
+            "What ``score`` means: null for the accepted single-model score, "
+            "'rrf_rank_fusion' for a fused value. Prevents a fusion score from being read as a "
+            "SASRec or Two-Tower model score."
         ),
     )
 
@@ -147,6 +157,21 @@ class RecommendationToolResult(BaseModel):
     timings_ms: dict[str, float] = Field(
         default_factory=dict,
         description="Engine-side scoring/ranking timings. Diagnostic only.",
+    )
+    score_kind: str | None = Field(
+        default=None,
+        description=(
+            "What every ``recommendations[*].score`` means for this result: null for the "
+            "accepted single-model score, 'rrf_rank_fusion' when several sources were fused."
+        ),
+    )
+    provenance: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-identity fusion provenance, keyed by parent_asin: which sources ranked the item, "
+            "each source's own rank and score kind, the fused rank and the fused score. Empty "
+            "when a single source produced the result."
+        ),
     )
 
 

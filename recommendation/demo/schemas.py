@@ -305,6 +305,22 @@ class RecommendationCard(BaseModel):
             "preference score; it is only meaningful for ordering candidates."
         ),
     )
+    score_kind: str | None = Field(
+        default=None,
+        description=(
+            "'rrf_rank_fusion' when Serving V1 fused several sources for this card. Distinguishes a "
+            "fused ranking score from the single-model score the accepted path reported."
+        ),
+    )
+    fusion_sources: tuple[str, ...] = Field(
+        default=(), description="Which sources ranked this candidate (Serving V1 only)."
+    )
+    fusion_source_ranks: dict[str, int] = Field(
+        default_factory=dict, description="Each source's own 1-based rank for this candidate."
+    )
+    fused_rank: int | None = Field(
+        default=None, description="The candidate's position in the fused order, before preference reranking."
+    )
     metadata_status: Literal["found", "missing"] = Field(
         ..., description="'missing' means the catalogue has no record for this candidate."
     )

@@ -11,9 +11,51 @@ Sequential Recommendation  ·  Conversational Preferences  ·  Persistent Memory
 Grounded Evidence          ·  Deterministic Reranking      ·  Reproducible Evaluation
 ```
 
-This is an offline research/demo system, not a production commerce stack. The serving path uses
-no hosted LLM and needs no API key; every number below comes from a committed artifact or a
-verified run.
+This is an offline demo and research system, not a production commerce stack. It contains **two
+tracks that are not one runtime**, and telling them apart is the first thing to understand:
+
+```text
+PRODUCT — SERVING                        the path /demo/ actually runs today
+  User → Conversation / Preference → Candidate Retrieval → Evidence
+       → Preference Reranking → Result + Recommendation Trace
+  Candidate Retrieval = Serving V1: SASRec + Two-Tower + catalogue lexical, combined by
+  deterministic reciprocal-rank fusion (RRF_K = 60).  With AGENTRECX_SERVING_FUSION=sasrec,
+  or when the Two-Tower artifacts are absent, it is SASRec alone — reported, never silent.
+
+OFFLINE LAB — RESEARCH ONLY              not on the browser path (one opt-in exception below)
+  Models / Fusion / Agent Policies → Shared Evaluation → promote or reject
+  Two-Tower · TIGER / Semantic-ID · multi-source fusion · LLM adaptive routing
+  · M3 / M4 · shared evaluator · preregistration, frozen artifacts, reports
+```
+
+The product path needs no hosted LLM and no API key; every number below comes from a committed
+artifact or a verified run.
+
+### In 30 seconds
+
+| Question | Answer |
+| --- | --- |
+| **How does the current product recommend?** | **Serving V1**: `SASRec`, `Two-Tower` and a catalogue lexical retriever each propose an ordering, deterministic rank fusion (RRF, K=60) combines them, catalogue metadata supplies evidence, and a deterministic policy reranks. `AGENTRECX_SERVING_FUSION=sasrec` — or missing Two-Tower artifacts — serves SASRec alone, with the reason logged. |
+| **Where does the LLM intervene?** | Only as a **proposal**: the turn route and preference values, and only in the opt-in LLM Agent decision mode. Its plan schema has no field for a product id, a score, evidence, a rank or a metric. |
+| **Which models are offline research only?** | **TIGER / Semantic-ID, the popularity retriever, the research fusion comparator arms, and the LLM adaptive-routing policy.** Two-Tower is no longer in this list: it is a Serving V1 source since P2-A. |
+| **What are M3 / M4, then?** | **Offline evaluation evidence** about candidate agent policies, each run once under a frozen protocol. They are not stages of the product: in both, the model-driven policy lost to the fixed multi-source comparator, so neither was promoted into the default serving path. |
+
+### Three terms, used consistently below
+
+| Term | Means | Does **not** mean |
+| --- | --- | --- |
+| **BM25 / catalogue evidence** | lexical grounding of a candidate against its own catalogue metadata | a production semantic retriever |
+| **LLM** | a preference / intent **proposal** layer — and in the research stack, an action proposal | recommendation truth: it cannot supply identity, scores, evidence, ranks or metrics |
+| **M3 / M4 control plane** | the **offline agent-policy evaluation** stack (`recommendation/control/`) | a serving architecture, or a product feature |
+
+Two precision notes, because both are easy to get wrong:
+
+- the bounded control-plane loop *can* be switched on in the demo as an opt-in alpha
+  (`AGENTRECX_CONTROL_PLANE=loop`, off by default). Even then the demo registers **one** candidate
+  source, because the multi-source candidate plane is constructed only by the offline harnesses;
+- two retrieval models were evaluated and **not** wired in. That is a fact about the current
+  implementation, not a claim that evidence rejected them — see
+  [How the two tracks relate](#how-the-two-tracks-relate).
 
 ---
 
@@ -73,7 +115,8 @@ or serve the real-data demo** without those artifacts supplied out-of-band.
 | `DELETE /v1/demo/sessions/{session_id}` | reset the session |
 
 Startup loads the accepted SASRec checkpoint and the ~300 MB catalogue metadata once (expect
-roughly 20 s and an `Application startup complete.` line). Stop it with `Ctrl+C`. The demo runs in
+roughly 45 s with Serving V1 — it loads two checkpoints plus the ~300 MB catalogue — and an
+`Application startup complete.` line). Stop it with `Ctrl+C`. The demo runs in
 the foreground; there is no PID file or daemon mode. **No hosted LLM API key is required: the
 default decision mode is deterministic and offline.** An optional LLM Agent decision mode can be
 enabled with a provider configuration — see
@@ -125,9 +168,10 @@ candidate metadata happens to satisfy the stored preferences.
 
 ---
 
-## Serving architecture
+## Product architecture — SERVING
 
-The browser demo path, by real component name:
+**This section, and only this section, is what the browser runs.** The diagram is the demo path by
+real component name:
 
 ```text
 User
@@ -165,13 +209,11 @@ SQLite, per user_key         MATCH / VIOLATION / UNKNOWN
       Recommendation Trace  (recommendation/demo/serialization.py)
 ```
 
-One model generates candidates, and the browser path consults exactly that one model. Some of the
-research extensions described further down are deliberately **not** on this path.
-
-Canonical diagrams for both stacks — serving and offline research, with the trust boundary drawn
-explicitly — are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
----
+**Serving V1** is the frozen product shape: a fixed multi-source retrieval (SASRec + Two-Tower +
+catalogue lexical) combined by deterministic rank fusion, then catalogue evidence, the preference
+matcher/reranker, and a complete trace. The full shape, the measured performance and the evidence
+boundary are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the contracts are in
+[recommendation/inference/README.md](recommendation/inference/README.md).
 
 ## Trust boundary
 
@@ -265,17 +307,17 @@ enforced rather than promised:
   never dressed up as a deterministic answer.
 
 This is a *productisation* feature of the browser demo. It is not the research question answered in
-[What happened when we evaluated a live LLM policy?](#what-happened-when-we-evaluated-a-live-llm-policy),
+[OFFLINE LAB: what happened when we evaluated a live LLM policy?](#offline-lab-what-happened-when-we-evaluated-a-live-llm-policy),
 which measured a different system (the bounded loop control plane's adaptive policy) against a
 fixed-fusion baseline under a frozen protocol. No LLM is used to produce any number in the
-[benchmark results](#frozen-benchmark-results).
+[benchmark results](#offline-lab-frozen-benchmark-results).
 
 ---
 
-## Dataset and evaluation
+## Dataset and evaluation protocol (shared by both tracks)
 
 | | |
-| --- | --- |
+|---|---|
 | Dataset | Amazon Reviews 2023 — *Sports & Outdoors* |
 | Interactions | 3,500,587 |
 | Users / items | 412,445 users · 156,746 items (after iterative k-core filtering) |
@@ -284,12 +326,18 @@ fixed-fusion baseline under a frozen protocol. No LLM is used to produce any num
 | Evaluation | full-catalogue ranking, seen-item masking, `Recall` / `HR` / `NDCG` @ K = 5/10/20 |
 | Evaluator | one shared implementation (`recommendation/evaluation`) used by every model |
 
+The dataset, split and evaluator are the one thing the two tracks genuinely share. Sharing an
+evaluator is what makes an offline result comparable; it does not put a model on the serving path.
+
 For single-positive leave-two-out, `HR@K` and `Recall@K` are numerically equivalent by
 construction, and that is documented rather than treated as a bug.
 
 ---
 
-## Frozen benchmark results
+## OFFLINE LAB: frozen benchmark results
+
+> **RESEARCH ONLY.** Nothing in this section executes in the browser demo. These are offline
+> comparisons of candidate models under one frozen protocol.
 
 Same cohort, same protocol, same evaluator:
 
@@ -323,7 +371,10 @@ these sources.**
 
 ---
 
-## What happened when we evaluated a live LLM policy?
+## OFFLINE LAB: what happened when we evaluated a live LLM policy?
+
+> **RESEARCH ONLY.** This is evaluation evidence about a candidate agent policy. It is **not** a
+> stage of the product, and the default serving path does not run it.
 
 After the demo system was complete, the project asked a harder question: does a *model-driven*
 policy, given a bounded tool budget, do better than the deterministic fixed-fusion comparator
@@ -348,8 +399,9 @@ action-space effect as much as a ranking-quality effect.
 > frozen protocol.**
 >
 > This is a result about one system configuration. It is **not** evidence that LLM agents do not
-> work for recommendation, and it is **not** a test of adaptive source selection — that comparison
-> was never run.
+> work for recommendation, and it is **not** a test of adaptive source selection. That comparison
+> was run later, as the offline **M4** experiment, where the model-driven adaptive policy also lost
+> to the fixed multi-source comparator — see [`docs/M4_RESULT.md`](docs/M4_RESULT.md).
 
 **Engineering lesson:** adding an LLM loop does not make a recommender adaptive by itself.
 Action-space design, available tools, success criteria and candidate depth determine what a
@@ -360,57 +412,99 @@ Full protocol and frozen report: [`docs/M3_PREREGISTRATION.md`](docs/M3_PREREGIS
 
 ---
 
-## Repository organization
+## OFFLINE LAB: research track
+
+**RESEARCH ONLY.** The repository contains **two tracks that are not one identical runtime
+architecture**:
+
+1. **PRODUCT — SERVING** (above) — the original system: SASRec candidates, conversation,
+   preference memory, evidence, deterministic reranking, browser demo. This is what `/demo/` runs.
+2. **OFFLINE LAB — RESEARCH ONLY** — retrieval-model comparison (Two-Tower, Semantic-ID/TIGER),
+   rank fusion, reproducibility work (hash manifest, frozen reports) and preregistered evaluations
+   of bounded model-driven policies (M3, M4). It shares the dataset, protocol and evaluator, but it
+   is not the browser serving path.
+
+### How the two tracks relate
 
 ```text
-recommendation/
-  agent/                 original conversational orchestration (AgentGraph)
-  models/  inference/    SASRec and supporting models
-  tools/                 RecommendationTool contract
-  catalog/  rag/         catalogue metadata index and candidate-scoped enrichment
-  memory/                explicit preference memory (SQLite)
-  preference_matching/   preference evidence (MATCH / VIOLATION / UNKNOWN)
-  reranking/             deterministic preference reranking
-  evaluation/            shared evaluator and metric primitives
-  demo/  api/  web/      session layer, FastAPI app, browser UI
-  control/               later bounded-control research track (offline)
-experiments/             offline benchmarks and research tooling
-docs/                    design, history, usage and research reports
-runs/                    frozen experiment metadata and artifacts (git-ignored output)
-backends/                external retrieval backend, own virtual environment
+a new model / source / policy
+        │
+        ▼
+OFFLINE LAB: shared evaluator + frozen protocol + preregistration
+        │
+   evidence sufficient?
+     ┌──┴──┐
+    yes    no
+     │      │
+     ▼      ▼
+promotion   stays research only
+candidate
 ```
 
----
+The gate is a process, and its current rulings are deliberately uneven:
 
-## Research track
+| Component | Status today | Why it is not on the serving path |
+| --- | --- | --- |
+| `SASRec` | **SERVING** | the accepted checkpoint; the sequential source of Serving V1 |
+| Two-Tower + catalogue lexical | **SERVING** (Serving V1) | the other two Serving V1 sources, fused by RRF_K = 60 at source head 100; `AGENTRECX_SERVING_FUSION=sasrec` serves SASRec alone, and an `auto` fallback is visible on `/health` (`active_engine`, `fallback_used`, `fallback_reason`) — never only in a log |
+| Two-Tower / DSSM | offline comparator | never wired into serving; promotion would need a serving-candidate audit (latency, artifact distribution, frozen fusion semantics) |
+| TIGER / Semantic-ID | offline source, **qualified but not enabled** | qualified as a candidate source in the offline stack and explicitly not wired into the runtime |
+| multi-source rank fusion | offline comparator | additionally blocked by an unimplemented step: the accepted preference reranker runs over the history recommender's candidates only, so *reranking over a fused candidate set* does not exist yet |
+| LLM adaptive source selection | offline evidence, **not promoted** | it lost to fixed multi-source traversal under the frozen protocol (M4) |
+| bounded control-plane loop | opt-in alpha, off by default (`AGENTRECX_CONTROL_PLANE=loop`) | available for evaluation; it is a second orchestration stack, not the product's default path |
 
-The repository contains **two stacks that are not one identical runtime architecture**:
-
-1. **The serving / demo stack** (above) — the original system: SASRec candidates, conversation,
-   preference memory, evidence, deterministic reranking, browser demo. This is what the demo runs.
-2. **A later research stack** — retrieval-model comparison (Two-Tower, Semantic-ID/TIGER),
-   rank fusion, reproducibility work (hash manifest, frozen reports) and a preregistered
-   evaluation of a bounded model-driven policy. It shares the dataset, protocol and evaluator but
-   is not the browser serving path.
+The fusion row is **not** "evidence rejected fusion". The offline fusion results are a different
+question from what the product runs, and what is missing there is an implementation and an audit —
+stated as such rather than dressed up as a decision.
 
 Deep-dive documentation, if you want the research detail:
 
 | Topic | Document |
 | --- | --- |
-| Architecture and state ownership | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Architecture, both tracks | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| The same shape as pure text | [`docs/ARCHITECTURE_TEXT_DIAGRAM.md`](docs/ARCHITECTURE_TEXT_DIAGRAM.md) |
 | Milestone-by-milestone history | [`docs/PROJECT_HISTORY.md`](docs/PROJECT_HISTORY.md) |
 | Experiments and results | [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) |
 | Canonical project state and status | [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) |
 | Model expansion (Two-Tower, fusion) | [`docs/MODEL_EXPANSION_HANDOFF.md`](docs/MODEL_EXPANSION_HANDOFF.md) |
+| Two-Tower design and fusion controls | [`docs/TWOTOWER.md`](docs/TWOTOWER.md) |
+| Semantic-ID / GenRec baseline | [`docs/SEMANTIC_ID.md`](docs/SEMANTIC_ID.md) |
 | TIGER backend boundary | [`docs/TIGER_BACKEND.md`](docs/TIGER_BACKEND.md) |
-| LLM-policy preregistration | [`docs/M3_PREREGISTRATION.md`](docs/M3_PREREGISTRATION.md) |
+| LLM-policy preregistration (M3) | [`docs/M3_PREREGISTRATION.md`](docs/M3_PREREGISTRATION.md) |
+| Formal M4 result | [`docs/M4_RESULT.md`](docs/M4_RESULT.md) |
+
+---
+
+## Repository organization
+
+```text
+recommendation/
+  agent/                 original conversational orchestration (AgentGraph)      [SERVING]
+  models/  inference/    SASRec and supporting models                            [SERVING]
+  tools/                 RecommendationTool contract                            [SERVING]
+  catalog/  rag/         catalogue index and candidate-scoped enrichment          [SERVING]
+  memory/                explicit preference memory (SQLite)                     [SERVING]
+  preference_matching/   preference evidence (MATCH / VIOLATION / UNKNOWN)       [SERVING]
+  reranking/             deterministic preference reranking                      [SERVING]
+  demo/  api/  web/      session layer, FastAPI app, browser UI                  [SERVING]
+  evaluation/            shared evaluator and metric primitives                  [SHARED]
+  control/               bounded control plane: offline agent-policy evaluation   [RESEARCH ONLY]
+  baselines/             ItemCF engineering baseline                             [RESEARCH ONLY]
+  semantic_id/           frozen historical GenRec v0                             [RESEARCH ONLY]
+  backends/              adapter to the external TIGER backend                   [RESEARCH ONLY]
+experiments/             offline benchmarks, arms, smokes and harnesses          [RESEARCH ONLY]
+docs/                    design, history, usage and frozen research reports
+runs/                    frozen experiment metadata and artifacts (git-ignored output)
+backends/                the external TIGER retrieval backend, its own venv      [RESEARCH ONLY]
+```
 
 ---
 
 ## Limitations
 
-- **The browser serving path is deterministic and offline.** There is no hosted LLM in it and no
-  API key. A provider-backed policy exists only in the offline research track.
+- **The default browser serving path is deterministic and offline.** No hosted LLM is needed and
+  no API key is required. An opt-in LLM Agent *decision* mode exists in the product, and it is a
+  proposal layer only; the offline research track's bounded policy is a different system.
 - **Preference extraction supports a bounded, explicit syntax.** It is a conservative rule-based
   parser, not general natural-language understanding. Anything outside that syntax is not stored.
 - **Evidence matching is conservative and exact-token.** No synonym or stemming layer:

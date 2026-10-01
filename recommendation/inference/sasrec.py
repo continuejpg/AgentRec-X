@@ -125,6 +125,13 @@ class RecommendationResult:
     history_truncated: bool
     eligible_candidates: int
     timings_ms: dict[str, float] = field(default_factory=dict)
+    #: What ``Recommendation.score`` means for this result.  ``None`` keeps the historical
+    #: single-model meaning; the fusion engine sets ``"rrf_rank_fusion"`` so a fused value is
+    #: never read as a model score.
+    score_kind: str | None = None
+    #: Optional per-identity provenance, keyed by ``parent_asin``.  The fusion engine fills it;
+    #: a single-source engine leaves it empty.
+    provenance: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def returned_k(self) -> int:
@@ -133,7 +140,7 @@ class RecommendationResult:
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view."""
-        return {
+        payload = {
             "recommendations": [r.as_dict() for r in self.recommendations],
             "requested_k": self.requested_k,
             "returned_k": self.returned_k,
@@ -143,6 +150,11 @@ class RecommendationResult:
             "eligible_candidates": self.eligible_candidates,
             "timings_ms": self.timings_ms,
         }
+        if self.score_kind is not None:
+            payload["score_kind"] = self.score_kind
+        if self.provenance:
+            payload["provenance"] = self.provenance
+        return payload
 
 
 def resolve_device(requested: str) -> torch.device:

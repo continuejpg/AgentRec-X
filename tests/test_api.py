@@ -78,7 +78,20 @@ def test_health_reports_ready(client) -> None:
     response = test_client.get("/health")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"status": "ok", "model_loaded": True, "device": "cpu", "detail": None}
+    # The accepted four fields, plus the Serving V1 serving report.  An injected engine carries no
+    # build report, so every serving field is null/False rather than a fabricated claim.
+    assert {k: body[k] for k in ("status", "model_loaded", "device", "detail")} == {
+        "status": "ok",
+        "model_loaded": True,
+        "device": "cpu",
+        "detail": None,
+    }
+    assert set(body) == {
+        "status", "model_loaded", "device", "detail",
+        "requested_engine", "active_engine", "fallback_used", "fallback_reason",
+        "fusion_sources", "rrf_k", "source_head",
+    }
+    assert body["active_engine"] is None and body["fallback_used"] is False
 
 
 def test_health_reports_not_ready_when_model_missing(tmp_path: Path) -> None:

@@ -425,7 +425,12 @@ def test_demo_error_mapping_is_exhaustive() -> None:
 def test_m6_endpoints_are_unchanged_with_the_demo_enabled(harness) -> None:
     health = harness.client.get("/health")
     assert health.status_code == 200
-    assert set(health.json()) == {"status", "model_loaded", "device", "detail"}
+    assert set(health.json()) == {
+        "status", "model_loaded", "device", "detail",
+        # Serving V1 adds which engine actually serves; additive, never replacing the four above.
+        "requested_engine", "active_engine", "fallback_used", "fallback_reason",
+        "fusion_sources", "rrf_k", "source_head",
+    }
 
     model = harness.client.get("/v1/model")
     assert model.status_code == 200

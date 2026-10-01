@@ -9,20 +9,65 @@ Cross-references: [README](../README.md) · [Experiments](EXPERIMENTS.md) ·
 
 ---
 
-## 0. Canonical diagrams (start here)
+## 0. Two tracks: PRODUCT and OFFLINE LAB (start here)
 
-These two diagrams are the **canonical shape** of the repository. Everything below this section
-is the detailed reference; where the two disagree, the diagrams are the summary and the numbered
-sections are the detail.
+This repository contains **two tracks that share one dataset, one protocol and one evaluator, and
+are not one runtime**. Everything the project does belongs to exactly one of them, and every
+diagram and section below is labelled accordingly.
 
-They describe **two stacks that live in one repository but are not one identical runtime stack**:
-the browser serving path, and the offline research/evaluation path.
+| Track | Label used throughout | What it is |
+| --- | --- | --- |
+| **PRODUCT** | `SERVING` | the browser / `/demo/` path that actually runs today |
+| **OFFLINE LAB** | `RESEARCH ONLY` | offline comparison of models, fusion rules and candidate agent policies; it does not execute in the browser |
+
+These two diagrams are the summary of that split. Everything below this section is the detailed
+reference; where the detail and the diagrams disagree, the diagrams are the summary and the
+numbered sections are the detail.
+
+**Terminology, used consistently in this document.**
+
+| Term | Means | Does *not* mean |
+| --- | --- | --- |
+| **BM25 / catalogue evidence** | lexical grounding of a candidate against its own catalogue metadata (`ProductEnricher`); separately, full-catalogue lexical search (`CatalogSearchSource`) exists in the research stack | a production semantic retriever |
+| **LLM** | a *proposal* layer — in the product, the turn route and preference values; in the research stack, an action choice | recommendation truth: it never supplies a product id, a score, evidence, a rank or a metric |
+| **M3 / M4 control plane** | the **offline agent-policy evaluation** stack under `recommendation/control/` | a serving architecture, or a product feature |
+
+Two precision notes the rest of this document depends on:
+
+* the bounded control-plane loop is an **opt-in alpha** in the demo
+  (`AGENTRECX_CONTROL_PLANE=loop`, off by default). Even then the demo registers one candidate
+  source, because the multi-source candidate plane is constructed only by the offline harnesses;
+* Two-Tower, TIGER and multi-source fusion are **not** on the serving path. For fusion that is an
+  implementation fact (see §0c), not a negative research verdict.
 
 ---
 
-### Diagram A — Serving / interview architecture
+### Serving V1 — the frozen product shape (P2-B)
 
-The path the verified browser demo actually takes. Only components on that path appear here.
+```text
+Conversation / Preference
+      -> Fixed Multi-Source Recommendation   SASRec · Two-Tower · Catalogue Lexical
+      -> Deterministic RRF                   reciprocal_rank_fusion, RRF_K = 60, head = 100
+      -> Catalogue Evidence                  candidate-scoped; cannot widen the candidate set
+      -> Preference Matcher / Reranker        unchanged since M10
+      -> Result + Recommendation Trace
+```
+
+Measured on this CPU host: initialisation ≈ 44 s, request median ≈ 1.45 s, of which the lexical
+source is ≈ 1.2 s (the known bottleneck).  `/health` reports `requested_engine`, `active_engine`,
+`fallback_used` and `fallback_reason`, so a degraded deployment is visible over HTTP.
+
+**Evidence boundary.** B1's paired evidence used the offline **depth-1000** protocol; Serving V1
+uses **depth 100**, the serving engines' `MAX_K`.  B1 establishes offline complementarity and the
+promotion case for fixed multi-source fusion; it does not license quoting its +32.4 % relative
+Recall@10 as the quality uplift of the depth-100 serving configuration.
+
+---
+
+### Diagram A — PRODUCT (SERVING) architecture
+
+The path the verified browser demo actually takes. Only components on that path appear here;
+every `RESEARCH ONLY` component is deliberately absent.
 
 ```text
 User / Browser
@@ -45,7 +90,8 @@ RecommendationTool  (recommendation/tools)
       |
       v
 SASRecInferenceEngine  (recommendation/inference/sasrec.py)
-      |  the accepted checkpoint - the ONE candidate generator on this path
+      |  Serving V1: SASRec + Two-Tower + catalogue lexical, combined by RRF_K = 60
+      |  (SASRec alone when AGENTRECX_SERVING_FUSION=sasrec or the Two-Tower artifacts are absent)
       v
 Trusted candidate set
       |  canonical identity parent_asin <-> item_id; PAD = 0 is never a candidate
@@ -132,15 +178,20 @@ layers, and the boundary is structural rather than conventional:
 
 **Deliberately not on this path:** the candidate plane, the candidate ledger, the bounded
 control plane, Two-Tower, TIGER and the fusion comparator. The browser agent consults exactly one
-candidate generator (SASRec) and performs no adaptive multi-source routing. The optional LLM
-Agent decision mode adds a decision policy, not a candidate source: it cannot reach the candidate
-plane, and it changes neither which generator runs nor how anything is scored.
+candidate generator (SASRec) and performs no adaptive multi-source routing. The optional LLM Agent
+decision mode adds a decision policy, not a candidate source: it cannot reach the candidate plane,
+and it changes neither which generator runs nor how anything is scored.
+
+"Deliberately not on this path" describes the current implementation; it is not a claim that
+evidence rejected these components. §0c states, per component, which of the two it is.
 
 ---
 
-## 0b. Diagram B — Offline research / evaluation architecture
+## 0b. Diagram B — OFFLINE LAB (RESEARCH ONLY) architecture
 
-Everything here is **offline**. Nothing in this diagram runs inside the browser demo.
+Everything here is `RESEARCH ONLY`. Nothing in this diagram runs on the browser serving path, with
+one bounded exception stated in the second block — the loop itself can be enabled in the demo as an
+opt-in alpha; nothing else here can.
 
 ```text
 Frozen dataset + protocol
@@ -176,7 +227,9 @@ Frozen dataset + protocol
 ```
 
 A separate, later experiment sits alongside the benchmark arms and is **not** part of the browser
-serving path:
+serving path. It is the subject of M3 and M4, and it is the only research component the demo can
+additionally run — as an opt-in alpha (`AGENTRECX_CONTROL_PLANE=loop`, off by default), still with
+one candidate source:
 
 ```text
 Bounded LLM control plane  (recommendation/control - a SECOND orchestration stack)
@@ -203,21 +256,40 @@ Bounded LLM control plane  (recommendation/control - a SECOND orchestration stac
 
 ---
 
-## 0c. How the two diagrams relate
+## 0c. How the two tracks relate
 
-The **serving stack** is the interview/demo product surface. It is what `/demo/` runs.
+**PRODUCT (`SERVING`)** is the interview/demo product surface. It is what `/demo/` runs.
 
-The **research stack** evaluates alternative retrievers, fusion strategies and a bounded LLM
-policy under the same frozen recommendation protocol, using the same dataset, cohort and
-evaluator.
+**OFFLINE LAB (`RESEARCH ONLY`)** evaluates alternative retrievers, fusion strategies and bounded
+LLM policies under the same frozen recommendation protocol, using the same dataset, cohort and
+evaluator. Sharing an evaluator is what makes results comparable; it does not put anything on the
+serving path.
+
+A research component reaches PRODUCT only by passing the offline evaluation and then a
+serving-candidate audit. Today's status is uneven, and the difference matters:
+
+| Component | Status | Why it is not serving |
+| --- | --- | --- |
+| SASRec | `SERVING` | the accepted checkpoint; the sequential source of Serving V1 |
+| Two-Tower | `SERVING` (Serving V1) | the second source, since P2-A; its three artifacts are `READY` in the B0 registry |
+| catalogue lexical | `SERVING` (Serving V1) | whole-catalogue BM25 source; shares the tokenizer/IDF/BM25 constants with the candidate-scoped enricher |
+| Two-Tower / DSSM | offline comparator | never wired in; promotion needs a serving-candidate audit (latency, artifact distribution, frozen fusion semantics) |
+| TIGER / Semantic-ID | offline source, qualified but **not enabled** | qualified as a candidate source in the research stack only |
+| multi-source rank fusion | offline comparator | an implementation gap: §7 records that the accepted preference reranker runs over the history recommender's candidates only, so reranking over a fused candidate set is not implemented |
+| LLM adaptive source selection | offline evidence, **not promoted** | it lost to fixed multi-source traversal under the frozen protocol (M4) |
+
+Reading the fusion row as "evidence rejected fusion" would be wrong. The offline fusion results
+answer a different question from what the product runs, and what stands between them is an
+implementation and an audit — reported here as such rather than as a decision.
 
 Research findings can inform design decisions, but most research sources are deliberately **not**
-wired into the browser serving path: the serving path uses SASRec and the original conversational
-stack only.
+wired into the browser serving path: it uses SASRec and the original conversational stack only.
 
 The repository therefore contains **two orchestration stacks** — the original browser `AgentGraph`
-stack and the later bounded control-plane stack. They share data, protocol and provenance
-conventions; they are not interchangeable, and they are not one identical serving architecture.
+stack and the later bounded control-plane stack. The second is an opt-in alpha
+(`AGENTRECX_CONTROL_PLANE=loop`, off by default) and the subject of M3/M4. They share data,
+protocol and provenance conventions; they are not interchangeable, and they are not one identical
+serving architecture.
 
 ---
 
@@ -240,7 +312,7 @@ conventions; they are not interchangeable, and they are not one identical servin
 
 ---
 
-## 2. Component map
+## 2. Component map — SHARED
 
 | Module | Owns | Does not own |
 | --- | --- | --- |
@@ -264,7 +336,7 @@ conventions; they are not interchangeable, and they are not one identical servin
 
 ---
 
-## 3. Recommendation backbone
+## 3. Recommendation backbone — SHARED
 
 ```text
 raw Amazon Reviews 2023  ->  preprocessing (iterative k-core, deterministic ids)
@@ -287,7 +359,7 @@ Invariants that later layers depend on:
 
 ---
 
-## 4. Recommendation Tool boundary
+## 4. Recommendation Tool boundary — SERVING
 
 `recommendation/tools/RecommendationTool` is the *only* interface through which anything
 above the model layer obtains candidates.
@@ -308,7 +380,7 @@ any other path, so the graph cannot score, mask or rank candidates itself.
 
 ---
 
-## 5. AgentGraph
+## 5. AgentGraph — SERVING
 
 `recommendation/agent/AgentGraph` composes the accepted stages as **optional injected
 collaborators**. The graph owns orchestration only.
@@ -355,7 +427,7 @@ while keeping `original_rank` auditable.
 
 ---
 
-## 6. Control plane (AgentRec-X 2.0-alpha, IMPLEMENTED)
+## 6. Control plane (AgentRec-X 2.0-alpha) — RESEARCH ONLY (offline agent-policy evaluation)
 
 The accepted `AgentGraph` (section 5) is a fixed DAG: one routing decision per run, and the
 sequence after it is static. `recommendation/control/` adds a second, **opt-in** control
@@ -436,7 +508,7 @@ AGENTRECX_CONTROL_PLANE=loop    # 2.0-alpha bounded agent loop
 
 ---
 
-## 7. Candidate plane (Stage 2, IMPLEMENTED)
+## 7. Candidate plane (Stage 2) — RESEARCH ONLY
 
 Stage 1 allowed one candidate source. Stage 2 allows several, and this is the boundary that
 keeps that safe:
@@ -507,7 +579,7 @@ zero-hit search returns zero hits with `matched=False` - never an arbitrary cata
 
 ---
 
-## 8. Interaction and personalization plane (Stage 3, IMPLEMENTED)
+## 8. Interaction and personalization plane (Stage 3) — RESEARCH ONLY
 
 ### Three signal domains, kept apart
 
@@ -620,7 +692,7 @@ the trajectory cannot become a copy of the user's preferences.
 
 ---
 
-## 9. Reasoning plane (Stage 4, IMPLEMENTED)
+## 9. Reasoning plane (Stage 4) — RESEARCH ONLY
 
 > Reasoning may change a decision; reasoning may not change a fact.
 
@@ -718,7 +790,7 @@ candidate changes no verdict and cannot return it to the recommendation set.
 
 ---
 
-## 10. Model-driven policy (Phase 1, IMPLEMENTED)
+## 10. Model-driven policy (Phase 1) — RESEARCH ONLY
 
 The bounded loop already let an Observation change the next action; the policy that made that
 choice was deterministic.  This phase adds a **model-driven** policy behind the same seam, and
@@ -840,7 +912,7 @@ deterministic and offline.
 
 ---
 
-## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)
+## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2) — RESEARCH ONLY
 
 `CandidateLedger != FeasibleCandidateView`
 ------------------------------------------
@@ -987,7 +1059,7 @@ asserts enforcement is measured against a run that actually enforced.
 
 ---
 
-## 12. Evaluation planes (Stage 6, IMPLEMENTED)
+## 12. Evaluation planes (Stage 6) — RESEARCH ONLY
 
 Three planes, deliberately **not** collapsed into one score.
 
@@ -1075,7 +1147,7 @@ Run it with `.venv/bin/python -m experiments.agent_evaluation_smoke`.
 
 ---
 
-## 13. Product metadata and candidate-scoped RAG
+## 13. Product metadata and candidate-scoped RAG — SERVING
 
 Two stages, deliberately split:
 
@@ -1102,7 +1174,7 @@ reported as unavailable rather than filled with generated text. Any reordering i
 
 ---
 
-## 14. Preference memory
+## 14. Preference memory — SERVING
 
 `recommendation/memory/PreferenceMemoryService` owns explicit conversational preferences.
 It is a different domain from interaction history and shares no field, method or table with
@@ -1128,7 +1200,7 @@ cannot become a behavioural event even in principle.
 
 ---
 
-## 15. Preference evidence
+## 15. Preference evidence — SERVING
 
 `recommendation/preference_matching/PreferenceCandidateMatcher` evaluates each **ACTIVE**
 preference against each candidate's **already-attached** metadata and returns one record per
@@ -1156,7 +1228,7 @@ drops or reorders anything.
 
 ---
 
-## 16. Deterministic reranking
+## 16. Deterministic reranking — SERVING
 
 `recommendation/reranking/PreferenceReranker` applies one frozen lexicographic key:
 
@@ -1195,7 +1267,7 @@ candidate; ordering is unaffected, and the label is deliberately not surfaced to
 
 ---
 
-## 17. Web / session layer
+## 17. Web / session layer — SERVING
 
 Three layers, each with a narrow job:
 
@@ -1244,7 +1316,7 @@ re-ranking — it renders the API's sequence and the API's rank fields.
 
 ---
 
-## 18. State ownership
+## 18. State ownership — SHARED
 
 | State | Owner | Lifetime | Writable by |
 | --- | --- | --- | --- |
@@ -1263,7 +1335,7 @@ turn, so a write during the turn cannot influence it.
 
 ---
 
-## 19. Trust boundaries
+## 19. Trust boundaries — SERVING
 
 ```mermaid
 flowchart TD
@@ -1306,7 +1378,7 @@ flowchart TD
 
 ---
 
-## 20. Failure behaviour
+## 20. Failure behaviour — SERVING
 
 The system prefers explicit failure to plausible degradation.
 
@@ -1328,7 +1400,7 @@ fallback anywhere.
 
 ---
 
-## 21. Determinism and reproducibility
+## 21. Determinism and reproducibility — SHARED
 
 * **Seeds and protocol are recorded.** The accepted run manifest pins seed 2026, the model
   and optimizer configuration, the evaluation protocol version, the cohort definition, the
@@ -1349,7 +1421,7 @@ fallback anywhere.
 
 ---
 
-## 22. Dependency lifecycle / heavy-object reuse
+## 22. Dependency lifecycle / heavy-object reuse — SHARED
 
 Constructed **once per process** by `DemoRuntime`:
 
@@ -1381,7 +1453,7 @@ injected (tests), the demo reuses it instead of loading a second checkpoint.
 
 ---
 
-## 23. Real provider evaluation with record and replay (Phase 3, IMPLEMENTED)
+## 23. Real provider evaluation with record and replay (Phase 3) — RESEARCH ONLY
 
 Phases 1-2.1 built a bounded policy seam, a deterministic model double, constraint enforcement
 and a run-scoped reference boundary.  What none of them had done was put a **real model** through
@@ -1613,7 +1685,7 @@ two `get_details` steps on different candidates were indistinguishable from two 
 
 ---
 
-## 24. Active evidence acquisition and real SimilarItem retrieval (Phase 4, IMPLEMENTED)
+## 24. Active evidence acquisition and real SimilarItem retrieval (Phase 4) — RESEARCH ONLY
 
 Phase 3.1 measured a capability ceiling rather than a reasoning one. Two facts made it visible:
 some stated hard constraints map to `ConstraintKind.UNVERIFIABLE`, so `check_constraint` returned
@@ -1711,7 +1783,7 @@ EVIDENCE_ACTIONS`; reasoning remains budget-free.
 
 ---
 
-## 25. Public recommendation benchmark (Phase 5, IMPLEMENTED)
+## 25. Public recommendation benchmark (Phase 5) — RESEARCH ONLY
 
 `experiments/benchmark_public.py` is the benchmark protocol and `experiments/phase5_benchmark.py` is
 the runner. Nothing here is agent architecture: the phase exists to prove recommendation quality on
@@ -1743,7 +1815,7 @@ others retrieved. Full detail, including the leakage evidence and the sample-ver
 
 ---
 
-## 26. External model backends (Step 2.2 specification; implemented in Steps 2.3–2.7)
+## 26. External model backends (Step 2.2 specification; implemented in Steps 2.3–2.7) — RESEARCH ONLY
 
 Custom **GenRec v0** (`recommendation/semantic_id/`, commit `80f81b1`) is **frozen as a historical
 baseline**. It is not extended: no content embeddings, no k-means++ initialisation, no

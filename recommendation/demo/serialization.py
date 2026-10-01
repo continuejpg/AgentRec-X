@@ -217,6 +217,9 @@ def build_cards(state: Mapping[str, Any]) -> tuple[RecommendationCard, ...]:
             (candidate.parent_asin, candidate.item_id): candidate for candidate in report.candidates
         }
 
+    # The engine's own provenance, keyed by identity; absent for a single-source engine.
+    fusion_by_identity: Mapping[str, Any] = getattr(tool_result, "provenance", None) or {}
+
     cards: list[RecommendationCard] = []
 
     if reranking is not None:
@@ -235,6 +238,7 @@ def build_cards(state: Mapping[str, Any]) -> tuple[RecommendationCard, ...]:
                     unknown_count=candidate.unknown_count,
                     evidence=evidence_by_identity.get(identity),
                     enriched_item=item,
+                    fusion_provenance=fusion_by_identity.get(item.parent_asin),
                 )
             )
         return tuple(cards)
@@ -256,6 +260,7 @@ def build_cards(state: Mapping[str, Any]) -> tuple[RecommendationCard, ...]:
                     unknown_count=sum(1 for r in record if str(r.status.value) == "unknown"),
                     evidence=evidence,
                     enriched_item=item,
+                    fusion_provenance=fusion_by_identity.get(item.parent_asin),
                 )
             )
         return tuple(cards)
@@ -274,6 +279,7 @@ def build_cards(state: Mapping[str, Any]) -> tuple[RecommendationCard, ...]:
                     unknown_count=0,
                     evidence=None,
                     enriched_item=None,
+                    fusion_provenance=fusion_by_identity.get(recommendation.parent_asin),
                 )
             )
     return tuple(cards)
@@ -291,8 +297,13 @@ def _card(
     unknown_count: int,
     evidence: Any,
     enriched_item: Any,
+    fusion_provenance: Mapping[str, Any] | None = None,
 ) -> RecommendationCard:
-    """Assemble one card, taking metadata and evidence from this candidate's own records."""
+    """Assemble one card, taking metadata and evidence from this candidate's own records.
+
+    ``fusion_provenance`` is the *engine's own* per-identity record, passed through unchanged: this
+    layer does not recompute sources or ranks, it only surfaces what the engine already decided.
+    """
     metadata_status = "missing"
     metadata_view: ProductMetadataView | None = None
     fallback_reason: str | None = None
@@ -315,6 +326,10 @@ def _card(
         evidence=_evidence_views(getattr(evidence, "evidence", ())),
         fallback_reason=fallback_reason,
         movement_summary=movement_summary(original_rank, reranked_rank),
+        score_kind=(fusion_provenance or {}).get("score_kind"),
+        fusion_sources=tuple((fusion_provenance or {}).get("sources") or ()),
+        fusion_source_ranks=(fusion_provenance or {}).get("source_ranks") or {},
+        fused_rank=(fusion_provenance or {}).get("fused_rank"),
     )
 
 

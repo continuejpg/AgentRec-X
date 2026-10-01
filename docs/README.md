@@ -5,8 +5,9 @@ depth.
 
 | Document | Read it when you want to… |
 | --- | --- |
-| [README](../README.md) | understand what the project is, what is learned vs rule-based, the accepted benchmark, and how to get started |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | know what each component owns, where the trust boundaries are, how failures behave, and how heavy objects are reused |
+| [README](../README.md) | understand what the project is, what the current product actually runs, what is offline research only, and how to get started |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | start from the two tracks (PRODUCT / OFFLINE LAB), then see what each component owns, where the trust boundaries are, how failures behave, and how heavy objects are reused. Every numbered section is labelled `SERVING`, `RESEARCH ONLY` or `SHARED` |
+| [ARCHITECTURE_TEXT_DIAGRAM.md](ARCHITECTURE_TEXT_DIAGRAM.md) | see the whole shape at once as pure text — product first, offline lab second, then the trust boundary, control-plane loop, candidate plane, backend boundary and a repository map |
 | [EXPERIMENTS.md](EXPERIMENTS.md) | check the dataset, the evaluation protocol, the accepted metrics, the policy diagnostics, and threats to validity |
 | [USAGE.md](USAGE.md) | actually run the server, the demo, the API, the tests and the smokes — including troubleshooting |
 | [PROJECT_HISTORY.md](PROJECT_HISTORY.md) | see the milestone sequence, its commits, and the invariants that held across them |
@@ -15,6 +16,7 @@ depth.
 | [TWOTOWER.md](TWOTOWER.md) | the post-Phase-5 Two-Tower retrieval baseline: architecture, objective, metrics, SASRec-vs-Two-Tower complementarity, and the frozen fusion ablation |
 | [MODEL_EXPANSION_HANDOFF.md](MODEL_EXPANSION_HANDOFF.md) | **handoff for the model-expansion steps**: Two-Tower parity and controls, Semantic-ID baseline, frozen protocol and trust boundaries |
 | [TIGER_BACKEND.md](TIGER_BACKEND.md) | **the Step-2.2 specification**: the separate public-TIGER backend boundary — layering, contracts, artifact schemas, PAD isolation, CERTIFIED retrieval, gates and milestone split |
+| [B1_PREREGISTRATION.md](B1_PREREGISTRATION.md) | **frozen, not yet executed**: the protocol that supplies the missing paired per-user evidence for the Two-Tower fusion increment (arms A/B/C/D, RRF_K=60, frozen heads, paired bootstrap + exact McNemar, promotion criterion) |
 | [PHASE5_HANDOFF.md](PHASE5_HANDOFF.md) | **current handoff**: the public-data recommendation benchmark — dataset and split, five comparable arms, Recall/NDCG/HR@10, the agent-selection ablation, leakage checks and limitations |
 
 Development instructions and engineering rules live in [AGENTS.md](../AGENTS.md).
@@ -42,8 +44,11 @@ Development instructions and engineering rules live in [AGENTS.md](../AGENTS.md)
 
 Numbers quoted in these documents come from a committed artifact or an executed smoke run,
 and each is attributed. Where a value is not recorded, the text says so rather than
-estimating it. Two distinctions are maintained throughout:
+estimating it. Three distinctions are maintained throughout:
 
+* **track labels** — `SERVING` marks what the browser product actually runs, `RESEARCH ONLY`
+  marks the offline lab, and `SHARED` marks what both genuinely use (dataset, split, evaluator).
+  A `RESEARCH ONLY` component is not a product feature and is not on the serving path;
 * **result categories** — the recommendation benchmark, offline policy diagnostics, and
   engineering measurements are reported separately and never merged;
 * **validity level** — no relevance, satisfaction or conversion claim is attached to

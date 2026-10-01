@@ -1,0 +1,222 @@
+{
+  "checkpoints": {
+    "best": {
+      "path": "/root/AgentRec-X/runs/sasrec_canonical_2026/best.pt",
+      "sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912"
+    },
+    "best_epoch": 6,
+    "best_metric": 0.00791319748084027,
+    "last": {
+      "path": "/root/AgentRec-X/runs/sasrec_canonical_2026/last.pt",
+      "sha256": "eeb4b7ce6ccfc37a580819a2529152a3b77ae222338f0ad8724a106fcf90adea"
+    }
+  },
+  "checks": {
+    "HR == Recall @10": true,
+    "HR == Recall @20": true,
+    "HR == Recall @5": true,
+    "all test metrics finite": true,
+    "all validation metrics finite": true,
+    "test cases == evaluation cohort": true,
+    "test metrics in [0,1]": true,
+    "validation cases == evaluation cohort": true
+  },
+  "cohort": {
+    "catalog_size": 156746,
+    "min_sequence_length": 3,
+    "num_test_cases": 412445,
+    "num_users_eligible": 412445,
+    "num_users_excluded": 0,
+    "num_users_total": 412445,
+    "num_validation_cases": 412445,
+    "protocol": "temporal_leave_two_out",
+    "protocol_version": "agentrecx.eval_protocol.v1"
+  },
+  "environment": {
+    "cuda_available": true,
+    "device_capability": [
+      8,
+      9
+    ],
+    "device_count": 1,
+    "device_name": "NVIDIA GeForce RTX 4090",
+    "python_version": "3.10.8",
+    "torch_cuda_version": "11.8",
+    "torch_version": "2.1.2+cu118",
+    "total_memory_bytes": 25250627584
+  },
+  "evaluation_batch_size": 2048,
+  "evaluation_users": 412445,
+  "formal_test_metrics": {
+    "HR@10": 0.013565445089648317,
+    "HR@20": 0.02148892579616676,
+    "HR@5": 0.008304137521366486,
+    "NDCG@10": 0.007019975041142503,
+    "NDCG@20": 0.009008710911775646,
+    "NDCG@5": 0.0053328165345728285,
+    "Recall@10": 0.013565445089648317,
+    "Recall@20": 0.02148892579616676,
+    "Recall@5": 0.008304137521366486
+  },
+  "formal_validation_metrics": {
+    "HR@10": 0.01531113239341003,
+    "HR@20": 0.02385530191904375,
+    "HR@5": 0.0092351707500394,
+    "NDCG@10": 0.00791319748084027,
+    "NDCG@20": 0.010062270127073334,
+    "NDCG@5": 0.00595726128233579,
+    "Recall@10": 0.01531113239341003,
+    "Recall@20": 0.02385530191904375,
+    "Recall@5": 0.0092351707500394
+  },
+  "format": "agentrecx.experiment.v1",
+  "git": {
+    "available": true,
+    "branch": "master",
+    "commit": "859fd0bbbfe8a000f496a3ed4b67a6e229df56c9",
+    "dirty": true
+  },
+  "itemcf_comparison": "PENDING (no same-artifact full-data ItemCF benchmark exists)",
+  "max_seq_len": 50,
+  "max_seq_len_selection": {
+    "candidate_windows": [
+      20,
+      50,
+      100,
+      200
+    ],
+    "reason": "smallest candidate retaining >= 95% of raw transitions",
+    "retention_by_window": {
+      "100": {
+        "raw_transitions": 2263252,
+        "retained_transitions": 2252521,
+        "retention": 0.995259
+      },
+      "20": {
+        "raw_transitions": 2263252,
+        "retained_transitions": 2089299,
+        "retention": 0.92314
+      },
+      "200": {
+        "raw_transitions": 2263252,
+        "retained_transitions": 2260873,
+        "retention": 0.998949
+      },
+      "50": {
+        "raw_transitions": 2263252,
+        "retained_transitions": 2223283,
+        "retention": 0.98234
+      }
+    },
+    "retention_target": 0.95,
+    "selected_max_seq_len": 50,
+    "selected_retention": 0.98234
+  },
+  "model_config": {
+    "activation": "gelu",
+    "dropout": 0.2,
+    "feed_forward_multiplier": 4.0,
+    "hidden_size": 64,
+    "initializer_range": 0.02,
+    "layer_norm_eps": 1e-08,
+    "max_seq_len": 50,
+    "model": "sasrec",
+    "normalization": "pre-norm",
+    "num_blocks": 2,
+    "num_heads": 2,
+    "num_items": 156746,
+    "padding_idx": 0
+  },
+  "num_items": 156746,
+  "num_users": 412445,
+  "optimizer_config": {
+    "batch_size": 256,
+    "device": "cuda:0",
+    "epochs": 1,
+    "learning_rate": 0.001,
+    "max_grad_norm": 5.0,
+    "optimizer": "AdamW",
+    "resample_negatives": false,
+    "seed": 2026,
+    "shuffle": true,
+    "weight_decay": 0.0
+  },
+  "precision": "fp32",
+  "processed_artifacts": {
+    "mappings": {
+      "path": "/root/AgentRec-X/data/processed/Sports_and_Outdoors_mappings.json",
+      "sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912"
+    },
+    "sequences": {
+      "path": "/root/AgentRec-X/data/processed/Sports_and_Outdoors_sequences.json",
+      "sha256": "d3d834260c867ff39ac1b32bb08fd17ea1dc394e9a6fb7af8d19aa046c1eab81"
+    }
+  },
+  "raw_data": {
+    "path": "/root/AgentRec-X/data/raw/Sports_and_Outdoors.jsonl.gz",
+    "sha256": "8f6ddb51c2674d048387533f1c58e22840e5eee639a59737eae979d66a87d642",
+    "size_bytes": 2634864204
+  },
+  "run_id": "m5b-sasrec-canonical-seed2026",
+  "seed": 2026,
+  "test_runtime_seconds": 45.32306054979563,
+  "test_sealed": {
+    "statement": "The formal test set was not used for model selection, early stopping, hyperparameter selection, or restart decisions.",
+    "test_used_for_selection": false
+  },
+  "test_throughput_users_per_second": 9100.113606556957,
+  "timestamp_utc": "2026-09-13T18:15:35Z",
+  "train_history_statistics": {
+    "count": 412445,
+    "max": 694,
+    "mean": 6.4874031689073695,
+    "median": 4.0,
+    "min": 3,
+    "p75": 7.0,
+    "p90": 12.0,
+    "p95": 17.0,
+    "p99": 34.0,
+    "raw_transitions": 2263252,
+    "total_interactions": 2675697,
+    "users_with_zero_transitions": 0
+  },
+  "train_transitions": 2263252,
+  "trainable_users": 412445,
+  "training": {
+    "best_epoch": 6,
+    "best_validation_hr@10": 0.01531113239341003,
+    "best_validation_ndcg@10": 0.00791319748084027,
+    "epochs_completed": 17,
+    "global_steps": 27404,
+    "history_path": "/root/AgentRec-X/runs/sasrec_canonical_2026/history.jsonl",
+    "peak_gpu_memory_bytes": 4997753344,
+    "stop_reason": "early stopping: patience 10 exhausted",
+    "train_seconds": 1627.6649248301983,
+    "validation_runtimes": [
+      43.96523302793503,
+      43.62425842881203,
+      43.78286895528436,
+      43.940437734127045,
+      43.74276016280055,
+      44.10407931730151,
+      44.81273373961449,
+      44.31295754760504,
+      45.255334585905075,
+      44.41171844676137,
+      44.63979463279247,
+      44.24518967047334,
+      44.04486442729831,
+      44.05603167042136,
+      44.14207940176129,
+      43.73793440684676,
+      43.92623981833458
+    ]
+  },
+  "training_batch_size": 256,
+  "validation_runtime_seconds": 44.9060229472816,
+  "verification": {
+    "compileall": "see final report",
+    "pytest": "see final report"
+  },
+  "zero_transition_users": 0
+}
