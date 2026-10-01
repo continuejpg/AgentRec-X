@@ -33,6 +33,70 @@ VENV_PYTHON="${REPO_ROOT}/.venv/bin/python"
 # CWD happened to be the repository root, defeating location independence.
 export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
+# --------------------------------------------------------------------------- #
+# .env autoload
+#
+# A provider configuration is filled in once in `<repo>/.env` and picked up from
+# then on, instead of the operator having to run `set -a; . ./.env; set +a` before
+# every start.  The precedence is:
+#
+#     existing process environment  >  .env  >  application defaults
+#
+# A variable that is already set in the environment is NEVER overwritten, so an
+# explicit `export` in the calling shell keeps winning.
+#
+# The file is PARSED, not sourced: a command substitution or a stray shell
+# statement in `.env` must not execute, and no value is ever echoed, so a
+# credential cannot reach the terminal or a log.
+#
+# `.env.local` is deliberately NOT read here.  It holds the local artifact-recovery
+# credential (HF_*), which the demo server has no use for; only
+# `scripts/fetch_artifacts.py` reads it, and only for its fetch/smoke subcommands.
+# --------------------------------------------------------------------------- #
+load_dotenv_into_environment() {
+    local file="${1:-}"
+    [[ -n "${file}" && -f "${file}" ]] || { DOTENV_LOADED=0; DOTENV_SKIPPED=0; return 0; }
+
+    local line key value
+    DOTENV_LOADED=0
+    DOTENV_SKIPPED=0
+
+    # `|| [[ -n "${line}" ]]` still processes a final line with no trailing newline.
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"     # drop leading blanks
+        [[ -z "${line}" || "${line:0:1}" == "#" ]] && continue
+        line="${line#export }"                      # tolerate `export KEY=...`
+        [[ "${line}" == *=* ]] || continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key%"${key##*[![:space:]]}"}"        # trim trailing blanks in the key
+        [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+
+        value="${value%$'\r'}"                      # tolerate CRLF line endings
+        if [[ "${#value}" -ge 2 ]]; then            # strip one layer of matching quotes
+            case "${value}" in
+                \"*\") value="${value:1:${#value}-2}" ;;
+                \'*\') value="${value:1:${#value}-2}" ;;
+            esac
+        fi
+
+        # `declare -p` succeeds exactly when the name is already set (even if empty),
+        # which is the precedence rule above; it never expands the value.
+        if declare -p "${key}" >/dev/null 2>&1; then
+            DOTENV_SKIPPED=$((DOTENV_SKIPPED + 1))
+            continue
+        fi
+        export "${key}=${value}"
+        DOTENV_LOADED=$((DOTENV_LOADED + 1))
+    done < "${file}"
+    return 0
+}
+
+# Sourced by the test suite to exercise the loader above without starting a server.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
+
 HOST="127.0.0.1"
 PORT="8000"
 DEVICE="cpu"
@@ -86,6 +150,18 @@ if ! [[ "${PORT}" =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
     exit 2
 fi
 
+# Loaded after argument parsing and before anything that reads configuration, so the
+# doctor, the preflight and the server all see exactly the same environment.  Missing
+# or partial provider configuration is not an error: the deterministic product starts
+# either way and the LLM decision mode reports itself unavailable as before.
+ENV_FILE="${REPO_ROOT}/.env"
+load_dotenv_into_environment "${ENV_FILE}"
+if [[ -f "${ENV_FILE}" ]]; then
+    ENV_STATUS="loaded (${DOTENV_LOADED} set, ${DOTENV_SKIPPED} preserved from the environment)"
+else
+    ENV_STATUS="absent (using the current environment)"
+fi
+
 # libgomp rejects an empty or non-positive OMP_NUM_THREADS on every torch import,
 # which would otherwise kill the server with a confusing message.  The sandbox has
 # been observed exporting 0; normalise it here (pytest does the same in conftest.py).
@@ -123,6 +199,7 @@ echo "[1/4] Repository"
 echo "      repo root : ${REPO_ROOT}"
 echo "      cwd       : $(pwd -P)"
 echo "      python    : ${VENV_PYTHON}"
+echo "      .env      : ${ENV_STATUS}"
 
 echo
 echo "[2/4] Preflight (read-only: no installation, no environment mutation)"

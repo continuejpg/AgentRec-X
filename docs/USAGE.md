@@ -100,6 +100,16 @@ Notes:
   with no credential, and the browser offers the mode as unavailable. They are read by
   `recommendation/control/provider_adapter.py`; no other variable accepts a secret, and the
   demo itself never stores one.
+* `./scripts/start_demo.sh` loads `<repo>/.env` automatically when that file exists, so the
+  provider configuration is filled in once instead of re-exported before every start. The
+  precedence is **existing process environment > `.env` > application defaults**: a variable
+  already set in the calling shell is never overwritten. The file is parsed rather than
+  sourced, and no value is echoed, so a credential cannot reach the terminal or a log. A
+  missing or partial `.env` is not an error — the deterministic product starts either way and
+  the LLM mode reports itself unavailable as before.
+* `.env.local` is **not** read by the launcher. It holds the local artifact-recovery
+  credential (`HF_*`), which only `scripts/fetch_artifacts.py` reads, and only for its
+  `fetch` / `smoke` subcommands.
 
 ---
 
