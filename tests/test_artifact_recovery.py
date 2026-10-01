@@ -675,6 +675,28 @@ def test_an_empty_value_is_unset(
     assert env["HF_REVISION"] == "main"
 
 
+def test_an_empty_environment_value_does_not_shadow_a_real_file_value(
+    recovery: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror of the case above, and the one an onboarding report depends on.
+
+    ``.env`` carrying copied empty placeholders must not erase a real value supplied by
+    ``.env.local``: without this, a launcher that exports ``HF_REPO_ID=`` would make a readiness
+    report say "not configured" while ``fetch`` -- run directly -- works.
+    """
+    (tmp_path / ".env").write_text("HF_REPO_ID=\nHF_REVISION=\nHF_TOKEN=\n", encoding="utf-8")
+    (tmp_path / ".env.local").write_text(
+        "HF_REPO_ID=owner/name\nHF_REVISION=main\nHF_TOKEN=token-value\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("HF_REPO_ID", "")
+    monkeypatch.setenv("HF_REVISION", "")
+    monkeypatch.setenv("HF_TOKEN", "")
+    env = recovery.load_environment(tmp_path)
+    assert env["HF_REPO_ID"] == "owner/name"
+    assert env["HF_REVISION"] == "main"
+    assert env["HF_TOKEN"] == "token-value"
+
+
 def test_an_empty_file_value_does_not_shadow_a_real_variable(
     recovery: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

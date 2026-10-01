@@ -389,13 +389,22 @@ def load_environment(repo_root: Path) -> dict[str, str]:
     Precedence: **real process environment > ``.env.local`` > ``.env`` > the manifest default.**
     A variable set in the real environment is never overridden by a file, and an empty value is
     treated as unset rather than as a deliberate empty string.
+
+    "Empty is unset" is applied **at every tier**, not only to the final merge: an empty value
+    therefore cannot erase a valid value from a lower-precedence source.  That is what makes an
+    empty ``HF_REPO_ID=`` placeholder in ``.env`` harmless when ``.env.local`` supplies the real
+    one -- and it is why a readiness report and an actual fetch always agree on the
+    configuration.
     """
     merged: dict[str, str] = {}
     for name in ENV_FILES:  # lowest precedence first; a later assignment wins
         for key, value in read_env_file(Path(repo_root) / name).items():
+            if value:
+                merged[key] = value
+    for key, value in os.environ.items():
+        if value:
             merged[key] = value
-    merged.update(os.environ)
-    return {key: value for key, value in merged.items() if value}
+    return merged
 
 
 def resolve_durable(

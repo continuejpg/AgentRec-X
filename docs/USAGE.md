@@ -140,9 +140,24 @@ Setup and start are **separate concepts**. Setup is the only mutating step; a no
 never runs `pip` and never changes the environment.
 
 ```bash
-./scripts/setup_demo.sh        # once, per fresh environment
+./scripts/setup_demo.sh        # once per fresh clone: prepare if needed, then report readiness
 ./scripts/start_demo.sh        # every time after that
 ```
+
+`setup_demo.sh` ends with the demo readiness report. It installs nothing when the environment is
+already complete, and its exit status is the verdict:
+
+```text
+DEMO READINESS: READY      -> scripts/start_demo.sh can serve the product
+DEMO READINESS: BLOCKED    -> a required item is missing; the report names it and prints the
+                              recovery command (scripts/fetch_artifacts.py verify / fetch --all)
+```
+
+Required: a supported Python with the runtime dependencies installed, and the six runtime
+artifacts registered in `config/demo_runtime_artifacts.json` (verified by
+`scripts/fetch_artifacts.py`, not by a second digest table). Optional, and never blocking: an LLM
+provider configuration in `.env` (the deterministic product needs none) and an artifact-recovery
+credential (only needed to download artifacts). Neither value is ever printed.
 
 `setup_demo.sh` (~1-3 min, needs network access once):
 

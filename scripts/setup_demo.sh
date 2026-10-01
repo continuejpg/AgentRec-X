@@ -16,8 +16,14 @@
 #      (requirements-cpu.txt) -- never an unqualified `pip install torch`;
 #   5. assert the result really is CPU-only (torch.version.cuda is None, no `nvidia`
 #      package directory) and that `pip check` is clean;
-#   6. deep-verify the five accepted runtime artifacts by SHA-256;
-#   7. finish with the doctor, so a failure is visible before the first start.
+#   6. print the demo readiness report and exit with its verdict.
+#
+# Step 6 owns no artifact truth of its own: the runtime artifact list, paths, sizes and
+# digests come from config/demo_runtime_artifacts.json through scripts/fetch_artifacts.py,
+# and are verified by that module's own verifier.  The report ends in
+#   DEMO READINESS: READY      (start_demo.sh can serve the product)
+#   DEMO READINESS: BLOCKED    (a required item is missing, with the recovery command)
+# The LLM provider and the artifact-recovery credential are OPTIONAL and never block.
 #
 # It never downloads, regenerates or modifies an artifact, and it never touches a
 # running demo server.
@@ -120,10 +126,23 @@ fi
 # --------------------------------------------------------------------------- #
 # [3/6] / [4/6] Dependencies
 # --------------------------------------------------------------------------- #
+# Preparation runs only when something is actually missing: a complete environment is
+# left untouched rather than reinstalled on every onboarding check.
+ENV_COMPLETE=0
+if [[ -x "${VENV_PYTHON}" ]] \
+   && "${VENV_PYTHON}" -m pip check >/dev/null 2>&1 \
+   && "${VENV_PYTHON}" -c 'import torch, numpy' >/dev/null 2>&1; then
+    ENV_COMPLETE=1
+fi
+
 if (( SKIP_INSTALL == 1 )); then
     echo
     echo "[3/6] Runtime dependencies  : SKIPPED (--skip-install)"
     echo "[4/6] CPU-only PyTorch       : SKIPPED (--skip-install)"
+elif (( ENV_COMPLETE == 1 )); then
+    echo
+    echo "[3/6] Runtime dependencies  : already satisfied (pip check clean, torch importable)"
+    echo "[4/6] CPU-only PyTorch       : already satisfied"
 else
     echo
     echo "[3/6] Runtime dependencies (requirements.txt)"
@@ -174,19 +193,23 @@ print("      device             : cpu")
 PY
 
 # --------------------------------------------------------------------------- #
-# [6/6] Artifacts + doctor
+# [6/6] Demo readiness
 # --------------------------------------------------------------------------- #
-echo
-echo "[6/6] Accepted runtime artifacts (full SHA-256 verification)"
-"${VENV_PYTHON}" -m recommendation.local_demo doctor --verify
-DOCTOR_STATUS=$?
+# The provider configuration is read from <repo>/.env, exactly as ./scripts/start_demo.sh
+# reads it, so this report describes the environment the server will actually get.  The
+# loader is not re-implemented here: sourcing the launcher defines it and returns before
+# the launcher can do anything else.
+# shellcheck source=./start_demo.sh
+source "${SCRIPT_DIR}/start_demo.sh"
+load_dotenv_into_environment "${REPO_ROOT}/.env"
 
 echo
-echo "======================================================================"
-if (( DOCTOR_STATUS == 0 )); then
-    echo " Setup complete. Start the demo with:  ./scripts/start_demo.sh"
-else
-    echo " Setup finished but the environment is NOT ready (see the doctor above)."
+echo "[6/6] Demo readiness (runtime artifacts verified by scripts/fetch_artifacts.py)"
+"${VENV_PYTHON}" -m recommendation.demo.readiness --repo-root "${REPO_ROOT}"
+READINESS_STATUS=$?
+
+if (( READINESS_STATUS != 0 )); then
+    echo >&2
+    echo "Setup finished, but the demo cannot start yet: a required item is missing above." >&2
 fi
-echo "======================================================================"
-exit "${DOCTOR_STATUS}"
+exit "${READINESS_STATUS}"

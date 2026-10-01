@@ -84,15 +84,26 @@ knowledge, alter the model's scores, mask history, or invent a canonical product
 ## Run the live demo
 
 ```bash
-./scripts/start_demo.sh
+./scripts/setup_demo.sh      # prepare if needed, then report what is missing
+./scripts/start_demo.sh      # start once the report says DEMO READINESS: READY
 ```
 
 Then open **<http://127.0.0.1:8000/demo/>**.
+
+`setup_demo.sh` is the single onboarding entry point: it creates `.venv` and installs the
+dependencies only when they are not already there, then prints a readiness report ending in
+`DEMO READINESS: READY` or `DEMO READINESS: BLOCKED`. A blocked report names the missing runtime
+artifact and prints the exact recovery command (`scripts/fetch_artifacts.py verify` and `fetch`).
+An LLM provider and an artifact-recovery credential are **optional** and never block: without them
+the deterministic product serves normally, and the LLM Agent decision mode simply reports itself
+unavailable. The report reads provider configuration from `.env` exactly as the launcher does, and
+never prints a credential.
 
 Two paths, and the difference matters to a reviewer:
 
 | Path | Command | Needs |
 | --- | --- | --- |
+| **Readiness check** | `./scripts/setup_demo.sh` | nothing beyond the checkout; it reports what is missing and how to get it |
 | **Offline quick start** (recommended first) | `./scripts/run_demo.sh` | nothing: it generates a small synthetic catalogue and a **randomly initialised** checkpoint |
 | **Full demo** (the measured configuration) | `./scripts/start_demo.sh` | the accepted SASRec checkpoint and the ~300 MB catalogue metadata |
 
