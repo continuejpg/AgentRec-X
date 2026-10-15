@@ -48,6 +48,7 @@ from .schemas import (
     TracePreferenceAction,
     TraceRankChange,
     ActivePreferenceView,
+    AgentExecutionView,
     AuditView,
     ChatResponse,
     EvidenceView,
@@ -64,6 +65,7 @@ __all__ = [
     "build_cards",
     "build_trace",
     "build_trace_with_decision",
+    "evidence_views",
     "movement_summary",
 ]
 
@@ -170,7 +172,7 @@ def _metadata_view(metadata: Any) -> ProductMetadataView | None:
     )
 
 
-def _evidence_views(evidence: Any) -> tuple[EvidenceView, ...]:
+def evidence_views(evidence: Any) -> tuple[EvidenceView, ...]:
     """Copy M10A evidence records, preserving status exactly and in order."""
     return tuple(
         EvidenceView(
@@ -323,7 +325,7 @@ def _card(
         match_count=match_count,
         violation_count=violation_count,
         unknown_count=unknown_count,
-        evidence=_evidence_views(getattr(evidence, "evidence", ())),
+        evidence=evidence_views(getattr(evidence, "evidence", ())),
         fallback_reason=fallback_reason,
         movement_summary=movement_summary(original_rank, reranked_rank),
         score_kind=(fusion_provenance or {}).get("score_kind"),
@@ -545,6 +547,9 @@ def build_chat_response(
     turn_id: str,
     turn_number: int,
     decision: TurnDecision | None = None,
+    agent: AgentExecutionView | None = None,
+    feedback: Any | None = None,
+    feedback_marks: Mapping[str, str] | None = None,
 ) -> ChatResponse:
     """Build the public chat response for one completed turn.
 
@@ -552,9 +557,33 @@ def build_chat_response(
     never from graph state, so a caller cannot influence them.  ``decision`` describes how the
     turn's decisions were reached; the default is the deterministic policy, which is what every
     caller that does not pass one actually ran.
+
+    ``agent`` is the execution record of a turn that ran the tool-selection decision mode's
+    *direct* branch - the one branch of that mode which reuses this graph-shaped builder.  It
+    stays ``None`` for every other caller, so the deterministic and plan-backed chat paths are
+    byte-for-byte what they were.
     """
     cards = build_cards(state)
+    if feedback_marks:
+        # E-03C: the user's own attitude, marked on the card it belongs to.  It is never merged into
+        # ``reason``/``knowledge_evidence``, which describe the product rather than the user.
+        cards = tuple(
+            card.model_copy(
+                update={"feedback": feedback_marks.get(card.parent_asin)}
+            )
+            if feedback_marks.get(card.parent_asin) is not None
+            else card
+            for card in cards
+        )
     audit = build_audit(state, cards)
+    if feedback is not None:
+        from .schemas import ProductFeedbackView
+
+        audit = audit.model_copy(
+            update={
+                "feedback": ProductFeedbackView.model_validate(feedback),
+            }
+        )
     route = str(state.get("route", "direct"))
     preferences = active_preference_views(getattr(state.get("memory_update"), "active", None))
     update = memory_update_view(state)
@@ -587,4 +616,5 @@ def build_chat_response(
             decision=decision if decision is not None else TurnDecision(),
             memory_update=update,
         ),
+        agent=agent,
     )

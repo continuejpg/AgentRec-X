@@ -426,10 +426,18 @@ def test_m6_endpoints_are_unchanged_with_the_demo_enabled(harness) -> None:
     health = harness.client.get("/health")
     assert health.status_code == 200
     assert set(health.json()) == {
-        "status", "model_loaded", "device", "detail",
-        # Serving V1 adds which engine actually serves; additive, never replacing the four above.
-        "requested_engine", "active_engine", "fallback_used", "fallback_reason",
-        "fusion_sources", "rrf_k", "source_head",
+        "active_engine",
+        "detail",
+        "device",
+        "fallback_reason",
+        "fallback_used",
+        "fusion_sources",
+        "model_loaded",
+        "requested_engine",
+        "rrf_k",
+        "source_head",
+        "status",
+        "tiger",
     }
 
     model = harness.client.get("/v1/model")

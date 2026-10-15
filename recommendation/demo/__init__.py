@@ -49,11 +49,14 @@ from .agent_policy import (
 )
 from .agent_schemas import (
     AGENT_API_VERSION,
+    AGENT_OUTCOMES,
     MAX_CONSTRAINTS,
     MAX_HISTORY_ITEMS,
     AgentCandidateView,
     AgentConstraintItem,
     AgentEligibilityView,
+    AgentExecutionView,
+    AgentOutcome,
     AgentRecommendRequest,
     AgentRecommendResponse,
     AgentRecommendationView,
@@ -76,6 +79,7 @@ from .schemas import (
     DECISION_MODES,
     DECISION_MODE_DETERMINISTIC,
     DECISION_MODE_LLM,
+    DECISION_MODE_LLM_AGENT,
     DEFAULT_DECISION_MODE,
     DEMO_API_VERSION,
     MAX_MESSAGE_LENGTH,
@@ -124,9 +128,11 @@ from .sessions import (
 
 __all__ = [
     "AGENT_API_VERSION",
+    "AGENT_OUTCOMES",
     "DECISION_MODES",
     "DECISION_MODE_DETERMINISTIC",
     "DECISION_MODE_LLM",
+    "DECISION_MODE_LLM_AGENT",
     "DEFAULT_DECISION_MODE",
     "DEFAULT_DEMO_K",
     "DEFAULT_DEMO_MEMORY_DB",
@@ -142,6 +148,7 @@ __all__ = [
     "AgentCandidateView",
     "AgentConstraintItem",
     "AgentEligibilityView",
+    "AgentExecutionView",
     "AgentRecommendRequest",
     "AgentRecommendResponse",
     "AgentRecommendationView",

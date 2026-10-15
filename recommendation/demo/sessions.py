@@ -37,7 +37,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .profiles import DemoProfile
 from .schemas import DECISION_MODES, DEFAULT_DECISION_MODE
@@ -115,6 +115,18 @@ class DemoSession:
     #: argument: the browser selects it once and every later turn inherits it, so a turn that
     #: omits the field cannot silently change how the session decides.
     decision_mode: str = DEFAULT_DECISION_MODE
+    #: The products this session's **last recommendation turn** actually presented, in the order
+    #: the user saw them (E-03C).  Minimal on purpose: canonical identity, the integer id the cards
+    #: showed, the final (post-ranking) position, an optional title for unambiguous reference, and
+    #: the run that produced them.  No scores, no metadata, no ledger, no other session's cards.
+    #:
+    #: Lifecycle: a turn that presents products replaces it; a turn that presents none (a direct
+    #: answer, a refused or empty run) leaves it untouched, so feedback can still refer to the last
+    #: list the user actually saw.  It is per-session by construction, so no cross-session
+    #: reference is possible; clearing it is what ``reset`` does.
+    last_presentation: tuple[Any, ...] = ()
+    #: The turn id that produced :attr:`last_presentation`, for the audit trail.
+    last_presentation_turn: str | None = None
     #: Serialises this session's turns only.  Repr-excluded: it is not state to display.
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -126,6 +138,20 @@ class DemoSession:
     def turn_id_for(self, sequence: int) -> str:
         """Return the server-owned turn identifier for a sequence number."""
         return f"{self.session_id}:{sequence:06d}"
+
+    def record_presentation(self, cards: "Sequence[Any]", *, turn_id: str) -> int:
+        """Replace this session's last-presentation record; returns how many cards it holds.
+
+        Called with the response's **own** recommendation list, so the record cannot contain a
+        product the user was not shown: no truncated candidate, no ungrounded identity, no
+        raw fusion rank mistaken for the displayed position.
+        """
+        if not cards:
+            # A turn that presented nothing does not erase what the user last saw.
+            return len(self.last_presentation)
+        self.last_presentation = tuple(cards)
+        self.last_presentation_turn = turn_id
+        return len(self.last_presentation)
 
     def switch_decision_mode(self, mode: str) -> str:
         """Set this session's decision mode, or refuse an unknown one.

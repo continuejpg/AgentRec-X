@@ -199,7 +199,12 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
     failure means for the configured mode.
     """
     from recommendation.catalog import MetadataIndex
-    from recommendation.inference.fusion import FusionInferenceEngine
+    from recommendation.backends.tiger_engine import set_shared_engine  # noqa: F401
+    from recommendation.inference.fusion import (
+        TIGER_SERVING_HEAD,
+        FusionInferenceConfig,
+        FusionInferenceEngine,
+    )
     from recommendation.inference.lexical import CatalogueLexicalIndex
     from recommendation.inference.twotower import (
         TwoTowerInferenceConfig,
@@ -220,6 +225,26 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
         raise RuntimeError("no catalogue artifact is configured")
     records = MetadataIndex.load(settings.catalog_path).records
     lexical = CatalogueLexicalIndex.build(records)
+    # Serving V1 stays the default and is byte-identical: the TIGER profile is only realised when
+    # the deployment opts in, and it is a *separate* profile rather than a change to V1.
+    config = FusionInferenceConfig()
+    tiger_engine = None
+    if _tiger_serving_enabled():
+        from recommendation.backends.tiger_engine import TigerServingEngine, TigerWorkerConfig
+
+        config = FusionInferenceConfig.for_profile("serving_v2_tiger")
+        tiger_engine = TigerServingEngine(
+            sequential,  # the deployment's trusted identity map, reused unchanged
+            config=TigerWorkerConfig(device=settings.device, k_max=TIGER_SERVING_HEAD),
+            blocking_start=False,  # a request must never wait out a minutes-long cold start
+        )
+        # Load once, in the background: /health reports "loading" until the handshake completes.
+        # Registered before the prewarm so the Agent service adopts this very engine rather than
+        # building a second worker with its own cold start.
+        from recommendation.backends.tiger_engine import set_shared_engine
+
+        set_shared_engine(tiger_engine)
+        tiger_engine.prewarm(background=True)
     return FusionInferenceEngine(
         sequential=sequential,
         two_tower=two_tower,
@@ -227,6 +252,8 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
         catalogue=records,
         item_id_for=sequential.parent_asin_to_item_id,
         is_known_identity=sequential.has_parent_asin,
+        config=config,
+        tiger=tiger_engine,
     )
 
 
@@ -257,6 +284,30 @@ def build_engine_report(
             report["fusion_sources"] = list(described.get("fusion_sources") or [])
             report["rrf_k"] = described.get("rrf_k")
             report["source_head"] = described.get("source_head_depth")
+            report["serving_fusion_profile"] = described.get("serving_fusion_profile")
+            report["source_head_depths"] = described.get("source_head_depths")
+            report["depth_policy"] = described.get("depth_policy")
+            # Four states an operator must be able to tell apart: disabled (profile without
+            # TIGER), loading, ready, failed - plus the artifact hashes and the retrieval mode.
+            tiger_health = described.get("tiger_health")
+            if tiger_health is None:
+                report["tiger"] = {"state": "disabled", "ready": False}
+            else:
+                state = str(tiger_health.get("state") or "not_started")
+                report["tiger"] = {
+                    "state": state,
+                    # Only the completed handshake makes the worker ready; a loading engine is
+                    # reported as loading, never as ready.
+                    "ready": state == "ready" and bool(tiger_health.get("started")),
+                    "started": bool(tiger_health.get("started")),
+                    "device": tiger_health.get("device"),
+                    "checkpoint_sha256": tiger_health.get("checkpoint_sha256"),
+                    "sid_artifact_sha256": tiger_health.get("sid_artifact_sha256"),
+                    "retrieval_mode": tiger_health.get("retrieval_mode"),
+                    "error": tiger_health.get("error"),
+                    "assets_missing": list(tiger_health.get("assets_missing") or []),
+                }
+            report["tiger_in_fusion"] = bool(tiger_health is not None)
         if mode != "sasrec" and report["active_engine"] != "fusion_rrf":
             report["fallback_used"] = True
             report["fallback_reason"] = (
@@ -265,6 +316,65 @@ def build_engine_report(
     else:
         report["fallback_reason"] = error
     return engine, error, report
+
+
+def release_serving_engine(state: Any) -> dict[str, Any]:
+    """Release the serving TIGER worker and clear the shared registry.  Never raises.
+
+    Called from the lifespan's ``finally`` and directly testable, which is why it is a function
+    rather than three inline lines: the shutdown path must be *executed* by a test, not read.
+    """
+    from recommendation.backends.tiger_engine import set_shared_engine
+
+    engine = getattr(state, "engine", None)
+    tiger = getattr(engine, "tiger", None) if engine is not None else None
+    released = False
+    if tiger is not None:
+        try:
+            tiger.close()
+            released = True
+        except Exception as exc:  # noqa: BLE001 - shutdown must not raise
+            LOGGER.error("releasing the TIGER worker failed: %s", type(exc).__name__)
+    set_shared_engine(None)
+    return {"tiger_released": released, "registry_cleared": True}
+
+
+def live_tiger_block(engine: Any, serving: Mapping[str, Any]) -> dict[str, Any] | None:
+    """TIGER's lifecycle as of **this request**, for ``/health``.
+
+    Reads ``engine.tiger_health()`` when the serving engine offers it (the V2 fusion engine does)
+    and otherwise falls back to the startup report, which is the correct answer for a deployment
+    that does not include TIGER at all.  ``ready`` is derived here so it can never disagree with
+    the state: only a completed handshake makes the worker ready.
+    """
+    probe = getattr(engine, "tiger_health", None) if engine is not None else None
+    health: Mapping[str, Any] | None = None
+    if callable(probe):
+        try:
+            health = probe()
+        except Exception:  # noqa: BLE001 - a broken probe must not break /health
+            health = {"state": "failed", "error": "the TIGER health probe raised"}
+    if health is None:
+        cached = serving.get("tiger")
+        return dict(cached) if isinstance(cached, dict) else None
+    state = str(health.get("state") or "not_started")
+    return {
+        "state": state,
+        "ready": state == "ready" and bool(health.get("started")),
+        "started": bool(health.get("started")),
+        "device": health.get("device"),
+        "checkpoint_sha256": health.get("checkpoint_sha256"),
+        "sid_artifact_sha256": health.get("sid_artifact_sha256"),
+        "retrieval_mode": health.get("retrieval_mode"),
+        "error": health.get("error"),
+        "assets_missing": list(health.get("assets_missing") or []),
+    }
+
+
+def _tiger_serving_enabled() -> bool:
+    """Whether this deployment opted TIGER into the serving fusion (off by default)."""
+    value = (os.environ.get("AGENTRECX_TIGER") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def build_engine(settings: ServiceSettings) -> tuple[Any | None, str | None]:
@@ -301,6 +411,36 @@ def build_engine(settings: ServiceSettings) -> tuple[Any | None, str | None]:
             return _build_sequential_engine(settings), None
         except Exception as inner:  # noqa: BLE001
             return None, f"{type(inner).__name__}: {inner}"
+
+
+def title_projection(asins: Sequence[str], catalogue: Any, *, limit: int = 50) -> dict[str, Any]:
+    """Read-only product titles for identities a caller already holds.
+
+    Reuses the catalogue the serving engine loaded (no reload, no second identity map).  It never
+    resolves identity, never reorders or rescores a recommendation, and never exposes a filesystem
+    path: an unknown identity - or a record without a title - maps to ``None`` so the caller can
+    fall back to the ASIN.
+    """
+    ordered: list[str] = []
+    for raw in asins:
+        value = str(raw).strip()
+        if value and value not in ordered:
+            ordered.append(value)
+    if len(ordered) > limit:
+        raise ValueError(f"at most {limit} identities may be looked up at once")
+    titles: dict[str, str | None] = {}
+    for value in ordered:
+        record = None
+        getter = getattr(catalogue, "get", None)
+        if callable(getter):
+            try:
+                record = getter(value)
+            except Exception:  # noqa: BLE001 - a broken lookup degrades to "no title"
+                record = None
+        title = getattr(record, "title", None) if record is not None else None
+        titles[value] = str(title) if isinstance(title, str) and title.strip() else None
+    return {"titles": titles, "count": len(titles),
+            "with_title": sum(1 for value in titles.values() if value)}
 
 
 def create_app(
@@ -383,6 +523,9 @@ def create_app(
         try:
             yield
         finally:
+            # The TIGER worker is a child of this process; closing it here (once) is what makes a
+            # shutdown explicit rather than a side effect of the parent exiting.
+            release_serving_engine(state)
             if owns_demo:
                 closer = getattr(application.state.demo_runtime, "close", None)
                 if callable(closer):
@@ -445,6 +588,10 @@ def create_app(
         """Readiness: distinguishes "process running" from "model loaded"."""
         loaded = state.model_loaded
         serving = state.serving or {}
+        # TIGER is read from the **live engine** on every request: the startup report is a
+        # snapshot taken while the worker was still loading, and a cached block would report
+        # "loading" for the rest of the process's life.
+        tiger_block = live_tiger_block(state.engine, serving)
         return HealthResponse(
             status="ok" if loaded else "unavailable",
             model_loaded=loaded,
@@ -456,6 +603,7 @@ def create_app(
             fallback_reason=serving.get("fallback_reason") if serving.get("fallback_used") else None,
             fusion_sources=serving.get("fusion_sources"),
             rrf_k=serving.get("rrf_k"),
+            tiger=tiger_block,
             source_head=serving.get("source_head"),
         )
 
@@ -473,6 +621,24 @@ def create_app(
             raise InferenceError(state.error or "model not loaded")
         assert state.engine is not None
         return ModelInfoResponse(**state.engine.model_metadata())
+
+    @app.get("/v1/catalogue/titles", tags=["catalogue"])
+    async def catalogue_titles(asins: str = "") -> Any:
+        """Titles for parent_asin values the caller already has (comma separated, max 50).
+
+        A projection, not a search: it adds no candidates and changes no score.  The Fusion view
+        uses it to show a product name beside an identity it received from /v1/recommend.
+        """
+        engine = state.engine
+        catalogue = getattr(engine, "catalogue", None) if engine is not None else None
+        values = [part.strip() for part in str(asins).split(",") if part.strip()]
+        try:
+            return title_projection(values, catalogue)
+        except ValueError as exc:
+            return JSONResponse(
+                status_code=422,
+                content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
+            )
 
     @app.post("/v1/recommend", response_model=RecommendResponse, tags=["recommendation"])
     async def recommend(payload: RecommendRequest) -> RecommendResponse:

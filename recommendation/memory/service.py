@@ -37,6 +37,7 @@ unchanged.  A failure never leaves partially applied state.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
@@ -44,6 +45,7 @@ from typing import Any, Sequence
 from .schemas import (
     PreferenceCandidate,
     PreferenceExtraction,
+    PreferenceKind,
     PreferenceExtractionError,
     PreferenceExtractor,
     PreferenceMemoryEntry,
@@ -153,6 +155,16 @@ def _supersedes(left: PreferenceMemoryEntry, right: PreferenceCandidate) -> bool
     return True
 
 
+def _normalise_span(text: str) -> str:
+    """A span reduced to comparable words: case, punctuation and surrounding space removed.
+
+    The extractor quotes the sentence it read and the caller quotes the sentence it resolved; they
+    differ by a full stop often enough that comparing them literally would silently keep a candidate
+    the caller asked to drop.
+    """
+    return " ".join(re.findall(r"[^\W_]+", str(text).lower()))
+
+
 class PreferenceMemoryService:
     """Turn-level preference-memory orchestration over an injected store.
 
@@ -212,12 +224,28 @@ class PreferenceMemoryService:
         user_message: str,
         turn_id: str,
         now: float | None = None,
+        extra_candidates: Sequence[PreferenceCandidate] = (),
+        extra_removals: Sequence[PreferenceRemoval] = (),
+        suppress_text_spans: Sequence[str] = (),
     ) -> TurnMemoryResult:
         """Extract and persist explicit preferences from one user-authored turn.
 
         ``user_message`` must be user-authored text.  System prompts, tool output and
         model reasoning are never passed here, and there is a guard against calling
         this with a blank message.
+
+        ``extra_candidates`` / ``extra_removals`` carry statements the *trusted* caller has
+        already resolved to something the extractor cannot know - today an identity-level product
+        feedback entry, whose value is a canonical ``parent_asin`` taken from a card this session
+        really presented.  They are validated and applied exactly like extracted ones: same
+        contract, same deduplication, same supersession, same audit trail, and every one of them
+        is re-validated here, so a caller cannot use them to bypass validation.
+
+        ``suppress_text_spans`` lists spans of this message whose *generic* interpretation must be
+        dropped: when the user says "I don't like the black shoes you showed me", the sentence is
+        feedback about one product and must not also be stored as a dislike of black shoes in
+        general.  Only candidates whose ``source_text`` lies inside such a span are dropped, so an
+        unrelated clause in the same message keeps its own meaning.
 
         Raises
         ------
@@ -241,11 +269,16 @@ class PreferenceMemoryService:
         # 1. Explicit retractions are applied even if the same turn was seen before,
         #    because a retraction carries no new entry to deduplicate on.
         extraction = self._extract(user_message)
+        extraction = self._with_caller_statements(
+            extraction,
+            extra_candidates=extra_candidates,
+            suppress_text_spans=suppress_text_spans,
+        )
 
         # 2-3. Validate everything before writing anything.  A candidate carrying
         # mode=REMOVE becomes a retraction directive here, so nothing is stored for it.
         candidates, inline_removals = self._validate_candidates(extraction)
-        removals = extraction.removals + inline_removals
+        removals = extraction.removals + inline_removals + tuple(extra_removals)
 
         update = MemoryUpdateSummary(removal_directives=len(removals))
         timestamp = time.time() if now is None else float(now)
@@ -301,6 +334,38 @@ class PreferenceMemoryService:
         )
 
     @staticmethod
+    def _with_caller_statements(
+        extraction: PreferenceExtraction,
+        *,
+        extra_candidates: Sequence[PreferenceCandidate],
+        suppress_text_spans: Sequence[str],
+    ) -> PreferenceExtraction:
+        """Fold caller-resolved statements in, dropping the generic reading they override.
+
+        The suppression is deliberately narrow: a candidate survives unless the span it quotes
+        lies inside one of the suppressed spans, so "I don't like the shoes you showed me, and I
+        prefer blue" keeps the colour statement and loses only the shoe remark.
+        """
+        spans = tuple(
+            _normalise_span(span) for span in suppress_text_spans if span and span.strip()
+        )
+        preferences = list(extraction.preferences)
+        if spans:
+            preferences = [
+                candidate
+                for candidate in preferences
+                if not any(
+                    _normalise_span(candidate.source_text) in span
+                    or span in _normalise_span(candidate.source_text)
+                    for span in spans
+                )
+            ]
+        preferences.extend(tuple(extra_candidates))
+        return PreferenceExtraction(
+            preferences=tuple(preferences), removals=tuple(extraction.removals)
+        )
+
+    @staticmethod
     def _validate_candidates(
         extraction: PreferenceExtraction,
     ) -> tuple[tuple[PreferenceCandidate, ...], tuple[PreferenceRemoval, ...]]:
@@ -322,10 +387,17 @@ class PreferenceMemoryService:
                 ) from exc
             if checked.mode is PreferenceMode.REMOVE:
                 # Converted into an equivalent retraction directive rather than being
-                # stored as a value, so "remove this" is never remembered as a fact.
+                # stored as a value, so "remove this" is never remembered as a fact.  A
+                # candidate that names a value retracts **that value** (E-03C: "undo what I
+                # said about this product"); the accepted removal model expresses a
+                # value-scoped retraction with ``value`` alone.
                 extra_removals.append(
                     PreferenceRemoval(
-                        kind=checked.kind,
+                        **(
+                            {"value": checked.value}
+                            if checked.kind is PreferenceKind.PRODUCT
+                            else {"kind": checked.kind}
+                        ),
                         source_text=checked.source_text,
                         extractor=checked.extractor,
                     )

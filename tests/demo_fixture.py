@@ -65,6 +65,14 @@ class DemoEngine:
     truthful stand-in for :class:`~recommendation.inference.SASRecInferenceEngine`: both
     the accepted Tool and the accepted Milestone 6 ``/v1/recommend`` endpoint consume it
     unchanged.  It exists only so the demo tests do not need the 349 MB checkpoint.
+
+    It also answers the trusted-identity protocol (``has_parent_asin`` /
+    ``parent_asin_to_item_id`` / ``item_id_to_parent_asin``) over the same rows it recommends
+    from.  The accepted serving engine provides those methods, and
+    ``recommendation.control.GroundingVerifier`` refuses an identity map that cannot answer
+    them - so without this the *agent* control plane (the candidate plane and its ledger) could
+    not be composed over this double at all, and a chat-mode test would fail on the fixture
+    rather than on the behaviour under test.
     """
 
     device = "cpu"
@@ -75,6 +83,20 @@ class DemoEngine:
         self._rows = tuple(rows)
         self.error = error
         self.calls: list[dict[str, Any]] = []
+        self._by_asin = {str(row[0]): int(row[1]) for row in self._rows}
+        self._by_id = {int(row[1]): str(row[0]) for row in self._rows}
+
+    def has_parent_asin(self, parent_asin: str) -> bool:
+        """True when the trusted mapping knows this identity: the grounding verifier's check."""
+        return str(parent_asin) in self._by_asin
+
+    def parent_asin_to_item_id(self, parent_asin: str) -> int:
+        """The trusted integer identity of a catalogue identity."""
+        return self._by_asin[str(parent_asin)]
+
+    def item_id_to_parent_asin(self, item_id: int) -> str:
+        """The identity an integer id refers to, or the id itself when the mapping has none."""
+        return self._by_id.get(int(item_id), str(item_id))
 
     @property
     def call_count(self) -> int:
@@ -225,6 +247,7 @@ def build_harness(
     clock: Any = None,
     memory_db: Path | None = None,
     demo: bool = True,
+    explanations: bool | None = None,
 ) -> DemoHarness:
     """Build a full M11 app over synthetic artifacts and a real SQLite memory store."""
     from fastapi.testclient import TestClient
@@ -244,6 +267,9 @@ def build_harness(
         kwargs["ttl_seconds"] = ttl_seconds
     if clock is not None:
         kwargs["clock"] = clock
+    if explanations is not None:
+        # The product-knowledge explanation capability is opt-in; a test that wants it says so.
+        kwargs["explanations"] = explanations
     runtime = build_demo_runtime(**kwargs)
 
     app = create_app(

@@ -54,9 +54,12 @@ __all__ = [
 #: Provenance recorded on every preference this layer proposes.
 LLM_EXTRACTOR_NAME = "llm_policy_v1"
 
-#: The two decision modes the browser may select.  ``deterministic`` is the default and needs
-#: no credential; ``llm`` requires a configured provider.
-DECISION_MODES: tuple[str, ...] = ("deterministic", "llm")
+#: The decision modes a demo session may select.  ``deterministic`` is the default and needs
+#: no credential; ``llm`` runs *this* module's plan (route plus preference mutations);
+#: ``llm_agent`` runs the tool-selection plan
+#: (:mod:`recommendation.demo.llm_agent`) through the bounded agent loop.  Both policy-backed
+#: modes require a configured provider and are refused when it is missing.
+DECISION_MODES: tuple[str, ...] = ("deterministic", "llm", "llm_agent")
 
 #: The mode a session runs in unless it is explicitly switched.  Named separately from the
 #: tuple because the default is a property of the demo, not of the ordering of this list.

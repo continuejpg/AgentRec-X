@@ -50,17 +50,25 @@ from recommendation.control.candidate_ledger import (
     CandidateProvenance,
     CandidateVerificationStatus,
 )
+from recommendation.preference_matching.schemas import PreferenceEvidence
 
 __all__ = [
     "AGENT_API_VERSION",
+    "AGENT_OUTCOMES",
     "MAX_CONSTRAINTS",
     "MAX_HISTORY_ITEMS",
-    "AgentConstraintItem",
     "AgentCandidateView",
+    "AgentConstraintItem",
     "AgentEligibilityView",
+    "AgentExecutionView",
+    "AgentObservationView",
+    "AgentOutcome",
     "AgentRecommendationView",
     "AgentRecommendRequest",
     "AgentRecommendResponse",
+    "AgentReplanView",
+    "ReplanDecisionView",
+    "ReplanObservationView",
     "AgentTerminalView",
     "AgentTimingView",
     "GroundedCandidateView",
@@ -258,6 +266,173 @@ class AgentRecommendationView(BaseModel):
             "This is provenance, not a score."
         ),
     )
+    # -- memory-aware ranking (E-02A): optional, and absent unless it actually ran ---------- #
+    reranked_rank: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "1-based position under the accepted M10B preference key, or null when no memory-aware "
+            "ranking ran. ``rank`` keeps the run's baseline (fused) position, so the two orders "
+            "stay distinguishable; the list itself is emitted in ``reranked_rank`` order."
+        ),
+    )
+    match_count: int = Field(default=0, ge=0)
+    violation_count: int = Field(default=0, ge=0)
+    unknown_count: int = Field(default=0, ge=0)
+    evidence: tuple[PreferenceEvidence, ...] = Field(
+        default=(),
+        description=(
+            "Real M10A evidence for this identity: one record per ACTIVE preference, each with its "
+            "three-state verdict, the catalogue field it read and its reason code. Empty when no "
+            "memory-aware ranking ran, and an undecidable preference is reported as 'unknown' - "
+            "never as a match or a violation."
+        ),
+    )
+    rerank_reason: str | None = Field(
+        default=None,
+        description="M10B's own machine-readable reason for this candidate's placement, if any.",
+    )
+
+
+class AgentObservationView(BaseModel):
+    """What one finished run's own record proves about tools, candidates and budget (E-03A).
+
+    Every field names a record the controller wrote: the terminal block for the verdict and the
+    budgets, the trajectory for what each source did, the grounding block for what was verified,
+    and the request/final list for ``k`` and the presented count.  Nothing here is inferred from
+    prose, from a product title or from a model's own account, and no field scores relevance: the
+    observation counts products, it does not judge them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_ref: str = Field(..., description="The controller's run identity; run-local and opaque.")
+    requested_k: int = Field(..., ge=0, description="The k this run was asked for.")
+    plan: tuple[str, ...] = Field(default=(), description="The sources the authorised plan named.")
+    executed_sources: tuple[str, ...] = Field(
+        default=(), description="The trusted candidate sources this run actually consulted."
+    )
+    unexecuted_sources: tuple[str, ...] = Field(
+        default=(),
+        description="Sources this deployment offers that the run did not consult - the only ones a "
+        "later retrieval could legally use.",
+    )
+    source_calls: dict[str, int] = Field(
+        default_factory=dict,
+        description="How often each source was consulted.  An action that cannot name its source "
+        "is reported under its own action name rather than guessed at.",
+    )
+    source_outcomes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each consulted source's outcome: 'candidates', 'empty' (it ran and returned "
+        "nothing) or 'failed' (a validation/verification failure or a failure observation).",
+    )
+    failed_sources: tuple[str, ...] = ()
+    empty_sources: tuple[str, ...] = ()
+    grounded_count: int = Field(
+        default=0, ge=0,
+        description="Products the run verified.  The ledger is identity-keyed, so this is already "
+        "de-duplicated across sources.",
+    )
+    ungrounded_count: int = Field(
+        default=0, ge=0,
+        description="Identities a source returned that the trusted mapping does not know.  They are "
+        "never candidates.",
+    )
+    multi_source_count: int = Field(
+        default=0, ge=0, description="Grounded products more than one source proposed."
+    )
+    presented_count: int = Field(
+        default=0, ge=0, description="Products the final answer actually presents."
+    )
+    candidates_sufficient: bool = Field(
+        default=False,
+        description="True when the answer presents at least the requested k.  A count, never a "
+        "claim about relevance.",
+    )
+    termination_status: str = ""
+    termination_reason: str | None = None
+    steps_used: int = Field(default=0, ge=0)
+    steps_limit: int = Field(default=0, ge=0)
+    tool_calls_used: int = Field(default=0, ge=0)
+    tool_calls_limit: int = Field(default=0, ge=0)
+    retries_used: int = Field(default=0, ge=0)
+    remaining_steps: int = Field(default=0, ge=0)
+    remaining_tool_calls: int = Field(default=0, ge=0)
+    has_further_budget: bool = False
+    eligibility_evaluated: bool = Field(
+        default=False,
+        description="True when a hard constraint was active and verdicts were computed.  False "
+        "means 'not evaluated', never 'everything passed'.",
+    )
+    eligible_candidate_count: int = Field(default=0, ge=0)
+
+
+class ReplanDecisionView(BaseModel):
+    """The gate's decision for one finished run (E-03A): whether to retrieve again, and why.
+
+    This round only decides.  A ``continue_recommended`` answer is a bounded suggestion - the run
+    has budget and a legal source it has not consulted - and it never widens a budget, invents a
+    source, or overrides a refusal.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    continue_recommended: bool
+    reason_code: str = Field(..., description="One code from the gate's closed vocabulary.")
+    eligible_sources: tuple[str, ...] = ()
+    remaining_tool_budget: int = Field(default=0, ge=0)
+    remaining_step_budget: int = Field(default=0, ge=0)
+    decision_source: str = Field(
+        default="deterministic_rules",
+        description="Who decided.  Only the deterministic rules exist in this milestone.",
+    )
+    explanation: str | None = Field(
+        default=None, max_length=280, description="A factual sentence naming the reason only."
+    )
+
+
+class ReplanObservationView(BaseModel):
+    """A compact before/after snapshot of one run's candidate state (E-03B).
+
+    The *initial* snapshot is taken when the replan decision is made (inside the run, before any
+    appended source), the *final* one after the run finished - so "what the first sources found" and
+    "what the request ended with" can never be read as the same number.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidates: int = Field(default=0, ge=0, description="Verified candidates at that moment.")
+    sources_consulted: tuple[str, ...] = ()
+    source_outcomes: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each consulted source's outcome: 'candidates', 'empty' or 'failed'.",
+    )
+    remaining_tool_calls: int = Field(default=0, ge=0)
+    remaining_steps: int = Field(default=0, ge=0)
+
+
+class AgentReplanView(BaseModel):
+    """What bounded replanning actually did in one run (E-03B).
+
+    A decision *and* its execution, distinguished by :attr:`status` from the closed vocabulary:
+    the run never needed it, the deterministic gate blocked it, the model declined, the model's
+    answer was invalid or its call failed, or a source was appended and produced candidates, none,
+    or a failure.  ``model_called`` is what makes "asked and declined" different from "never asked".
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: str = Field(..., description="One code from the replanning status vocabulary.")
+    reason_code: str = ""
+    model_called: bool = False
+    chosen_source: str | None = None
+    eligible_sources: tuple[str, ...] = ()
+    decision_step: int | None = Field(
+        default=None, description="The step index at which the one decision was taken."
+    )
+    initial: ReplanObservationView = Field(default_factory=ReplanObservationView)
+    final: ReplanObservationView = Field(default_factory=ReplanObservationView)
 
 
 class AgentCandidateView(BaseModel):
@@ -428,6 +603,102 @@ class AgentTimingView(BaseModel):
     serialize_ms: float = Field(..., ge=0.0, description="Wall time building this response.")
 
 
+#: What one agent-backed turn turned out to be.  A closed set, because "no products in this
+#: response" has three different causes and a caller must be able to tell them apart instead of
+#: reading every one of them as a successful direct answer:
+#:
+#: ``direct``
+#:     the decision policy chose a direct turn; no controller ran at all;
+#: ``recommended``
+#:     a controller ran and the candidates it produced are being presented;
+#: ``no_candidates``
+#:     a controller ran, finished, and had nothing presentable;
+#: ``refused``
+#:     a controller ran and its completion guard refused to finish the run
+#:     (``TerminationReason.COMPLETION_REFUSED``: nothing grounded, or the last execution failed);
+#: ``failed``
+#:     a controller ran and did not complete and was not refused - a capability failure, an
+#:     invalid action or an exhausted budget.  The terminal block carries the controller's own
+#:     precise reason, so this label never has to stand in for a taxonomy.
+AGENT_OUTCOMES: tuple[str, ...] = (
+    "direct",
+    "recommended",
+    "no_candidates",
+    "refused",
+    "failed",
+)
+
+AgentOutcome = Literal["direct", "recommended", "no_candidates", "refused", "failed"]
+
+
+class AgentExecutionView(BaseModel):
+    """What one chat turn's agent execution actually did, restricted to safe, already-public facts.
+
+    This is the chat-side home of the execution summary
+    :func:`~recommendation.demo.agent_chat_adapter.agent_execution_digest` produces for callers
+    that log or assert.  It exists because ``route`` alone cannot describe an agent turn: a
+    recommendation the controller could not complete and a turn the policy decided needed no
+    products both present an empty list, and only the run's own record tells them apart.
+
+    Every field is copied from the executed run - the planned names are the validated plan's own,
+    ``terminal``/``trajectory``/``grounded``/``timing`` are the very views
+    ``POST /v1/demo/agent/recommend`` already publishes - so this block can never disagree with
+    the run, and it widens no boundary: no prompt, no model prose, no stack trace, no raw memory,
+    no internal object.  ``action_counts`` is derived here (and only here) from the trajectory's
+    *validated* steps, which is what makes "which sources ran, and how many times" answerable
+    without re-deriving it from a log.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: AgentOutcome = Field(
+        ..., description="Which of the closed outcomes above this turn actually was."
+    )
+    planned_sources: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "The candidate sources the validated decision plan named, in the plan's order. The "
+            "names the model chose - not a default list, and not a claim that they produced "
+            "anything (see grounded.sources_present for what did)."
+        ),
+    )
+    controller_executed: bool = Field(
+        ...,
+        description=(
+            "True only when the bounded recommendation controller actually ran. False for a "
+            "direct turn, which is the one case where no tool was executed at all."
+        ),
+    )
+    action_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "How many times each action kind was **executed** (validated steps only), so a source "
+            "the controller legally consulted twice is visible as two. A proposal the validator "
+            "refused is not counted as an execution."
+        ),
+    )
+    terminal: AgentTerminalView | None = Field(
+        default=None, description="The controller's own terminal record; null when none ran."
+    )
+    trajectory: TrajectorySummaryView | None = Field(
+        default=None,
+        description=(
+            "The run's projected control record: proposed action kinds, their counts, the "
+            "observation types and the refusal codes. Never a reasoning transcript."
+        ),
+    )
+    grounded: GroundedCandidateView | None = Field(
+        default=None,
+        description=(
+            "The run's grounded candidate universe with per-source provenance (source, that "
+            "source's own rank, its own raw score and score kind). Null when no controller ran."
+        ),
+    )
+    timing: AgentTimingView | None = Field(
+        default=None, description="The run's wall-clock split; null when no controller ran."
+    )
+
+
 class AgentRecommendResponse(BaseModel):
     """Body of a successful ``POST /v1/demo/agent/recommend``."""
 
@@ -454,6 +725,28 @@ class AgentRecommendResponse(BaseModel):
     eligibility: AgentEligibilityView
     terminal: AgentTerminalView
     trajectory: TrajectorySummaryView
+    observation: AgentObservationView | None = Field(
+        default=None,
+        description=(
+            "What this run's own execution record proves about tools, candidates and budget, with "
+            "the deterministic replan decision (E-03A).  Present on every executed run."
+        ),
+    )
+    replan: ReplanDecisionView | None = Field(
+        default=None,
+        description=(
+            "Whether another retrieval is worth attempting, from the run's own record alone.  The "
+            "terminal gate's decision: it never executes anything (E-03A)."
+        ),
+    )
+    replan_execution: AgentReplanView | None = Field(
+        default=None,
+        description=(
+            "What bounded replanning did during the run, present only when the capability is "
+            "enabled (E-03B): the initial observation, the decision, and the appended source's "
+            "real outcome."
+        ),
+    )
     timing: AgentTimingView = Field(
         default_factory=lambda: AgentTimingView(total_ms=0.0, agent_ms=0.0, serialize_ms=0.0)
     )

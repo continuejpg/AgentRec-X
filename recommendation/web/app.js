@@ -785,7 +785,14 @@
 
     var ranks = el("div", "card-ranks");
     ranks.appendChild(el("div", null, "Original SASRec rank: #" + card.original_rank));
-    ranks.appendChild(el("div", null, "Raw SASRec ranking score " + formatScore(card.sasrec_score)
+    /* ``sasrec_score`` is the only score slot the chat contract has, so the card must say which
+       kind of score it actually holds: printing a fused or single-source score as a SASRec logit
+       would be a false claim about what the number measures. */
+    var scoreKind = card.score_kind || "sasrec_logit";
+    var scoreLabel = (scoreKind === "sasrec_logit")
+      ? "Raw SASRec ranking score "
+      : "Ranking score (" + scoreKind + ") ";
+    ranks.appendChild(el("div", null, scoreLabel + formatScore(card.sasrec_score)
       + " (a ranking score, not a probability)"));
     if (card.movement_summary) { ranks.appendChild(el("div", null, card.movement_summary)); }
     details.appendChild(ranks);

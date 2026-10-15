@@ -60,13 +60,16 @@ def test_response_still_validates_and_trace_is_optional(harness: Any) -> None:
 
 
 def test_trace_is_additive_only(harness: Any) -> None:
-    """Nothing that existed before may change shape; trace is the only new key."""
+    """Nothing that existed before may change shape; ``trace`` and ``agent`` are the only added keys."""
     session_id = harness.create_session()["session_id"]
-    body_before_shape = set(_chat(harness, session_id, CAMPING))
-    assert body_before_shape == {
+    body = _chat(harness, session_id, CAMPING)
+    assert set(body) == {
         "api_version", "session_id", "turn_id", "turn", "route", "message",
-        "active_preferences", "memory_update", "recommendations", "audit", "trace",
+        "active_preferences", "memory_update", "recommendations", "audit", "trace", "agent",
     }
+    # ``agent`` (E-01A-3B) is additive and null on this path: the deterministic mode never runs the
+    # tool-selection policy, so the field is present-but-empty rather than a new claim.
+    assert body["agent"] is None, "the deterministic path must not claim an agent execution"
 
 
 # --------------------------------------------------------------------------- #

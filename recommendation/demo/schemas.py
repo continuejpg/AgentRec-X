@@ -26,9 +26,14 @@ Nothing here computes, orders, filters or scores anything.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Any, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# The agent run's execution view lives with the agent response it belongs to; this module
+# re-exports it for its long-standing importers (``serialization``, ``demo/__init__``) instead of
+# redefining it, so there is exactly one definition of the execution record.
+from .agent_schemas import AgentExecutionView
 
 from recommendation.api.schemas import MAX_K, MIN_K
 
@@ -45,6 +50,7 @@ __all__ = [
     "ChatResponse",
     "CreateSessionRequest",
     "DecisionMode",
+    "AgentExecutionView",
     "DecisionModeView",
     "DecisionModesResponse",
     "DemoHealthResponse",
@@ -68,12 +74,19 @@ DEMO_API_VERSION = "1.0.0"
 #: credential, so an existing client that never sends the field keeps exactly its old behaviour.
 DECISION_MODE_DETERMINISTIC = "deterministic"
 DECISION_MODE_LLM = "llm"
-DECISION_MODES: tuple[str, ...] = (DECISION_MODE_DETERMINISTIC, DECISION_MODE_LLM)
+#: The agent mode: the request is planned by the model, validated, then executed by the controller
+#: (the E-01A path).  Additive: a client that never sends it keeps its previous behaviour.
+DECISION_MODE_LLM_AGENT = "llm_agent"
+DECISION_MODES: tuple[str, ...] = (
+    DECISION_MODE_DETERMINISTIC,
+    DECISION_MODE_LLM,
+    DECISION_MODE_LLM_AGENT,
+)
 DEFAULT_DECISION_MODE = DECISION_MODE_DETERMINISTIC
 
 #: The wire type of a decision mode.  A closed set, so an unknown mode is a validation error
 #: rather than an unrecognised string a session would have to interpret.
-DecisionMode = Literal["deterministic", "llm"]
+DecisionMode = Literal["deterministic", "llm", "llm_agent"]
 
 #: Upper bound on a chat message.  A demo turn is a shopping sentence, not a document;
 #: bounding it keeps one request from carrying an unbounded amount of prompt text.
@@ -282,6 +295,132 @@ class ProductMetadataView(BaseModel):
     )
 
 
+class KnowledgeEvidenceView(BaseModel):
+    """One catalogue fact cited by a card's grounded reason (V2 E-02B).
+
+    ``evidence_id`` is ``"<parent_asin>:<field path>"`` and identifies a unit of *this product's own*
+    retrieved knowledge; ``field_path`` and ``value`` are what the catalogue actually holds and what
+    the validated claim repeated.  The user's own feedback is never part of this block.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evidence_id: str
+    parent_asin: str
+    item_id: int
+    field_path: str
+    value: str
+    source: str = "catalog_metadata"
+    retrieval_score: float = 0.0
+    truncated: bool = Field(
+        default=False, description="True when the cited value was shortened for display."
+    )
+
+
+class RagAuditView(BaseModel):
+    """What the product-knowledge explanation step did for this turn (V2 E-02B)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    model_called: bool = False
+    products_examined: int = Field(default=0, ge=0)
+    products_with_evidence: int = Field(default=0, ge=0)
+    evidence_units: int = Field(default=0, ge=0)
+    explanations_accepted: int = Field(default=0, ge=0)
+    explanations_rejected: int = Field(default=0, ge=0)
+    explanations_abstained: int = Field(default=0, ge=0)
+    failure: str | None = None
+    reason_source: str | None = Field(
+        default="template_from_validated_claims",
+        description=(
+            "Where an accepted reason's sentence came from.  Never free model prose: this "
+            "deployment renders it from the claims it validated against the product's own "
+            "catalogue evidence."
+        ),
+    )
+
+
+class ReplanAuditView(BaseModel):
+    """The replan gate's decision for this turn (V2 E-03A), and what bounded replanning did (E-03B).
+
+    A decision, never an execution, in the E-03A fields; the E-03B fields report what actually
+    happened inside the run, with ``status`` from a closed vocabulary so "never asked", "asked and
+    declined", "invalid answer" and "a source really ran" can never be confused.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    continue_recommended: bool = False
+    reason_code: str = ""
+    eligible_sources: tuple[str, ...] = ()
+    remaining_tool_budget: int = Field(default=0, ge=0)
+    remaining_step_budget: int = Field(default=0, ge=0)
+    decision_source: str = "deterministic_rules"
+    status: str | None = Field(
+        default=None,
+        description=(
+            "The replanning outcome when the capability ran: not_triggered / gate_blocked / "
+            "model_declined / invalid_output / model_failed / appended_candidates / "
+            "appended_empty / appended_failed.  Null when the capability is disabled."
+        ),
+    )
+    model_called: bool = False
+    chosen_source: str | None = None
+    initial_candidate_count: int = Field(default=0, ge=0)
+    final_candidate_count: int = Field(default=0, ge=0)
+
+
+class ProductFeedbackView(BaseModel):
+    """What one product-level feedback statement did (V2 E-03C).
+
+    Six stages, kept apart on purpose: the user's wording (``action``/``span``), the reference the
+    system parsed (``reference``), the **verified** identity (``parent_asin``/``item_id``/
+    ``final_position``), whether a record was written (``written``/``memory_id``/``entry_status``),
+    what is ACTIVE now (``active_product_feedback``), and the effect the next turn will therefore
+    apply (``effect``).  ``status`` is the honest verdict, including refusals: an ambiguous reference
+    or a product this session never presented writes nothing.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: str = Field(
+        ..., description="none | resolved | ambiguous | unknown_product | no_presentation"
+    )
+    action: str = Field(
+        default="none", description="like | dislike | exclude | correct | retract | none"
+    )
+    reference: str = ""
+    span: str = ""
+    detail: str = ""
+    parent_asin: str | None = None
+    item_id: int | None = None
+    final_position: int | None = Field(
+        default=None,
+        description="The position the user actually saw, after fusion and ranking - never a raw rank.",
+    )
+    written: bool = False
+    entry_status: str | None = Field(
+        default=None,
+        description=(
+            "The lifecycle state the stored entry ended in (active / superseded / removed).  The "
+            "store's own entry identifier is deliberately not published: 'a record exists and here "
+            "is its state' is what the contract needs, and a store handle is not."
+        ),
+    )
+    effect: str | None = Field(
+        default=None,
+        description=(
+            "promote | demote | replace | retract.  This deployment orders candidates by M10A "
+            "evidence, so an explicit exclusion request is reported as ``demote``: a disliked "
+            "product sinks and is absent whenever the pool is larger than k, but it is not deleted "
+            "from the candidate set."
+        ),
+    )
+    active_product_feedback: tuple[dict[str, str], ...] = ()
+    active_before: tuple[dict[str, str], ...] = ()
+
+
 class RecommendationCard(BaseModel):
     """One recommendation, with both ranks and its own evidence attached by identity."""
 
@@ -340,6 +479,35 @@ class RecommendationCard(BaseModel):
             "Never a quality or relevance claim."
         ),
     )
+    # -- grounded explanation (V2 E-02B): about the product, never about the user ----------------- #
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "A sentence rendered from validated catalogue claims for this product, or null when "
+            "nothing was validated.  Never free model prose."
+        ),
+    )
+    reason_status: str = Field(
+        default="not_attempted",
+        description=(
+            "grounded | insufficient_evidence | rejected | not_attempted.  A card with no verified "
+            "reason says 'not_attempted' rather than leaving the field empty, so 'we did not try' "
+            "and 'we tried and found nothing' stay distinguishable."
+        ),
+    )
+    knowledge_evidence: tuple[KnowledgeEvidenceView, ...] = Field(
+        default=(),
+        description="The catalogue facts the reason cites, one per validated claim.",
+    )
+    # -- the user's own attitude (V2 E-03C): not a fact about the product ------------------------- #
+    feedback: str | None = Field(
+        default=None,
+        description=(
+            "The feedback that was ACTIVE when this answer was ranked: 'liked' or 'disliked'.  It "
+            "is the user's attitude, never a catalogue fact, and it never appears in ``reason`` or "
+            "``knowledge_evidence``."
+        ),
+    )
 
 
 class AuditView(BaseModel):
@@ -362,6 +530,24 @@ class AuditView(BaseModel):
     reranked_order: tuple[str, ...] = ()
     ranked_with_preference_count: int = Field(default=0, ge=0)
     ranked_with_preferences: tuple[ActivePreferenceView, ...] = ()
+    rag: RagAuditView | None = Field(
+        default=None,
+        description="The product-knowledge explanation step's own record (V2 E-02B), or null.",
+    )
+    replan: ReplanAuditView | None = Field(
+        default=None,
+        description=(
+            "The observation-and-replan gate's decision for this turn, or null when no controller "
+            "ran (a direct turn).  A decision only: E-03A does not execute a second plan."
+        ),
+    )
+    feedback: ProductFeedbackView | None = Field(
+        default=None,
+        description=(
+            "Product-level feedback for this turn (E-03C): the resolved reference, the verified "
+            "identity, the stored record and the effect the next turn applies."
+        ),
+    )
 
 
 class TraceMemoryChanges(BaseModel):
@@ -566,6 +752,15 @@ class ChatResponse(BaseModel):
             "The client renders this sequence and must not re-sort it."
         ),
     )
+    agent: AgentExecutionView | None = Field(
+        default=None,
+        description=(
+            "The agent run's own execution view, present when a controller executed this turn (the "
+            "llm_agent mode).  Null for the deterministic, llm and direct paths, which run no "
+            "controller - stated rather than defaulted, because 'no controller ran' and 'a "
+            "controller ran and found nothing' are different facts."
+        ),
+    )
     audit: AuditView
     trace: RecommendationTrace | None = Field(
         default=None,
@@ -642,3 +837,4 @@ class ResetResponse(BaseModel):
             "be created explicitly."
         ),
     )
+

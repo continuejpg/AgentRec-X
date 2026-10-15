@@ -91,6 +91,15 @@ class PreferenceKind(str, Enum):
     COLOR = "color"
     MATERIAL = "material"
     FREE_FORM_CONSTRAINT = "free_form_constraint"
+    #: Identity-level feedback about **one** product the user was actually shown (E-03C).
+    #:
+    #: ``value`` is the product's canonical ``parent_asin`` - never a title, a colour or a
+    #: category - and the kind means "the user's attitude towards this product", nothing broader:
+    #: a dislike of one product is *not* a dislike of its brand, colour or category, and the
+    #: extractor is never allowed to widen it into one.  An entry of this kind carries no text a
+    #: lexical query could use, so it never shapes a catalogue query; it is compared against a
+    #: candidate's own identity instead (see ``recommendation.preference_matching``).
+    PRODUCT = "product"
 
 
 class PreferencePolarity(str, Enum):

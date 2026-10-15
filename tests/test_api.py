@@ -90,6 +90,9 @@ def test_health_reports_ready(client) -> None:
         "status", "model_loaded", "device", "detail",
         "requested_engine", "active_engine", "fallback_used", "fallback_reason",
         "fusion_sources", "rrf_k", "source_head",
+        # T-02.7 fix D: the health payload reports TIGER's lifecycle.  Null when the serving
+        # profile does not include TIGER, so a non-TIGER deployment is unchanged in meaning.
+        "tiger",
     }
     assert body["active_engine"] is None and body["fallback_used"] is False
 

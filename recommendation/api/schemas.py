@@ -7,7 +7,7 @@ the served item mapping?" belongs to the inference engine, which owns the mappin
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Any, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,6 +60,30 @@ class RecommendationItem(BaseModel):
     )
 
 
+class TigerHealthBlock(BaseModel):
+    """TIGER's lifecycle, as the HTTP surface reports it.
+
+    ``ready`` is derived from the engine's own handshake, so a deployment whose worker is still
+    loading reports ``state="loading"``/``ready=false`` and can never look available.
+    """
+
+    # ``ignore`` rather than ``forbid``: the engine's ``health()`` is the source of truth and may
+    # grow a field; that must never turn /health into a 500.
+    model_config = ConfigDict(extra="ignore")
+
+    state: str = Field(..., description="disabled | not_started | loading | ready | failed")
+    ready: bool = Field(..., description="True only once the worker handshake completed.")
+    started: bool | None = None
+    device: str | None = None
+    assets_missing: list[str] = Field(default_factory=list)
+    checkpoint_sha256: str | None = None
+    sid_artifact_sha256: str | None = None
+    retrieval_mode: str | None = Field(
+        default=None, description="The mode the engine runs: CERTIFIED or APPROXIMATE."
+    )
+    error: str | None = None
+
+
 class RecommendResponse(BaseModel):
     """Body of a successful ``POST /v1/recommend``."""
 
@@ -83,6 +107,22 @@ class RecommendResponse(BaseModel):
     )
     eligible_candidates: int = Field(
         ..., description="Catalog size minus the supplied history items."
+    )
+    score_kind: str | None = Field(
+        default=None,
+        description=(
+            "What the scores mean.  A fused result reports 'rrf_rank_fusion'; a single-model "
+            "result reports that model's own kind.  Never a probability."
+        ),
+    )
+    provenance: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-identity provenance: the fused rank and score, which sources contributed, each "
+            "source's own rank and score kind, and - for TIGER candidates - the model's score, "
+            "Semantic ID and retrieval mode.  Carried rather than dropped: a fused answer that "
+            "cannot say where it came from is not an auditable one."
+        ),
     )
     timings_ms: dict[str, float] = Field(
         default_factory=dict, description="Server-side scoring/ranking timings in milliseconds."
@@ -110,6 +150,13 @@ class HealthResponse(BaseModel):
     )
     fallback_used: bool = Field(
         default=False, description="True when fusion was requested but SASRec-only is serving."
+    )
+    tiger: TigerHealthBlock | None = Field(
+        default=None,
+        description=(
+            "TIGER's lifecycle when the serving profile includes it; absent (or state "
+            "'disabled') when it does not."
+        ),
     )
     fallback_reason: str | None = Field(
         default=None, description="Why the fallback happened. Present only when it did."

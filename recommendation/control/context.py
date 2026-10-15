@@ -14,15 +14,25 @@ What a policy sees is what a *control* decision actually needs:
 * the user's request text (untrusted, already visible to it today);
 * the actions the **system** currently permits (never self-assumed);
 * whether a trusted history exists at all - a boolean, never the history;
-* how many explicit preferences are active - a count, never the entries;
+* how many explicit preferences are active, plus the ACTIVE preference *values* a policy may fold
+  into a retrieval query - but never the snapshot those values came from (see below);
 * whether a verified candidate set already exists - a boolean plus an opaque reference,
   never the candidates;
 * the last observation, already minimised;
 * the remaining step and tool-call budgets, so a policy can behave sensibly near a limit
   even though it can never raise one.
 
+The preference view is deliberate, bounded, and therefore stated precisely.  Shaping a lexical
+query from what the user stated is a genuine *control* decision, so the policy is handed the
+projection built by
+:func:`recommendation.memory.query_adapter.project_active_preferences`: for each ACTIVE entry its
+kind, polarity, value, opaque entry id and sort key.  It is **not** handed the M9 snapshot and
+therefore cannot reach the owning ``user_key`` (neither the snapshot's nor an entry's), the verbatim
+``source_text`` span of the user's message, the ``source_turn_id``, the extractor name, any
+timestamp, or any removed/superseded entry - a preference the user withdrew never crosses at all.
+
 What it must never expose, and therefore has no field for: database handles, credentials,
-``user_key``, the memory store, the preference entries themselves, the metadata index, the
+``user_key``, the memory store, the preference snapshot or its entries, the metadata index, the
 SASRec engine, the Tool, item ids, ``parent_asin`` values, raw scores, mapping or
 checkpoint internals, and secret configuration of any kind.
 
@@ -33,9 +43,12 @@ builds a fresh one for every step.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .schemas import ActionKind, Observation, RunStatus
+
+if TYPE_CHECKING:  # annotation only: the control plane does not import the memory layer at runtime
+    from recommendation.memory.query_adapter import ActivePreferenceProjection
 
 __all__ = [
     "CandidateReference",
@@ -148,9 +161,18 @@ class PolicyContext:
     #: the history itself.
     has_trusted_history: bool
 
-    #: How many explicit preferences are active.  A count, never the entries: preference
-    #: *values* are not needed to decide between "recommend" and "finish".
+    #: How many explicit preferences are active.  A count, and - for the kinds a lexical query can
+    #: use - the value-level projection below.
     active_preference_count: int = 0
+
+    #: The user's ACTIVE preferences as a **value-level projection** the controller builds from the
+    #: turn's snapshot (``memory.query_adapter.project_active_preferences``): kind, polarity, value,
+    #: opaque entry id, sort key.  Deliberately not the snapshot itself - no ``user_key``, no
+    #: ``source_text``, no turn id, no timestamp, no removed or superseded entry - so a policy (or a
+    #: model-backed policy's prompt) can shape a retrieval query without being able to quote the
+    #: user's raw words, identify them, or see a preference they withdrew.  Read-only: it carries no
+    #: write path and no store handle.
+    active_preferences: ActivePreferenceProjection | None = None
 
     #: Whether a verified candidate set already exists for this run.
     candidate_state: CandidateState = field(default_factory=CandidateState)

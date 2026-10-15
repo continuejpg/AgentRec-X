@@ -146,6 +146,35 @@ _STOPVALUES = frozenset(
     }
 )
 
+#: A phrase that *points at* something the user was shown ("the second one", "that item again")
+#: rather than naming a property of a product.  A reference is resolved by the layer that knows what
+#: was on screen - today the product-feedback resolver, which binds it to a real card identity - and
+#: it is never a preference value: storing "second one" as a feature would let a later catalogue
+#: match read meaning into it that the user never expressed.
+_ORDINAL_WORD = (
+    r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|\d+(?:st|nd|rd|th)|last)"
+)
+_ITEM_REFERENCE_TAIL = re.compile(
+    rf"(?:^|\s){_ORDINAL_WORD}\s+(?:one|item|product|result|option|card|thing)"
+    r"(?:\s+(?:again|anymore|any\s+more))?$",
+    re.IGNORECASE,
+)
+
+#: A token shaped like a catalogue identity (``B0NOTASHOWN``).  It is an *identity*, not a property,
+#: so it is never a preference value: the layer that holds the identity mapping resolves it, and a
+#: value the catalogue could only match as text would be meaningless.
+_IDENTITY_VALUE = re.compile(r"^[A-Z0-9]{8,14}$")
+
+#: Wording that points at what the user was *shown* ("the black shoes you showed me"): the phrase
+#: it dominates is a reference to a product, not a property of one, so its generic reading is not a
+#: preference.  It is resolved - and only resolved - by the layer that knows what was on screen.
+_PRESENTATION_REFERENCE = re.compile(
+    r"\b(you\s+(showed|recommended|suggested|gave|listed|sent)|(showed|recommended|suggested)"
+    r"\s+me|that\s+(recommendation|suggestion)|from\s+(the\s+)?(list|results))\b",
+    re.IGNORECASE,
+)
+
 #: Retraction phrases: the user withdraws a constraint rather than adding one.
 #:
 #: A retraction may name its subject before the phrase ("color does not matter") or
@@ -362,6 +391,14 @@ def _normalise_capture(raw_value: str, sentence: str) -> _Span | None:
     first_word = collapsed.split()[0].lower()
     if first_word in _STOPVALUES:
         # e.g. "anything over $80" -- the capture is a quantifier, not a value.
+        return None
+    if _IDENTITY_VALUE.match(collapsed.replace(" ", "")):
+        # e.g. "B0NOTASHOWN": an identity, not a property of a product.
+        return None
+    if _ITEM_REFERENCE_TAIL.search(collapsed):
+        # e.g. "the second one", "recommend the first one again": a *reference* to something the
+        # user was shown, not a property of a product.  It belongs to the feedback path, which can
+        # verify the identity, and must never become a feature value.
         return None
     if len(collapsed) > 60:
         return None
@@ -648,6 +685,12 @@ class RuleBasedPreferenceExtractor:
         """Extract a value for one polarity pattern, or ``None``."""
         match = pattern.search(sentence)
         if match is None:
+            return None
+        pointed_at = _PRESENTATION_REFERENCE.search(sentence)
+        if pointed_at is not None and match.start("value") < pointed_at.start():
+            # "the black shoes you showed me": the value precedes the wording that points at the
+            # presented product, so it names *that product* rather than a property the user wants.
+            # A statement in a later clause ("... and I prefer blue") keeps its own meaning.
             return None
         span = _normalise_capture(match.group("value"), sentence)
         if span is None:

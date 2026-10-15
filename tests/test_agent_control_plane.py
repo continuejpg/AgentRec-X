@@ -179,6 +179,14 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         "acquired_evidence_count",
         "evidenced_candidate_count",
         "similar_item_available",
+        # M-02A adds the value-level preference projection the controller builds from the turn's
+        # snapshot, so a policy can shape a *lexical query* from what the user stated.  It is a
+        # deliberate widening and a bounded one, and the shape is asserted rather than trusted:
+        # each entry carries kind, polarity, value, an opaque entry id and a sort key - no user
+        # key, no ``source_text``, no turn id, no timestamp, and no withdrawn entry.  The snapshot
+        # itself is still unreachable (asserted below), which is what keeps the other trusted
+        # fields inside the boundary.
+        "active_preferences",
     }
     assert set(vars(context)) == allowed
 
@@ -211,7 +219,17 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
     assert set(context.grounded_parent_asins) <= known
     assert not hasattr(context, "tool")
     assert not hasattr(context, "engine")
-    assert not hasattr(context, "preference_snapshot")
+    assert not hasattr(context, "preference_snapshot"), (
+        "the M9 snapshot itself must never be reachable: only the projection below is"
+    )
+
+    # The preference view is the bounded projection, and *what it carries* is the guarantee - the
+    # field's name is not.  This harness runs without memory, so the projection is empty here; the
+    # data-level assertion lives in
+    # ``test_the_preference_projection_carries_values_and_nothing_else`` below.
+    assert context.active_preferences is not None
+    assert context.active_preferences.entries == ()
+    assert context.active_preference_count == 0
 
     # Phase 4's summary is counts and an attribute menu: no evidence *value* can appear in it,
     # because a value is only ever attached to a constraint verdict.
@@ -256,6 +274,91 @@ def test_policy_context_has_no_route_to_trusted_state() -> None:
         assert reference.is_reasoning_target is True
     # A reference that was never offered is not resolvable.
     assert context.candidate_reference("cand-not-offered") is None
+
+
+def test_the_preference_projection_carries_values_and_nothing_else() -> None:
+    """The M-02A widening, checked on the data rather than on the field's name.
+
+    The controller reads the user's ACTIVE preferences once per turn so a policy can shape a
+    lexical query from them.  What it hands over must be the *minimum* that decision needs: this
+    test seeds real memory through the real M9 service, runs the real loop over real entries, and
+    inspects the context the real policy received.  It asserts what a field name cannot: the
+    ACTIVE values still arrive, each entry carries exactly six non-identifying values, and nothing
+    in the policy's view can reach the snapshot's owner key, the user's raw words, a turn id or a
+    timestamp.
+    """
+    from recommendation.memory.query_adapter import (
+        ActivePreferenceProjection,
+        project_active_preferences,
+    )
+    from recommendation.memory.schemas import PreferenceMemoryEntry
+
+    harness = build_control_harness(with_memory=True)
+    assert harness.memory_service is not None
+    # One preference through the accepted M9 write path ...
+    harness.memory_service.process_turn(
+        user_key=harness.user_key,
+        user_message="I prefer Salomon gear.",
+        turn_id="guard-turn-1",
+    )
+    # ... and one withdrawn entry, as the audit trail really holds them.  Its value is a
+    # deliberately distinctive marker: a short word like "red" is a substring of the summary's own
+    # field names, which would make the leakage check below pass or fail for the wrong reason.
+    store = harness.memory_service.store
+    store.add_entry(PreferenceMemoryEntry(
+        memory_id="guard-withdrawn", user_key=harness.user_key, kind="color",
+        value="chartreuse-withdrawn-marker",
+        polarity="prefer", source_text="the exact words the user later withdrew",
+        source_turn_id="guard-turn-0", logical_seq=99, created_at=1.0, status="removed",
+    ))
+
+    history = harness.memory_service.get_memory_history(harness.user_key)
+    active_values = {entry.value for entry in history.active_entries}
+    withdrawn_values = {entry.value for entry in history.entries if not entry.is_active}
+    assert active_values and withdrawn_values, "the fixture must hold both kinds of entry"
+
+    harness.controller.run("find me hiking gear", HISTORY)
+    context = harness.policy.last_context
+    assert context is not None
+
+    projection = context.active_preferences
+    assert isinstance(projection, ActivePreferenceProjection)
+    assert context.active_preference_count == len(history.active_entries)
+    assert {item.value for item in projection.entries} == active_values, (
+        "every ACTIVE value the store holds must still reach the policy"
+    )
+    for item in projection.entries:
+        assert set(vars(item)) == {
+            "memory_id", "kind", "polarity", "value", "status", "logical_seq"}
+        assert item.status.value == "active"
+
+    # Nothing sensitive is reachable - not through an attribute, and not through a repr.
+    rendered = repr(context) + str(context.summary())
+    for name in ("user_key", "source_text", "source_turn_id", "created_at", "read_at",
+                 "superseded_by", "extractor"):
+        assert not hasattr(projection, name), name
+        assert not hasattr(projection.entries[0], name), name
+    assert harness.user_key not in rendered, "the owning user key reached the policy's view"
+    for entry in history.entries:
+        assert entry.source_text not in rendered, "verbatim user text reached the policy's view"
+        assert entry.source_turn_id not in rendered, "a turn id reached the policy's view"
+        assert entry.memory_id not in str(context.summary()), (
+            "the trajectory summary is a different boundary and must carry no entry id"
+        )
+        assert entry.value not in str(context.summary()), (
+            "the trajectory summary carries counts, never a preference value"
+        )
+
+    # A withdrawn preference never crosses, even when the projection is built from the full
+    # snapshot that still contains it - which is the case the store's own filtering cannot cover.
+    full = project_active_preferences(history)
+    assert {item.value for item in full.entries} == active_values
+    assert not (withdrawn_values & {item.value for item in full.entries})
+
+    # The raw snapshot, the store and the service stay on the trusted side entirely.
+    assert not hasattr(context, "preference_snapshot")
+    assert not hasattr(context, "memory_service")
+    assert not hasattr(context, "store")
 
 
 def test_policy_cannot_supply_candidate_ids_or_history() -> None:

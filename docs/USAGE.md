@@ -464,6 +464,12 @@ curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>/chat \
   -H 'Content-Type: application/json' \
   -d '{"message": "I am going hiking in the rain. Drop the lightweight preference, but I would still prefer something durable.", "k": 5, "decision_mode": "llm"}'
 
+# one turn whose TOOLS are chosen by the model and executed by the bounded agent loop
+# (the model picks from the sources this deployment actually serves; a "direct" plan runs none)
+curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "waterproof jacket under 100", "k": 5, "decision_mode": "llm_agent"}'
+
 # reset the session (only that session; its id stops working)
 curl -s -X DELETE http://127.0.0.1:8000/v1/demo/sessions/<SESSION_ID>
 ```
@@ -472,25 +478,193 @@ A chat response is structured, not prose-only. Top-level keys:
 
 ```text
 api_version  session_id  turn_id  turn  route  message
-active_preferences   memory_update   recommendations[]   audit   trace
+active_preferences   memory_update   recommendations[]   audit   trace   agent
 ```
+
+`agent` is the one additive field the tool-selection mode introduced, and it is `null` on every
+other mode's turns: it carries that turn's real execution record (the validated plan's sources, the
+actions that actually ran with their counts, the controller's terminal state, and the grounded
+candidates with per-source provenance). It exists because `route` alone cannot describe an agent
+turn - and it is what tells these three apart:
+
+| what happened | `route` | `recommendations` | `agent.outcome` | `agent.controller_executed` |
+|---|---|---|---|---|
+| the model chose a direct turn | `direct` | `[]` | `direct` | `false` |
+| a controller ran and found nothing presentable | `direct` | `[]` | `refused` (or `no_candidates` for a run that completed empty) | `true` |
+| a controller ran and produced candidates | `recommend` | the cards | `recommended` | `true` |
+
+A run the completion guard refused renders no text of its own; the response then answers with an
+authored sentence for that outcome instead of an empty string, and `agent.terminal` carries the
+controller's own `termination_reason` and bounded `termination_detail`.
 
 Each `recommendations[]` entry carries `reranked_rank`, `original_rank`, `parent_asin`,
 `item_id`, `sasrec_score`, `metadata_status`, `metadata`, `match_count`, `violation_count`,
-`unknown_count`, `evidence[]`, `fallback_reason` and `movement_summary`.
+`unknown_count`, `evidence[]`, `fallback_reason` and `movement_summary`. `metadata` is filled with
+the attributes the trusted catalogue actually supplied - on the agent path that is the product
+title and nothing else, so the remaining attributes render as unavailable rather than invented -
+and `score_kind` always names what `sasrec_score` measures (`sasrec_logit`, `bm25`,
+`rrf_rank_fusion`, `agent_controller_score`), so a fused or single-source score is never read as a
+SASRec logit.
 
 `trace` is a consolidated view of what the turn already decided, including `decision_mode`,
 `provider`, `model`, `proposed_route` and `preference_actions[]`. `decision_mode` is
-`deterministic` or `llm`; `provider`/`model` are `null` unless a provider actually answered;
-`preference_actions[]` lists validated actions with an `applied` flag taken from the persisted
-memory write. The trace never carries prompts, model reasoning or raw provider output.
+`deterministic`, `llm` or `llm_agent`; `provider`/`model` are `null` unless a provider actually
+answered; `preference_actions[]` lists validated actions with an `applied` flag taken from the
+persisted memory write. The trace never carries prompts, model reasoning or raw provider output.
+
+Which mode does what:
+
+| mode | who decides | executed by | `proposed_route` |
+|---|---|---|---|
+| `deterministic` | fixed policy | the accepted agent graph | `null` |
+| `llm` | one validated turn plan: route + preference mutations | the accepted agent graph | the plan's route |
+| `llm_agent` | one validated **tool** plan: which trusted candidate sources to consult | the bounded agent loop over the candidate plane and its ledger; a `direct` plan runs no controller and is answered by the accepted direct capability | the plan's route |
+
+A `llm_agent` turn keeps the session's preference memory current: what the shopper states on a turn
+is persisted once through the accepted M9 service, keyed by that session's own namespace and the
+turn's server-owned id, and `memory_update` / `active_preferences` report the store's own result.
+The session's ACTIVE preferences are also handed to the tool-selection planner as **structured
+context** (`context.active_preferences`: kind, polarity and value only, capped, never the snapshot,
+never `user_key`, never `source_text`, and nothing withdrawn) - so the model can tell what the
+shopper asked for *now* from what they stated earlier. A stored preference is never spliced into
+this turn's search query: the retrieval query is the current request alone.
+
+A `recommend` turn's answer contains what **every source it legally executed** grounded: the
+sequential source's verified list and each plane source's grounded set, de-duplicated by identity and
+ordered by the accepted reciprocal-rank fusion of those sources' own rankings (`k` then bounds the
+answer, after the ordering). The response's `grounded` block names every source the run used, and a
+product two sources both returned appears once with each source's own rank and score.
+
+A `recommend` turn then **ranks those candidates with that memory** (E-02A). The run's presentable
+candidates - exactly the set the response publishes - are enriched with their trusted catalogue
+metadata, matched against each ACTIVE preference by the accepted M10A matcher and ordered by the
+accepted M10B key. In the response:
+
+* each card keeps `original_rank` (the run's fused position) and gains `reranked_rank` (the
+  memory-aware position), `match_count` / `violation_count` / `unknown_count`, `evidence` (M10A's
+  own records, including which catalogue field was read) and `movement_summary`;
+* `audit.reranking_applied`, `audit.moved_count`, `audit.original_order` and `audit.reranked_order`
+  describe the reordering, and `audit.ranked_with_preferences` names the ACTIVE preferences it was
+  performed under - the **pre-write** set, because a turn reads memory before it writes it;
+* identity, `sasrec_score`, `score_kind` and `fusion_sources` are never touched by the ranking, no
+  candidate is added or dropped, and a candidate whose catalogue record is missing is reported as
+  `unknown` rather than matched or violated.
+
+With no ACTIVE preference the order is the fused order byte for byte (`reranking_applied` is
+`false`). Set `AGENTRECX_AGENT_MEMORY_RANKING=0` to pin that pre-E-02A behaviour even when memory
+exists.
+
+**Grounded recommendation reasons (E-02B, opt-in).** With `AGENTRECX_AGENT_EXPLANATIONS=1` a
+`llm_agent` recommendation turn retrieves catalogue knowledge for the products it is about to show -
+and only those, keyed by `parent_asin`, never a catalogue search - and asks the model once for
+per-product **claims** (evidence id, field path, value), not prose. A claim is published only if its
+identity is one of the presented products, its `evidence_id` exists in that product's own pack, and
+its field path and value match the unit exactly; the sentence on the card is then rendered from the
+validated citations:
+
+* `reason` - the rendered reason, or `null`;
+* `reason_status` - `grounded`, `insufficient_evidence`, `rejected` or `not_attempted`;
+* `knowledge_evidence` - the catalogue facts cited, each with `evidence_id`
+  (`"<parent_asin>:<field path>"`), `field_path`, `value`, `source` (`catalog_metadata`) and the
+  retrieval score;
+* `audit.rag` - whether the step ran, how many products had evidence, and how many explanations were
+  accepted, rejected or abstained.
+
+Preference evidence stays in the card's existing `evidence` field: `knowledge_evidence` is what the
+catalogue says, `evidence` is the accepted M10A verdict. A reason may *mention* that a cited fact
+matches a stated preference, and only when M10A recorded a match on the same field and value. With
+the switch off (the default) nothing changes: no retrieval, no second model call, `audit.rag` is
+`null` and every card field is exactly what it was. A failed or unreadable model answer never changes
+a recommendation - it produces no reason and an audit code. Ranking with memory does **not** choose tools - the plan is validated first - and it does
+not re-score, re-fuse or filter. A `llm_agent` *direct* turn reuses the accepted graph turn, whose
+memory behaviour is unchanged, and the request-declared `/v1/demo/agent/recommend` path is not
+reranked by this capability at all.
+
+**Product-level feedback (E-03C).** A user can react to a product this session actually showed:
+"like the second one", "I don't like the first one", "please don't recommend it again", "actually
+I like it instead", "forget what I said about the second one". The identity is bound in the trusted
+layer - never by the model, never from free text alone - against the session's own record of its last
+recommendation turn (the response's own cards, with the position the user saw, after fusion, ranking
+and the `k` limit):
+
+* `audit.feedback` reports six separate stages: the wording (`action`, `span`), the parsed reference
+  (`reference`), the verified identity (`parent_asin`, `item_id`, `final_position`), whether a record
+  was written (`written`, `entry_status`), what is ACTIVE now (`active_product_feedback`) and the
+  effect the next turn applies (`effect`: `promote` / `demote` / `replace` / `retract`);
+* `status` is the honest verdict: `resolved`, or a refusal - `ambiguous` (several cards fit, or the
+  position does not exist), `unknown_product` (an identity or item id this session never presented),
+  `no_presentation` (nothing was shown yet), `none` (not product feedback at all). A refusal writes
+  nothing and returns 422-free, normal prose;
+* M9 stores it as a new `product` preference kind whose value is the canonical `parent_asin`, so it
+  is validated, deduplicated, superseded and audited like any other preference, is excluded from
+  lexical query shaping (it is an identity, not text), and is compared by M10A against the
+  candidate's own identity: a like is a match, a dislike is a violation, and **another** product is
+  `unknown` - never a violation, so feedback about one card cannot penalise the others;
+* the effect is real and bounded: an `avoid` sinks the product through the accepted M10B ordering
+  (and it leaves the answer whenever the pool exceeds `k`), a `prefer` raises it, and a retraction
+  restores the previous order. This deployment orders by evidence, so an explicit exclusion request
+  is reported as a **demotion** (`effect: demote`), not as a hard removal from the candidate set;
+* feedback is never widened: a dislike of one product stores no colour, brand or category
+  preference, the sentence's generic reading is dropped rather than stored, and a value the user
+  *pointed at* ("the black shoes you showed me") is refused as a preference value - only an explicit
+  generalisation ("I never want black shoes") becomes an ordinary M9 constraint;
+* cards are marked with the user's own attitude in `recommendations[].feedback` (`liked` /
+  `disliked`), which is kept apart from `reason` and `knowledge_evidence`: the catalogue explains the
+  product, the mark states the user's opinion, and no product defect is ever inferred from it;
+* nothing is recalled because of feedback. The catalogue, the plan, fusion, provenance, scores and
+  the candidate set are untouched: the same pool is ordered differently, and identity, de-duplication
+  and `k` still apply. Other sessions never see it, and the request-declared `/v1/demo/agent/recommend`
+  path and the deterministic / `llm` modes report no feedback block at all.
+
+**Bounded replanning (E-03B, opt-in).** With `AGENTRECX_AGENT_REPLANNING=1` an `llm_agent`
+recommendation turn may add **at most one** extra source, chosen by the model from the sources the
+deployment offers and the run has not consulted, **inside the same run**: the same step and tool
+budgets, the same validator, the same candidate plane and grounding verifier, the same accumulated
+candidate set. It exists because a run's terminal record cannot recover from an empty or short
+answer - by then the accepted completion guard has already refused - so the decision is taken where
+the controller already offers one, by the policy that proposes the next action.
+
+* the deterministic gate runs first and is decided from the run's own projection: candidates held
+  (only hard-constraint-verified ones when a constraint is active) against the request's `k`, the
+  consulted sources and their recorded outcomes, the actions the controller currently offers minus
+  the ones already consulted, the remaining tool and step budgets, and the run's own status. It
+  requires **two** steps (a source, then the finish that must follow it), refuses after a rejected
+  proposal, and allows one decision per run;
+* the model receives only the request, the value-level projection of the ACTIVE preferences, a
+  counts-and-names observation, and the eligible sources with the deployment's own purpose strings.
+  It answers `{"replan": true|false, "source": ...}`; anything that is not one eligible name - an
+  unknown name, an already-consulted source, a second request, unreadable output, a failed call -
+  means *no replan*, with no retry;
+* the response reports what really happened, never what was merely suggested: `replan_execution`
+  (agent response) and `audit.replan.{status, model_called, chosen_source,
+  initial_candidate_count, final_candidate_count}` (chat), with `status` one of `not_triggered`,
+  `gate_blocked`, `model_declined`, `invalid_output`, `model_failed`, `appended_candidates`,
+  `appended_empty`, `appended_failed`. The pre-append state stays its own fact: the initial
+  snapshot is frozen when the decision is taken, the final one describes the finished run, and the
+  E-03A terminal observation keeps its own post-run meaning;
+* the extra source's candidates join the **same** accumulated set: one fusion, one memory-aware
+  ranking over the whole final pool, one `k` limit, and explanations for exactly the products
+  presented.
+
+With the switch off (the default) nothing changes: no extra model call, no extra tool call, the
+same answer, and `audit.replan.status` is `null` (absent execution record). The request-declared
+`/v1/demo/agent/recommend` path, the deterministic and `llm` chat modes and `/v1/recommend` never
+replan.
+
+A `recommend` turn's own `message` narrates exactly the products its `recommendations` list
+contains, in that list's final order (after fusion, memory-aware ranking, the `k` limit and the
+explanation step): the prose is rendered from the response's own cards, so it cannot name a product
+the run retrieved but did not show, repeat a rank the ranking changed, or state a product fact that
+the explanation step did not validate - an unexplained product is labelled as having no verified
+catalogue reason rather than given a written one. A turn that presents no products (a direct answer,
+a run with no candidates, a refused or a failed run) keeps the controller's own text unchanged.
 
 Validation and error behaviour:
 
 * `message` must be a non-blank string of at most 2000 characters;
 * `k` must be a **strict** integer in `1..100` (so `"5"` and `5.0` are rejected);
-* `decision_mode` is optional and must be `deterministic` or `llm`; it is stored on the session,
-  so omitting it on later turns keeps the session's current mode;
+* `decision_mode` is optional and must be `deterministic`, `llm` or `llm_agent`; it is stored on
+  the session, so omitting it on later turns keeps the session's current mode;
 * request bodies forbid extra fields — sending `trusted_user_history`, `history`,
   `parent_asins`, `preference_snapshot`, `reranking`, `user_key`, `session_id`, `turn_id`
   or `route` returns **422**;
@@ -499,10 +673,47 @@ Validation and error behaviour:
 * session capacity reached → **503** `session_capacity_exceeded`;
 * backend failures (recommendation, preference stage, agent) → **502** with an
   authored detail. A failed turn never returns fabricated recommendation content;
-* LLM decision mode with no usable provider → **503** `llm_unavailable`; a provider timeout →
-  **504** `llm_timeout`; an invalid plan or unsupported action → **502** `llm_invalid_plan`; any
-  other provider failure → **502** `llm_provider_error`. Every one of these fails closed: the
-  turn makes no memory mutation and is never answered by the deterministic path instead.
+* LLM decision modes with no usable provider → **503** `llm_unavailable`; a provider timeout →
+  **504** `llm_timeout`; an invalid plan, an unsupported action or a refused tool selection →
+  **502** `llm_invalid_plan`; any other provider failure → **502** `llm_provider_error`. Every one
+  of these fails closed: the turn is never answered by a different mode's path, and a refused tool
+  plan is never replaced by a default source list.
+
+#### Real-provider smoke test (opt-in, manual)
+
+The automated suite answers every provider call with a scripted client, so it never proves anything
+about a real endpoint. This is the reproducible procedure for doing that on a machine that is
+allowed to spend provider calls. It is **not** run by the test suite, and nothing in the repository
+runs it automatically.
+
+```bash
+# 1. Configure the provider once (this file is git-ignored). Both policy-backed modes then work.
+cp .env.example .env      # then set AGENTRECX_LLM_BASE_URL / _MODEL / _API_KEY / _PROFILE
+
+# 2. Start the demo the normal way: the launcher autoloads .env
+./scripts/start_demo.sh                 # add AGENTRECX_TIGER=1 only if its worker is warm
+
+# 3. Confirm this deployment can actually serve the mode (provider present, plane reachable)
+curl -s http://127.0.0.1:8000/v1/demo/decision-modes | python -m json.tool
+
+# 4. One real model-planned turn
+SESSION=$(curl -s -X POST http://127.0.0.1:8000/v1/demo/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"profile_id": "demo-user-1", "decision_mode": "llm_agent"}' \
+  | python -c 'import json,sys; print(json.load(sys.stdin)["session_id"])')
+
+curl -s -X POST "http://127.0.0.1:8000/v1/demo/sessions/${SESSION}/chat" \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "waterproof jacket under 100", "k": 5}' | python -m json.tool
+```
+
+What to check in that response: `trace.decision_mode == "llm_agent"`; `agent.planned_sources`
+names only sources `/v1/demo/decision-modes` advertises (a TIGER worker that is still loading is
+not among them); `agent.action_counts` lists the actions that really ran and how often;
+`agent.outcome` is `recommended`, `direct`, `no_candidates`, `refused` or `failed`, with
+`agent.terminal` carrying the controller's own reason for anything but a successful run; and every
+`recommendations[]` card carries a real `parent_asin`, a `score_kind`, and provenance in
+`fusion_sources`.
 
 ---
 

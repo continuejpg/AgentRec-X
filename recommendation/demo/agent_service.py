@@ -25,13 +25,17 @@ deliberately not an adaptive selector.
 
 No session, no hidden state
 ---------------------------
-The service keeps a bounded cache of compiled controllers keyed by
-``(k, user_key, source plan)``, exactly as the demo runtime caches compiled graphs per
-``(k, user_key)``: a controller binds a source plan and an optional memory namespace at
-construction, and compiling one is pure Python over the same process-scoped collaborators.
-No model, index or store is ever rebuilt.  Preference memory is touched **only** when the
-request supplies a ``user_key``; without one the run reads and writes no memory at all,
-which is what makes the offline mode reproducible.
+Each request composes its **own** controller over the process-scoped collaborators - the engine,
+the catalogue, the lexical search index, the matcher, the reranker and the memory store are built
+once and shared, while the controller, its policy and its candidate plane (with the ledger that
+records provenance) live for exactly one request.  Nothing that belongs to a run outlives it, so
+two identical requests cannot influence each other and two concurrent requests share no mutable
+run state.
+
+That per-request composition is deliberate and costs nothing measurable: the expensive objects are
+the shared ones, and the loop compiles its driver graph per run regardless.  Preference memory is
+touched **only** when the request supplies a ``user_key``; without one the run reads and writes no
+memory at all, which is what makes the offline mode reproducible.
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ from recommendation.memory import PreferenceKind
 from recommendation.control.task_state import TaskConstraint, TaskState
 
 from .agent_policy import DEFAULT_SOURCE_PLAN, DemoSourcePlanPolicy, normalise_source_plan
+from .replan_policy import BoundedReplanPolicy
 from .agent_schemas import (
     AgentRecommendRequest,
     AgentRecommendResponse,
@@ -71,10 +76,18 @@ from .agent_trajectory import (
 )
 from .control_plane import CONTROL_PLANE_LOOP
 
+#: The process-wide TIGER engine accessor.  Imported at module scope because
+#: ``DemoAgentService.__init__`` calls it: while this import lived only inside
+#: ``_build_tiger_engine`` the constructor raised ``NameError`` on every Agent request and the
+#: route reported a generic 502 (the T-02.7C failure).
+from recommendation.backends.tiger_engine import shared_engine  # noqa: E402
+
 __all__ = [
     "AGENT_LOOP_LIMITS",
-    "DEFAULT_MAX_CACHED_CONTROLLERS",
+    "ENV_MEMORY_RANKING",
     "ENV_SIMILAR_ITEMS",
+    "ENV_TIGER",
+    "ENV_TIGER_CHECKPOINT",
     "AGENT_POLICY_LLM",
     "DemoAgentError",
     "DemoAgentService",
@@ -94,6 +107,14 @@ ENV_AGENT_POLICY = "AGENTRECX_AGENT_POLICY"
 
 #: The policy name that opts into the real model.
 AGENT_POLICY_LLM = "llm"
+
+#: Switch for memory-aware ranking of an LLM-selected run (E-02A).
+#:
+#: On by default, because it can only act when the caller supplies a non-empty read of the
+#: session's memory: a deployment with no memory, no ACTIVE preference, or no presented candidates
+#: behaves exactly as it did before this capability existed.  Set it to ``0``/``false``/``off`` to
+#: pin the pre-E-02A baseline - the fused order then always stands, whatever memory holds.
+ENV_MEMORY_RANKING = "AGENTRECX_AGENT_MEMORY_RANKING"
 
 #: Opt-in switch for the Two-Tower candidate source (post-Phase-5 model expansion).
 #:
@@ -118,15 +139,16 @@ ENV_TWO_TOWER_MAPPINGS = "AGENTRECX_TWO_TOWER_MAPPINGS_PATH"
 #: sources it actually runs.  Set ``AGENTRECX_AGENT_SIMILAR_ITEMS=1`` on a machine with the
 #: headroom to offer ``find_similar``.
 ENV_SIMILAR_ITEMS = "AGENTRECX_AGENT_SIMILAR_ITEMS"
+#: Opt-in for the TIGER generative source.  Any non-empty value enables it; the worker is a
+#: long-lived subprocess that owns its own virtual environment.
+ENV_TIGER = "AGENTRECX_TIGER"
+#: Optional override for the accepted checkpoint directory (defaults to the frozen path).
+ENV_TIGER_CHECKPOINT = "AGENTRECX_TIGER_CHECKPOINT"
 
 #: Loop budgets for one HTTP request.  Sized for the longest plan this endpoint accepts -
 #: one step per named source plus the terminal finish - with the same hard bounds as the
 #: accepted demo loop, so an agent cannot turn one request into unbounded work.
 AGENT_LOOP_LIMITS = LoopLimits(max_steps=6, max_tool_calls=4, max_retries=1)
-
-#: Hard cap on cached controllers, independent of the request rate, so a long-lived process
-#: cannot grow the cache without limit.
-DEFAULT_MAX_CACHED_CONTROLLERS = 128
 
 #: The constraint dimensions a request may state.  This is the accepted preference ontology
 #: (:class:`~recommendation.memory.PreferenceKind`), not a second vocabulary: the control
@@ -177,9 +199,12 @@ class DemoAgentService:
         memory_service: Any = None,
         similar_item_tool: Any = None,
         two_tower_tool: Any = None,
+        tiger_engine: Any = None,
+        tiger_enabled: bool = False,
         policy_factory: Any = None,
         limits: LoopLimits = AGENT_LOOP_LIMITS,
-        max_cached_controllers: int = DEFAULT_MAX_CACHED_CONTROLLERS,
+        memory_ranking: bool | None = None,
+        replanning: bool | None = None,
     ) -> None:
         self._tool = tool
         self._enricher = enricher
@@ -190,6 +215,27 @@ class DemoAgentService:
         self._memory_service = memory_service
         self._similar_item_tool = similar_item_tool
         self._two_tower_tool = two_tower_tool
+        #: The TIGER source is opt-in and gated on readiness: an engine that has not finished its
+        #: (minutes-long) cold start is neither advertised nor registered in the plane, so no
+        #: action can be offered that would then block on a model load.
+        self._tiger_engine: Any = None
+        #: True only when *this* service created the engine.  A shared engine borrowed from the
+        #: serving fusion must survive this service being closed.
+        self._owns_tiger_engine: bool = False
+        self._tiger_tool: Any = None
+        self._tiger_error: str | None = None
+        self._tiger_state: str = "disabled"
+        _adopted = None
+        if tiger_engine is None and tiger_enabled:
+            _adopted = shared_engine()
+            tiger_engine = _build_tiger_engine(engine)
+        if tiger_engine is not None:
+            from recommendation.control.tiger_source import TigerSourceTool
+
+            self._owns_tiger_engine = tiger_engine is not _adopted
+            self._tiger_engine = tiger_engine
+            self._tiger_tool = TigerSourceTool(tiger_engine)
+            self._tiger_state = "ready" if getattr(tiger_engine, "started", False) else "not_started"
         #: Builds the run's policy.  Defaults to the deterministic, request-driven source plan;
         #: a deployment may inject the accepted model-driven policy instead.  Injection rather
         #: than a branch inside the loop is what keeps this endpoint's policy interchangeable.
@@ -197,8 +243,19 @@ class DemoAgentService:
             lambda plan, k: DemoSourcePlanPolicy(plan, default_k=k)
         )
         self._limits = limits
-        self._max_cached = max_cached_controllers
-        self._controllers: dict[tuple[int, str | None, tuple[str, ...]], LoopController] = {}
+        #: Whether a caller-supplied preference snapshot may reorder the presented candidates
+        #: (E-02A).  ``None`` means "read the deployment switch"; a deployment that never supplies
+        #: memory is unaffected either way.
+        self._memory_ranking_enabled = memory_ranking_enabled(memory_ranking)
+        #: Whether an LLM-selected run may add **one** extra legal source inside the same run,
+        #: chosen by the model, inside the run's own step and tool budgets (E-03B).  Off unless the
+        #: deployment asks for it; the request-declared path never uses it.
+        from .replan_policy import replanning_enabled
+
+        self._replanning_enabled = replanning_enabled(replanning)
+        #: Diagnostics only: how many controllers this service has composed.  There is no
+        #: controller cache to bound (see :meth:`_compose_controller`).
+        self._controllers_built = 0
         self._lock = threading.Lock()
         #: Built once, because the catalogue search index is a per-process cost, not a
         #: per-request one.
@@ -228,6 +285,7 @@ class DemoAgentService:
             kwargs["two_tower_tool"] = _build_two_tower_tool()
         if kwargs.get("policy_factory") is None and llm_policy_selected():
             kwargs["policy_factory"] = _build_llm_policy_factory()
+        kwargs.setdefault("tiger_enabled", _tiger_enabled())
         return cls(**kwargs)
 
     # -- metadata ---------------------------------------------------------- #
@@ -260,65 +318,205 @@ class DemoAgentService:
             sources.append("similar_item")
         if self._two_tower_tool is not None:
             sources.append("two_tower")
+        # Advertised only when the engine is warm: the deployment must never claim a source it
+        # cannot serve without a multi-minute model load.
+        if self._tiger_tool is not None and self._tiger_state_now() == "ready":
+            sources.append("tiger")
         return tuple(sources)
+
+    @property
+    def tool_budget(self) -> int:
+        """How many tool calls one run of this service may execute.
+
+        The controller's own bound (``LoopLimits.max_tool_calls``), read from this instance rather
+        than assumed from the module default, because the limits are injectable.  A caller that
+        offers this many tools - the tool-selection planner is the one that does - offers exactly
+        what the loop is allowed to run, so a plan can never be larger than the run it authorises.
+        """
+        return int(self._limits.max_tool_calls)
 
     @property
     def consultable_note(self) -> str:
         """A one-line statement of which actions the controller currently offers."""
+        offered = ["history", "catalog_search"]
+        if self._similar_item_tool is not None:
+            offered.append("similar_item")
+        if self._two_tower_tool is not None:
+            offered.append("two_tower")
+        if self._tiger_state_now() == "ready":
+            offered.append("tiger")
         return (
-            "history and catalog_search are reachable; a source registered without a "
-            "similar-item tool is reported as available but the controller does not yet offer "
-            "SELECT_SOURCE for it"
+            "the controller offers SELECT_SOURCE for every registered plane source: "
+            + ", ".join(offered)
         )
 
     def close(self) -> None:
-        """Drop every cached controller.
+        """Release what this service owns; calling it twice is harmless.
 
-        Controllers hold compiled policies and a candidate ledger, but no store or model of
-        their own - those belong to the runtime.  Releasing the cache is therefore enough to
-        make a shutdown deterministic, and calling this twice is harmless.
+        There is no controller cache to drop: each request composes and then releases its own
+        controller, whose policy, plane and ledger die with the request.  What is left to release
+        is the TIGER worker this service started, and only when it started it - a shared engine
+        borrowed from the serving fusion outlives this service.
         """
-        with self._lock:
-            self._controllers.clear()
+        engine, self._tiger_engine = self._tiger_engine, None
+        self._tiger_tool = None
+        if engine is not None and self._owns_tiger_engine:
+            # Only an engine this service built is ours to stop: the serving fusion may still be
+            # using a shared worker.
+            try:
+                engine.close()
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                pass
+            self._tiger_state = "not_started"
+        self._owns_tiger_engine = False
+
+    def _tiger_state_now(self) -> str:
+        """TIGER's state, read from the **engine** when one is present.
+
+        The engine is shared with the serving fusion (one worker per process), so readiness must
+        be whatever that engine reports - not a private copy of the state that no one updates.
+        """
+        if self._tiger_engine is None:
+            return "disabled"
+        health = getattr(self._tiger_engine, "health", None)
+        if callable(health):
+            try:
+                return str(health().get("state") or self._tiger_state)
+            except Exception:  # noqa: BLE001 - a broken engine reports its own failure
+                return "failed"
+        return self._tiger_state
 
     @property
-    def compiled_controller_count(self) -> int:
-        """How many distinct ``(k, user_key, plan)`` controllers are currently cached."""
+    def tiger_status(self) -> dict[str, Any]:
+        """TIGER's lifecycle state, so health can distinguish the four outcomes.
+
+        ``disabled`` (not configured), ``not_started`` (configured, worker not launched),
+        ``loading`` (prewarm in flight), ``ready`` (worker handshake completed), ``failed``
+        (the worker refused to start or died - ``error`` carries the reason).
+        """
+        health = {}
+        probe = getattr(self._tiger_engine, "health", None)
+        if callable(probe):
+            try:
+                health = dict(probe())
+            except Exception:  # noqa: BLE001
+                health = {}
+        return {
+            "state": self._tiger_state_now(),
+            "enabled": self._tiger_engine is not None,
+            "registered": self._tiger_tool is not None,
+            "advertised": "tiger" in self.available_sources,
+            "error": health.get("error", self._tiger_error),
+            "device": getattr(getattr(self._tiger_engine, "config", None), "device", None),
+            "checkpoint_sha256": health.get("checkpoint_sha256"),
+            "sid_artifact_sha256": health.get("sid_artifact_sha256"),
+            "retrieval_mode": health.get("retrieval_mode"),
+        }
+
+    def prewarm_tiger(self, *, background: bool = True) -> dict[str, Any]:
+        """Start the TIGER worker (cold start is minutes on CPU) and return the new status.
+
+        ``background=True`` returns immediately with ``state="loading"``, which is what a
+        deployment should do at boot; ``background=False`` blocks until the worker is ready or
+        has failed.  An unconfigured deployment reports ``disabled`` and does nothing.
+        """
+        if self._tiger_engine is None:
+            return self.tiger_status
+        state = self._tiger_state_now()
+        if state in {"ready", "loading"}:
+            return self.tiger_status
+        engine_prewarm = getattr(self._tiger_engine, "prewarm", None)
+        if callable(engine_prewarm):
+            # The engine owns the worker; delegating keeps one state machine, not two.
+            engine_prewarm(background=background)
+            return self.tiger_status
+
+        def _load() -> None:
+            try:
+                self._tiger_engine.start()
+                self._tiger_state = "ready"
+                self._tiger_error = None
+            except Exception as exc:  # noqa: BLE001 - reported through tiger_status
+                self._tiger_state = "failed"
+                self._tiger_error = f"{type(exc).__name__}: {exc}"
+
+        self._tiger_state = "loading"
+        if background:
+            threading.Thread(target=_load, name="tiger-prewarm", daemon=True).start()
+        else:
+            _load()
+        return self.tiger_status
+
+    @property
+    def controllers_built(self) -> int:
+        """How many controllers this service has composed (monotonic; diagnostics only).
+
+        Monotonic rather than a cache size on purpose: a controller is composed for exactly one
+        request (see :meth:`_compose_controller`), so "currently cached" is not a fact this service
+        has to report, while "how many were built" answers the question a reviewer actually asks -
+        including whether a direct turn composed none.
+        """
         with self._lock:
-            return len(self._controllers)
+            return self._controllers_built
 
-    # -- controller cache -------------------------------------------------- #
+    # -- one controller per request ---------------------------------------- #
 
-    def _controller_for(
-        self, *, k: int, user_key: str | None, plan: Sequence[str]
+    def _compose_controller(
+        self,
+        *,
+        use_memory: bool = True,
+        k: int,
+        user_key: str | None,
+        plan: Sequence[str],
+        replan_client: Any = None,
+        preference_snapshot: Any = None,
     ) -> LoopController:
-        cache_key = (k, user_key, tuple(plan))
-        with self._lock:
-            existing = self._controllers.get(cache_key)
-            if existing is not None:
-                return existing
+        """Compose a controller for **one** request.
 
-        controller = self._build_controller(k=k, user_key=user_key, plan=plan)
+        Deliberately not cached.  A controller owns three things that are per-run state, not
+        process state:
 
+        * the policy instance, which remembers which planned sources it already proposed (see
+          :meth:`~recommendation.demo.agent_policy.DemoSourcePlanPolicy.choose`);
+        * the :class:`~recommendation.control.CandidatePlane`'s ``CandidateLedger``, whose entries
+          are read back as a run's grounded universe - shared across requests, a second request
+          reports candidates it never retrieved and can decide it has already served a source;
+        * the plane itself, which the loop consults to decide what it may offer.
+
+        Composing one per request makes all three request-scoped, which is what makes two identical
+        requests independent and what makes concurrent requests safe with no extra locking: they no
+        longer share anything mutable.  It is cheap - the previous cache saved only attribute
+        assignments, because everything expensive (engine, catalogue, lexical index, matcher,
+        reranker, memory store) is owned by this service and injected, and the loop compiles its
+        driver graph per run either way (``LoopController._run_graph_driver``).
+        """
         with self._lock:
-            duplicate = self._controllers.get(cache_key)
-            if duplicate is not None:
-                return duplicate
-            if len(self._controllers) >= self._max_cached:
-                # FIFO eviction: dict preserves insertion order, so the oldest key goes.
-                oldest = next(iter(self._controllers))
-                self._controllers.pop(oldest, None)
-            self._controllers[cache_key] = controller
-            return controller
+            self._controllers_built += 1
+        return self._build_controller(
+            k=k,
+            user_key=user_key,
+            plan=plan,
+            use_memory=use_memory,
+            replan_client=replan_client,
+            preference_snapshot=preference_snapshot,
+        )
 
     def _build_controller(
-        self, *, k: int, user_key: str | None, plan: Sequence[str]
+        self,
+        *,
+        use_memory: bool = True,
+        k: int,
+        user_key: str | None,
+        plan: Sequence[str],
+        replan_client: Any = None,
+        preference_snapshot: Any = None,
     ) -> LoopController:
         """Compose one controller: capability, candidate plane, eligibility, then the loop.
 
         The order matters.  The eligibility evaluator is built over the **same** catalogue
-        the plane grounds against, and the plane's ledger is a fresh one per controller, so
-        provenance is scoped to that controller's runs and cannot accumulate across requests.
+        the plane grounds against, and the plane's ledger is created here, with the controller,
+        so provenance is scoped to the one request this controller serves - a ledger that
+        outlived its request would let the next one report candidates it never retrieved.
         """
         capability = RecommendFromHistoryCapability(
             self._tool,
@@ -339,9 +537,33 @@ class DemoAgentService:
             catalog_search=self._catalog_search,
             similar_item_tool=self._similar_item_tool,
             two_tower_tool=self._two_tower_tool,
+            # Registered only once the worker is warm: the menu is derived from the plane, so
+            # this is what keeps SELECT_SOURCE{tiger} from being offered before it can run.
+            tiger_tool=self._tiger_tool if self._tiger_state_now() == "ready" else None,
         )
         eligibility = CandidateEligibilityEvaluator(GroundedReasoner(self._metadata))
-        policy = self._policy_factory(plan, k)
+        # An LLM-selected run pins the isolated policy directly: the configured factory belongs to
+        # the legacy path and must keep its own behaviour.
+        if use_memory:
+            policy = self._policy_factory(plan, k)
+        elif self._replanning_enabled and replan_client is not None:
+            # The LLM-selected path, with bounded replanning: the plan policy still serves the
+            # authorised plan, and at most one extra legal source may be appended inside this same
+            # run, on this run's budgets (E-03B).  The request-declared path keeps its own factory.
+            from recommendation.memory.query_adapter import project_active_preferences
+
+            policy = BoundedReplanPolicy(
+                plan,
+                default_k=k,
+                use_memory=False,
+                client=replan_client,
+                # The source choice may see the user's ACTIVE preferences - value level only, the
+                # same projection a policy is entitled to - because the loop this path composes
+                # deliberately binds no memory of its own.
+                preferences=project_active_preferences(preference_snapshot),
+            )
+        else:
+            policy = DemoSourcePlanPolicy(plan, default_k=k, use_memory=False)
         return LoopController(
             policy,
             capability,
@@ -364,21 +586,92 @@ class DemoAgentService:
             start.  Mapping a plan the run cannot honour onto a default would make an
             unsupported request look like a successful one.
         """
-        started = time.perf_counter()
         try:
             plan = normalise_source_plan(payload.sources)
+        except ValueError as exc:
+            raise DemoAgentError(str(exc), code="unsupported_source_plan") from exc
+        return self._execute_plan(plan=plan, payload=payload, use_memory=True)
+
+    def run_selection(
+        self,
+        selection: Any,
+        payload: AgentRecommendRequest,
+        *,
+        preference_snapshot: Any = None,
+        replan_client: Any = None,
+    ) -> AgentRecommendResponse:
+        """Execute a **validated LLM tool selection** through this service's own controller.
+
+        The plan comes from the model's validated choice, never from the request body, so the
+        caller's ``sources`` field cannot override it.  Sources are re-checked against
+        :attr:`available_sources` at execution time (a source may have become unavailable between
+        planning and running), and the memory-conditioned query adapter is switched **off** for
+        this path: an LLM-selected run must not append unrelated historical preferences.
+
+        ``preference_snapshot`` is the *caller's* trusted read of this session's M9 memory.  The chat
+        runtime supplies it, keyed by the server-owned session namespace, so the model cannot name
+        one; when it holds ACTIVE entries and memory-aware ranking is enabled, the presented
+        candidates are reordered by the accepted M10A/M10B components (see
+        :mod:`recommendation.demo.memory_ranking`) and when it is empty the fused order stands.  The
+        model's tool *choice* is never overridden by memory, and the request-declared
+        :meth:`run` path deliberately passes no snapshot, which is what keeps the legacy endpoint
+        exactly as it was.
+        """
+        from recommendation.demo.tool_selection import source_plan_from_selection
+
+        if getattr(selection, "route", None) != "recommend":
+            raise DemoAgentError(
+                "a direct selection does not start a recommendation run",
+                code="not_a_recommendation",
+            )
+        plan = source_plan_from_selection(selection)
+        try:
+            plan = normalise_source_plan(plan)
         except ValueError as exc:
             raise DemoAgentError(str(exc), code="unsupported_source_plan") from exc
         unavailable = [name for name in plan if name not in self.available_sources]
         if unavailable:
             raise DemoAgentError(
-                "this deployment does not configure the requested source(s): "
+                "the selected source(s) are not available on this deployment: "
                 + ", ".join(unavailable),
                 code="unsupported_source_plan",
             )
+        return self._execute_plan(
+            plan=plan,
+            payload=payload,
+            use_memory=False,
+            preference_snapshot=preference_snapshot,
+            # Bounded replanning is part of this path only: the caller passes the turn's model
+            # client, and the service composes the policy with it when the switch is on.
+            replan_client=replan_client,
+        )
 
-        controller = self._controller_for(
-            k=payload.k, user_key=payload.user_key, plan=plan
+    def _execute_plan(
+        self,
+        *,
+        plan: tuple[str, ...],
+        payload: AgentRecommendRequest,
+        use_memory: bool,
+        preference_snapshot: Any = None,
+        replan_client: Any = None,
+    ) -> AgentRecommendResponse:
+        """Run one plan and project it.  Shared by the request-declared and LLM-selected paths.
+
+        ``preference_snapshot`` is honoured only when this deployment has memory-aware ranking
+        enabled (:data:`ENV_MEMORY_RANKING`): the run's presented candidates are then reordered by
+        the accepted M10A/M10B components, over trusted catalogue metadata, without touching their
+        identity, score, score kind or provenance.
+        """
+        started = time.perf_counter()
+        controller = self._compose_controller(
+            k=payload.k,
+            user_key=payload.user_key,
+            plan=plan,
+            use_memory=use_memory,
+            replan_client=replan_client,
+            # Read-only: the bounded replanning policy may describe the user's ACTIVE preferences
+            # to the model, and nothing else in the run changes because of it.
+            preference_snapshot=preference_snapshot,
         )
         task_state = _task_state(payload)
         agent_input = AgentInput(
@@ -397,24 +690,64 @@ class DemoAgentService:
 
         serialize_started = time.perf_counter()
         ledger = _ledger_of(controller)
+        # The run's presentable candidates: every source it legally executed, fused by the accepted
+        # rank-fusion rule (see ``presentable_candidates``).  One definition serves the ranking, the
+        # titles and the view, so nothing can be ranked that the response would refuse to show.
+        from .agent_trajectory import presentable_candidates
+
+        presentable = presentable_candidates(result.state)
+        ranking = self._memory_ranking(result, ledger, payload, preference_snapshot)
         # Route is derived from the run's own trusted artifacts.  A run that produced no
         # candidate set is a direct turn *or* a failed one, and an empty recommendation list is
         # the honest answer in both cases - so a failure is never dressed up as a successful
         # direct reply.
         produced_candidates = result.state.get("tool_result") is not None
+        recommendations = build_recommendations_view(
+            result.state,
+            ledger,
+            # Titles for exactly what may be shown, which is the run's accumulated candidate
+            # set - not only the most recent source's list.
+            titles=_titles_of(
+                self._metadata, [str(item.parent_asin) for item in presentable]
+            ),
+            ranking=ranking,
+            # ``k`` bounds the answer *after* the fusion (and after any memory-aware ranking),
+            # so it is the top of the run's own ordering rather than a slice of one source.
+            limit=payload.k,
+        )
+        grounded_view = build_grounded_view(result, ledger)
+        eligibility_view = build_eligibility_view(result)
+        terminal_view = build_terminal_view(result)
+        trajectory_view = build_trajectory_summary(result)
+        # The run-level observation and the deterministic replan gate (E-03A).  Built here, after
+        # every decision is final, from the frozen views above and nothing else: no tool runs, the
+        # planner is not consulted again, no query changes and no controller state is written - so
+        # the answer above cannot move because of it.
+        from .observation import build_observation, decide_replan
+
+        replan_execution = _replan_execution_view(controller, recommendations, terminal_view)
+        observation = build_observation(
+            terminal=terminal_view,
+            grounded=grounded_view,
+            eligibility=eligibility_view,
+            trajectory=trajectory_view,
+            plan=plan,
+            available_sources=self.available_sources,
+            requested_k=payload.k,
+            presented_count=len(recommendations),
+        )
         response = AgentRecommendResponse(
             route="recommend" if produced_candidates else "direct",
             message=result.final_response,
             control_plane=self.control_plane_name,
-            recommendations=build_recommendations_view(
-                result.state,
-                ledger,
-                titles=_titles_of(self._metadata, _recommended_identities(result.state)),
-            ),
-            grounded=build_grounded_view(result, ledger),
-            eligibility=build_eligibility_view(result),
-            terminal=build_terminal_view(result),
-            trajectory=build_trajectory_summary(result),
+            recommendations=recommendations,
+            grounded=grounded_view,
+            eligibility=eligibility_view,
+            terminal=terminal_view,
+            trajectory=trajectory_view,
+            observation=observation,
+            replan=decide_replan(observation),
+            replan_execution=replan_execution,
             timing=AgentTimingView(
                 total_ms=(time.perf_counter() - started) * 1000.0,
                 agent_ms=agent_ms,
@@ -424,9 +757,66 @@ class DemoAgentService:
         return response
 
 
+    def _memory_ranking(
+        self,
+        result: Any,
+        ledger: Any,
+        payload: AgentRecommendRequest,
+        preference_snapshot: Any,
+    ) -> Any:
+        """Rank this run's presented candidates with the session's ACTIVE preferences, or nothing.
+
+        Returns ``None`` whenever there is nothing to do, which is the common case and the reason
+        a memory-free deployment is unaffected: no snapshot, no ranking switch, no ACTIVE
+        preference, or no presented candidates all leave the fused order exactly as it was.
+
+        The candidates come from :func:`presentable_candidates`, i.e. the same set the response is
+        about to publish, so the ranking can neither introduce nor hide a product.  Its trusted
+        catalogue metadata comes from this service's own M8 enricher over the shared index, and the
+        matching and ordering are the accepted M10A and M10B components - not a second rule set.
+        """
+        if not self._memory_ranking_enabled or preference_snapshot is None:
+            return None
+        if self._enricher is None or self._matcher is None or self._reranker is None:
+            # Without the trusted metadata path there is no honest way to decide whether a
+            # candidate matches a preference, and guessing from a title is exactly what this
+            # milestone forbids.  No components, no ranking.
+            return None
+        from .agent_trajectory import presentable_candidates
+        from .memory_ranking import rank_with_memory
+
+        candidates = presentable_candidates(result.state)
+        if not candidates:
+            return None
+        return rank_with_memory(
+            candidates=candidates,
+            tool_result=result.state.get("tool_result"),
+            preferences=preference_snapshot,
+            enricher=self._enricher,
+            matcher=self._matcher,
+            reranker=self._reranker,
+            # The current request selects which catalogue facts are retrieved; it is never merged
+            # with a stored preference, and the preferences never enter this string.
+            query=payload.message,
+        )
+
+
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+
+
+def memory_ranking_enabled(value: Any = None) -> bool:
+    """Whether memory-aware ranking is enabled for this deployment.
+
+    Default **on**; an explicit ``0``/``false``/``no``/``off`` turns it off, so the pre-E-02A
+    behaviour can be pinned without a code change.  An unrecognised value keeps the default rather
+    than guessing: the switch can only ever *disable* a capability that is inert without memory.
+    """
+    raw = os.environ.get(ENV_MEMORY_RANKING) if value is None else value
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
 
 
 def llm_policy_selected() -> bool:
@@ -523,6 +913,59 @@ def _recommended_identities(state: Mapping[str, Any]) -> tuple[str, ...]:
     )
 
 
+def _replan_execution_view(
+    controller: LoopController, recommendations: Any, terminal: Any = None
+) -> Any:
+    """What bounded replanning did in this run, read from the policy the controller actually used.
+
+    ``None`` unless that policy is the bounded replanning one (E-03B), so the block is absent -
+    rather than defaulted - when the capability is disabled or the run used another policy.  The
+    initial snapshot is the one the policy took when it decided; the final snapshot is this
+    response's own counts.
+    """
+    policy = getattr(controller, "policy", None)
+    record = getattr(policy, "record", None)
+    if not callable(record):
+        return None
+    state = record(final_candidates=len(recommendations))
+    from .agent_schemas import AgentReplanView, ReplanObservationView
+
+    return AgentReplanView(
+        status=str(getattr(state, "status", "not_triggered")),
+        reason_code=str(getattr(state, "reason_code", "") or ""),
+        model_called=bool(getattr(state, "model_called", False)),
+        chosen_source=getattr(state, "chosen_source", None),
+        eligible_sources=tuple(getattr(state, "eligible_sources", ()) or ()),
+        decision_step=getattr(state, "decision_step", None),
+        initial=ReplanObservationView(
+            candidates=int(getattr(state, "initial_candidates", 0) or 0),
+            # The decision-time record, frozen before the appended source ran.
+            sources_consulted=tuple(
+                getattr(state, "initial_consulted_sources", ()) or ()
+            ),
+            source_outcomes=dict(getattr(state, "initial_source_outcomes", {}) or {}),
+            remaining_tool_calls=int(getattr(state, "remaining_tool_calls", 0) or 0),
+            remaining_steps=int(getattr(state, "remaining_steps", 0) or 0),
+        ),
+        final=ReplanObservationView(
+            candidates=len(recommendations),
+            sources_consulted=tuple(getattr(state, "consulted_sources", ()) or ()),
+            source_outcomes=dict(getattr(state, "source_outcomes", {}) or {}),
+            # The run's own remaining budget when it stopped, not the decision's.
+            remaining_tool_calls=max(
+                0,
+                int((getattr(terminal, "limits", {}) or {}).get("max_tool_calls", 0) or 0)
+                - int(getattr(terminal, "tool_calls", 0) or 0),
+            ),
+            remaining_steps=max(
+                0,
+                int((getattr(terminal, "limits", {}) or {}).get("max_steps", 0) or 0)
+                - int(getattr(terminal, "steps", 0) or 0),
+            ),
+        ),
+    )
+
+
 def _ledger_of(controller: LoopController) -> Any | None:
     """The controller's candidate ledger, or ``None`` when no plane was configured."""
     plane = getattr(controller, "candidate_plane", None)
@@ -547,3 +990,43 @@ def _titles_of(metadata: Any, parent_asins: Sequence[str]) -> Mapping[str, str]:
         if isinstance(title, str) and title.strip():
             titles[str(identity)] = title
     return titles
+
+
+def _tiger_enabled() -> bool:
+    """True when the deployment opted into the TIGER generative source."""
+    value = (os.environ.get(ENV_TIGER) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _shared_tiger_engine() -> Any:
+    """The process-wide engine, imported lazily so this module never hard-depends on it."""
+    from recommendation.backends.tiger_engine import shared_engine
+
+    return shared_engine()
+
+
+def _build_tiger_engine(identity: Any, **overrides: Any) -> Any:
+    """Compose the real TIGER serving engine over the deployment's own trusted identity map.
+
+    The identity map is the accepted one this service already uses, so TIGER can never resolve a
+    product AgentRec-X does not have.  The worker runs in the backend's own virtual environment
+    and is started lazily by :meth:`DemoAgentService.prewarm_tiger`.
+    """
+    from recommendation.backends.tiger_engine import (
+        TigerServingEngine,
+        TigerWorkerConfig,
+        shared_engine,
+    )
+
+    existing = shared_engine()
+    if existing is not None:
+        # One worker per process: adopt the engine the serving fusion already built and prewarmed.
+        return existing
+    config_kwargs: dict[str, Any] = {}
+    checkpoint = (os.environ.get(ENV_TIGER_CHECKPOINT) or "").strip()
+    if checkpoint:
+        from pathlib import Path
+
+        config_kwargs["checkpoint_dir"] = Path(checkpoint)
+    config = TigerWorkerConfig(**{**config_kwargs, **overrides})
+    return TigerServingEngine(identity, config=config)

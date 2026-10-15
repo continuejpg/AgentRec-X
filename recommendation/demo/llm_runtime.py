@@ -65,6 +65,7 @@ __all__ = [
     "LLMTurnRun",
     "PlanDecisionModel",
     "PlanPreferenceExtractor",
+    "build_llm_client",
     "build_llm_planner",
     "provider_facts",
 ]
@@ -75,8 +76,8 @@ __all__ = [
 LLM_MAX_ATTEMPTS = 2
 
 
-def build_llm_planner(client_factory: Any = None) -> LLMTurnPlanner:
-    """Build the planner over the existing provider seam.
+def build_llm_client(client_factory: Any = None) -> Any:
+    """Build the structured-model client the policy-backed modes share.
 
     ``client_factory`` is an injection point for tests and for a deployment that supplies its
     own transport; production uses :func:`~recommendation.control.provider_adapter.
@@ -86,18 +87,26 @@ def build_llm_planner(client_factory: Any = None) -> LLMTurnPlanner:
     ``not_configured`` code, so every caller sees one error type rather than two.
     """
     if client_factory is not None:
-        client = client_factory()
-    else:
-        from recommendation.control.provider_adapter import build_provider_client
+        return client_factory()
+    from recommendation.control.provider_adapter import build_provider_client
 
-        try:
-            client = build_provider_client()
-        except ModelCallError as exc:
-            raise LLMPolicyError(
-                "no provider is configured for the LLM decision mode",
-                code="not_configured",
-            ) from exc
-    return LLMTurnPlanner(client, max_attempts=LLM_MAX_ATTEMPTS)
+    try:
+        return build_provider_client()
+    except ModelCallError as exc:
+        raise LLMPolicyError(
+            "no provider is configured for the LLM decision mode",
+            code="not_configured",
+        ) from exc
+
+
+def build_llm_planner(client_factory: Any = None) -> LLMTurnPlanner:
+    """Build the turn planner over the existing provider seam.
+
+    Delegates client construction to :func:`build_llm_client`, which is what lets a runtime that
+    serves *both* policy-backed modes hold exactly one client: the same object is handed to this
+    planner and to the tool-selection planner.
+    """
+    return LLMTurnPlanner(build_llm_client(client_factory), max_attempts=LLM_MAX_ATTEMPTS)
 
 
 def provider_facts(client: Any) -> tuple[str | None, str | None]:

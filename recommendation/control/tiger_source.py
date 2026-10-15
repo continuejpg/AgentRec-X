@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
 from .arguments import CandidateSource
@@ -191,7 +191,13 @@ class TigerSourceTool:
 
     @property
     def last_proposals(self) -> tuple[TigerProposal, ...]:
-        """The full proposals retained from the most recent successful call."""
+        """The proposals this source actually offered: validated, seen-filtered, capped at ``k``.
+
+        The retrieval's full certified frontier is validated before filtering (see
+        :meth:`propose`), so this tuple is a *selection* of a verified set rather than the raw
+        engine output.  ``last_outcome`` reports ``frontier_size`` and ``seen_filtered`` so the
+        difference is never hidden.
+        """
         return self._last_proposals
 
     @property
@@ -250,24 +256,73 @@ class TigerSourceTool:
             )
 
         recommendations = list(getattr(result, "recommendations", ()) or ())
+        frontier_size = len(recommendations)
         if not recommendations:
             self._last_proposals = ()
             self._last_outcome = {"state": "EMPTY", "retrieval_mode": mode,
+                                  "requested_k": k, "returned_k": 0, "frontier_size": 0,
+                                  "seen_filtered": 0,
                                   "reason": "retrieval_returned_no_candidates"}
             return []
 
         checkpoint = str(getattr(result, "checkpoint_sha256", "") or "")
         sid_hash = str(getattr(result, "sid_artifact_sha256", "") or "")
         resolver = dict(getattr(result, "resolver", {}) or {})
-        proposals: list[TigerProposal] = []
+
+        # 1. Validate the **whole** returned frontier before anything is dropped.  A malformed
+        #    row must never be hidden by the filtering below, and a CERTIFIED frontier is not
+        #    truncated to k here: the retrieval's own result is preserved intact.
+        validated: list[TigerProposal] = []
         for position, item in enumerate(recommendations, start=1):
-            proposals.append(
+            validated.append(
                 self._validate(item, position=position, mode=mode, checkpoint=checkpoint,
                                sid_hash=sid_hash, resolver=resolver)
             )
-        self._last_proposals = tuple(proposals)
-        self._last_outcome = {"state": "OK", "retrieval_mode": mode,
-                              "candidates": len(proposals)}
+
+        # 2. Deterministic seen-item filter, in the model's own order.  The backend never masks
+        #    (that is the boundary rule); eligibility belongs to this layer.  ``encoded`` is the
+        #    trusted history this call was made with.
+        seen = {int(value) for value in encoded}
+        kept: list[TigerProposal] = []
+        seen_filtered = 0
+        for proposal in validated:
+            if int(proposal.item_id) in seen:
+                seen_filtered += 1
+                continue
+            kept.append(proposal)
+
+        # 3. At most k survivors, original model order, then 4. contiguous source ranks.  The
+        #    model's scores are carried through untouched - only the rank is this source's own
+        #    bookkeeping (the plane reads rank for fusion and score for provenance).
+        selected = kept[:k]
+        proposals = tuple(
+            replace(proposal, rank=position)
+            for position, proposal in enumerate(selected, start=1)
+        )
+        if not proposals:
+            self._last_proposals = ()
+            self._last_outcome = {"state": "EMPTY", "retrieval_mode": mode, "requested_k": k,
+                                  "returned_k": 0, "frontier_size": frontier_size,
+                                  "seen_filtered": seen_filtered,
+                                  "reason": "legal_catalogue_exhausted"}
+            return []
+
+        self._last_proposals = proposals
+        outcome: dict[str, Any] = {
+            "state": "OK", "retrieval_mode": mode, "requested_k": k,
+            "returned_k": len(proposals), "frontier_size": frontier_size,
+            "seen_filtered": seen_filtered,
+            "frontier_short": len(proposals) < k,
+        }
+        if len(proposals) < k:
+            # Distinguish the two shortfalls precisely.  The filter is only blamed when the
+            # unfiltered frontier *would* have satisfied k: if the retrieval itself came back
+            # with fewer than k rows, filtering is not the cause.
+            if len(validated) >= k and len(kept) < k:
+                outcome["reason"] = "frontier_short_after_seen_filter"
+            else:
+                outcome["reason"] = "frontier_short"
+        self._last_outcome = outcome
         return [(p.parent_asin, p.rank, p.score) for p in proposals]
 
     # -- internals --------------------------------------------------------- #

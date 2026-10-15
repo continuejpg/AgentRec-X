@@ -25,9 +25,16 @@ Preference kind              Evidence source                                 Mat
 ``price_max``                ``price_text`` (numeric)                        MATCH / VIOLATION
 ``price_min``                ``price_text`` (numeric)                        MATCH / VIOLATION
 ``feature``                  ``features``, ``title``, ``description``        MATCH only
+``product``                  the candidate's own ``parent_asin``             MATCH / VIOLATION
 ``category``                 ``categories``, ``main_category``, ``title``    MATCH only
 ``free_form_constraint``     none                                            always UNKNOWN
 ===========================  ==============================================  ==================
+
+``product`` is the identity rule (E-03C).  Its value **is** a canonical ``parent_asin`` - the one
+the trusted identity mapping already resolved for a card this session presented - and it is
+compared against the candidate's own identity, never against text.  Liking one product therefore
+cannot become a taste for its brand, and disliking one cannot become an avoidance of its colour: a
+different product is ``UNKNOWN``, not a violation, because the user said nothing about it.
 
 Categorical matching compares **whole normalised tokens**, never substrings, so
 ``"red"`` does not match ``"hundred"`` and ``"blue"`` does not match ``"blueberry"``.
@@ -448,6 +455,19 @@ def _evaluate(
         return _match_partial(entry, record, _PARTIAL_FEATURE_FIELDS)
     if kind is PreferenceKind.CATEGORY:
         return _match_partial(entry, record, _PARTIAL_CATEGORY_FIELDS)
+    if kind is PreferenceKind.PRODUCT:
+        # The candidate's identity, taken from its own catalogue record - the same categorical rule,
+        # with the product itself as the field.  An entry naming another product is UNKNOWN, so
+        # feedback about one card never penalises the others.
+        identity = str(getattr(record, "parent_asin", "") or "")
+        if not identity:
+            return _unknown(
+                entry,
+                metadata_present=True,
+                reason_code=ReasonCode.METADATA_MISSING,
+                detail="the candidate carries no canonical product identity",
+            )
+        return _match_categorical(entry, record, ("parent_asin", identity))
 
     # Defensive: every supported kind is handled above, so reaching here means the
     # matrix and the dispatch have drifted apart.  It is reported rather than ignored.

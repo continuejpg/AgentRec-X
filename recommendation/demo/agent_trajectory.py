@@ -142,21 +142,80 @@ def build_grounded_view(result: Any, ledger: Any | None) -> GroundedCandidateVie
             ),
         )
     grounded = ledger.grounded_entries
+    # A run can hold candidates the plane never recorded - the accepted capability's sequential
+    # source is not a plane source - and they are presentable.  They are reported here so the
+    # grounded universe the response describes is the universe it may actually show; a plane-only
+    # run adds nothing and reports exactly what it reported before.
+    recorded = {str(entry.parent_asin): entry for entry in ledger.entries}
+    presented = _run_candidates(result.state)
+    views: list[AgentCandidateView] = []
+    seen: set[str] = set()
+    for item in presented:
+        parent_asin = str(item.parent_asin)
+        seen.add(parent_asin)
+        entry = recorded.get(parent_asin)
+        if entry is None:
+            # No plane sighting exists for this candidate, so it carries no fabricated
+            # provenance: an empty tuple is the honest record.
+            views.append(AgentCandidateView(
+                parent_asin=parent_asin,
+                grounded=True,
+                verification_status="grounded",
+                provenance=(),
+            ))
+            continue
+        views.append(AgentCandidateView(
+            parent_asin=parent_asin,
+            grounded=entry.verification_status.value == "grounded",
+            verification_status=entry.verification_status.value,
+            provenance=tuple(entry.provenance),
+        ))
+    # Everything else the ledger holds - including ungrounded identities, which are retained for
+    # audit and are never presented - keeps its ledger order after the run's presentable order.
+    for entry in ledger.entries:
+        if str(entry.parent_asin) in seen:
+            continue
+        views.append(AgentCandidateView(
+            parent_asin=str(entry.parent_asin),
+            grounded=entry.verification_status.value == "grounded",
+            verification_status=entry.verification_status.value,
+            provenance=tuple(entry.provenance),
+        ))
+    # The run's own execution order first (it is the order the trajectory shows), then any source
+    # the ledger knows and the retained rankings do not - which cannot happen today, but reporting
+    # a source the run really used must never depend on that.
+    sources = list(_run_sources(result.state))
+    for source in ledger.sources_present():
+        if source.value not in sources:
+            sources.append(source.value)
+    adopted_count = sum(1 for item in presented if str(item.parent_asin) not in recorded)
     return GroundedCandidateView(
-        grounded_count=len(grounded),
+        grounded_count=len(grounded) + adopted_count,
         ungrounded_count=len(ledger.ungrounded_entries),
         multi_source_count=len(ledger.multi_source_parent_asins()),
-        sources_present=tuple(source.value for source in ledger.sources_present()),
-        candidates=tuple(
-            AgentCandidateView(
-                parent_asin=str(entry.parent_asin),
-                grounded=entry.verification_status.value == "grounded",
-                verification_status=entry.verification_status.value,
-                provenance=tuple(entry.provenance),
-            )
-            for entry in ledger.entries
-        ),
+        sources_present=tuple(sources),
+        candidates=tuple(views),
     )
+
+
+def _run_candidates(state: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The candidates the run holds, from the accumulated artifact when there is one."""
+    artifact = state.get("presentable_tool_result")
+    if artifact is None:
+        artifact = state.get("tool_result")
+    return tuple(getattr(artifact, "recommendations", ()) or ())
+
+
+def _run_sources(state: Mapping[str, Any]) -> tuple[str, ...]:
+    """The trusted sources this run executed, in first-seen order.
+
+    Read from the loop's retained per-source rankings; a state built without a controller (a
+    fixture, a replay) reports nothing rather than guessing a source name.
+    """
+    rankings = state.get("candidate_rankings")
+    if not isinstance(rankings, dict):
+        return ()
+    return tuple(str(name) for name in rankings)
 
 
 def build_eligibility_view(result: Any) -> AgentEligibilityView:
@@ -181,11 +240,40 @@ def build_eligibility_view(result: Any) -> AgentEligibilityView:
     )
 
 
+def presentable_candidates(state: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The candidates the run may present, in the backend's order - the one presentation rule.
+
+    The set is the controller's accumulated candidate artifact: every source the run legally
+    executed, fused by the accepted reciprocal-rank rule (``state["presentable_tool_result"]``,
+    written by the loop's adoption step).  When a run has only ever adopted one source - the whole
+    history-only path - that artifact *is* the adopted Tool result, byte for byte, so nothing about
+    a single-source run changes.  ``state["tool_result"]`` remains the fallback for a state built
+    without a controller (a projection, a fixture, a replay).
+
+    Used both by :func:`build_recommendations_view` and by the memory-aware ranking adapter
+    (E-02A), so the set that gets ranked is byte-for-byte the set that gets published: a hard
+    constraint narrows it identically in both places, and nothing can be ranked that the response
+    would then refuse to show.
+    """
+    artifact = state.get("presentable_tool_result")
+    if artifact is None:
+        artifact = state.get("tool_result")
+    if artifact is None:
+        return ()
+    permitted = _presentable_identities(state)
+    items = tuple(getattr(artifact, "recommendations", ()) or ())
+    if permitted is None:
+        return items
+    return tuple(item for item in items if str(item.parent_asin) in permitted)
+
+
 def build_recommendations_view(
     state: Mapping[str, Any],
     ledger: Any | None,
     *,
     titles: Mapping[str, str] | None = None,
+    ranking: Any | None = None,
+    limit: int | None = None,
 ) -> tuple[AgentRecommendationView, ...]:
     """Project the ranked recommendation list, attaching each item's source provenance.
 
@@ -196,31 +284,52 @@ def build_recommendations_view(
     never in the answer.  Presenting it here while the projection excluded it would be exactly
     the failure the constraint kernel exists to prevent - a violator shown as a recommendation.
 
-    The order is the backend's order and is never re-sorted.  Provenance is looked up from the
-    ledger by identity; an item the ledger does not know (the capability-only path) reports no
-    sources rather than a guessed one.
+    Without ``ranking`` the order is the backend's order (the run's fused order) and is never
+    re-sorted.  With a :class:`~recommendation.demo.memory_ranking.MemoryRanking` the *list*
+    follows the accepted M10B order while ``rank`` keeps each candidate's baseline (fused)
+    position, so the memory-aware order and the fusion order are both readable in the same
+    response and neither rewrites the other.  Scores, score kinds and provenance are copied from
+    the ledger in both cases.
+
+    ``limit`` is applied **after** the ordering, so the request's ``k`` bounds what is shown while
+    the order it is taken from is the run's own fused (or memory-aware) ranking of the whole
+    candidate set - never an arbitrary subset of one source.
+
+    Provenance is looked up from the ledger by identity; an item the ledger does not know (the
+    capability-only path) reports no sources rather than a guessed one.
     """
-    tool_result = state.get("tool_result")
-    if tool_result is None:
+    items = presentable_candidates(state)
+    if not items:
         return ()
-    permitted = _presentable_identities(state)
     resolution = _ledger_sources(ledger)
+    ranked = None if ranking is None else ranking.by_identity()
+    if ranked is not None:
+        # The ranking was computed over exactly this set, so re-read it in its own order rather
+        # than trusting the caller's list to agree with it.
+        items = tuple(sorted(items, key=lambda item: ranked[str(item.parent_asin)].reranked_rank))
+    if limit is not None:
+        items = items[: max(int(limit), 0)]
     views: list[AgentRecommendationView] = []
-    for item in tool_result.recommendations:
+    for item in items:
         parent_asin = str(item.parent_asin)
-        if permitted is not None and parent_asin not in permitted:
-            continue
         score, score_kind = _score_for(parent_asin, item, ledger)
+        entry = None if ranked is None else ranked.get(parent_asin)
         views.append(
             AgentRecommendationView(
                 # Ranked over the presented set, so the numbering a client renders has no gap.
-                rank=len(views) + 1,
+                rank=len(views) + 1 if entry is None else entry.rank,
                 item_id=int(item.item_id),
                 parent_asin=parent_asin,
                 score=score,
                 score_kind=score_kind,
                 title=None if titles is None else titles.get(parent_asin),
                 sources=resolution.get(parent_asin, ()),
+                reranked_rank=None if entry is None else entry.reranked_rank,
+                match_count=0 if entry is None else entry.match_count,
+                violation_count=0 if entry is None else entry.violation_count,
+                unknown_count=0 if entry is None else entry.unknown_count,
+                evidence=() if entry is None else entry.evidence,
+                rerank_reason=None if entry is None else entry.reason,
             )
         )
     return tuple(views)

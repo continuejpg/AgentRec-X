@@ -50,7 +50,9 @@ REMOVE_LIGHT = "Remove my lightweight preference."
 DIRECT_PLAN = {"route": "direct", "add": [], "remove": []}
 
 #: The response keys the demo published before the decision mode existed.  The mode is carried
-#: inside ``trace``, so this set must not change.
+#: inside ``trace``, so this set must not change - except for the one additive, default-``None``
+#: field E-01A-3B introduced for the agent decision mode (``agent``), which is ``null`` on every
+#: turn this file exercises and is asserted so here rather than left implicit.
 CHAT_RESPONSE_KEYS = {
     "api_version",
     "session_id",
@@ -63,6 +65,7 @@ CHAT_RESPONSE_KEYS = {
     "recommendations",
     "audit",
     "trace",
+    "agent",
 }
 
 
@@ -151,6 +154,10 @@ def test_existing_clients_default_to_deterministic(tmp_path: Path) -> None:
         body = _ok(_chat(harness, session_id, "Recommend some hiking gear."))
         assert body["trace"]["decision_mode"] == "deterministic"
         assert set(body) == CHAT_RESPONSE_KEYS, "the mode must not add a top-level field"
+        assert body["agent"] is None, (
+            "the agent execution record belongs to the tool-selection mode; every other mode "
+            "reports null rather than an empty claim"
+        )
         assert harness.state(session_id)["decision_mode"] == "deterministic"
     finally:
         close_harness(harness)

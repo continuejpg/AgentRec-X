@@ -37,28 +37,37 @@ from typing import Any, Sequence
 
 from recommendation.control import ActionKind, ActionProposal, PolicyActionError
 
-__all__ = ["SOURCE_PLANS", "DemoSourcePlanPolicy", "normalise_source_plan"]
+__all__ = [
+    "SOURCE_ARGUMENTS",
+    "SOURCE_PLANS",
+    "SOURCE_PURPOSES",
+    "DemoSourcePlanPolicy",
+    "normalise_source_plan",
+]
 
 #: The candidate sources a request may name, mapped to the control-plane action that
 #: consults them.  ``history`` is the accepted sequential recommender; ``catalog_search`` is
 #: full-catalogue lexical search over normalized catalogue text.
 #:
 #: ``history`` maps to the accepted ``RECOMMEND_FROM_HISTORY`` action, and that is a
-#: deliberate refusal to route it through the candidate plane.  Routing it via
-#: ``SELECT_SOURCE`` would add provenance for it, but ``SELECT_SOURCE`` is only offered when a
-#: similar-item source is registered, and changing that menu rule was measured to alter the
-#: action sequence of an **archived Phase-3 recording** (three replay tests failed) - i.e. it
-#: changes which actions a run may take, which is a control-plane behaviour change rather than
-#: packaging.  So the history path stays exactly as accepted, and the response labels its
-#: provenance as the history source without a ledger record (see
-#: :func:`~recommendation.demo.agent_trajectory.build_grounded_view`).  ``catalog_search``
-#: goes through the plane, which is what records real multi-source provenance.
+#: deliberate refusal to route it through the candidate plane: the accepted single-source path
+#: stays exactly as it was, and the response labels its provenance as the history source without
+#: a ledger record (see :func:`~recommendation.demo.agent_trajectory.build_grounded_view`).
+#: ``catalog_search`` goes through the plane, which is what records real multi-source provenance.
+#:
+#: ``two_tower`` and ``tiger`` are consulted through ``SELECT_SOURCE``, the action that names one
+#: trusted source.  That action used to be offered only when a *similar-item* source was
+#: registered, which left both unreachable in a deployment that does not ship the 6.21 GB
+#: item-item index.  The menu rule now offers it whenever the plane can serve any source the
+#: action can name (see ``recommendation/control/loop.py:_plane_candidate_actions``); a
+#: deployment that does register similar-item sees the identical action tuple as before.
 SOURCE_PLANS: dict[str, ActionKind] = {
     "history": ActionKind.RECOMMEND_FROM_HISTORY,
     "catalog_search": ActionKind.SEARCH_CATALOG,
-    # Two-Tower is consulted through ``SELECT_SOURCE``, the action that names one trusted
-    # source, because it is neither the accepted history recommender nor a lexical search.
+    # Two-Tower and TIGER are consulted through ``SELECT_SOURCE``, the action that names one
+    # trusted source, because neither is the accepted history recommender nor a lexical search.
     "two_tower": ActionKind.SELECT_SOURCE,
+    "tiger": ActionKind.SELECT_SOURCE,
 }
 
 #: The ``CandidateSource`` each plan name selects when consulted through the candidate plane.
@@ -66,13 +75,26 @@ SOURCE_ARGUMENTS: dict[str, str] = {
     "history": "history",
     "catalog_search": "catalog_search",
     "two_tower": "two_tower",
+    "tiger": "tiger",
+}
+
+#: One short, factual purpose per source name, for callers that must *describe* a source rather
+#: than consult it - today the tool-selection prompt, which is handed the menu of sources this
+#: deployment can actually serve.  It lives beside :data:`SOURCE_PLANS` so the described set and
+#: the executable set cannot drift apart, and each wording names a retrieval capability only: a
+#: purpose may not claim a product fact, a quality, an identity or a score.
+SOURCE_PURPOSES: dict[str, str] = {
+    "history": "sequential recommendation from the shopper's own trusted purchase history",
+    "catalog_search": "lexical full-catalogue search over normalized product text",
+    "two_tower": "embedding retrieval from the trained Two-Tower candidate model",
+    "tiger": "generative semantic-id retrieval from the TIGER backend",
 }
 
 #: Default plan: the accepted history recommender alone.  That keeps the endpoint's default
 #: behaviour identical to the accepted single-source path.
 DEFAULT_SOURCE_PLAN: tuple[str, ...] = ("history",)
 
-#: Upper bound on a plan.  Three sources is every registered source today, and a bound here
+#: Upper bound on a plan.  Four sources is every registered source today, and a bound here
 #: means a malformed request cannot ask the loop to do unbounded work.
 MAX_SOURCE_PLAN = len(SOURCE_PLANS)
 
@@ -131,6 +153,7 @@ class DemoSourcePlanPolicy:
         *,
         query_builder: Any = None,
         default_k: int = 5,
+        use_memory: bool = True,
     ) -> None:
         if not plan:
             raise ValueError("a source plan needs at least one source")
@@ -140,9 +163,16 @@ class DemoSourcePlanPolicy:
         self._plan = tuple(plan)
         self._query_builder = query_builder or _search_arguments_from_message
         self._default_k = int(default_k)
+        #: Whether this plan may fold the user's stored preferences into the lexical query.
+        #: Defaults to the accepted legacy behaviour; an LLM-selected run turns it off so an
+        #: unrelated historical preference can never be appended behind the current request.
+        self._use_memory = bool(use_memory)
         self._call_count = 0
-        #: Sources already proposed in the current run, and whether the plan is served.
-        #: Reset on step 0, because one compiled policy serves every run of its controller.
+        #: Sources already proposed **in the current run**, and whether the current run's plan is
+        #: served.  Both are cleared on the first step of a run (see :meth:`choose`), because a
+        #: compiled policy may serve more than one run - whether the controller is reused or the
+        #: same instance is handed to a second engine - and run-scoped state that survived into the
+        #: next run used to make that run skip a planned source.
         self._served: set[str] = set()
         self._finished_plan = False
 
@@ -170,11 +200,20 @@ class DemoSourcePlanPolicy:
         without this the plan would repeat its first source until the step budget ran out
         instead of moving on.
 
+        That record is **run-scoped**, and this method is what makes it so: ``step_index == 0``
+        is the first decision of a run (the engine that carries the step counter is built per
+        run), so both fields are cleared there.  Relying on a fresh policy instance instead would
+        be relying on how a *caller* composes its controller - and a caller that reuses one (as
+        this deployment did) would then silently change the second run's behaviour: a source
+        already served in the previous run is still in ``_served``, so once the first source of
+        the new run has grounded candidates the next planned source is skipped and the plan ends
+        early.  Cleaning up here keeps one run's decisions from reaching the next one whatever
+        the caller does.
+
         The record is a returned flag rather than mutable state: ``choose`` reports
         ``finished_plan=True`` once the plan is served, and the loop clears that flag on the
-        terminal step.  One policy instance is cached per compiled controller and is shared by
-        every run that controller serves, so mutable "which sources have I asked for" state
-        would leak between requests and silently change the second request's behaviour.
+        terminal step.  Note that a *refused* FINISH does not restart the plan: the flag stays
+        true, the policy keeps proposing FINISH, and the step budget bounds the run.
 
         A planned source the run does not currently offer is skipped rather than proposed: the
         controller's validator is the authority on availability, and a policy that proposed an
@@ -182,7 +221,8 @@ class DemoSourcePlanPolicy:
         """
         self._call_count += 1
         if context.step_index == 0:
-            # A fresh run on this cached policy: last run's plan is over.
+            # The first decision of a run: nothing has been consulted *in this run* yet.
+            self._served = set()
             self._finished_plan = False
         available = context.available_actions
         plan = self._plan
@@ -224,7 +264,14 @@ class DemoSourcePlanPolicy:
             return ActionProposal(
                 action=action,
                 rationale="the request asked for full-catalogue lexical retrieval",
-                arguments=self._query_builder(context.user_request, limit=self._default_k),
+                arguments=_adapt_search_arguments(
+                    self._query_builder(context.user_request, limit=self._default_k),
+                    # The controller hands a policy the *projection* of the user's ACTIVE
+                    # preferences, never the M9 snapshot (see PolicyContext); the adapter reads the
+                    # same six values out of it either way, so this stays duck-typed and the
+                    # baseline path is unchanged when memory is off.
+                    getattr(context, "active_preferences", None) if self._use_memory else None,
+                ),
             )
         self._served.add(source)
         if action is ActionKind.RECOMMEND_FROM_HISTORY:
@@ -240,6 +287,21 @@ class DemoSourcePlanPolicy:
             rationale=f"the request asked for the {source} candidate source",
             arguments=self._select_arguments(source),
         )
+
+    def proposal_for_source(self, source: str, context: Any) -> ActionProposal | None:
+        """One proposal for exactly ``source``, built the same way the plan builds it.
+
+        Public because a *bounded replanning* policy (E-03B) may add one source the authorised
+        plan did not name, and that source's action and arguments must be constructed by the same
+        rule as any other: the query comes from the current request, the budget from this policy's
+        ``default_k``, and the source name from :data:`SOURCE_PLANS`.  Returns ``None`` when this
+        deployment's plan vocabulary does not know the name - the caller then declines rather than
+        inventing an action.
+        """
+        action = SOURCE_PLANS.get(str(source))
+        if action is None:
+            return None
+        return self._proposal_for(str(source), action, context)
 
     def _select_arguments(self, source: str) -> Any:
         """Build ``SELECT_SOURCE`` arguments naming one trusted source."""
@@ -295,6 +357,27 @@ class DemoSourcePlanPolicy:
             "no planned source is available and FINISH is not offered: "
             + ", ".join(a.value for a in available)
         )
+
+
+
+def _adapt_search_arguments(arguments: Any, snapshot: Any | None) -> Any:
+    """Fold this user's ACTIVE preferences into the lexical query, if any apply.
+
+    The policy owns *what to look for*; the trusted search tool still owns matching.  With no
+    usable preference the original arguments object is returned **unchanged**, so the baseline path
+    is bit-for-bit what it was.
+    """
+    from recommendation.control import SearchCatalogArguments
+    from recommendation.control.arguments import MAX_SEARCH_TERMS
+    from recommendation.memory.query_adapter import adapt_terms
+
+    base = tuple(getattr(arguments, "terms", ()) or ())
+    adaptation = adapt_terms(base, snapshot)
+    if not adaptation.changed:
+        return arguments
+    # The adapter builds the object directly, so it must respect the argument schema's own term
+    # bound (``MAX_SEARCH_TERMS``) rather than assume the constructor already capped the list.
+    return SearchCatalogArguments(terms=adaptation.terms[:MAX_SEARCH_TERMS])
 
 
 def _search_arguments_from_message(message: str, *, limit: int) -> Any:

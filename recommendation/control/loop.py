@@ -43,6 +43,7 @@ from recommendation.agent.pipeline import (
 )
 from recommendation.agent.rendering import NO_CANDIDATES_TEXT
 from recommendation.agent.state import AgentGraphState, AgentInput, TrustedHistory
+from recommendation.memory.query_adapter import project_active_preferences
 from recommendation.tools.schemas import RecommendationToolResult, ToolRecommendation
 
 from .capability import RecommendFromHistoryCapability
@@ -370,7 +371,16 @@ class _LoopEngine:
     # -- policy ------------------------------------------------------------ #
 
     def build_context(self) -> PolicyContext:
-        """Build the controlled projection the policy is allowed to see."""
+        """Build the controlled projection the policy is allowed to see.
+
+        The preference part of that projection is built here, from the turn's snapshot, and it is
+        built **narrow**: :func:`project_active_preferences` copies the ACTIVE entries' kind,
+        polarity, value, opaque id and sort key, and nothing else.  The snapshot itself stays in
+        the run state, where the trusted stages that need the full entries (matching, reranking,
+        persistence) read it; a policy never receives it, so it cannot reach the owning
+        ``user_key``, the verbatim ``source_text`` behind a preference, its turn id or its
+        timestamps, and it cannot see a preference the user withdrew.
+        """
         snapshot = self.state.get("preference_snapshot")
         active_count = 0
         if snapshot is not None:
@@ -383,6 +393,7 @@ class _LoopEngine:
             available_actions=self.available_actions(),
             has_trusted_history=bool(self.state.get("trusted_user_history")),
             active_preference_count=active_count,
+            active_preferences=project_active_preferences(snapshot),
             candidate_state=self.candidate_state(),
             last_observation=self.last_observation,
             remaining_steps=self.control.steps_remaining,
@@ -531,6 +542,21 @@ class _LoopEngine:
             offered.append(ActionKind.SEARCH_CATALOG)
         if self.candidate_plane.has_source(CandidateSource.SIMILAR_ITEM):
             offered.append(ActionKind.FIND_SIMILAR)
+        # ``SELECT_SOURCE`` names exactly one trusted source, so it is offered whenever the plane
+        # can serve *any* source that action can name - not only when item-item similarity
+        # happens to be registered.  Gating it on ``SIMILAR_ITEM`` alone made ``two_tower`` (and
+        # ``tiger``) unreachable for a deployment that does not ship the 6.21 GB similarity
+        # index, even though the plane could serve them.  For a deployment that *does* register
+        # similar-item the offered order is unchanged (FIND_SIMILAR, then SELECT_SOURCE), which
+        # is what keeps archived recordings replaying identically.
+        if any(
+            self.candidate_plane.has_source(source)
+            for source in (
+                CandidateSource.SIMILAR_ITEM,
+                CandidateSource.TWO_TOWER,
+                CandidateSource.TIGER,
+            )
+        ):
             offered.append(ActionKind.SELECT_SOURCE)
         return tuple(offered)
 
@@ -935,7 +961,7 @@ class _LoopEngine:
         # Record which trusted source produced this candidate set, so the renderer can name it
         # instead of implying the sequential recommender.
         self.state["candidate_source"] = str(getattr(result, "source", "") or "")
-        self.state["tool_result"] = RecommendationToolResult(
+        adopted = RecommendationToolResult(
             recommendations=list(recommendations),
             requested_k=result.requested_k,
             returned_k=len(recommendations),
@@ -944,6 +970,92 @@ class _LoopEngine:
             history_truncated=False,
             eligible_candidates=0,
         )
+        self.state["tool_result"] = adopted
+        self._record_candidate_ranking(
+            source=str(getattr(result, "source", "") or self.validated.action.value),
+            tool_result=adopted,
+        )
+
+    def _record_candidate_ranking(
+        self, *, source: str, tool_result: RecommendationToolResult
+    ) -> None:
+        """Retain one executed source's own ranking and rebuild what the run may present.
+
+        A candidate-producing step used to replace the run's candidate set outright, so a run
+        that legally consulted two sources presented only the second one's products.  This keeps
+        each source's set (one ranking per source, the latest run of a source winning) and derives
+        the run's presentable set from all of them with the **accepted** fusion rule - a reorder of
+        what was really grounded, never a union with anything a source did not return.
+
+        Nothing else changes: the run's *current* candidate set (``state["tool_result"]``), the
+        policy-visible counts, the completion guard and the tool budget are untouched, so
+        termination semantics are exactly as they were.
+        """
+        rankings = dict(self.state.get("candidate_rankings") or {})
+        rankings[str(source)] = tool_result
+        self.state["candidate_rankings"] = rankings
+        self.state["presentable_tool_result"] = self._fuse_presentable(rankings)
+
+    def _fuse_presentable(self, rankings: dict[str, RecommendationToolResult]) -> Any:
+        """The run's presentable candidates: every executed source's set, fused by rank.
+
+        One source is returned unchanged, byte for byte, which is what keeps a single-source run
+        (the whole deterministic and history-only path) exactly as it was.  Several sources are
+        fused by :func:`~recommendation.control.candidate_ledger.reciprocal_rank_fusion` over each
+        source's own ranking, so an identity two sources both returned carries both sightings'
+        weight and appears once.  The envelope's ``score_kind`` is the ledger's own name for a
+        multi-source result; the per-identity rendering score is still resolved by the caller from
+        the ledger, so no per-candidate claim is made here.
+        """
+        if not rankings:
+            return None
+        if len(rankings) == 1:
+            return next(iter(rankings.values()))
+        from .candidate_ledger import reciprocal_rank_fusion
+
+        rankings_list = [
+            [str(item.parent_asin) for item in envelope.recommendations]
+            for envelope in rankings.values()
+        ]
+        order = [identity for identity, _ in reciprocal_rank_fusion(rankings_list)]
+        # First source to propose an identity owns its rendering record (rank, item id, score);
+        # the identity itself is one product, which is the ledger's own de-duplication rule.
+        items: dict[str, ToolRecommendation] = {}
+        for envelope in rankings.values():
+            for item in envelope.recommendations:
+                items.setdefault(str(item.parent_asin), item)
+        recommendations = [
+            items[identity].model_copy(update={"rank": position})
+            for position, identity in enumerate(
+                [identity for identity in order if identity in items], start=1
+            )
+        ]
+        envelopes = list(rankings.values())
+        return RecommendationToolResult(
+            recommendations=recommendations,
+            requested_k=max(int(envelope.requested_k) for envelope in envelopes),
+            returned_k=len(recommendations),
+            history_length=max(int(envelope.history_length) for envelope in envelopes),
+            effective_history_length=max(
+                int(envelope.effective_history_length) for envelope in envelopes
+            ),
+            history_truncated=any(bool(envelope.history_truncated) for envelope in envelopes),
+            eligible_candidates=max(
+                int(envelope.eligible_candidates) for envelope in envelopes
+            ),
+            score_kind="rrf_rank_fusion",
+        )
+
+    def presentable_tool_result(self) -> Any:
+        """This run's accumulated presentable candidates, or ``None`` before any source ran.
+
+        Read-only: the artifact is written when a candidate-producing step is adopted, so a
+        consumer never recomputes a fusion and two consumers can never disagree about the order.
+        """
+        artifact = self.state.get("presentable_tool_result")
+        if artifact is not None:
+            return artifact
+        return self.state.get("tool_result")
 
     def _execute_evidence(self) -> StepOutcome:
         """Acquire trusted evidence and re-derive the run's feasibility from it.
@@ -1470,6 +1582,15 @@ class _LoopEngine:
         """
         if result.tool_result is not None:
             self.state["tool_result"] = result.tool_result
+            # The accepted capability is this run's sequential source.  Its ranking is the one
+            # candidate set the plane never records (the plane owns the ledger and the capability
+            # predates it), so it is retained here - otherwise a later plane step would overwrite
+            # the only copy and the run could not present what this source grounded.
+            from .arguments import CandidateSource
+
+            self._record_candidate_ranking(
+                source=CandidateSource.HISTORY.value, tool_result=result.tool_result
+            )
         if result.enrichment is not None:
             self.state["enrichment"] = result.enrichment
         if result.preference_evidence is not None:
@@ -1508,7 +1629,15 @@ class _LoopEngine:
         """
         if self.eligibility is None or not self.constraint_requirements:
             return
-        identities = self.grounded_identities()
+        # The assessment covers everything the run may present, not only the most recent
+        # source's set: a verdict has to exist for every candidate the response could show, or
+        # the projection below would be built from a narrower universe than the answer.
+        presentable = self.presentable_tool_result()
+        identities = (
+            tuple(str(item.parent_asin) for item in presentable.recommendations)
+            if presentable is not None
+            else self.grounded_identities()
+        )
         if not identities:
             self.feasibility = None
             self.state.pop("candidate_eligibility", None)
@@ -1528,7 +1657,7 @@ class _LoopEngine:
         # against what they would have shown rather than against everything they retrieved.
         self.state["constraint_projection"] = candidate_feasibility_projection(
             self.feasibility,
-            self.state.get("tool_result"),
+            self.presentable_tool_result(),
             self.state.get("enrichment"),
             self.state.get("reranking"),
         )

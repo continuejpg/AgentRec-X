@@ -137,6 +137,9 @@ MATCHING_SUPPORT: dict[PreferenceKind, MatchingSupport] = {
     PreferenceKind.PRICE_MIN: MatchingSupport.SUPPORTED,
     PreferenceKind.FEATURE: MatchingSupport.PARTIALLY_SUPPORTED,
     PreferenceKind.CATEGORY: MatchingSupport.PARTIALLY_SUPPORTED,
+    #: Identity-level product feedback (E-03C): compared against the candidate's own canonical
+    #: ``parent_asin``, never against text, so it is supported exactly and only for that product.
+    PreferenceKind.PRODUCT: MatchingSupport.SUPPORTED,
     PreferenceKind.FREE_FORM_CONSTRAINT: MatchingSupport.UNSUPPORTED_FOR_MATCHING,
 }
 
