@@ -1,0 +1,161 @@
+{
+  "frozen_at": "2026-10-16 07:14",
+  "head": "b3af9da79a87aada73cf389ee4c22df5f2169d54",
+  "branch": "v2/e04a-pass-checkpoint",
+  "models": {
+    "sasrec": {
+      "path": "runs/sasrec_canonical_2026/best.pt",
+      "exists": true,
+      "bytes": 121675470,
+      "sha256": "352bd3ae7ebc5e20adbaac0388ac20fa4b9cc547a579500191d940f77a105912"
+    },
+    "two_tower": {
+      "path": "runs/twotower_public_2026_full/checkpoint.pt",
+      "exists": true,
+      "bytes": 162221222,
+      "sha256": "0e56be01f872ed0cc46eca69ef54770b1ea7dbd3e4ef92aa6eb290b605d8b1ab"
+    }
+  },
+  "supporting_assets": {
+    "runs/sasrec_canonical_2026/run.json": {
+      "path": "runs/sasrec_canonical_2026/run.json",
+      "exists": true,
+      "bytes": 6469,
+      "sha256": "e3549049f955bb0540444c221523444b2a333e8df5eac6b97984342e40c6e2c7"
+    },
+    "runs/twotower_public_2026_full/run.json": {
+      "path": "runs/twotower_public_2026_full/run.json",
+      "exists": true,
+      "bytes": 5646,
+      "sha256": "2c6b81105b408b9d5a50960a4ee50cdf804c444a87444b2cf004d4662a35afb8"
+    },
+    "runs/twotower_public_2026_full/metadata_categories.json": {
+      "path": "runs/twotower_public_2026_full/metadata_categories.json",
+      "exists": true,
+      "bytes": 2741318,
+      "sha256": "46469955655b8c552a172cb324e724455c72ae4bc10c9fe3d53a35c83b882a9d"
+    },
+    "data/processed/Sports_and_Outdoors_mappings.json": {
+      "path": "data/processed/Sports_and_Outdoors_mappings.json",
+      "exists": true,
+      "bytes": 39670810,
+      "sha256": "dca7815a2482ab200f2cf1e3dd62eec9035bf6c5386e76cce920325360f01912"
+    },
+    "data/processed/Sports_and_Outdoors_sequences.json": {
+      "path": "data/processed/Sports_and_Outdoors_sequences.json",
+      "exists": true,
+      "bytes": 348683134,
+      "sha256": "SKIPPED_LARGE"
+    },
+    "runs/tiger_public_2026/checkpoint/tiger.pt": {
+      "path": "runs/tiger_public_2026/checkpoint/tiger.pt",
+      "exists": true,
+      "bytes": 45181927,
+      "sha256": "95e5cb6f816bb271b8551a6dd9b62ee33c8e0f6b5908ce426622113a072c6c0a"
+    },
+    "runs/tiger_public_2026/sid/semantic_ids.json": {
+      "path": "runs/tiger_public_2026/sid/semantic_ids.json",
+      "exists": true,
+      "bytes": 5775237,
+      "sha256": "6501fbe8e146e3c57ce7a146e37c3be29235ae5bbd082116f6a8e30e739e8d0e"
+    }
+  },
+  "key_archives": [
+    {
+      "path": "runs/e04b_gate_b1_sasrec/gate_b1_summary.json",
+      "exists": true,
+      "bytes": 5696,
+      "sha256": "70f4eb9eb27390e67f64b0c9e3eda09717691645949ea39839b298d4a3095558"
+    },
+    {
+      "path": "runs/e04b_gate_b2_twotower/gate_b2_summary.json",
+      "exists": true,
+      "bytes": 8797,
+      "sha256": "5ffe5389f8e08d0880cfb37717450fdfce21f6be22b4858c5ec6c52bd4beb312"
+    },
+    {
+      "path": "runs/e04b_gate_b3_tiger/gate_b3_summary.json",
+      "exists": true,
+      "bytes": 2527,
+      "sha256": "e0a02265ead83c7ff4c615ef6cd18865952059973d3a172861746dcf95686680"
+    },
+    {
+      "path": "runs/e04b_gate_b3_tiger_stages/stage_100.json",
+      "exists": true,
+      "bytes": 19135,
+      "sha256": "0669df6a3b0fb15bb4b7b2f4120816e3a63c51026364cd1be148d50d71e1dff1"
+    },
+    {
+      "path": "runs/e04b_gate_b3_final_diag/GATE_B3_FULL_CANDIDATES.jsonl",
+      "exists": true,
+      "bytes": 425629,
+      "sha256": "1e3697b4270758734209e91df1928d89161bb5f68f900de6c79a04be1458ba20"
+    },
+    {
+      "path": "runs/gate_c12_service_validation_r2/sasrec_summary.json",
+      "exists": true,
+      "bytes": 928,
+      "sha256": "98d5cee7d178dc7b244d6dddcc3130cda1cd073bd2bef49bfb99cd180ba988b1"
+    },
+    {
+      "path": "runs/gate_c12_service_validation_r2/two_tower_summary.json",
+      "exists": true,
+      "bytes": 946,
+      "sha256": "46016f0421a247696a2f340514a88221726b3ed84efad65ef1529f71e2b79fcf"
+    },
+    {
+      "path": "runs/p3_unified/sasrec/responses_run1.jsonl",
+      "exists": true,
+      "bytes": 1176474,
+      "sha256": "ea89fcde4ff3a891b0dc0ca8ce10b52d01fd90f26f7247290bada17d90c14365"
+    },
+    {
+      "path": "runs/p3_unified/sasrec/responses_run2.jsonl",
+      "exists": true,
+      "bytes": 1176494,
+      "sha256": "06dd1884b17f6e34af1af568618a1f370615466a1018c484503fd38c6447d88a"
+    },
+    {
+      "path": "runs/p3_unified_r2/two_tower/responses_run1.jsonl",
+      "exists": true,
+      "bytes": 1174533,
+      "sha256": "c0a5773474760169d730707bba41e4658a96309bd9d607753ef13c550bd0e94d"
+    },
+    {
+      "path": "runs/p3_unified_r2/two_tower/responses_run2.jsonl",
+      "exists": true,
+      "bytes": 1174525,
+      "sha256": "b7db88fc1a48565299d91aadd303a1c9870b840eecdf381f36c818198b9d4b19"
+    },
+    {
+      "path": "runs/p3_unified_fusion/fusion/responses_run1.jsonl",
+      "exists": true,
+      "bytes": 1186813,
+      "sha256": "7b11525bb8706203fcc4df9ee7929eb76b45f64637393608e569b895375f9860"
+    },
+    {
+      "path": "runs/p3_unified_fusion/fusion/responses_run2.jsonl",
+      "exists": true,
+      "bytes": 1186817,
+      "sha256": "38ea4b3b528ce156ebebc3fdc9d07400934e98ee5f0d5db91b1a43b6fece56c0"
+    },
+    {
+      "path": "runs/p3_unified_analysis/P3_UNIFIED_METRICS.json",
+      "exists": true,
+      "bytes": 2728,
+      "sha256": "e1b20e7a0649419947c6ffbe5df05b335603a38a93e48cbdebc5f98ad4bc172b"
+    },
+    {
+      "path": "runs/p3_unified_analysis/P3_PAIRED_BOOTSTRAP.json",
+      "exists": true,
+      "bytes": 2621,
+      "sha256": "effb0c0923a202c806b0980c35b10398cb9b2c15053d7ea047842d30258df6e2"
+    }
+  ],
+  "versions": {
+    "python": "3.10.12",
+    "torch": "2.1.2+cpu",
+    "cuda_available": false
+  },
+  "note": "runs/** is .gitignore'd (495 ignored files under runs/); these are local evidence archives, not Git content"
+}
