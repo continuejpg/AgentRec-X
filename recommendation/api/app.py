@@ -227,7 +227,16 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
     lexical = CatalogueLexicalIndex.build(records)
     # Serving V1 stays the default and is byte-identical: the TIGER profile is only realised when
     # the deployment opts in, and it is a *separate* profile rather than a change to V1.
-    config = FusionInferenceConfig()
+    # Serving profile selection: the deployment names it through the existing startup configuration
+    # (``AGENTRECX_FUSION_PROFILE``).  Absent => ``serving_v1``, byte-identical to before.
+    profile_name = (os.environ.get("AGENTRECX_FUSION_PROFILE") or "serving_v1").strip().lower()
+    from recommendation.inference.fusion import FUSION_PROFILES as _FUSION_PROFILES
+
+    if profile_name not in _FUSION_PROFILES:
+        raise RuntimeError(
+            f"unknown AGENTRECX_FUSION_PROFILE {profile_name!r}; known: {sorted(_FUSION_PROFILES)}"
+        )
+    config = FusionInferenceConfig.for_profile(profile_name)
     tiger_engine = None
     if _tiger_serving_enabled():
         from recommendation.backends.tiger_engine import TigerServingEngine, TigerWorkerConfig
@@ -549,6 +558,14 @@ def create_app(
             content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
         )
 
+    @app.exception_handler(UnknownCatalogueIdentity)
+    async def _unknown_catalogue_identity(_request: Request, exc: Exception) -> JSONResponse:
+        """A history identity outside the served catalogue is a client error, not a server fault."""
+        return JSONResponse(
+            status_code=422,
+            content=ErrorResponse(error="unknown_item", detail=str(exc)).model_dump(),
+        )
+
     @app.exception_handler(UnknownItemError)
     async def _unknown_item_handler(_request: Request, exc: UnknownItemError):
         return JSONResponse(
@@ -687,6 +704,7 @@ def create_app(
 #: The demo API is enabled here (and only here) so the served process is the full demo,
 #: while ``create_app()`` used directly -- including by the Milestone 6 tests -- stays
 #: exactly the Milestone 6 service.
+from ..inference.fusion import UnknownCatalogueIdentity  # noqa: E402
 app = create_app(enable_demo=True)
 
 

@@ -99,6 +99,11 @@ FUSION_SOURCES_V2_TIGER: tuple[str, ...] = FUSION_SOURCES + (TIGER_SOURCE,)
 #: TIGER cannot serve the 100-deep head the other three are read at.
 FUSION_PROFILES: dict[str, tuple[str, ...]] = {
     "serving_v1": FUSION_SOURCES,
+    # Gate C-1/C-2: single-backend serving profiles, added for service acceptance.  They select one
+    # source each and change nothing else: same scoring, same seen mask, same top-k, same
+    # tie-breaking inside that source.  ``serving_v1`` remains the default and is untouched.
+    "serving_v1_sequential_only": ("sequential",),
+    "serving_v1_two_tower_only": ("two_tower",),
     "serving_v2_tiger": FUSION_SOURCES_V2_TIGER,
     # Same four sources, but the three engines that can serve depth 100 keep it while TIGER stays
     # at its own ceiling.  A *different* configuration, recorded as such rather than presented as
@@ -141,6 +146,15 @@ SOURCE_SCORE_KINDS: dict[str, str] = {
 
 class FusionError(RuntimeError):
     """The fusion engine cannot produce a trustworthy result."""
+
+
+class UnknownCatalogueIdentity(FusionError):
+    """A caller-supplied history identity is outside the served catalogue.
+
+    A **client** input error by construction: the raising check inspects only the request's own
+    history list against the trusted identity map.  A dedicated subclass keeps genuine engine
+    failures out of the 4xx path.
+    """
 
 
 @runtime_checkable
@@ -448,7 +462,7 @@ class FusionInferenceEngine:
         if self.is_known_identity is not None:
             unknown = [value for value in history if not self.is_known_identity(value)]
             if unknown:
-                raise FusionError(
+                raise UnknownCatalogueIdentity(
                     f"history contains {len(unknown)} identity(ies) outside the served catalogue, "
                     f"first: {unknown[0]!r}"
                 )
