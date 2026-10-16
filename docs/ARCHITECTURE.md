@@ -508,7 +508,9 @@ AGENTRECX_CONTROL_PLANE=loop    # 2.0-alpha bounded agent loop
 
 ---
 
-## 7. Candidate plane (Stage 2) — RESEARCH ONLY
+## 7. Candidate plane (Stage 2, IMPLEMENTED)
+
+> Status: the plane below is implemented and wired into the agent service (`recommendation/control/candidate_plane.py`, consumed at `recommendation/demo/agent_service.py:527`).  The *offline-lab track* as a whole is still a research track (see §0b and §6), and the limitations listed under "Not implemented (documented, not claimed)" below remain unclaimed.
 
 Stage 1 allowed one candidate source. Stage 2 allows several, and this is the boundary that
 keeps that safe:
@@ -562,7 +564,7 @@ zero-hit search returns zero hits with `matched=False` - never an arbitrary cata
 
 **Unavailable sources are absent, not faked.** `SIMILAR_ITEM` is not configured by default.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No item-item similarity index ships.** `SIMILAR_ITEM` needs a separate build step over
   `Sports_and_Outdoors_sequences.json` (item co-occurrence) or item embeddings; neither is
@@ -579,7 +581,7 @@ zero-hit search returns zero hits with `matched=False` - never an arbitrary cata
 
 ---
 
-## 8. Interaction and personalization plane (Stage 3) — RESEARCH ONLY
+## 8. Interaction and personalization plane (Stage 3, IMPLEMENTED)
 
 ### Three signal domains, kept apart
 
@@ -680,7 +682,7 @@ and bounds, and writes nothing. There is no `memory_id`, no `user_key`, no super
 and no store handle in the projection, and `PolicyContext.summary()` records only counts — so
 the trajectory cannot become a copy of the user's preferences.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No conflict-resolution algorithm across domains.** Scope and lifecycle *precedence rules*
   are represented (`hard_constraints()` vs `soft_constraints()`), but nothing yet reconciles
@@ -692,7 +694,7 @@ the trajectory cannot become a copy of the user's preferences.
 
 ---
 
-## 9. Reasoning plane (Stage 4) — RESEARCH ONLY
+## 9. Reasoning plane (Stage 4, IMPLEMENTED)
 
 > Reasoning may change a decision; reasoning may not change a fact.
 
@@ -777,7 +779,7 @@ Reasoning authority is deliberately **not** recommendation membership (section 1
 lets an agent explain an exclusion or gather the fact that would resolve it. Inspecting such a
 candidate changes no verdict and cannot return it to the recommendation set.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No `CHECK_COMPATIBILITY` semantics for interfaces or fitment**, because the catalogue has
   none. The verdict is `UNKNOWN` by design; adding real fitment checks would require a
@@ -790,7 +792,7 @@ candidate changes no verdict and cannot return it to the recommendation set.
 
 ---
 
-## 10. Model-driven policy (Phase 1) — RESEARCH ONLY
+## 10. Model-driven policy (Phase 1, IMPLEMENTED)
 
 The bounded loop already let an Observation change the next action; the policy that made that
 choice was deterministic.  This phase adds a **model-driven** policy behind the same seam, and
@@ -912,7 +914,7 @@ deterministic and offline.
 
 ---
 
-## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2) — RESEARCH ONLY
+## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)
 
 `CandidateLedger != FeasibleCandidateView`
 ------------------------------------------
@@ -1043,7 +1045,7 @@ They were one question over one set, which made "checked and compliant" indistin
 declared `hard_constraints` now become the run's **real** active constraints, so a case that
 asserts enforcement is measured against a run that actually enforced.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No candidate narrowing metric.** `constraint_not_enforced` detects a violation reaching the
   answer; it does not score *how well* a set was narrowed.
@@ -1059,7 +1061,7 @@ asserts enforcement is measured against a run that actually enforced.
 
 ---
 
-## 12. Evaluation planes (Stage 6) — RESEARCH ONLY
+## 12. Evaluation planes (Stage 6, IMPLEMENTED)
 
 Three planes, deliberately **not** collapsed into one score.
 
@@ -1132,7 +1134,7 @@ That is `Action -> Observation -> Policy` versus `Decide Once -> Fixed Workflow`
 
 Run it with `.venv/bin/python -m experiments.agent_evaluation_smoke`.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No published benchmark numbers.** The cases are inspectable fixtures, not a leaderboard.
 * **No clarification-quality metric.** Whether a question was *good* is not measured, only
@@ -1665,7 +1667,7 @@ Trajectory records gained `read_signature` (evaluation-plane version 4) - `get_d
 so "did the run repeat a read it had already performed" is answerable from the record. Without it
 two `get_details` steps on different candidates were indistinguishable from two on the same ones.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **No prompt tuning against individual cases.** Prompt v2 was written from the *pattern* the
   baseline showed, before the v2 run, and no case was modified afterwards. Both prompt versions
@@ -1771,7 +1773,7 @@ candidate set is untouched) nor read-only reasoning (it reaches a separate trust
 the run does not have). It therefore consumes a tool call. `TOOL_CALL_ACTIONS = CANDIDATE_ACTIONS +
 EVIDENCE_ACTIONS`; reasoning remains budget-free.
 
-### Not implemented (documented, not claimed)
+### Not implemented — RESEARCH ONLY (documented, not claimed)
 
 * **Not embedding or ANN retrieval.** The index is lexical TF-IDF cosine. A learned or approximate
   index would be a different implementation behind the same `CandidateSourceTool` protocol.
