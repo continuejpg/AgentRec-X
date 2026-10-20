@@ -104,6 +104,9 @@ FUSION_PROFILES: dict[str, tuple[str, ...]] = {
     # tie-breaking inside that source.  ``serving_v1`` remains the default and is untouched.
     "serving_v1_sequential_only": ("sequential",),
     "serving_v1_two_tower_only": ("two_tower",),
+    # R-LR-03: the same three sources, but the final ordering comes from the trained LightGBM
+    # LambdaRank (fallback: full-precision RRF on the same pool).  Defaults stay untouched.
+    "serving_v1_learned_ranker": FUSION_SOURCES,
     "serving_v2_tiger": FUSION_SOURCES_V2_TIGER,
     # Same four sources, but the three engines that can serve depth 100 keep it while TIGER stays
     # at its own ceiling.  A *different* configuration, recorded as such rather than presented as

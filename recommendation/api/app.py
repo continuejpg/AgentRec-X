@@ -254,7 +254,7 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
 
         set_shared_engine(tiger_engine)
         tiger_engine.prewarm(background=True)
-    return FusionInferenceEngine(
+    _fusion_engine = FusionInferenceEngine(
         sequential=sequential,
         two_tower=two_tower,
         lexical=lexical,
@@ -264,6 +264,12 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
         config=config,
         tiger=tiger_engine,
     )
+    built = _fusion_engine
+    if getattr(_fusion_engine.config, "profile", None) == "serving_v1_learned_ranker":
+        # Experimental profile only: the default serving_v1 path never imports LightGBM.
+        from ..inference.learned_ranker import LearnedRanker, LearnedRankerEngine, MODEL_PATH, SCHEMA_PATH
+        built = LearnedRankerEngine(_fusion_engine, LearnedRanker(MODEL_PATH, SCHEMA_PATH))
+    return built
 
 
 def build_engine_report(

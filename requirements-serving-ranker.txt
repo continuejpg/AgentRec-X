@@ -1,0 +1,5 @@
+# Optional dependencies for the EXPERIMENTAL serving_v1_learned_ranker profile only.
+# The default serving profile (serving_v1) does not need these packages and never imports them.
+# Verified combination: Python 3.10.12, NumPy 1.26.4, LightGBM 4.7.0 (prebuilt wheel, CPU).
+lightgbm==4.7.0
+numpy==1.26.4
