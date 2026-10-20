@@ -142,7 +142,8 @@ class LearnedRanker:
             self.last_used_model = False
             return [], self.fallback_reasons[-1]
         try:
-            rows = build_feature_rows(item_ids, parent_asins, rank_by_source, score_by_source, rrf_by_asin, universe)
+            rows = build_feature_rows(item_ids, parent_asins, rank_by_source, score_by_source, rrf_by_asin,
+                                        rrf_universe)
             if not rows:
                 raise ValueError("no candidates")
             import numpy as np

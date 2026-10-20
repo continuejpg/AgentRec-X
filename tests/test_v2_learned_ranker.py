@@ -84,3 +84,33 @@ def test_missing_model_is_reported_and_counted_once_per_call() -> None:
 
 def test_ordering_protocol_is_ranker_then_rrf_then_item_id() -> None:
     assert order_by_ranker([0.5, 0.5, 0.9], [0.01, 0.02, 0.0], [7, 3, 9]) == [2, 1, 0]
+
+
+class _FixedScores:
+    """Deterministic booster whose scores deliberately invert the RRF order."""
+
+    num_feature = 15
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def predict(self, X, num_iteration=None):  # noqa: ANN001, ANN201
+        self.calls += len(X)
+        return np.asarray([float(i) for i in range(len(X))], np.float32)
+
+
+def test_normal_prediction_path_uses_the_model_and_never_silently_falls_back() -> None:
+    """Regression for the `universe` NameError: predict must run, order must differ from RRF."""
+    asins = ["B0A", "B0B", "B0C", "B0D", "B0E"]
+    ranks = {"seq": {"B0A": 1, "B0C": 3}, "tt": {"B0B": 2}, "lex": {"B0D": 1, "B0E": 2}}
+    scores = {"seq": {"B0A": 9.0, "B0C": 3.0}, "tt": {"B0B": 5.0}, "lex": {"B0D": 7.0, "B0E": 6.5}}
+    rrf = {a: rrf_full({s: ranks[s].get(a, 0) for s in ranks}) for a in asins}
+    booster = _FixedScores()
+    ranker = _ranker(booster)
+    order, reason = ranker.order(asins, list(range(len(asins))), ranks, scores, rrf, asins)
+    rrf_order = sorted(range(len(asins)), key=lambda i: (-rrf[asins[i]], asins[i]))
+    assert reason is None, f"normal path must not fall back: {reason}"
+    assert ranker.fallback_count == 0
+    assert booster.calls == len(asins)          # LightGBM.predict really ran
+    assert order != rrf_order                    # the model, not RRF, decided the order
+    assert ranker.last_used_model is True
