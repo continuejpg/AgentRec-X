@@ -662,6 +662,17 @@ class DemoAgentService:
         the accepted M10A/M10B components, over trusted catalogue metadata, without touching their
         identity, score, score kind or provenance.
         """
+        # A learned-ranker base ordering cannot enter the dynamic multi-source plane: the model was
+        # fitted on the fixed three-source protocol and already returns a final ordering, so fusing
+        # it again would break the protocol and misreport who ranked the result.  Refuse BEFORE
+        # composing the controller or recalling anything (no model load, no predict, no recall).
+        from ..inference.learned_ranker import LearnedRankerEngine
+        _engine = getattr(self, "_engine", None) or getattr(self, "engine", None)
+        if isinstance(_engine, LearnedRankerEngine):
+            raise DemoAgentError(
+                "dynamic candidate selection does not support the learned-ranker serving profile",
+                code="unsupported_source_plan",
+            )
         started = time.perf_counter()
         controller = self._compose_controller(
             k=payload.k,

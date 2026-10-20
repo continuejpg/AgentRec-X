@@ -61,3 +61,15 @@ sha256sum model.txt feature_schema.json     # 必须与第 1 节一致
 | 恢复 | `tar -xzf lr_v1_learned_ranker_20261020.tar.gz -C <target> && cd <target> && sha256sum -c SHA256SUMS` |
 | 完整性实测 | 解压成功 ✓；内部 5 个文件 `sha256sum -c` 全部 OK ✓；归档 sha256 已记录 ✓ |
 | 持久化等级 | ⚠️ 位于**仓库之外**（未入 Git ✓）但**与仓库同一文件系统** ⇒ 仅“本地归档” ✗；尚无独立外部存储，**不宣称异地可靠交付** ✗ |
+
+## 8. Agent 链路接入边界（AG-LR-01）
+
+| 链路 | 是否使用 LightGBM | 说明 |
+|---|---|---|
+| `POST /v1/recommend` | **是** ✓ | `state.engine` 即 `LearnedRankerEngine`（profile 选中时） |
+| 常规 AgentGraph：`runtime -> RecommendationTool -> engine.recommend` | **是** ✓ | Tool 对引擎是结构化类型，runtime 注入哪个引擎就用哪个（`runtime.py: resolved_engine = engine`）⇒ 无需改 Agent 代码 ✓ |
+| LLM Agent：`CandidatePlane -> Ledger/RRF -> 最终排序` | **否** ✗ | 该路径按来源分别调用 Tool，再在 plane 内做 RRF 融合；若把 LightGBM 的完整排序当作“一个来源”再融合，最终顺序会被 RRF 覆盖 ⇒ **不启用**，并在报告中明确“模型未参与” ✗ |
+
+**边界规则**：LambdaRank 只在固定 SASRec + Two-Tower + BM25（`head_depth=100`）协议下训练。
+Agent 允许动态选择来源组合或深度 ⇒ **不得**用缺来源的特征冒充协议一致 ✗；此类请求保留原 RRF，
+并在 provenance/trace 中记录 `ranker_used=false` 与原因 ✓。

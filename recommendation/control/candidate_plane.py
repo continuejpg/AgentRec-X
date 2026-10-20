@@ -167,8 +167,23 @@ class _HistorySourceTool:
 
     @property
     def score_kind(self) -> str:
-        """SASRec logits: ordering-only, never comparable across sources."""
-        return "sasrec_logit"
+        """What this source's numbers actually mean.
+
+        The accepted history Tool normally holds the SASRec engine, but the demo runtime injects
+        whatever engine the service was built with.  Under the experimental learned-ranker profile
+        that engine reports ``lightgbm_lambdarank``, so a hard-coded ``sasrec_logit`` would mislabel
+        a full three-source re-ranking as raw SASRec logits.  Delegate to the engine when it declares
+        a kind, and keep the historical default.
+        """
+        tool = getattr(self, "_tool", None)
+        engine = None
+        for attribute in ("engine", "_engine"):
+            candidate = getattr(tool, attribute, None)
+            if candidate is not None and not isinstance(candidate, (list, tuple, dict)):
+                engine = candidate
+                break
+        declared = getattr(engine, "score_kind", None)
+        return declared if isinstance(declared, str) and declared else "sasrec_logit"
 
     def propose(
         self,
