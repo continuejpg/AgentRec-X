@@ -215,7 +215,10 @@ def test_dynamic_plane_guard_rejects_a_learned_ranker_engine() -> None:
     assert isinstance(fake_engine, LearnedRankerEngine)          # isinstance really holds
 
     with pytest.raises(DemoAgentError) as excinfo:
-        DemoAgentService._execute_plan(SimpleNamespace(_engine=fake_engine))   # unbound call
+        DemoAgentService._execute_plan(
+            SimpleNamespace(_engine=fake_engine),                       # unbound call
+            plan=None, payload=None, use_memory=True,                   # never read: guard is first
+        )
 
     assert excinfo.value.code == "unsupported_source_plan"
     assert "learned-ranker" in str(excinfo.value)
