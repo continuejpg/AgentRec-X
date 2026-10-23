@@ -162,3 +162,23 @@ recommendation/{api,agent,baselines,catalog,datasets,demo,evaluation,inference,
 The project-level `README.md` and the `docs/` set (architecture, experiments, usage, this
 history) were added as a documentation-and-presentation pass after M11. They describe
 existing behaviour; they did not change production code.
+
+---
+
+## V2 与精排：M11 之后（2026-10-11 → 2026-10-20）
+
+上面那张图停在 M11。之后的工程分成三段，每段都有自己的验收入口，**不要把它们混成一次"大版本"**。
+
+| 阶段 | 时间 | 做了什么 | 锚点提交 | 结论 |
+| --- | --- | --- | --- | --- |
+| V2 交付 | 10-11 → 10-16 | 认知整合、TIGER 实时引擎与四源 Demo、E-01…E-04（Memory→RAG→有界重规划→真实 Provider 冒烟）、Gate B/C、P3 三路径质量评测、证据包与冻结计划 | `b3af9da` · `ac0d058` · `21007eb` · `c4dc0ef` · `4facd07` | 后端工程 PASS；最小服务 PASS；Agent/真实 LLM 在线闭环 PARTIAL；P3 探索性；TIGER PARTIAL 不准入 |
+| Learned Ranker | 10-19 → 10-20 | 只读审计 → 5,000 组候选物化（1,366,080 行）→ LambdaRank C0（22 棵树）→ 独立 test → Fast Serving 剖面 | `7f908a7` · `925d495` | 工程 FINAL PASS（实验）；质量 NOT ESTABLISHED（HR@20 21/766 vs RRF 30/766，CI 跨 0） |
+| Agent 集成 | 10-20 | 真实 Demo Chat 5/5 由精排模型决定基础排序；动态 CandidatePlane **前置拒绝**该组合 | `7821173` · `f4bb9fd` | AGENTGRAPH PASS；LLM CANDIDATE PLANE UNSUPPORTED（已加运行时守卫） |
+
+关键文档：
+
+- V2 总账：[`V2_FINAL_ACCEPTANCE.md`](V2_FINAL_ACCEPTANCE.md) · [`V2_ROADMAP_COVERAGE.md`](V2_ROADMAP_COVERAGE.md) · [`V2_KNOWN_LIMITATIONS.md`](V2_KNOWN_LIMITATIONS.md)
+- 精排：[`LEARNED_RANKER_DEPLOYMENT.md`](LEARNED_RANKER_DEPLOYMENT.md)（含模型归档、SHA256、回退与边界）
+- 过程与教训：[`ENGINEERING_PRACTICE.md`](ENGINEERING_PRACTICE.md) · 里程碑原始指令：[`SESSION_MILESTONES.md`](SESSION_MILESTONES.md)
+
+> 版本标签：`v2.0.0-rc1` **尚未创建** —— 证据包只落在同一文件系统的 `backups/`，不构成独立持久化。

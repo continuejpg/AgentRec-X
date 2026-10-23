@@ -338,6 +338,9 @@ Every package above has its own README with the contracts it enforces.
 | Where every artifact lives and how it is verified | [`docs/ARTIFACT_STORAGE.md`](docs/ARTIFACT_STORAGE.md) |
 | Experiments and frozen results | [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md) |
 | Canonical project state | [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) |
+| **Start here (new session / new contributor)** | [`docs/ONBOARDING.md`](docs/ONBOARDING.md) |
+| **How the project was built and what it taught** | [`docs/ENGINEERING_PRACTICE.md`](docs/ENGINEERING_PRACTICE.md) |
+| Every milestone brief, in order (regenerable) | [`docs/SESSION_MILESTONES.md`](docs/SESSION_MILESTONES.md) |
 | Milestone-by-milestone history | [`docs/PROJECT_HISTORY.md`](docs/PROJECT_HISTORY.md) |
 | Paired-evidence preregistration (B1) | [`docs/B1_PREREGISTRATION.md`](docs/B1_PREREGISTRATION.md) |
 | Two-Tower design and fusion controls | [`docs/TWOTOWER.md`](docs/TWOTOWER.md) |

@@ -616,3 +616,22 @@ candidates for presentation, or reports a metric.
     than an optional compatibility reader for an existing v0 artifact.
 
 At the beginning of every new milestone or substantial task, read this AGENTS.md before making repository changes.
+
+---
+
+## 20. Start here (orientation for a new session)
+
+Read these three before proposing or changing anything; they are the project's memory, not
+decoration:
+
+- `docs/ONBOARDING.md` — current coordinates (branch, HEAD, default vs experimental profile),
+  reading order, three hard rules, a ten-minute self-check, and the list of **known gaps**.
+- `docs/ENGINEERING_PRACTICE.md` — the nine build stages with commit anchors, ten practices that
+  were forced by real incidents, and the incident table (silent fallback, red test pushed, RRF
+  rank drift, harness lifecycle bugs).
+- `docs/SESSION_MILESTONES.md` — every milestone brief in order, regenerated from the session
+  store with `scripts/mine_session_milestones.py` (`--check` detects drift).
+
+Two standing facts to never re-derive from scratch: the default profile is `serving_v1` (three
+sources + RRF) and must stay unchanged, and the project's quality status is **NOT ESTABLISHED** —
+engineering PASS and quality PASS are separate claims and must be reported separately.
