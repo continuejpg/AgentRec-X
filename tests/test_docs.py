@@ -56,10 +56,12 @@ FORBIDDEN_MARKETING = (
 )
 
 #: Endpoint shapes that never existed or were superseded; seeing them means stale docs.
-#: Expressed as regexes with a negative lookbehind so the legitimate ``/v1/recommend``
-#: is not flagged as a bare ``/recommend``.
+#: Expressed as regexes with negative lookbehinds for the two routes that legitimately end in
+#: ``/recommend``: ``/v1/recommend`` and ``/v1/demo/agent/recommend`` (the latter is the stateless
+#: agent endpoint, ``recommendation/api/demo_routes.py:669``).  Without the second lookbehind the
+#: pattern flagged that real route as stale, which is a defect in this guard, not in the docs.
 OBSOLETE_ENDPOINT_PATTERNS = (
-    r"(?<!v1)/recommend\b",
+    r"(?<!v1)(?<!agent)/recommend\b",
     r"/api/recommend\b",
     r"/v1/demo/chat\b",
     r"/v1/chat\b",
@@ -285,17 +287,37 @@ def test_documented_environment_variables_are_read_by_the_code() -> None:
     variables = sorted(set(re.findall(r"\bAGENTRECX_[A-Z_]+\b", usage)))
     assert variables, "no environment variables documented"
 
-    # ``provider_adapter`` is included because it is the module that reads the optional LLM
-    # provider variables (``AGENTRECX_LLM_*``); the other three hold the serving and memory
-    # configuration.
+    # Scan the whole package, not four hand-picked modules: the earlier four-file list missed a
+    # variable that *is* read (``AGENTRECX_AGENT_EXPLANATIONS`` in ``demo/explanation.py``) and
+    # reported a false failure.  A wider scan is the stricter rule.
     sources = "\n".join(
-        _text(path)
-        for path in (
-            REPO_ROOT / "recommendation" / "config.py",
-            REPO_ROOT / "recommendation" / "api" / "app.py",
-            REPO_ROOT / "recommendation" / "memory" / "store.py",
-            REPO_ROOT / "recommendation" / "control" / "provider_adapter.py",
-        )
+        path.read_text(encoding="utf-8")
+        for path in sorted((REPO_ROOT / "recommendation").rglob("*.py"))
+        if "__pycache__" not in path.parts
     )
     for variable in variables:
         assert variable in sources, f"{variable} is documented but never read by the code"
+
+
+def test_the_architecture_doc_matches_the_serving_sources() -> None:
+    """The architecture document must not contradict Serving V1.
+
+    Serving V1 is SASRec + Two-Tower + catalogue lexical fused by RRF (§0).  Two revisions of
+    this document carried the opposite claim ("Two-Tower, TIGER and multi-source fusion are not
+    on the serving path"), which is why this is pinned as a fact rather than left to review.
+    """
+    architecture = _text(REPO_ROOT / "docs" / "ARCHITECTURE.md")
+
+    sections = architecture.split("### Serving V1", 1)
+    assert len(sections) == 2, "docs/ARCHITECTURE.md no longer declares a Serving V1 section"
+    block = sections[1][:1500]
+    for source in ("SASRec", "Two-Tower", "Catalogue Lexical"):
+        assert source in block, f"Serving V1 does not name its source {source!r}"
+
+    stale = (
+        "Two-Tower, TIGER and multi-source fusion are **not** on the serving path"
+    )
+    assert stale not in architecture, (
+        "docs/ARCHITECTURE.md again claims Two-Tower/fusion are not serving; the code "
+        "(recommendation/inference/fusion.py FUSION_PROFILES['serving_v1']) says otherwise"
+    )

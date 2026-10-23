@@ -571,7 +571,15 @@ def test_result_is_serialisable(tool: RecommendationTool) -> None:
 
     payload = json.loads(json.dumps(tool.run(RecommendationToolRequest(k=3), context()).model_dump()))
     assert payload["returned_k"] == len(payload["recommendations"])
-    assert set(payload["recommendations"][0]) == {"rank", "parent_asin", "item_id", "score"}
+    # ``score_kind`` was added when Serving V1 introduced fused scores (FusionInferenceEngine sets
+    # ``rrf_rank_fusion``); the M7A-era four-key expectation predates it.
+    assert set(payload["recommendations"][0]) == {
+        "rank",
+        "parent_asin",
+        "item_id",
+        "score",
+        "score_kind",
+    }
 
 
 def test_result_contains_no_natural_language_or_product_metadata(tool: RecommendationTool) -> None:
@@ -590,6 +598,11 @@ def test_score_field_is_not_named_as_probability(tool: RecommendationTool) -> No
     from recommendation.tools.schemas import ToolRecommendation
 
     fields = set(ToolRecommendation.model_fields)
-    assert fields == {"rank", "parent_asin", "item_id", "score"}
+    # ``score_kind`` carries what the number means (raw model score vs fused score) and is
+    # part of the documented contract in ``recommendation/tools/schemas.py``.
+    assert fields == {"rank", "parent_asin", "item_id", "score", "score_kind"}
     description = ToolRecommendation.model_fields["score"].description or ""
-    assert "NOT a probability" in description
+    # V2 reworded this sentence when fused scores were introduced; the claim is unchanged
+    # ("a fused score is NOT a model score" and no score is a probability).  Pin the sentence
+    # that states it today rather than the pre-fusion wording.
+    assert "In no case is this a probability" in description
