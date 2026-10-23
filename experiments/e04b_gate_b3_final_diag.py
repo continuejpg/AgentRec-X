@@ -64,7 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out.mkdir(parents=True)
     os.environ.setdefault("OMP_NUM_THREADS", "4")
 
-    from recommendation.backends.tiger_engine import _MappingIdentity, TigerServingEngine, TigerWorkerConfig
+    from recommendation.inference.tiger_engine import _MappingIdentity, TigerServingEngine, TigerWorkerConfig
     from recommendation.evaluation.metrics import excluded_seen, hit_at_k
 
     mappings = json.loads(MAPPINGS.read_text(encoding="utf-8"))

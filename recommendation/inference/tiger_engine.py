@@ -869,7 +869,7 @@ def _parse_history(text: str) -> tuple[int, ...]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:  # pragma: no cover - operator CLI
-    from recommendation.backends.tiger_engine import TigerServingEngine as _Engine  # self-import guard
+    from recommendation.inference.tiger_engine import TigerServingEngine as _Engine  # self-import guard
 
     parser = argparse.ArgumentParser(description="TIGER serving engine self-check / one request")
     parser.add_argument("--checkpoint-dir", type=Path, default=DEFAULT_CHECKPOINT_DIR)

@@ -23,7 +23,7 @@ from typing import Any, Sequence
 
 import pytest
 
-from recommendation.backends.tiger_engine import TigerEngineNotReady
+from recommendation.inference.tiger_engine import TigerEngineNotReady
 from recommendation.control.tiger_source import TIGER_SCORE_KIND
 from recommendation.inference.fusion import (
     FUSION_PROFILES,

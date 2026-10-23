@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from recommendation.api.schemas import HealthResponse, RecommendResponse, TigerHealthBlock
-from recommendation.backends.tiger_engine import (
+from recommendation.inference.tiger_engine import (
     TigerServingEngine,
     set_shared_engine,
     shared_engine,
@@ -215,7 +215,7 @@ def test_a_broken_engine_health_probe_reports_failed() -> None:
 def test_the_engine_exposes_health_before_it_is_started() -> None:
     from pathlib import Path
 
-    from recommendation.backends.tiger_engine import TigerWorkerConfig
+    from recommendation.inference.tiger_engine import TigerWorkerConfig
 
     engine = TigerServingEngine(
         {"B0TEST": 1},

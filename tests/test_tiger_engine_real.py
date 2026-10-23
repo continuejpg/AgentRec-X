@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from recommendation.backends.tiger_engine import (
+from recommendation.inference.tiger_engine import (
     DEFAULT_HANDOFF_DIR,
     REPO,
     TigerServingEngine,

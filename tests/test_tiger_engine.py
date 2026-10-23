@@ -25,7 +25,7 @@ from typing import Any, Mapping
 
 import pytest
 
-from recommendation.backends.tiger_engine import (
+from recommendation.inference.tiger_engine import (
     APPROXIMATE,
     CERTIFIED,
     TigerAssetsMissing,
@@ -431,11 +431,11 @@ def test_result_satisfies_tiger_source_tool() -> None:
 
     assert tool.source is CandidateSource.TIGER
     assert tool.score_kind == TIGER_SCORE_KIND
-    assert triples == [
-        ("B0TRUSTED03", 1, -1.25),
-        ("B0TRUSTED01", 2, -2.5),
-        ("B0TRUSTED02", 3, -3.75),
-    ]
+    # Two of the three certified rows are the caller's own history, and the source masks
+    # seen items by design (``tiger_source.py`` step 2, "Deterministic seen-item filter");
+    # ranks are renumbered after filtering.  The pre-mask expectation predated that step.
+    assert triples == [("B0TRUSTED02", 1, -3.75)]
+    assert tool.last_outcome["seen_filtered"] == 2
     proposal = tool.last_proposals[0]
     assert proposal.retrieval_mode == CERTIFIED
     assert proposal.checkpoint_sha256 == "a" * 64

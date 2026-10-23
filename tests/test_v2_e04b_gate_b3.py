@@ -44,7 +44,7 @@ def test_the_worker_boundary_carries_no_canonical_identity() -> None:
 
 
 def test_the_engine_offers_a_certified_mode_without_downgrade() -> None:
-    from recommendation.backends.tiger_engine import TigerWorkerConfig
+    from recommendation.inference.tiger_engine import TigerWorkerConfig
 
     config = TigerWorkerConfig()
     # Decode parameters come from the native defaults; nothing here is tuned on test cases.

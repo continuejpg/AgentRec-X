@@ -199,7 +199,7 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
     failure means for the configured mode.
     """
     from recommendation.catalog import MetadataIndex
-    from recommendation.backends.tiger_engine import set_shared_engine  # noqa: F401
+    from recommendation.inference.tiger_engine import set_shared_engine  # noqa: F401
     from recommendation.inference.fusion import (
         TIGER_SERVING_HEAD,
         FusionInferenceConfig,
@@ -239,7 +239,7 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
     config = FusionInferenceConfig.for_profile(profile_name)
     tiger_engine = None
     if _tiger_serving_enabled():
-        from recommendation.backends.tiger_engine import TigerServingEngine, TigerWorkerConfig
+        from recommendation.inference.tiger_engine import TigerServingEngine, TigerWorkerConfig
 
         config = FusionInferenceConfig.for_profile("serving_v2_tiger")
         tiger_engine = TigerServingEngine(
@@ -250,7 +250,7 @@ def _build_fusion_engine(settings: ServiceSettings) -> Any:
         # Load once, in the background: /health reports "loading" until the handshake completes.
         # Registered before the prewarm so the Agent service adopts this very engine rather than
         # building a second worker with its own cold start.
-        from recommendation.backends.tiger_engine import set_shared_engine
+        from recommendation.inference.tiger_engine import set_shared_engine
 
         set_shared_engine(tiger_engine)
         tiger_engine.prewarm(background=True)
@@ -339,7 +339,7 @@ def release_serving_engine(state: Any) -> dict[str, Any]:
     Called from the lifespan's ``finally`` and directly testable, which is why it is a function
     rather than three inline lines: the shutdown path must be *executed* by a test, not read.
     """
-    from recommendation.backends.tiger_engine import set_shared_engine
+    from recommendation.inference.tiger_engine import set_shared_engine
 
     engine = getattr(state, "engine", None)
     tiger = getattr(engine, "tiger", None) if engine is not None else None

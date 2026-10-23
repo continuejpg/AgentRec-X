@@ -254,7 +254,7 @@ class FusionInferenceEngine:
     #: Optional confirmation that an identity belongs to the trusted catalogue.  When supplied, an
     #: identity it rejects is dropped instead of presented.
     is_known_identity: Callable[[str], bool] | None = None
-    #: The TIGER serving engine (``recommendation.backends.tiger_engine.TigerServingEngine``).
+    #: The TIGER serving engine (``recommendation.inference.tiger_engine.TigerServingEngine``).
     #: Required **iff** ``"tiger"`` is in ``config.sources``: a profile that names TIGER must not
     #: quietly fuse three sources and report four.
     tiger: Any = None

@@ -80,7 +80,7 @@ from .control_plane import CONTROL_PLANE_LOOP
 #: ``DemoAgentService.__init__`` calls it: while this import lived only inside
 #: ``_build_tiger_engine`` the constructor raised ``NameError`` on every Agent request and the
 #: route reported a generic 502 (the T-02.7C failure).
-from recommendation.backends.tiger_engine import shared_engine  # noqa: E402
+from recommendation.inference.tiger_engine import shared_engine  # noqa: E402
 
 __all__ = [
     "AGENT_LOOP_LIMITS",
@@ -1011,7 +1011,7 @@ def _tiger_enabled() -> bool:
 
 def _shared_tiger_engine() -> Any:
     """The process-wide engine, imported lazily so this module never hard-depends on it."""
-    from recommendation.backends.tiger_engine import shared_engine
+    from recommendation.inference.tiger_engine import shared_engine
 
     return shared_engine()
 
@@ -1023,7 +1023,7 @@ def _build_tiger_engine(identity: Any, **overrides: Any) -> Any:
     product AgentRec-X does not have.  The worker runs in the backend's own virtual environment
     and is started lazily by :meth:`DemoAgentService.prewarm_tiger`.
     """
-    from recommendation.backends.tiger_engine import (
+    from recommendation.inference.tiger_engine import (
         TigerServingEngine,
         TigerWorkerConfig,
         shared_engine,
