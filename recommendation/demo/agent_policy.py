@@ -304,60 +304,16 @@ class DemoSourcePlanPolicy:
         return self._proposal_for(str(source), action, context)
 
     def _select_arguments(self, source: str) -> Any:
-        """Build ``SELECT_SOURCE`` arguments naming one trusted source."""
-        from recommendation.control import CandidateSource, SelectSourceArguments
+        """Build ``SELECT_SOURCE`` arguments naming one trusted source.
 
-        return SelectSourceArguments(
-            source=CandidateSource(SOURCE_ARGUMENTS[source]), limit=self._default_k
-        )
-
-    def _select_arguments(self, source: str) -> Any:
-        """Build ``SELECT_SOURCE`` arguments naming one trusted source."""
-        from recommendation.control import CandidateSource, SelectSourceArguments
-
-        return SelectSourceArguments(
-            source=CandidateSource(SOURCE_ARGUMENTS[source]), limit=self._default_k
-        )
-
-    def _consulted_sources(self, context: Any) -> frozenset[str]:
-        """Sources this run has already consulted, read from its own recorded actions.
-
-        Every plan source is consulted through the candidate plane, whose observations record
-        which source produced them, so the trajectory is a sufficient and non-forgeable record
-        of what the plan has already done.
+        One definition only.  The FINISH fallback lives in :meth:`choose`, which is the only
+        place that may decide the plan is served; a second copy here was unreachable.
         """
-        plan_sources = frozenset(self._plan)
-        consulted: set[str] = set()
-        for step in getattr(context, "trajectory", ()) or ():
-            proposal = getattr(step, "action_proposal", None) or {}
-            arguments = proposal.get("arguments") or {}
-            source = arguments.get("source")
-            if source in plan_sources:
-                consulted.add(str(source))
-            if proposal.get("action") == ActionKind.SEARCH_CATALOG.value and (
-                "catalog_search" in plan_sources
-            ):
-                consulted.add("catalog_search")
-        return frozenset(consulted)
-
-    def _select_arguments(self, source: str) -> Any:
-        """Build ``SELECT_SOURCE`` arguments naming one trusted source."""
         from recommendation.control import CandidateSource, SelectSourceArguments
 
         return SelectSourceArguments(
             source=CandidateSource(SOURCE_ARGUMENTS[source]), limit=self._default_k
         )
-
-        if context.action_available(ActionKind.FINISH):
-            return ActionProposal(
-                action=ActionKind.FINISH,
-                rationale="every source the request named has been consulted",
-            )
-        raise PolicyActionError(
-            "no planned source is available and FINISH is not offered: "
-            + ", ".join(a.value for a in available)
-        )
-
 
 
 def _adapt_search_arguments(arguments: Any, snapshot: Any | None) -> Any:

@@ -23,7 +23,6 @@ plan the existing ``DemoSourcePlanPolicy`` already accepts.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field

@@ -938,14 +938,10 @@ def test_policy_metadata_accumulates_usage_over_a_decisions_attempts(tmp_path: P
     assert "step_input_tokens" not in metadata
 
 
-def _policy_context() -> PolicyContext:
-    """A minimal policy context with one offered action."""
-    return PolicyContext(
-        user_request="anything",
-        available_actions=(ActionKind.FINISH,),
-        has_trusted_history=True,
-        candidate_state=CandidateState(),
-    )
+# NOTE: a first `_policy_context()` helper (one offered action, request "anything") used to
+# live here.  It was never effective: a later module-level definition of the same name shadows
+# it, and Python resolves the global at call time, so every caller already received the later
+# three-action context.  It was removed as dead code; the tests in this section are unchanged.
 
 
 # =========================================================================== #
