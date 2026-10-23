@@ -8,7 +8,7 @@ modes return real generative results through `TigerSourceTool`.
 
 ```text
 AgentRec-X (L2)                                backend venv (own process)
-recommendation/backends/tiger_engine.py  ──►  backends/tiger_public/src/tiger_public/serve_worker.py
+recommendation/inference/tiger_engine.py  ──►  backends/tiger_public/src/tiger_public/serve_worker.py
   TigerServingEngine                             Assets: load_generator(...) once
     .parent_asin_to_item_id(asin) -> int           CatalogueTrie + SidResolver
     .item_id_to_parent_asin(item_id) -> str        per request:
@@ -32,7 +32,7 @@ The worker is long-lived, so the generator loads once per process, not once per 
 ## Constructing it (for T-02)
 
 ```python
-from recommendation.backends.tiger_engine import (
+from recommendation.inference.tiger_engine import (
     APPROXIMATE, CERTIFIED, TigerServingEngine, TigerWorkerConfig,
 )
 

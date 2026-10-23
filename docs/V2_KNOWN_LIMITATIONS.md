@@ -25,3 +25,17 @@
 
 10. **未验证命令**：`uvicorn` 监听端口的真实启动命令未实跑（验收使用进程内 ASGI 客户端）；
     `runs/**`（495 个被忽略文件）为本地证据归档，**不在 Git 内**，需独立持久化保存。
+
+---
+
+## 2026-10-23 修订（不改变上面冻结的判定，只登记状态变化）
+
+* **第 4 条**：两项既有失败已全部消除。`test_t7a_adapter_never_names_canonical_identity` —
+  AgentRec-X 侧身份包装器已迁出 `recommendation/backends/` 至
+  `recommendation/inference/tiger_engine.py`（§19.2 允许身份只在该包外再挂载）；
+  `test_result_satisfies_tiger_source_tool` — 该用例的期望早于 `tiger_source.py` 的
+  seen-item 掩码步骤，已按现有契约更新（并新增 `seen_filtered` 断言）。
+  另新增 `T6` 登记：`backends/tiger_public/src/tiger_public/serve_worker.py` 已在
+  `PROVENANCE.md` 标为 `ORIGINAL`。
+* **第 9 条**（版本化未完成）自 2026-10-20 起已失效：HEAD 为 `f4bb9fd` 且分支已推送。
+

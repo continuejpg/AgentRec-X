@@ -34,6 +34,9 @@
 ## 4. 两项既有失败（持续单独披露 ✓，未修复、未放宽）
 
 ① `tests/test_backend_boundaries.py::test_t7a_adapter_never_names_canonical_identity` ✗
-（`recommendation/backends/tiger_engine.py` 4 个身份标识符违反 AGENTS.md §19.2 字面契约 = `known_architecture_contract_failure` ✓）；
+（原 `recommendation/backends/tiger_engine.py` 4 个身份标识符违反 AGENTS.md §19.2 字面契约 = `known_architecture_contract_failure` ✓）。
+**2026-10-23 更新**：该模块已迁出后端适配器包至 `recommendation/inference/tiger_engine.py`
+（它自述为 "the AgentRec-X side … owns the trusted identity map"，身份再挂载本就属于包外），
+T7a 已通过；本条保留为历史记录。
 ② `tests/test_tiger_engine.py::test_result_satisfies_tiger_source_tool` ✗（**A 类**：FakeTransport 替身/预期漂移 ✓，既有 ✓）。
 **二者均不阻塞 SASRec / Two-Tower 链路** ✓，但**必须随准入记录保留** ✓。
