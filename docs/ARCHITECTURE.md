@@ -37,8 +37,9 @@ Two precision notes the rest of this document depends on:
 * the bounded control-plane loop is an **opt-in alpha** in the demo
   (`AGENTRECX_CONTROL_PLANE=loop`, off by default). Even then the demo registers one candidate
   source, because the multi-source candidate plane is constructed only by the offline harnesses;
-* Two-Tower, TIGER and multi-source fusion are **not** on the serving path. For fusion that is an
-  implementation fact (see §0c), not a negative research verdict.
+* Two-Tower and multi-source rank fusion **are** on the serving path (Serving V1, P2-A/P2-B).
+  TIGER is qualified in the research stack but **not enabled**. The product shape is the
+  Serving V1 block immediately below; §0c records the per-component status.
 
 ---
 
@@ -268,22 +269,26 @@ serving path.
 A research component reaches PRODUCT only by passing the offline evaluation and then a
 serving-candidate audit. Today's status is uneven, and the difference matters:
 
-| Component | Status | Why it is not serving |
+| Component | Status | Basis / why it is (not) serving |
 | --- | --- | --- |
 | SASRec | `SERVING` | the accepted checkpoint; the sequential source of Serving V1 |
 | Two-Tower | `SERVING` (Serving V1) | the second source, since P2-A; its three artifacts are `READY` in the B0 registry |
 | catalogue lexical | `SERVING` (Serving V1) | whole-catalogue BM25 source; shares the tokenizer/IDF/BM25 constants with the candidate-scoped enricher |
-| Two-Tower / DSSM | offline comparator | never wired in; promotion needs a serving-candidate audit (latency, artifact distribution, frozen fusion semantics) |
 | TIGER / Semantic-ID | offline source, qualified but **not enabled** | qualified as a candidate source in the research stack only |
-| multi-source rank fusion | offline comparator | an implementation gap: §7 records that the accepted preference reranker runs over the history recommender's candidates only, so reranking over a fused candidate set is not implemented |
 | LLM adaptive source selection | offline evidence, **not promoted** | it lost to fixed multi-source traversal under the frozen protocol (M4) |
 
-Reading the fusion row as "evidence rejected fusion" would be wrong. The offline fusion results
-answer a different question from what the product runs, and what stands between them is an
-implementation and an audit — reported here as such rather than as a decision.
+Two-Tower is listed once because there is one object: the serving source. An earlier revision
+carried a second "offline comparator / never wired in" row for DSSM; that described the study
+*before* P2-A promoted it, and it was removed here so this table cannot state two statuses for
+one component.
 
-Research findings can inform design decisions, but most research sources are deliberately **not**
-wired into the browser serving path: it uses SASRec and the original conversational stack only.
+TIGER and LLM adaptive source selection remain research-only, and that is a **decision** recorded
+in their own reports, not an implementation gap. The offline fusion results answer a different
+question from what the product runs.
+
+Research findings can inform design decisions, but they reach the browser serving path only
+through Serving V1 (SASRec + Two-Tower + catalogue lexical, fused by RRF) and the original
+conversational stack; TIGER is deliberately not wired in.
 
 The repository therefore contains **two orchestration stacks** — the original browser `AgentGraph`
 stack and the later bounded control-plane stack. The second is an opt-in alpha
@@ -295,9 +300,10 @@ serving architecture.
 
 ## 1. Architectural goals
 
-1. **One trained model, everything else inspectable.** SASRec is the only learned component.
-   Every other decision — retrieval, matching, ordering, routing — is deterministic and
-   reviewable by reading the code.
+1. **Few learned components, all named.** SASRec (sequential) and Two-Tower (retrieval) are the
+   two learned models on the serving path; the experimental LightGBM ranker is a third, off by
+   default and behind its own profile. Every other decision — enrichment, matching, ordering,
+   routing — is deterministic and reviewable by reading the code.
 2. **The conversational layer must not be able to corrupt behavioural data.** This is the
    primary safety property, and it is enforced structurally rather than by convention.
 3. **Never fabricate.** Missing metadata stays missing; unavailable evidence stays
@@ -1911,7 +1917,9 @@ so the specification's own claim is not silently rewritten; superseded items are
 * **Reset retains preference rows as unreachable audit provenance** — accepted memory
   semantics retain history and the web layer is forbidden from erasing store rows.
 * **No learned Critic**; reranking is a frozen lexicographic policy.
-* **Candidate generation is item-ID SASRec**; no Semantic IDs or generative recommender.
+* **Candidate generation is item-ID retrieval**: Serving V1 fuses SASRec (item-ID sequential),
+  Two-Tower and whole-catalogue lexical. TIGER / Semantic-ID is qualified in the research stack
+  but **not enabled**, and `recommendation/semantic_id/` is a frozen GenRec v0 artifact.
 * **Candidate-scoped RAG is lexical BM25**, not dense retrieval.
 * **The M10B tail reason label can be imprecise** for the last candidate; ordering is
   unaffected and the label is not user-facing.
