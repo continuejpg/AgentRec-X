@@ -250,6 +250,17 @@ arithmetic: prefix reconstruction MSE, residual norms, complete occupancy histog
 largest-code fraction as distinct from codebook coverage, and the pre-dedup collision-group
 distribution.  Neither module needs network access.
 
+### `src/tiger_public/serve_worker.py`
+`ORIGINAL`.  The long-lived serving loop and its subprocess/JSONL transport, added with this
+project's own serving milestone (git `b3af9da`, "preserve phases 1-5 and E-04A provider smoke
+PASS").  It composes, unmodified, the accepted backend functions — `load_generator`,
+`build_history_input`, `TigerCaseScorer`, `retrieve` and `CatalogueTrie` — and adds only the
+loop, the bounded request transport and the never-upgraded status handoff.  No model,
+tokenizer, decoder, resolver or scoring rule is reimplemented in it, and no external code was
+copied into it, so no third-party notice applies.  Evidence: its module docstring states the
+scope ("adds only the loop and the transport"), and `git log --diff-filter=A` attributes the
+file to `b3af9da` inside this repository.
+
 ## Corrections and notices carried with the backend
 
 These are recorded because source-fidelity matters for a licence-sensitive tree.  They are
