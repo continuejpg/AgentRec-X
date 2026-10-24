@@ -34,6 +34,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from .decision import AgentDecision, MalformedDecision
 from .rendering import (
+    build_constraint_empty_response,
     build_grounded_response,
     build_recommendation_response,
     build_reranked_response,
@@ -130,6 +131,15 @@ def finalize_stage(state: AgentGraphState) -> dict[str, Any]:
         result = state.get("tool_result")
         if result is None:
             raise _no_tool_result()
+        # A constrained run whose feasible set is empty has a *constraint* outcome, not an
+        # exhausted history.  The eligibility view is the trusted record of that outcome, so
+        # the refusal is rendered from it instead of falling through to the exhaustion text.
+        projection = state.get("constraint_projection")
+        if projection is not None and projection.is_empty:
+            return {
+                "route": ROUTE_RECOMMEND,
+                "final_response": build_constraint_empty_response(projection.view),
+            }
         reranking = state.get("reranking")
         if reranking is not None:
             enrichment = state.get("enrichment")

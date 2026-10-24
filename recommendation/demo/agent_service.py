@@ -41,11 +41,13 @@ memory at all, which is what makes the offline mode reproducible.
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from typing import Any, Mapping, Sequence
 
 from recommendation.agent import AgentInput
+from recommendation.agent.rendering import build_final_list_response
 from recommendation.control import (
     CandidateEligibilityEvaluator,
     CandidateLedger,
@@ -752,9 +754,25 @@ class DemoAgentService:
             requested_k=payload.k,
             presented_count=len(recommendations),
         )
+        # A run the completion guard refused because no candidate could be *verified* compliant
+        # ends with no text at all.  The reason is already the trusted eligibility view, so the
+        # answer states it instead of returning an empty string: an empty constrained run is a
+        # constraint outcome, not a transport failure.  Completed empty runs are rendered by the
+        # finalizer itself; this covers the refused-completion path only.
+        message = result.final_response
+        if not message and not recommendations:
+            projection = result.state.get("constraint_projection")
+            if projection is not None and projection.is_empty:
+                from ..agent.rendering import build_constraint_empty_response
+
+                message = build_constraint_empty_response(projection.view)
+        # The explanation must name exactly the answer's own products, in its own order.  The
+        # final list is already built above (fusion, constraints, optional memory re-rank), so
+        # this is the one correct input; a matching accepted text is kept unchanged.
+        message = _consistent_message(message, recommendations, self._metadata)
         response = AgentRecommendResponse(
             route="recommend" if produced_candidates else "direct",
-            message=result.final_response,
+            message=message,
             control_plane=self.control_plane_name,
             recommendations=recommendations,
             grounded=grounded_view,
@@ -1006,6 +1024,71 @@ def _titles_of(metadata: Any, parent_asins: Sequence[str]) -> Mapping[str, str]:
         if isinstance(title, str) and title.strip():
             titles[str(identity)] = title
     return titles
+
+
+#: One Amazon ``parent_asin``: a leading ``B`` and nine alphanumerics.  Used only to read
+#: which products a *rendered text* names, never to derive an identity for a candidate.
+_ASIN_RE = re.compile(r"\bB[0-9A-Z]{9}\b")
+
+
+def _product_ids(text: Any) -> list[str]:
+    """The product ids a rendered text names, in order, duplicates preserved."""
+    if not isinstance(text, str):
+        return []
+    return _ASIN_RE.findall(text)
+
+
+def _facts_for(metadata: Any, parent_asins: Sequence[str]) -> Mapping[str, Mapping[str, str]]:
+    """A ``parent_asin -> catalogue facts`` map for exactly the identities being rendered.
+
+    Keyed by identity so a fact can only ever be printed beside the product it belongs to.
+    Absent fields are omitted rather than defaulted: the explanation prints what the
+    catalogue says, and nothing where it says nothing.
+    """
+    records = getattr(metadata, "records", None)
+    if not isinstance(records, Mapping):
+        return {}
+    facts: dict[str, Mapping[str, str]] = {}
+    for identity in parent_asins:
+        record = records.get(identity)
+        if record is None:
+            continue
+        entry: dict[str, str] = {}
+        title = getattr(record, "title", None)
+        if isinstance(title, str) and title.strip():
+            entry["Title"] = title
+        main_category = getattr(record, "main_category", None)
+        if isinstance(main_category, str) and main_category.strip():
+            entry["Main category"] = main_category
+        categories = getattr(record, "categories", None) or ()
+        if categories:
+            entry["Category"] = str(categories[-1])
+        store = getattr(record, "store", None)
+        if isinstance(store, str) and store.strip():
+            entry["Store"] = store
+        if entry:
+            facts[str(identity)] = entry
+    return facts
+
+
+def _consistent_message(
+    message: str, recommendations: Sequence[Any], metadata: Any
+) -> str:
+    """Return text that names **exactly** the final recommendation list, in its order.
+
+    The accepted finalizer renders the sequential source's candidates, which can differ
+    from the fused, constraint-projected answer whenever another source contributed.  The
+    final list is already decided when this is called, so the only correct input to the
+    explanation is that list.  A text that already names exactly those identities in order
+    is left untouched; otherwise the explanation is re-rendered from the final list and
+    identity-keyed catalogue facts.  No candidate, rank or list is modified here.
+    """
+    if not recommendations:
+        return message
+    final_ids = [str(item.parent_asin) for item in recommendations]
+    if _product_ids(message) == final_ids:
+        return message
+    return build_final_list_response(recommendations, _facts_for(metadata, final_ids))
 
 
 def _tiger_enabled() -> bool:

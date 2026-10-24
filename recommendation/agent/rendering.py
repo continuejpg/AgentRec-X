@@ -40,6 +40,8 @@ __all__ = [
     "build_recommendation_response",
     "build_source_response",
     "build_reranked_response",
+    "build_constraint_empty_response",
+    "build_final_list_response",
     "evidence_line",
     "field_label",
     "memory_context",
@@ -56,6 +58,110 @@ NO_CANDIDATES_TEXT = (
     "No unseen product is left to recommend from this interaction history, so "
     "there are no candidates to show."
 )
+
+
+def build_constraint_empty_response(view: Any) -> str:
+    """Render the honest reason for a constrained run with no presentable candidate.
+
+    A run whose hard constraints exclude every candidate must not reuse the
+    candidate-exhaustion sentence: that text says the interaction history had nothing
+    left, which is a different - and false - explanation.  This renders the active
+    constraints and the eligibility counts that produced the empty answer, and nothing
+    else: it names no excluded product, invents no near miss, and does not relax the
+    constraint.  It reads only the eligibility view already computed by the control
+    plane; it never re-evaluates a constraint.
+
+    Three states are kept apart, because they are not the same claim:
+
+    * every assessed candidate was **disproved** - "no candidate satisfies" is proved;
+    * at least one candidate is **undecided** - only "no candidate could be verified" is
+      proved, and missing facts are never converted into violations;
+    * **nothing was assessed** - no candidate was available to check at all.
+    """
+    requirements = ", ".join(
+        f"{requirement.kind.value}={requirement.expected}"
+        for requirement in (getattr(view, "requirements", ()) or ())
+    )
+    if not requirements:
+        requirements = "active hard constraints"
+    assessed = len(getattr(view, "assessed_identities", ()) or ())
+    verified = int(getattr(view, "verified_eligible_count", 0))
+    ineligible = int(getattr(view, "ineligible_count", 0))
+    unresolved = int(getattr(view, "unresolved_count", 0))
+    counts = (
+        f"Candidates assessed: {assessed}; "
+        f"verified eligible: {verified}; "
+        f"ineligible: {ineligible}; "
+        f"unresolved (catalogue cannot decide): {unresolved}."
+    )
+    if assessed == 0:
+        return "\n".join([
+            "No candidate was available to evaluate against the active constraints "
+            f"({requirements}).",
+            "",
+            counts,
+            "Nothing is shown because no candidate was retrieved to verify against the "
+            "constraints.",
+            "This is a constraint outcome, not a confirmed absence of a matching product.",
+        ])
+    if unresolved > 0:
+        return "\n".join([
+            "No candidate could be verified as satisfying the active constraints "
+            f"({requirements}).",
+            "",
+            counts,
+            "Nothing is shown rather than an unverified product: "
+            f"{unresolved} candidate(s) remain undecided, and missing facts are not "
+            "treated as violations.",
+            "This is a verification outcome, not a confirmed absence of a matching "
+            "product, and not an exhausted interaction history.",
+        ])
+    return "\n".join([
+        f"No candidate satisfies the active constraints ({requirements}).",
+        "",
+        counts,
+        "Nothing is shown rather than a non-compliant or unverified product.",
+        "This is a constraint outcome, not an exhausted interaction history.",
+    ])
+
+def build_final_list_response(
+    recommendations: Any, facts_by_asin: Any
+) -> str:
+    """Render exactly the **final** recommendation list, in its presented order.
+
+    The caller passes the list the response is about to publish, so identity, order and
+    membership are the answer's own - this function never re-derives a candidate set and
+    cannot introduce a product the response does not show.  Catalogue facts are looked up
+    by ``parent_asin`` (never by position), so a product's attributes cannot be printed
+    beside another product's identity.
+
+    ``facts_by_asin`` maps each identity to the catalogue labels it actually has.  A
+    missing fact is simply omitted; no placeholder or invented attribute is printed.
+    """
+    items = list(recommendations)
+    if not items:
+        return NO_CANDIDATES_TEXT
+    lines = [
+        f"Final recommendation list ({len(items)} item(s), in the order presented):",
+        "",
+    ]
+    for item in items:
+        sources = ", ".join(str(value) for value in (getattr(item, "sources", ()) or ()))
+        suffix = f" [{sources}]" if sources else ""
+        lines.append(f"{int(item.rank)}. {item.parent_asin}{suffix}")
+        facts = (facts_by_asin or {}).get(item.parent_asin, {})
+        for label in ("Title", "Main category", "Category", "Store"):
+            value = facts.get(label)
+            if value:
+                lines.append(f"   {label}: {value}")
+        lines.append("")
+    lines.extend([
+        "These are exactly the products in the final answer above; no other product is "
+        "named in this explanation. Titles and catalogue facts are quoted from the product "
+        "metadata for the listed identity, and are omitted where the metadata has none.",
+    ])
+    return "\n".join(lines)
+
 
 #: Footer that stops raw model scores from being read as product evidence.  The
 #: recommender's scores order candidates; they say nothing about a product.
