@@ -49,6 +49,7 @@ from recommendation.demo import (
     DEFAULT_DECISION_MODE,
     AgentRecommendRequest,
     AgentRecommendResponse,
+    AgentShoppingRequest,
     ChatRequest,
     ChatResponse,
     CreateSessionRequest,
@@ -286,6 +287,22 @@ def map_demo_exception(exc: BaseException) -> DemoHTTPError:
             # beyond the request bound).  Reported as unusable history rather than as a backend
             # crash, and no default history is substituted.
             return DemoHTTPError(422, "invalid_history", "the demo history is not usable")
+        if exc.code == "unknown_clarification":
+            return DemoHTTPError(
+                404,
+                "unknown_clarification",
+                "the clarification is unknown or belongs to another session",
+            )
+        if exc.code == "expired_clarification":
+            return DemoHTTPError(
+                410,
+                "clarification_expired",
+                "the clarification has expired; start a new shopping turn",
+            )
+        if exc.code == "memory_unavailable":
+            return DemoHTTPError(
+                503, "memory_unavailable", "shopping requires the preference store"
+            )
         return DemoHTTPError(502, "agent_failed", "the agent could not complete this request")
     if isinstance(exc, MalformedDecision):
         return DemoHTTPError(
@@ -686,6 +703,45 @@ def build_demo_router() -> APIRouter:
             raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
         try:
             return runtime.agent_service().run(payload)
+        except Exception as exc:  # noqa: BLE001 - mapped, never leaked
+            raise map_demo_exception(exc) from exc
+
+    @router.post("/sessions/{session_id}/agent/shopping", response_model=AgentRecommendResponse)
+    def agent_shopping(
+        session_id: str, payload: AgentShoppingRequest, request: Request
+    ) -> AgentRecommendResponse:
+        """Run one multi-turn shopping turn inside a demo session.
+
+        The session owns the trusted history and the preference-memory namespace, so the
+        request body carries neither: a caller cannot point this turn at another session's
+        history or memory.  The controller is the existing ``DemoAgentService``; this route
+        only allocates the session turn, builds the agent request from **server-owned**
+        history, and delegates.  A conflict or an undecidable candidate set can therefore
+        suspend the turn with a ``clarification``; the next call on the same session passes
+        its ``clarification_id`` and the answer text.
+        """
+        runtime = _runtime(request)
+        if not runtime.ready:
+            raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
+        try:
+            with runtime.sessions.turn(session_id) as allocation:
+                session = allocation.session
+                if not session.trusted_user_history:
+                    raise DemoHTTPError(422, "invalid_history", "the demo history is not usable")
+                agent_payload = AgentRecommendRequest(
+                    message=payload.message,
+                    history=list(session.trusted_user_history),
+                    k=payload.k,
+                    sources=payload.sources,
+                    constraints=payload.constraints,
+                    clarification_id=payload.clarification_id,
+                    user_key=session.user_key,
+                )
+                return runtime.agent_service().run_shopping_turn(
+                    agent_payload, session_id=session.user_key
+                )
+        except DemoHTTPError:
+            raise
         except Exception as exc:  # noqa: BLE001 - mapped, never leaked
             raise map_demo_exception(exc) from exc
 
