@@ -39,7 +39,16 @@
     memoryNote: document.getElementById("memory-note"),
     modeDeterministic: document.getElementById("mode-deterministic"),
     modeLlm: document.getElementById("mode-llm"),
-    modeNote: document.getElementById("mode-note")
+    modeNote: document.getElementById("mode-note"),
+    shopStatus: document.getElementById("shop-status"),
+    shopTranscript: document.getElementById("shop-transcript"),
+    shopForm: document.getElementById("shop-form"),
+    shopMessage: document.getElementById("shop-message"),
+    shopMaxPrice: document.getElementById("shop-max-price"),
+    shopSend: document.getElementById("shop-send"),
+    shopClarification: document.getElementById("shop-clarification"),
+    shopIntent: document.getElementById("shop-intent"),
+    shopCards: document.getElementById("shop-cards")
   };
 
   var state = {
@@ -56,7 +65,15 @@
     decisionMode: "deterministic",
     modes: null,
     /* True when the server advertised no decision-mode list at all (an older build). */
-    modeProbeFailed: false
+    modeProbeFailed: false,
+    /* Multi-turn shopping is a distinct server path from /chat.  The page keeps only what the
+       server's last response said: the pending question id, a turn counter, and a send guard.
+       It never keeps its own authoritative intent or product facts. */
+    shop: {
+      sending: false,
+      pendingId: null,
+      turns: 0
+    }
   };
 
   /* ------------------------------------------------------------------ */
@@ -97,8 +114,8 @@
     state.sending = busy;
     els.send.disabled = busy || state.expired;
     els.input.disabled = busy || state.expired;
-    els.newSession.disabled = busy;
-    els.resetSession.disabled = busy || !state.sessionId;
+    els.newSession.disabled = busy || state.shop.sending;
+    els.resetSession.disabled = busy || state.shop.sending || !state.sessionId;
     els.profileSelect.disabled = busy;
     els.send.textContent = busy ? "Sending…" : "Send";
   }
@@ -339,6 +356,7 @@
         els.tracePanel.appendChild(el("p", "muted", "Send a message to see this turn's trace."));
         renderModeChoice();
         renderStatusChips();
+        resetShopView();
         setBusy(false);
         setState("ready");
         els.input.focus();
@@ -347,6 +365,8 @@
         setBusy(false);
         setState("error");
         state.sessionId = null;
+        setShopStatus("error", "Session unavailable. Start a new session to shop.");
+        setShopBusy(false);
         showBanner("error", "Could not start a session", describeError(error));
       });
   }
@@ -360,12 +380,258 @@
       .then(function () {
         showBanner("info", "Session reset", "Only that session was removed. Starting a new one.");
         state.sessionId = null;
+        setShopBusy(false);
+        setShopStatus("", "Session reset. Creating a new one...");
         return createSession();
       })
       .catch(function (error) {
         setBusy(false);
         setState("error");
         showBanner("error", "Reset failed", describeError(error));
+      });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* multi-turn shopping                                                 */
+  /* ------------------------------------------------------------------ */
+
+  function setShopStatus(kind, text) {
+    els.shopStatus.className = "shop-status" + (kind ? " " + kind : "");
+    els.shopStatus.textContent = text;
+  }
+
+  function setShopBusy(busy) {
+    state.shop.sending = busy;
+    var locked = busy || state.expired || !state.sessionId;
+    els.shopSend.disabled = locked;
+    els.shopMessage.disabled = locked;
+    els.shopMaxPrice.disabled = locked;
+    els.shopSend.textContent = busy ? "Sending…" : "Ask";
+    els.newSession.disabled = busy || state.sending;
+    els.resetSession.disabled = busy || state.sending || !state.sessionId;
+  }
+
+  function resetShopView() {
+    state.shop.pendingId = null;
+    state.shop.turns = 0;
+    els.shopMessage.value = "";
+    els.shopMaxPrice.value = "";
+    clear(els.shopTranscript);
+    clear(els.shopIntent);
+    els.shopIntent.appendChild(el("span", "muted",
+      "The current intent appears here after a shopping turn."));
+    clear(els.shopCards);
+    els.shopCards.appendChild(el("p", "muted",
+      "Final recommendations and their evidence-bound reasons appear here."));
+    els.shopClarification.hidden = true;
+    clear(els.shopClarification);
+    setShopStatus("", state.sessionId
+      ? "Ready. Ask for something, or answer the pending question."
+      : "Create a session to start.");
+    setShopBusy(false);
+  }
+
+  function appendShopTurn(kind, meta, body) {
+    var turn = el("div", "turn " + kind);
+    turn.appendChild(el("div", "turn-meta", meta));
+    turn.appendChild(el("div", "turn-body", body));
+    els.shopTranscript.appendChild(turn);
+    els.shopTranscript.scrollTop = els.shopTranscript.scrollHeight;
+  }
+
+  function showShopClarification(clarification) {
+    els.shopClarification.hidden = false;
+    clear(els.shopClarification);
+    var title = clarification.kind === "conflict"
+      ? "Conflicting requirements"
+      : "The catalogue could not verify a requirement";
+    els.shopClarification.appendChild(el("div", "shop-clarification-title", title));
+    els.shopClarification.appendChild(el("div", null, clarification.question));
+    if (clarification.options && clarification.options.length) {
+      els.shopClarification.appendChild(el("div", "hint",
+        "Options: " + clarification.options.join(" / ")));
+    }
+  }
+
+  function renderShopIntent(intent) {
+    clear(els.shopIntent);
+    if (!intent) {
+      els.shopIntent.appendChild(el("span", "muted", "No intent was returned for this turn."));
+      return;
+    }
+    var hard = intent.hard || [];
+    var soft = intent.soft || [];
+    if (!hard.length && !soft.length && !(intent.conflicts || []).length) {
+      els.shopIntent.appendChild(el("span", "muted", "No active hard or soft preferences."));
+    }
+    hard.forEach(function (entry) {
+      els.shopIntent.appendChild(el("span", "intent-chip hard",
+        entry.kind + ": " + entry.value));
+    });
+    soft.forEach(function (entry) {
+      var className = "intent-chip soft" + (entry.polarity === "avoid" ? " avoid" : "");
+      var prefix = entry.polarity === "avoid" ? "avoids " : "";
+      els.shopIntent.appendChild(el("span", className,
+        prefix + entry.kind + ": " + entry.value));
+    });
+    (intent.conflicts || []).forEach(function (code) {
+      els.shopIntent.appendChild(el("div", "intent-conflict",
+        "Unresolved conflict: " + code));
+    });
+  }
+
+  function renderShopCards(recommendations, message) {
+    clear(els.shopCards);
+    var list = recommendations || [];
+    if (!list.length) {
+      els.shopCards.appendChild(el("p", "muted shop-empty",
+        message || "No recommendations were returned."));
+      return;
+    }
+    /* The server's order is the only order: no sorting, no filtering, no lookups. */
+    list.forEach(function (card) {
+      var wrap = el("article", "card shop-card");
+      var head = el("div", "card-head");
+      head.appendChild(el("span", "card-rank", String(card.rank)));
+      head.appendChild(el("span", "card-title",
+        card.title || card.parent_asin || "Untitled product"));
+      wrap.appendChild(head);
+      wrap.appendChild(el("div", "card-asin", card.parent_asin || ""));
+      if (card.sources && card.sources.length) {
+        wrap.appendChild(el("div", "card-ranks", "sources: " + card.sources.join(", ")));
+      }
+      if (card.reason) {
+        wrap.appendChild(el("p", "shop-reason", card.reason));
+      } else {
+        wrap.appendChild(el("p", "shop-reason muted",
+          "No reason was returned for this item."));
+      }
+      els.shopCards.appendChild(wrap);
+    });
+  }
+
+  function shopSend(event) {
+    if (event) { event.preventDefault(); }
+    if (!state.sessionId || state.shop.sending || state.expired) { return; }
+    var message = els.shopMessage.value.trim();
+    if (!message) {
+      showBanner("error", "Message required", "Type a shopping request before sending.");
+      return;
+    }
+    var constraints = [];
+    var maxPrice = els.shopMaxPrice.value.trim();
+    if (maxPrice) {
+      var value = Number(maxPrice);
+      if (!isFinite(value) || value < 0) {
+        showBanner("error", "Invalid maximum price",
+          "Enter a non-negative number, or leave the field empty.");
+        return;
+      }
+      constraints.push({ kind: "price_max", value: String(value) });
+    }
+
+    hideBanner();
+    setShopBusy(true);
+    setShopStatus("", "Sending…");
+    var label = message + (constraints.length ? " [max $" + constraints[0].value + "]" : "");
+    appendShopTurn("user", "You", label);
+    els.shopMessage.value = "";
+
+    var body = {
+      message: message,
+      k: 5,
+      sources: ["history", "catalog_search"],
+      constraints: constraints
+    };
+    if (state.shop.pendingId) {
+      body.clarification_id = state.shop.pendingId;
+    }
+
+    request("/sessions/" + encodeURIComponent(state.sessionId) + "/agent/shopping", {
+      method: "POST",
+      body: body
+    })
+      .then(function (payload) {
+        els.shopMessage.value = "";
+        state.shop.turns += 1;
+        renderShopIntent(payload.intent || null);
+        var clarification = payload.clarification || null;
+        if (clarification) {
+          state.shop.pendingId = clarification.clarification_id;
+          if (clarification.kind === "conflict") {
+            setShopStatus("waiting", "Waiting for your answer: the requirements conflict.");
+          } else if (clarification.kind === "unverified") {
+            setShopStatus("waiting",
+              "Waiting for your answer: the catalogue could not verify a requirement.");
+          } else {
+            setShopStatus("waiting", "Waiting for your answer.");
+          }
+          showShopClarification(clarification);
+          appendShopTurn("agent", "Agent — question",
+            payload.message || clarification.question);
+          clear(els.shopCards);
+          els.shopCards.appendChild(el("p", "muted",
+            "No product is shown while a clarification is pending."));
+        } else {
+          state.shop.pendingId = null;
+          els.shopClarification.hidden = true;
+          clear(els.shopClarification);
+          var recommendations = payload.recommendations || [];
+          appendShopTurn("agent", "Agent", payload.message || "The run returned no message.");
+          renderShopCards(recommendations, payload.message);
+          if (recommendations.length) {
+            setShopStatus("success", "Recommended " + recommendations.length + " product(s).");
+          } else if (payload.terminal && payload.terminal.status === "failed") {
+            setShopStatus("error",
+              "Run ended without a verified recommendation ("
+              + (payload.terminal.termination_reason || "failed") + ").");
+          } else {
+            setShopStatus("empty",
+              "No product satisfied the active constraints; the explanation above is the server's.");
+          }
+        }
+        setShopBusy(false);
+        els.shopMessage.focus();
+      })
+      .catch(function (error) {
+        setShopBusy(false);
+        if (error && error.code === "session_not_found") {
+          state.expired = true;
+          setBusy(false);
+          setShopBusy(false);
+          setState("session expired");
+          setShopStatus("error", "Session expired. Start a new session to continue.");
+          showBanner("error", "Session expired", describeError(error));
+          return;
+        }
+        if (error && error.code === "unknown_clarification") {
+          state.shop.pendingId = null;
+          els.shopClarification.hidden = true;
+          clear(els.shopClarification);
+          setShopStatus("error",
+            "This clarification is no longer available. Send a new request.");
+          appendShopTurn("agent", "Agent — clarification unavailable",
+            error.message || "The clarification is unknown or belongs to another session.");
+          showBanner("error", "Clarification unavailable",
+            "That question was already answered, expired, or belongs to another session. "
+            + "Nothing was re-submitted automatically.");
+          return;
+        }
+        if (error && error.code === "clarification_expired") {
+          state.shop.pendingId = null;
+          els.shopClarification.hidden = true;
+          clear(els.shopClarification);
+          setShopStatus("error", "The clarification expired. Send a new request.");
+          appendShopTurn("agent", "Agent — clarification expired",
+            error.message || "The clarification expired.");
+          showBanner("error", "Clarification expired",
+            "Start a new shopping turn; the expired question was not re-sent.");
+          return;
+        }
+        setShopStatus("error", "The shopping turn failed. No partial result was fabricated.");
+        appendShopTurn("agent", "Agent — failure",
+          error && error.message ? error.message : "The request failed.");
+        showBanner("error", "Shopping turn failed", describeError(error));
       });
   }
 
@@ -427,6 +693,8 @@
           state.expired = true;
           setState("session expired");
           setBusy(false);
+          setShopBusy(false);
+          setShopStatus("error", "Session expired. Start a new session to continue.");
           showBanner("error", "Session expired", describeError(error));
           return;
         }
@@ -907,6 +1175,7 @@
   /* ------------------------------------------------------------------ */
 
   els.form.addEventListener("submit", send);
+  els.shopForm.addEventListener("submit", shopSend);
   els.newSession.addEventListener("click", function () { createSession(); });
   els.resetSession.addEventListener("click", function () { resetSession(); });
   els.profileSelect.addEventListener("change", function () {
@@ -920,6 +1189,7 @@
   });
 
   setBusy(false);
+  resetShopView();
   setState("initializing");
   renderModeChoice();
   checkHealth()

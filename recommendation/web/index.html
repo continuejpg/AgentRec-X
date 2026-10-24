@@ -72,6 +72,52 @@
         <div id="memory-note" class="memory-note" hidden></div>
       </section>
 
+      <section class="panel shopping-panel" aria-label="Multi-turn shopping">
+        <h2>Multi-turn shopping</h2>
+        <p class="hint">
+          Ask a shopping request, then answer any clarification the agent asks. The server owns
+          the current intent, the final list and every reason; this page only displays what the
+          response contains. Demo only: sessions and pending questions live in one server process,
+          and there is no authentication, so do not expose this deployment to an untrusted network.
+        </p>
+        <div id="shop-status" class="shop-status" role="status">Create a session to start.</div>
+        <div id="shop-transcript" class="transcript shop-transcript" aria-live="polite"></div>
+        <form id="shop-form" class="composer shop-composer" autocomplete="off">
+          <input
+            id="shop-message"
+            type="text"
+            autocomplete="off"
+            maxlength="2000"
+            placeholder="I need a yoga mat, budget $30"
+            aria-label="Shopping message"
+            disabled
+          />
+          <label class="shop-budget" for="shop-max-price">
+            Max price
+            <input
+              id="shop-max-price"
+              type="number"
+              min="0"
+              step="0.01"
+              autocomplete="off"
+              placeholder="optional"
+              aria-label="Maximum price (optional)"
+              disabled
+            />
+          </label>
+          <button id="shop-send" type="submit" disabled>Ask</button>
+        </form>
+        <div id="shop-clarification" class="shop-clarification" role="status" hidden></div>
+        <h3 class="shop-subhead">Current intent (from the server)</h3>
+        <div id="shop-intent" class="shop-intent">
+          <span class="muted">The current intent appears here after a shopping turn.</span>
+        </div>
+        <h3 class="shop-subhead">Final recommendations (server order)</h3>
+        <div id="shop-cards" class="cards shop-cards">
+          <p class="muted">Final recommendations and their evidence-bound reasons appear here.</p>
+        </div>
+      </section>
+
       <section class="panel conversation" aria-label="Conversation">
         <h2>Conversation</h2>
         <div id="transcript" class="transcript" aria-live="polite"></div>
