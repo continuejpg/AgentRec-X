@@ -66,6 +66,7 @@ __all__ = [
     "AgentRecommendationView",
     "AgentRecommendRequest",
     "AgentRecommendResponse",
+    "AgentShoppingRequest",
     "AgentReplanView",
     "ReplanDecisionView",
     "ReplanObservationView",
@@ -177,6 +178,13 @@ class AgentRecommendRequest(BaseModel):
             "writes no preference memory at all, which is the default and the reproducible mode."
         ),
     )
+    clarification_id: OpaqueId | None = Field(
+        default=None,
+        description=(
+            "Optional id of a pending clarification this turn answers. Only meaningful on the "
+            "multi-turn shopping turn; a normal request leaves it null."
+        ),
+    )
     sources: tuple[str, ...] = Field(
         default=("history",),
         description=(
@@ -227,6 +235,53 @@ class AgentRecommendRequest(BaseModel):
         return stripped
 
 
+class AgentShoppingRequest(BaseModel):
+    """Body of ``POST /v1/demo/sessions/{session_id}/agent/shopping``.
+
+    The session owns the trusted interaction history and the preference-memory namespace,
+    so this body deliberately carries **no** history and no ``user_key``: a caller cannot
+    point a shopping turn at another namespace.  ``message``, ``k``, ``sources`` and
+    ``constraints`` are validated exactly like the single-turn agent request; the only
+    additional field is the optional ``clarification_id`` that answers a pending question.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    message: Message = Field(
+        ...,
+        description="Natural-language shopping message for this turn. Untrusted text.",
+        examples=["I need a yoga mat, budget $30"],
+    )
+    k: StrictK = Field(
+        default=5,
+        description=f"Number of recommendations to request, {MIN_K}..{MAX_K} (strict integer).",
+    )
+    sources: tuple[str, ...] = Field(
+        default=("history", "catalog_search"),
+        description=(
+            "Which trusted candidate sources this turn consults, in order. Defaults to the "
+            "fusion the deployment measured; every named source is consulted and fused."
+        ),
+        examples=[["history", "catalog_search"]],
+    )
+    constraints: Annotated[tuple[AgentConstraintItem, ...], Field(max_length=MAX_CONSTRAINTS)] = (
+        Field(
+            default=(),
+            description=(
+                "Optional hard constraints for this turn. They are also projected into the "
+                "shopping intent and checked by the deterministic eligibility layer."
+            ),
+        )
+    )
+    clarification_id: OpaqueId | None = Field(
+        default=None,
+        description=(
+            "The id of a pending clarification this turn answers. Omit it for a new shopping "
+            "turn; an unknown, expired or cross-session id is rejected."
+        ),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # response blocks
 # --------------------------------------------------------------------------- #
@@ -258,6 +313,14 @@ class AgentRecommendationView(BaseModel):
     )
     title: str | None = Field(
         default=None, description="Normalised catalogue title, or null when absent."
+    )
+    reason: str | None = Field(
+        default=None,
+        description=(
+            "Deterministic, evidence-bound reason for this product, derived from the current "
+            "shopping intent and this product's own catalogue record. Null when no shopping "
+            "intent was available. Every factual clause is traceable to the record."
+        ),
     )
     sources: tuple[str, ...] = Field(
         default=(),
@@ -699,6 +762,42 @@ class AgentExecutionView(BaseModel):
     )
 
 
+class AgentIntentConstraintView(BaseModel):
+    """One active entry of the current shopping intent."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: str
+    value: str
+    polarity: str
+    strength: Literal["hard", "soft"]
+    source_turn_id: str = ""
+
+
+class AgentIntentView(BaseModel):
+    """The deterministic current intent a shopping turn was executed against."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hard: tuple[AgentIntentConstraintView, ...] = ()
+    soft: tuple[AgentIntentConstraintView, ...] = ()
+    conflicts: tuple[str, ...] = ()
+    turn_ids: tuple[str, ...] = ()
+    active_preference_count: int = Field(default=0, ge=0)
+
+
+class AgentClarificationView(BaseModel):
+    """A pending question the caller can answer on the next shopping turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    clarification_id: str
+    question: str
+    kind: str = "unverified"
+    blocks: str = "candidate_set"
+    options: tuple[str, ...] = ()
+
+
 class AgentRecommendResponse(BaseModel):
     """Body of a successful ``POST /v1/demo/agent/recommend``."""
 
@@ -746,6 +845,17 @@ class AgentRecommendResponse(BaseModel):
             "enabled (E-03B): the initial observation, the decision, and the appended source's "
             "real outcome."
         ),
+    )
+    clarification: AgentClarificationView | None = Field(
+        default=None,
+        description=(
+            "Present when this run suspended to ask the user a question. The question is "
+            "also the message; answering it on the next shopping turn resumes the task."
+        ),
+    )
+    intent: AgentIntentView | None = Field(
+        default=None,
+        description="The current shopping intent this turn was executed against, when available.",
     )
     timing: AgentTimingView = Field(
         default_factory=lambda: AgentTimingView(total_ms=0.0, agent_ms=0.0, serialize_ms=0.0)

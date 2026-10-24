@@ -1698,11 +1698,13 @@ class _LoopEngine:
         equivalent of: an action that produced no candidates *and* carried no reply text
         (for example a test policy that only proposes FINISH).
         """
-        if self.clarification is not None and not self.produced_recommendation:
-            # A suspended run is not a direct turn: the response *is* the question.  It is
-            # rendered through the accepted finalizer as a direct response so the two control
-            # planes keep one presentation path, and the question text comes from the
-            # validated action rather than from a model string.
+        if self.clarification is not None:
+            # A suspended run is not a direct turn: the response *is* the question, even when
+            # retrieval already produced candidates - nothing may be presented while the answer
+            # that would decide eligibility is outstanding.  It is rendered through the accepted
+            # finalizer as a direct response so the two control planes keep one presentation
+            # path, and the question text comes from the validated action rather than from a
+            # model string.
             self.state["decision"] = AgentDecision(
                 action="direct_response", direct_response=self.clarification.question
             )

@@ -44,6 +44,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from typing import Any, Mapping, Sequence
 
 from recommendation.agent import AgentInput
@@ -62,13 +63,24 @@ from recommendation.control import (
 from recommendation.memory import PreferenceKind
 from recommendation.control.task_state import TaskConstraint, TaskState
 
-from .agent_policy import DEFAULT_SOURCE_PLAN, DemoSourcePlanPolicy, normalise_source_plan
+from .agent_policy import (
+    DEFAULT_SOURCE_PLAN,
+    ClarificationPolicy,
+    DemoSourcePlanPolicy,
+    IntentQueryPolicy,
+    normalise_source_plan,
+)
 from .replan_policy import BoundedReplanPolicy
 from .agent_schemas import (
+    AgentClarificationView,
+    AgentConstraintItem,
+    AgentIntentConstraintView,
+    AgentIntentView,
     AgentRecommendRequest,
     AgentRecommendResponse,
     AgentTimingView,
 )
+from .shopping_intent import build_reason, derive_intent, query_terms
 from .agent_trajectory import (
     build_eligibility_view,
     build_grounded_view,
@@ -259,6 +271,14 @@ class DemoAgentService:
         #: controller cache to bound (see :meth:`_compose_controller`).
         self._controllers_built = 0
         self._lock = threading.Lock()
+        #: Pending shopping clarifications, keyed by clarification id.  In-process demo state,
+        #: deliberately not a second preference store: it holds only the question and the
+        #: session id that may answer it.  A restart drops it, which is why the response also
+        #: carries the question itself.
+        self._pending_clarifications: dict[str, dict[str, Any]] = {}
+        #: Sessions that already had one clarification.  A second undecidable run degrades
+        #: through the accepted termination path instead of looping on questions.
+        self._clarified_sessions: set[str] = set()
         #: Built once, because the catalogue search index is a per-process cost, not a
         #: per-request one.
         self._catalog_search = CatalogSearchSource(metadata)
@@ -472,6 +492,9 @@ class DemoAgentService:
         plan: Sequence[str],
         replan_client: Any = None,
         preference_snapshot: Any = None,
+        clarification_question: str | None = None,
+        clarify_unresolved: bool = False,
+        intent_terms: Sequence[str] = (),
     ) -> LoopController:
         """Compose a controller for **one** request.
 
@@ -501,6 +524,9 @@ class DemoAgentService:
             use_memory=use_memory,
             replan_client=replan_client,
             preference_snapshot=preference_snapshot,
+            clarification_question=clarification_question,
+            clarify_unresolved=clarify_unresolved,
+            intent_terms=intent_terms,
         )
 
     def _build_controller(
@@ -512,6 +538,9 @@ class DemoAgentService:
         plan: Sequence[str],
         replan_client: Any = None,
         preference_snapshot: Any = None,
+        clarification_question: str | None = None,
+        clarify_unresolved: bool = False,
+        intent_terms: Sequence[str] = (),
     ) -> LoopController:
         """Compose one controller: capability, candidate plane, eligibility, then the loop.
 
@@ -571,6 +600,16 @@ class DemoAgentService:
             )
         else:
             policy = DemoSourcePlanPolicy(plan, default_k=source_limit, use_memory=False)
+        # The shopping-intent wrappers are additive and opt-in: the legacy request path and the
+        # LLM-selected path compose the same policy object they always did.
+        if intent_terms:
+            policy = IntentQueryPolicy(policy, terms=intent_terms)
+        if clarification_question or clarify_unresolved:
+            policy = ClarificationPolicy(
+                policy,
+                question=clarification_question,
+                ask_on_unresolved=clarify_unresolved,
+            )
         return LoopController(
             policy,
             capability,
@@ -583,7 +622,14 @@ class DemoAgentService:
 
     # -- one request ------------------------------------------------------- #
 
-    def run(self, payload: AgentRecommendRequest) -> AgentRecommendResponse:
+    def run(
+        self,
+        payload: AgentRecommendRequest,
+        *,
+        clarification_question: str | None = None,
+        clarify_unresolved: bool = False,
+        intent_terms: Sequence[str] = (),
+    ) -> AgentRecommendResponse:
         """Serve one request: validate the plan, run the loop, project the result.
 
         Raises
@@ -597,7 +643,152 @@ class DemoAgentService:
             plan = normalise_source_plan(payload.sources)
         except ValueError as exc:
             raise DemoAgentError(str(exc), code="unsupported_source_plan") from exc
-        return self._execute_plan(plan=plan, payload=payload, use_memory=True)
+        return self._execute_plan(
+            plan=plan,
+            payload=payload,
+            use_memory=True,
+            clarification_question=clarification_question,
+            clarify_unresolved=clarify_unresolved,
+            intent_terms=intent_terms,
+        )
+
+    def run_shopping_turn(
+        self,
+        payload: AgentRecommendRequest,
+        *,
+        session_id: str,
+    ) -> AgentRecommendResponse:
+        """Serve one turn of a multi-turn shopping session.
+
+        The preference store remains the only memory.  This method previews this turn's
+        extraction against the active snapshot to build the **current** intent, so a new,
+        corrected or withdrawn requirement changes this turn's hard constraints and query
+        immediately, without writing the turn twice: the loop still commits the user's message
+        once, when a recommendation completes.
+
+        A provable contradiction or an undecidable candidate set becomes one pending question.
+        The question is a suspension (`awaiting_user`), never a successful completion, never a
+        fabricated candidate, and never a relaxation of a hard constraint.
+        """
+        if self._memory_service is None:
+            raise DemoAgentError(
+                "multi-turn shopping requires the preference-memory store",
+                code="memory_unavailable",
+            )
+        if payload.clarification_id:
+            with self._lock:
+                pending = self._pending_clarifications.get(payload.clarification_id)
+                if pending is None:
+                    raise DemoAgentError(
+                        "the clarification id is unknown or belongs to another session",
+                        code="unknown_clarification",
+                    )
+                if pending.get("session_id") != session_id:
+                    # Do not consume another session's question: a cross-session attempt must
+                    # not be able to invalidate it.
+                    raise DemoAgentError(
+                        "the clarification id is unknown or belongs to another session",
+                        code="unknown_clarification",
+                    )
+                if time.time() - float(pending.get("created_at", 0.0)) > CLARIFICATION_TTL_SECONDS:
+                    self._pending_clarifications.pop(payload.clarification_id, None)
+                    raise DemoAgentError(
+                        "the clarification has expired; start a new shopping turn",
+                        code="expired_clarification",
+                    )
+                self._pending_clarifications.pop(payload.clarification_id, None)
+        snapshot = self._memory_service.get_active_preferences(session_id)
+        extraction = self._memory_service.extractor.extract(payload.message)
+        explicit = tuple(
+            {"kind": getattr(item.kind, "value", str(item.kind)), "value": str(item.value)}
+            for item in payload.constraints
+        )
+        turn_id = f"{session_id}:{payload.clarification_id or uuid.uuid4().hex[:12]}"
+        intent = derive_intent(
+            snapshot, extraction, turn_id=turn_id, explicit_constraints=explicit
+        )
+        terms = query_terms(intent, payload.message)
+        if intent.conflicts:
+            response = self.run(
+                payload.model_copy(update={"user_key": session_id, "constraints": ()}),
+                clarification_question=intent.conflicts[0].question,
+            )
+            self._commit_clarify_turn(session_id, payload.message, turn_id)
+            return self._attach_clarification(response, intent, session_id, kind="conflict")
+        constraints = tuple(
+            AgentConstraintItem(kind=str(item["kind"]), value=str(item["value"]))
+            for item in intent.hard_constraints()
+        )
+        response = self.run(
+            payload.model_copy(update={"user_key": session_id, "constraints": constraints}),
+            clarify_unresolved=session_id not in self._clarified_sessions,
+            intent_terms=terms,
+        )
+        if response.terminal.termination_reason == "awaiting_user":
+            self._commit_clarify_turn(session_id, payload.message, turn_id)
+            return self._attach_clarification(response, intent, session_id, kind="unverified")
+        return self._attach_intent_and_reasons(response, intent)
+
+    def _commit_clarify_turn(self, session_id: str, message: str, turn_id: str) -> None:
+        """Persist the statement that led to a question, exactly once.
+
+        A suspended run does not commit the turn (the loop commits only on a completed
+        recommendation).  Without this, the conflict or constraint that caused the question
+        would be forgotten before the user answers.  The write is the accepted memory
+        service's own; it stores the user's message, never the question.
+        """
+        self._memory_service.process_turn(
+            user_key=session_id,
+            user_message=message,
+            turn_id=turn_id,
+        )
+
+    def _attach_intent_and_reasons(
+        self, response: AgentRecommendResponse, intent: Any
+    ) -> AgentRecommendResponse:
+        """Attach one evidence-bound reason per final item, plus the intent that produced it."""
+        records = getattr(self._metadata, "records", {}) or {}
+        recommendations = tuple(
+            item.model_copy(
+                update={"reason": build_reason(records.get(item.parent_asin), intent)}
+            )
+            for item in response.recommendations
+        )
+        return response.model_copy(
+            update={"recommendations": recommendations, "intent": _intent_view(intent)}
+        )
+
+    def _attach_clarification(
+        self,
+        response: AgentRecommendResponse,
+        intent: Any,
+        session_id: str,
+        *,
+        kind: str,
+    ) -> AgentRecommendResponse:
+        """Record and expose one pending question for ``session_id``."""
+        if response.terminal.termination_reason != "awaiting_user":
+            return self._attach_intent_and_reasons(response, intent)
+        clarification_id = uuid.uuid4().hex
+        with self._lock:
+            for key, value in list(self._pending_clarifications.items()):
+                if value.get("session_id") == session_id:
+                    self._pending_clarifications.pop(key, None)
+            self._pending_clarifications[clarification_id] = {
+                "session_id": session_id,
+                "question": response.message,
+                "kind": kind,
+                "created_at": time.time(),
+            }
+            self._clarified_sessions.add(session_id)
+        view = AgentClarificationView(
+            clarification_id=clarification_id,
+            question=response.message,
+            kind=kind,
+        )
+        return response.model_copy(
+            update={"clarification": view, "intent": _intent_view(intent)}
+        )
 
     def run_selection(
         self,
@@ -661,6 +852,9 @@ class DemoAgentService:
         use_memory: bool,
         preference_snapshot: Any = None,
         replan_client: Any = None,
+        clarification_question: str | None = None,
+        clarify_unresolved: bool = False,
+        intent_terms: Sequence[str] = (),
     ) -> AgentRecommendResponse:
         """Run one plan and project it.  Shared by the request-declared and LLM-selected paths.
 
@@ -690,6 +884,9 @@ class DemoAgentService:
             # Read-only: the bounded replanning policy may describe the user's ACTIVE preferences
             # to the model, and nothing else in the run changes because of it.
             preference_snapshot=preference_snapshot,
+            clarification_question=clarification_question,
+            clarify_unresolved=clarify_unresolved,
+            intent_terms=intent_terms,
         )
         task_state = _task_state(payload)
         agent_input = AgentInput(
@@ -1006,6 +1203,30 @@ def _ledger_of(controller: LoopController) -> Any | None:
     return getattr(plane, "ledger", None) if plane is not None else None
 
 
+def _intent_view(intent: Any) -> AgentIntentView:
+    """Project a shopping intent into the wire view (values only, no raw text)."""
+
+    def entries(values: Any) -> tuple[AgentIntentConstraintView, ...]:
+        return tuple(
+            AgentIntentConstraintView(
+                kind=entry.kind,
+                value=entry.value,
+                polarity=entry.polarity,
+                strength=entry.strength.value,
+                source_turn_id=entry.source_turn_id,
+            )
+            for entry in values
+        )
+
+    return AgentIntentView(
+        hard=entries(intent.hard),
+        soft=entries(intent.soft),
+        conflicts=tuple(conflict.code for conflict in intent.conflicts),
+        turn_ids=intent.turn_ids,
+        active_preference_count=intent.active_preference_count,
+    )
+
+
 def _titles_of(metadata: Any, parent_asins: Sequence[str]) -> Mapping[str, str]:
     """A ``parent_asin -> title`` map for exactly the identities being returned.
 
@@ -1029,6 +1250,11 @@ def _titles_of(metadata: Any, parent_asins: Sequence[str]) -> Mapping[str, str]:
 #: One Amazon ``parent_asin``: a leading ``B`` and nine alphanumerics.  Used only to read
 #: which products a *rendered text* names, never to derive an identity for a candidate.
 _ASIN_RE = re.compile(r"\bB[0-9A-Z]{9}\b")
+
+#: How long a pending shopping clarification may be answered.  The pending record is
+#: process-local (there is no durable clarification store); an expired record is removed and
+#: reported, never silently reused.
+CLARIFICATION_TTL_SECONDS = 30 * 60
 
 
 def _product_ids(text: Any) -> list[str]:

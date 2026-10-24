@@ -41,7 +41,9 @@ __all__ = [
     "SOURCE_ARGUMENTS",
     "SOURCE_PLANS",
     "SOURCE_PURPOSES",
+    "ClarificationPolicy",
     "DemoSourcePlanPolicy",
+    "IntentQueryPolicy",
     "normalise_source_plan",
 ]
 
@@ -347,3 +349,95 @@ def _search_arguments_from_message(message: str, *, limit: int) -> Any:
     from recommendation.control import SearchCatalogArguments
 
     return SearchCatalogArguments.from_text(message, limit=limit)
+
+
+class IntentQueryPolicy:
+    """Wrap a plan policy and rebuild its catalogue query from the current intent.
+
+    The wrapped policy still owns *which* sources to consult and in what order.  Only the
+    ``SEARCH_CATALOG`` terms are replaced, with the terms the shopping-intent projection
+    computed for this turn (hard category/brand, then soft, then the user's own message).
+    Removed and superseded values are absent from the intent, so they cannot leak into the
+    query; the cap is the argument schema's own.
+    """
+
+    name = "demo-source-plan-with-intent-query"
+
+    def __init__(self, inner: Any, *, terms: Sequence[str]) -> None:
+        self._inner = inner
+        self._terms = tuple(str(term) for term in terms)
+
+    def choose(self, context: Any) -> ActionProposal:
+        proposal = self._inner.choose(context)
+        if proposal.action is ActionKind.SEARCH_CATALOG and self._terms:
+            from recommendation.control import SearchCatalogArguments
+
+            return proposal.model_copy(
+                update={"arguments": SearchCatalogArguments(terms=self._terms)}
+            )
+        return proposal
+
+
+class ClarificationPolicy:
+    """Wrap a plan policy and ask one question when the intent cannot be resolved.
+
+    Two triggers, both explicit:
+
+    * ``question`` -- a pre-computed conflict question (for example a price floor above the
+      ceiling).  Asked on the first decision, before any source runs.
+    * ``ask_on_unresolved`` -- at the point the plan would finish, if the run holds no
+      verified candidate and at least one candidate is still undecided.  The question says
+      exactly that; it never claims the undecided candidates are non-compliant.
+
+    One question per run, and only while the controller offers the action.  The guard, the
+    constraints and the candidate set are untouched; a clarification is a suspension, not a
+    success, and no product is presented.
+    """
+
+    name = "demo-source-plan-with-clarification"
+
+    def __init__(
+        self,
+        inner: Any,
+        *,
+        question: str | None = None,
+        ask_on_unresolved: bool = False,
+    ) -> None:
+        self._inner = inner
+        self._question = question
+        self._ask_on_unresolved = bool(ask_on_unresolved)
+        self._asked = False
+
+    def choose(self, context: Any) -> ActionProposal:
+        if getattr(context, "step_index", 0) == 0:
+            self._asked = False
+        if (
+            not self._asked
+            and not getattr(context, "awaiting_user", False)
+            and context.action_available(ActionKind.ASK_CLARIFICATION)
+        ):
+            question = self._question
+            if (
+                question is None
+                and self._ask_on_unresolved
+                and int(getattr(context, "verified_eligible_count", 0) or 0) == 0
+                and int(getattr(context, "unresolved_count", 0) or 0) > 0
+            ):
+                from recommendation.demo.shopping_intent import build_unresolved_question
+
+                question = build_unresolved_question(context)
+            if question:
+                from recommendation.control.arguments import AskClarificationArguments
+
+                self._asked = True
+                return ActionProposal(
+                    action=ActionKind.ASK_CLARIFICATION,
+                    rationale=(
+                        "the current intent cannot be resolved from the catalogue; the answer "
+                        "would change which candidates are eligible"
+                    ),
+                    arguments=AskClarificationArguments(
+                        question=str(question), blocks="candidate_set"
+                    ),
+                )
+        return self._inner.choose(context)
