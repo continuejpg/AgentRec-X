@@ -542,10 +542,15 @@ class DemoAgentService:
             tiger_tool=self._tiger_tool if self._tiger_state_now() == "ready" else None,
         )
         eligibility = CandidateEligibilityEvaluator(GroundedReasoner(self._metadata))
+        # Phase 2B: the per-source budget is a separate number from the final ``k``.
+        # Unconfigured it resolves to ``k``, which is exactly the accepted behaviour.
+        from .source_limit import resolve_source_limit
+
+        source_limit = resolve_source_limit(k)
         # An LLM-selected run pins the isolated policy directly: the configured factory belongs to
         # the legacy path and must keep its own behaviour.
         if use_memory:
-            policy = self._policy_factory(plan, k)
+            policy = self._policy_factory(plan, source_limit)
         elif self._replanning_enabled and replan_client is not None:
             # The LLM-selected path, with bounded replanning: the plan policy still serves the
             # authorised plan, and at most one extra legal source may be appended inside this same
@@ -554,7 +559,7 @@ class DemoAgentService:
 
             policy = BoundedReplanPolicy(
                 plan,
-                default_k=k,
+                default_k=source_limit,
                 use_memory=False,
                 client=replan_client,
                 # The source choice may see the user's ACTIVE preferences - value level only, the
@@ -563,7 +568,7 @@ class DemoAgentService:
                 preferences=project_active_preferences(preference_snapshot),
             )
         else:
-            policy = DemoSourcePlanPolicy(plan, default_k=k, use_memory=False)
+            policy = DemoSourcePlanPolicy(plan, default_k=source_limit, use_memory=False)
         return LoopController(
             policy,
             capability,
