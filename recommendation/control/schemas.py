@@ -496,6 +496,11 @@ class TerminationReason(str, Enum):
     INVALID_ACTION = "invalid_action"
     #: The CompletionGuard refused to end the run and no progress remained possible.
     COMPLETION_REFUSED = "completion_refused"
+    #: The CompletionGuard refused because no candidate was proved compliant while at least
+    #: one candidate was still undecided.  This is not an execution failure and not a
+    #: refuted candidate set: it is an answer the run could not verify, so the run still
+    #: fails closed and presents nothing.
+    NO_VERIFIED_CANDIDATE = "no_verified_candidate"
     #: The run had no legal action available at all.
     NO_AVAILABLE_ACTION = "no_available_action"
     #: A capability or verifier raised a terminal failure.

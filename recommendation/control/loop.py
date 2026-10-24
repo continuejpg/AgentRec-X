@@ -1529,7 +1529,7 @@ class _LoopEngine:
         )
         return self._terminate(
             self.completion_guard.terminal_status(self.completion),
-            TerminationReason.COMPLETION_REFUSED,
+            self.completion_guard.termination_reason(self.completion),
             f"{self.completion.code}: {self.completion.detail}",
         )
 

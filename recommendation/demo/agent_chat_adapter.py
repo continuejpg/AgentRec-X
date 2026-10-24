@@ -57,10 +57,12 @@ from recommendation.demo.serialization import evidence_views, movement_summary
 #: controller's score, which may come from any source or from fusion - not a SASRec logit.
 AGENT_SCORE_KIND = "agent_controller_score"
 
-#: The terminal reason that means the completion guard refused to end the run.  Named here rather
-#: than imported from the control plane: this module projects a *wire* fact, and the value is part
-#: of the controller's published vocabulary (``TerminationReason.COMPLETION_REFUSED``).
+#: The terminal reasons that mean the completion guard refused to end the run.  Named here
+#: rather than imported from the control plane: this module projects a *wire* fact, and the
+#: values are part of the controller's published vocabulary
+#: (``TerminationReason.COMPLETION_REFUSED`` / ``NO_VERIFIED_CANDIDATE``).
 COMPLETION_REFUSED = "completion_refused"
+NO_VERIFIED_CANDIDATE = "no_verified_candidate"
 
 #: What the turn answers when the controller's own text is empty and the run produced nothing.
 #: Each states only what the run's own record proves - no apology, no cause the record does not
@@ -156,7 +158,10 @@ def agent_outcome(response: AgentRecommendResponse, *, proposed_route: str | Non
         return "direct"
     terminal = response.terminal
     if not terminal.succeeded:
-        if str(terminal.termination_reason or "") == COMPLETION_REFUSED:
+        if str(terminal.termination_reason or "") in (
+            COMPLETION_REFUSED,
+            NO_VERIFIED_CANDIDATE,
+        ):
             return "refused"
         return "failed"
     return "no_candidates"

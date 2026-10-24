@@ -34,6 +34,7 @@ from .schemas import (
     ActionKind,
     ControlState,
     RunStatus,
+    TerminationReason,
     ValidatedAction,
     VerificationResult,
 )
@@ -233,3 +234,17 @@ class CompletionGuard:
         if refusal.code in {"already_terminal"}:
             return RunStatus.ABORTED
         return RunStatus.FAILED
+
+    def termination_reason(self, refusal: VerificationResult) -> TerminationReason:
+        """The controller-owned reason for a refusal that cannot be retried.
+
+        ``no_verified_compliant_candidate`` is semantically distinct from the other
+        refusals: it is not an execution error and not a broken candidate set, but an
+        answer the run could not *prove* - nothing was verified compliant and at least one
+        candidate remained undecided.  It therefore gets its own reason, while the run
+        still fails closed (status ``FAILED``, ``succeeded=False``) because presenting an
+        unverified set, or claiming success, would both be unsupported.
+        """
+        if refusal.code == "no_verified_compliant_candidate":
+            return TerminationReason.NO_VERIFIED_CANDIDATE
+        return TerminationReason.COMPLETION_REFUSED

@@ -75,7 +75,13 @@ _SOURCE_NAMES = frozenset({"history", "catalog_search", "similar_item", "two_tow
 #: existed, or because execution failed.  Suggesting another retrieval would be an attempt to
 #: bypass the run's own safety decision, so the gate refuses regardless of budget.
 BLOCKING_TERMINATIONS = frozenset(
-    {"invalid_action", "completion_refused", "no_available_action", "execution_failed"}
+    {
+        "invalid_action",
+        "completion_refused",
+        "no_verified_candidate",
+        "no_available_action",
+        "execution_failed",
+    }
 )
 
 #: The closed reason vocabulary of the gate.

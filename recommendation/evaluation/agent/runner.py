@@ -984,7 +984,10 @@ def _terminal_outcome(result: LoopResult) -> TerminalOutcome:
         return TerminalOutcome.BUDGET_EXHAUSTED
     if reason is TerminationReason.INVALID_ACTION:
         return TerminalOutcome.UNAUTHORISED_ACTION
-    if reason is TerminationReason.COMPLETION_REFUSED:
+    if reason in (
+        TerminationReason.COMPLETION_REFUSED,
+        TerminationReason.NO_VERIFIED_CANDIDATE,
+    ):
         return TerminalOutcome.COMPLETION_REFUSED
     return TerminalOutcome.FAILED
 
