@@ -12,7 +12,7 @@
 - 请求期间 `state.shop.sending` + 按钮禁用防重复提交；404/410 不清空后自动重试，只提示并允许新回合。
 - 商品卡片严格按 API 顺序，理由逐商品显示；空结果显示后端约束解释；不使用 `innerHTML`。
 - 前端变更 3 个文件（+376/−4）；新增 3 个静态/流程测试；受影响套件 **151 passed**；
-  `node --check` 通过。未做真实浏览器自动化，已明确记录。
+  `node --check` 通过。Phase 4.3 已用真实 headless Chrome 完成浏览器验收（见 `docs/P4_3_ACCEPTANCE.md`）。
 
 ---
 
@@ -146,8 +146,9 @@ pytest -q tests/test_p4_shopping_web.py tests/test_p4_shopping_api.py \
 # 151 passed
 ```
 
-**未做真实浏览器自动化**：没有 headless browser 依赖；前端只做了语法检查、静态契约与
-同序列 HTTP 测试。真实浏览器点击路径需要人工按 §7 验证。
+**浏览器验收由 Phase 4.3 完成**：headless Chrome + CDP 对 `/demo/` 执行了真实点击流程，
+覆盖推荐、预算替换、冲突澄清、回答后重推、无法核实、失效 id 与 reset；结果见
+[`docs/P4_3_ACCEPTANCE.md`](P4_3_ACCEPTANCE.md)。本文件记录的是 4.2 交付时的静态/HTTP 测试。
 
 ---
 
@@ -216,7 +217,7 @@ pytest -q tests/test_p4_shopping_web.py tests/test_p4_shopping_api.py \
 
 ## 10. 剩余问题
 
-1. **无真实浏览器自动化**：只有 `node --check`、静态契约、HTTP 序列测试；真实点击需人工验证。
+1. **浏览器验收**：Phase 4.3 已用 headless Chrome 验证；仍非人工桌面浏览器视觉验收。
 2. **前端只提供 max price 输入**：min price、category/brand 等只能靠自然语言；约束冲突演示需要
    “max price + 文本 min”组合。
 3. **UI 不持久化 transcript**：刷新页面会重建 session 视图；session 本身也随重启失效。
