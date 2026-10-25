@@ -41,7 +41,7 @@ quality; the measured Recall/NDCG/HR comparison lives in the Phase-5 benchmark
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -67,7 +67,13 @@ __all__ = [
     "AgentRecommendRequest",
     "AgentRecommendResponse",
     "AgentShoppingRequest",
+    "AgentPreferenceEvidenceView",
+    "AgentPreferenceOptionView",
     "AgentReplanView",
+    "AgentResearchActionView",
+    "AgentResearchClarificationView",
+    "AgentResearchOptionView",
+    "AgentResearchView",
     "ReplanDecisionView",
     "ReplanObservationView",
     "AgentTerminalView",
@@ -185,6 +191,14 @@ class AgentRecommendRequest(BaseModel):
             "multi-turn shopping turn; a normal request leaves it null."
         ),
     )
+    clarification_option: OpaqueId | None = Field(
+        default=None,
+        description=(
+            "Optional id of a structured option on the pending clarification. Used only with "
+            "clarification_id; the option tells the resumed run which read-only research step "
+            "to take (compare another attribute, show known facts, or stop research)."
+        ),
+    )
     sources: tuple[str, ...] = Field(
         default=("history",),
         description=(
@@ -206,6 +220,14 @@ class AgentRecommendRequest(BaseModel):
             ),
             examples=[[{"kind": "price_max", "value": "120"}]],
         )
+    )
+    preference_discovery: bool = Field(
+        default=False,
+        description=(
+            "Opt in to candidate-aware preference construction.  When true, a shopping turn "
+            "may suspend once on a trusted attribute difference between its own candidates.  "
+            "Default false keeps the existing shopping/recommendation behaviour unchanged."
+        ),
     )
 
     @field_validator("message")
@@ -278,6 +300,21 @@ class AgentShoppingRequest(BaseModel):
         description=(
             "The id of a pending clarification this turn answers. Omit it for a new shopping "
             "turn; an unknown, expired or cross-session id is rejected."
+        ),
+    )
+    clarification_option: OpaqueId | None = Field(
+        default=None,
+        description=(
+            "Optional structured option id from the pending clarification. Only valid together "
+            "with clarification_id; unknown option ids are rejected without consuming the "
+            "pending clarification."
+        ),
+    )
+    preference_discovery: bool = Field(
+        default=False,
+        description=(
+            "Opt in to candidate-aware preference construction for this shopping session.  "
+            "The prompt is presented as evidence, never as a final recommendation list."
         ),
     )
 
@@ -786,6 +823,69 @@ class AgentIntentView(BaseModel):
     active_preference_count: int = Field(default=0, ge=0)
 
 
+class AgentResearchOptionView(BaseModel):
+    """One executable choice attached to a research clarification.
+
+    The option is derived from a real Observation: ``compare_attributes`` only appears for
+    attributes the comparison actually marked comparable; ``known_facts`` only appears when
+    at least one catalogue value was verified; ``stop_research`` is always safe.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    option_id: str
+    label: str
+    action: Literal["compare_attributes", "show_known_facts", "stop_research"]
+    attributes: tuple[str, ...] = ()
+    products: tuple[str, ...] = ()
+
+
+class AgentResearchClarificationView(BaseModel):
+    """The structured research context behind a pending question."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str
+    missing_attributes: tuple[str, ...] = ()
+    products: tuple[str, ...] = ()
+    known_facts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    inspected_products: tuple[str, ...] = ()
+    compared: bool = False
+    options: tuple[AgentResearchOptionView, ...] = ()
+
+
+class AgentPreferenceOptionView(BaseModel):
+    """One executable option in a candidate-aware preference question."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    option_id: str
+    label: str
+    action: Literal["lower", "higher", "value", "none", "skip"]
+    attribute: str
+    value: str | float | None = None
+
+
+class AgentPreferenceEvidenceView(BaseModel):
+    """The trusted candidate comparison behind a preference question.
+
+    This is deliberately separate from ``recommendations``: a pending preference question
+    presents evidence, not a final list.  Values are copied from the trusted catalogue
+    comparison; the field never asserts a missing or title-inferred value.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attribute: str
+    label: str
+    reason: str
+    products: tuple[str, ...]
+    values: dict[str, Any] = Field(default_factory=dict)
+    comparison_kind: Literal["numeric", "categorical"]
+    missing: tuple[str, ...] = ()
+    options: tuple[AgentPreferenceOptionView, ...] = ()
+
+
 class AgentClarificationView(BaseModel):
     """A pending question the caller can answer on the next shopping turn."""
 
@@ -796,6 +896,43 @@ class AgentClarificationView(BaseModel):
     kind: str = "unverified"
     blocks: str = "candidate_set"
     options: tuple[str, ...] = ()
+    reason: str | None = None
+    missing_attributes: tuple[str, ...] = ()
+    products: tuple[str, ...] = ()
+    known_facts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    research_options: tuple[AgentResearchOptionView, ...] = ()
+    preference: AgentPreferenceEvidenceView | None = None
+
+
+class AgentResearchActionView(BaseModel):
+    """One Phase 6B product-research action, with its real input and result.
+
+    Facts/rows are copied from the trusted observations.  The view is deliberately separate
+    from ``message``: research can be visible to the caller without changing the final
+    recommendation text or its product order.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tool: Literal["inspect_product", "compare_products"]
+    status: str
+    products: tuple[str, ...] = ()
+    attributes: tuple[str, ...] = ()
+    missing_attributes: tuple[str, ...] = ()
+    unsupported_attributes: tuple[str, ...] = ()
+    code: str | None = None
+    facts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    rows: tuple[dict[str, Any], ...] = ()
+
+
+class AgentResearchView(BaseModel):
+    """What product research actually did in one run, and why it is visible."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    executed: bool = False
+    actions: tuple[AgentResearchActionView, ...] = ()
+    note: str = ""
 
 
 class AgentRecommendResponse(BaseModel):
@@ -829,6 +966,20 @@ class AgentRecommendResponse(BaseModel):
         description=(
             "What this run's own execution record proves about tools, candidates and budget, with "
             "the deterministic replan decision (E-03A).  Present on every executed run."
+        ),
+    )
+    research: AgentResearchView | None = Field(
+        default=None,
+        description=(
+            "Phase 6B product-research actions actually executed, with their facts, missing "
+            "attributes and failures.  Absent when the request did not justify research."
+        ),
+    )
+    preference: AgentPreferenceEvidenceView | None = Field(
+        default=None,
+        description=(
+            "Candidate-aware preference evidence when the shopping agent asks one bounded "
+            "question about a real catalogue difference.  Evidence, not a final list."
         ),
     )
     replan: ReplanDecisionView | None = Field(

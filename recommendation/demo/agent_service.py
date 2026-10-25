@@ -58,10 +58,11 @@ from recommendation.control import (
     GroundingVerifier,
     LoopController,
     LoopLimits,
+    ReasoningExecutor,
     RecommendFromHistoryCapability,
 )
 from recommendation.memory import PreferenceKind
-from recommendation.control.task_state import TaskConstraint, TaskState
+from recommendation.control.task_state import TaskConstraint, TaskState, TaskIntent
 
 from .agent_policy import (
     DEFAULT_SOURCE_PLAN,
@@ -70,21 +71,48 @@ from .agent_policy import (
     IntentQueryPolicy,
     normalise_source_plan,
 )
+from .research_policy import (
+    DynamicProductResearchPolicy,
+    requested_attributes,
+    wants_comparison,
+)
 from .replan_policy import BoundedReplanPolicy
 from .agent_schemas import (
     AgentClarificationView,
     AgentConstraintItem,
     AgentIntentConstraintView,
     AgentIntentView,
+    AgentPreferenceEvidenceView,
+    AgentPreferenceOptionView,
     AgentRecommendRequest,
     AgentRecommendResponse,
+    AgentResearchClarificationView,
+    AgentResearchView,
     AgentTimingView,
+)
+from .preference_construction import (
+    PreferenceOption,
+    PreferencePrompt,
+    TaskPreference,
+    augment_intent,
+    blocked_attributes_from_history,
+    blocked_attributes_from_intent,
+    build_preference_prompt,
+    preference_from_option,
+    rank_with_task_preference,
+    resolve_preference_option,
+)
+from .research_clarification import (
+    ResearchResume,
+    build_research_clarification,
+    resolve_research_option,
 )
 from .shopping_intent import build_reason, derive_intent, query_terms
 from .agent_trajectory import (
     build_eligibility_view,
     build_grounded_view,
     build_recommendations_view,
+    build_research_view,
     build_terminal_view,
     build_trajectory_summary,
 )
@@ -172,6 +200,11 @@ CONSTRAINT_KINDS: frozenset[str] = frozenset(
     kind.value for kind in PreferenceKind if kind is not PreferenceKind.FREE_FORM_CONSTRAINT
 )
 
+#: Phase 6D task-level bounds.  They are deliberately separate from the per-run tool-call
+#: budget: a resume creates a new run, but it must not reset the research budget.
+MAX_RESEARCH_CLARIFICATIONS = 2
+MAX_TASK_RESEARCH_CALLS = 4
+
 
 class DemoAgentError(RuntimeError):
     """The agent service could not serve a request.  Carries a stable code."""
@@ -223,6 +256,12 @@ class DemoAgentService:
         self._tool = tool
         self._enricher = enricher
         self._metadata = metadata
+        # Phase 6A: read-only product research over the same trusted metadata the
+        # eligibility evaluator uses.  No second catalogue is loaded.  The executor is
+        # optional so a deployment without a catalogue cannot advertise facts it cannot read.
+        self._reasoning_executor = (
+            ReasoningExecutor(GroundedReasoner(metadata)) if metadata is not None else None
+        )
         self._matcher = matcher
         self._reranker = reranker
         self._engine = engine
@@ -279,6 +318,10 @@ class DemoAgentService:
         #: Sessions that already had one clarification.  A second undecidable run degrades
         #: through the accepted termination path instead of looping on questions.
         self._clarified_sessions: set[str] = set()
+        #: Candidate-aware preference construction is a shopping-only capability.  One prompt
+        #: per task/session, and the chosen soft preference lives only in this task state.
+        self._preference_asked: set[str] = set()
+        self._task_preferences: dict[str, TaskPreference] = {}
         #: Built once, because the catalogue search index is a per-process cost, not a
         #: per-request one.
         self._catalog_search = CatalogSearchSource(metadata)
@@ -495,6 +538,10 @@ class DemoAgentService:
         clarification_question: str | None = None,
         clarify_unresolved: bool = False,
         intent_terms: Sequence[str] = (),
+        dynamic_research: bool = False,
+        research_resume: ResearchResume | None = None,
+        research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
+        clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
     ) -> LoopController:
         """Compose a controller for **one** request.
 
@@ -527,6 +574,10 @@ class DemoAgentService:
             clarification_question=clarification_question,
             clarify_unresolved=clarify_unresolved,
             intent_terms=intent_terms,
+            dynamic_research=dynamic_research,
+            research_resume=research_resume,
+            research_budget_remaining=research_budget_remaining,
+            clarification_budget_remaining=clarification_budget_remaining,
         )
 
     def _build_controller(
@@ -541,6 +592,10 @@ class DemoAgentService:
         clarification_question: str | None = None,
         clarify_unresolved: bool = False,
         intent_terms: Sequence[str] = (),
+        dynamic_research: bool = False,
+        research_resume: ResearchResume | None = None,
+        research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
+        clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
     ) -> LoopController:
         """Compose one controller: capability, candidate plane, eligibility, then the loop.
 
@@ -610,6 +665,16 @@ class DemoAgentService:
                 question=clarification_question,
                 ask_on_unresolved=clarify_unresolved,
             )
+        if dynamic_research and self._reasoning_executor is not None:
+            # Outer wrapper: it gets the last chance to research after the source plan (and
+            # the optional clarification wrapper) says it is done.  It only proposes
+            # INSPECT_PRODUCT / COMPARE_PRODUCTS, and only while the tool budget allows.
+            policy = DynamicProductResearchPolicy(
+                policy,
+                resume=research_resume,
+                research_budget_remaining=research_budget_remaining,
+                clarification_budget_remaining=clarification_budget_remaining,
+            )
         return LoopController(
             policy,
             capability,
@@ -618,6 +683,7 @@ class DemoAgentService:
             limits=self._limits,
             candidate_plane=plane,
             eligibility_evaluator=eligibility,
+            reasoning_executor=self._reasoning_executor,
         )
 
     # -- one request ------------------------------------------------------- #
@@ -629,6 +695,11 @@ class DemoAgentService:
         clarification_question: str | None = None,
         clarify_unresolved: bool = False,
         intent_terms: Sequence[str] = (),
+        dynamic_research: bool = False,
+        research_resume: ResearchResume | None = None,
+        research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
+        clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
+        task_preference: TaskPreference | None = None,
     ) -> AgentRecommendResponse:
         """Serve one request: validate the plan, run the loop, project the result.
 
@@ -650,6 +721,11 @@ class DemoAgentService:
             clarification_question=clarification_question,
             clarify_unresolved=clarify_unresolved,
             intent_terms=intent_terms,
+            dynamic_research=dynamic_research,
+            research_resume=research_resume,
+            research_budget_remaining=research_budget_remaining,
+            clarification_budget_remaining=clarification_budget_remaining,
+            task_preference=task_preference,
         )
 
     def run_shopping_turn(
@@ -675,7 +751,66 @@ class DemoAgentService:
                 "multi-turn shopping requires the preference-memory store",
                 code="memory_unavailable",
             )
+        preference_choice = self._task_preferences.get(session_id)
+        preference_answer = False
         if payload.clarification_id:
+            # A candidate-aware preference question is a shopping-task suspension, not a
+            # research observation.  Validate its option and session/TTL before consuming it.
+            with self._lock:
+                pending = self._pending_clarifications.get(payload.clarification_id)
+                if pending is not None and pending.get("kind") == "preference":
+                    if pending.get("session_id") != session_id:
+                        raise DemoAgentError(
+                            "the clarification id is unknown or belongs to another session",
+                            code="unknown_clarification",
+                        )
+                    if (
+                        time.time() - float(pending.get("created_at", 0.0))
+                        > CLARIFICATION_TTL_SECONDS
+                    ):
+                        self._pending_clarifications.pop(payload.clarification_id, None)
+                        raise DemoAgentError(
+                            "the clarification has expired; start a new shopping turn",
+                            code="expired_clarification",
+                        )
+                    prompt = _preference_prompt_from_payload(pending.get("preference_prompt"))
+                    option, error = resolve_preference_option(
+                        prompt,
+                        option_id=payload.clarification_option,
+                        message=payload.message,
+                    )
+                    if error is not None:
+                        raise DemoAgentError(error, code="invalid_preference_option")
+                    assert option is not None
+                    self._pending_clarifications.pop(payload.clarification_id, None)
+                    self._preference_asked.add(session_id)
+                    if option.action in {"none", "skip"}:
+                        preference_choice = None
+                        self._task_preferences.pop(session_id, None)
+                    else:
+                        preference_choice = preference_from_option(
+                            prompt, option, turn_id=payload.clarification_id
+                        )
+                        self._task_preferences[session_id] = preference_choice
+                    stored = pending.get("request") or {}
+                    payload = payload.model_copy(
+                        update={
+                            "message": str(stored.get("message") or payload.message),
+                            "k": int(stored.get("k") or payload.k),
+                            "sources": tuple(stored.get("sources") or payload.sources),
+                            "constraints": tuple(
+                                AgentConstraintItem.model_validate(item)
+                                for item in (stored.get("constraints") or ())
+                            ),
+                            "clarification_id": None,
+                            "clarification_option": None,
+                        }
+                    )
+                    preference_answer = True
+        if payload.clarification_id:
+            pending = None
+            research_resume: ResearchResume | None = None
+            previous_research: AgentResearchView | None = None
             with self._lock:
                 pending = self._pending_clarifications.get(payload.clarification_id)
                 if pending is None:
@@ -696,22 +831,95 @@ class DemoAgentService:
                         "the clarification has expired; start a new shopping turn",
                         code="expired_clarification",
                     )
+                # Phase 6C: validate/select a structured option BEFORE consuming the pending
+                # question.  An unknown option must not burn the clarification.
+                raw_clarification = pending.get("research_clarification")
+                if raw_clarification is not None:
+                    clarification = AgentResearchClarificationView.model_validate(
+                        raw_clarification
+                    )
+                    option, error = resolve_research_option(
+                        clarification,
+                        option_id=payload.clarification_option,
+                        message=payload.message,
+                    )
+                    if error is not None:
+                        raise DemoAgentError(error, code="invalid_clarification_option")
+                    if option is None:
+                        # A free-text answer that is not one of the offered selections falls
+                        # back to the safe, non-research choices.  It never becomes a fact.
+                        option = next(
+                            (
+                                item for item in clarification.options
+                                if item.action == "show_known_facts"
+                            ),
+                            next(
+                                (
+                                    item for item in clarification.options
+                                    if item.action == "stop_research"
+                                ),
+                                None,
+                            ),
+                        )
+                    if option is not None:
+                        research_resume = ResearchResume(
+                            clarification_id=payload.clarification_id or "",
+                            option_id=option.option_id,
+                            action=option.action,
+                            attributes=tuple(option.attributes),
+                            products=tuple(option.products),
+                            known_facts=dict(clarification.known_facts),
+                            inspected_products=tuple(clarification.inspected_products),
+                            compared=bool(clarification.compared),
+                        )
+                elif payload.clarification_option is not None:
+                    raise DemoAgentError(
+                        "this clarification has no structured options",
+                        code="invalid_clarification_option",
+                    )
+                raw_research = pending.get("research")
+                if raw_research is not None:
+                    previous_research = AgentResearchView.model_validate(raw_research)
+                pending_clarification_count = int(pending.get("clarification_count", 0) or 0)
+                pending_research_calls = int(pending.get("research_calls_used", 0) or 0)
                 self._pending_clarifications.pop(payload.clarification_id, None)
+        else:
+            research_resume = None
+            previous_research = None
+            pending_clarification_count = 0
+            pending_research_calls = 0
+        effective_constraints: tuple[AgentConstraintItem, ...] = tuple(payload.constraints)
+        if (
+            payload.clarification_id
+            and not effective_constraints
+            and previous_research is not None
+            and pending is not None
+            and pending.get("constraints")
+        ):
+            # A research clarification suspends the same shopping task.  Its hard constraints
+            # remain in force unless this answer explicitly supplies a new set.
+            effective_constraints = tuple(
+                AgentConstraintItem.model_validate(item)
+                for item in pending.get("constraints") or ()
+            )
         snapshot = self._memory_service.get_active_preferences(session_id)
         extraction = self._memory_service.extractor.extract(payload.message)
         explicit = tuple(
             {"kind": getattr(item.kind, "value", str(item.kind)), "value": str(item.value)}
-            for item in payload.constraints
+            for item in effective_constraints
         )
         turn_id = f"{session_id}:{payload.clarification_id or uuid.uuid4().hex[:12]}"
         intent = derive_intent(
             snapshot, extraction, turn_id=turn_id, explicit_constraints=explicit
         )
         terms = query_terms(intent, payload.message)
+        if preference_choice is not None:
+            intent = augment_intent(intent, preference_choice)
         if intent.conflicts:
             response = self.run(
                 payload.model_copy(update={"user_key": session_id, "constraints": ()}),
                 clarification_question=intent.conflicts[0].question,
+                dynamic_research=True,
             )
             self._commit_clarify_turn(session_id, payload.message, turn_id)
             return self._attach_clarification(response, intent, session_id, kind="conflict")
@@ -720,13 +928,43 @@ class DemoAgentService:
             for item in intent.hard_constraints()
         )
         response = self.run(
-            payload.model_copy(update={"user_key": session_id, "constraints": constraints}),
+            payload.model_copy(
+                update={
+                    "user_key": None if preference_answer else session_id,
+                    "constraints": constraints,
+                }
+            ),
             clarify_unresolved=session_id not in self._clarified_sessions,
             intent_terms=terms,
+            dynamic_research=True,
+            research_resume=research_resume,
+            research_budget_remaining=max(
+                0, MAX_TASK_RESEARCH_CALLS - pending_research_calls
+            ),
+            clarification_budget_remaining=max(
+                0, MAX_RESEARCH_CLARIFICATIONS - pending_clarification_count
+            ),
+            task_preference=preference_choice,
         )
+        if previous_research is not None:
+            response = _merge_previous_research(
+                response, previous_research, research_resume
+            )
         if response.terminal.termination_reason == "awaiting_user":
             self._commit_clarify_turn(session_id, payload.message, turn_id)
-            return self._attach_clarification(response, intent, session_id, kind="unverified")
+            return self._attach_clarification(
+                response,
+                intent,
+                session_id,
+                kind="unverified",
+                constraints=constraints,
+                clarification_count=pending_clarification_count + 1,
+            )
+        preference_response = self._maybe_attach_preference_question(
+            response, intent, session_id, payload
+        )
+        if preference_response is not None:
+            return preference_response
         return self._attach_intent_and_reasons(response, intent)
 
     def _commit_clarify_turn(self, session_id: str, message: str, turn_id: str) -> None:
@@ -758,6 +996,121 @@ class DemoAgentService:
             update={"recommendations": recommendations, "intent": _intent_view(intent)}
         )
 
+    def _maybe_attach_preference_question(
+        self,
+        response: AgentRecommendResponse,
+        intent: Any,
+        session_id: str,
+        payload: AgentRecommendRequest,
+    ) -> AgentRecommendResponse | None:
+        """Ask at most one evidence-backed preference question per shopping task.
+
+        The feature is shopping-only and only precedes a normal completed recommendation.  It
+        skips explicit comparison/details tasks, failed research, an existing task preference,
+        and any task where the visible candidates do not differ on a trustworthy attribute.
+        """
+        if not response.terminal.succeeded or response.terminal.status != "finished":
+            return None
+        if not payload.preference_discovery:
+            return None
+        if session_id in self._preference_asked:
+            return None
+        if self._task_preferences.get(session_id) is not None:
+            return None
+        if _task_state(payload).intent in (TaskIntent.COMPARE, TaskIntent.DETAILS):
+            return None
+        if response.research is not None and any(
+            action.status == "failed" for action in response.research.actions
+        ):
+            return None
+        ids = tuple(item.parent_asin for item in response.recommendations)
+        if len(ids) < 2:
+            return None
+        blocked = blocked_attributes_from_intent(intent)
+        try:
+            history = self._memory_service.get_memory_history(session_id)
+            blocked |= blocked_attributes_from_history(history.entries)
+        except Exception:  # noqa: BLE001 - absence of history must not fabricate a block
+            pass
+        prompt = build_preference_prompt(
+            ids,
+            getattr(self._metadata, "records", {}) or {},
+            blocked_attributes=tuple(blocked),
+        )
+        if prompt is None:
+            return None
+        return self._attach_preference_question(
+            response, prompt, intent, session_id, payload
+        )
+
+    def _attach_preference_question(
+        self,
+        response: AgentRecommendResponse,
+        prompt: PreferencePrompt,
+        intent: Any,
+        session_id: str,
+        payload: AgentRecommendRequest,
+    ) -> AgentRecommendResponse:
+        """Replace a completed list with one evidence-backed preference suspension."""
+        from dataclasses import asdict
+
+        clarification_id = uuid.uuid4().hex
+        question = (
+            f"These candidates differ on {prompt.label}. Which do you prefer? "
+            f"{prompt.reason}"
+        )
+        evidence = _preference_evidence_view(prompt)
+        terminal = response.terminal.model_copy(
+            update={
+                "status": "waiting_for_user",
+                "termination_reason": "awaiting_user",
+                "termination_detail": "awaiting the user's bounded preference answer",
+                "succeeded": False,
+            }
+        )
+        clarification = AgentClarificationView(
+            clarification_id=clarification_id,
+            question=question,
+            kind="preference",
+            blocks="preference",
+            options=tuple(option.label for option in prompt.options),
+            reason="candidate_attribute_difference",
+            products=prompt.products,
+            preference=evidence,
+        )
+        with self._lock:
+            for key, value in list(self._pending_clarifications.items()):
+                if value.get("session_id") == session_id:
+                    self._pending_clarifications.pop(key, None)
+            self._pending_clarifications[clarification_id] = {
+                "session_id": session_id,
+                "question": question,
+                "kind": "preference",
+                "created_at": time.time(),
+                "preference_prompt": asdict(prompt),
+                "preference": evidence.model_dump(),
+                "request": {
+                    "message": payload.message,
+                    "k": payload.k,
+                    "sources": list(payload.sources),
+                    "constraints": [item.model_dump() for item in payload.constraints],
+                },
+            }
+            self._preference_asked.add(session_id)
+        return response.model_copy(
+            update={
+                "message": question,
+                "recommendations": (),
+                "terminal": terminal,
+                "clarification": clarification,
+                "preference": evidence,
+                "intent": _intent_view(intent),
+                "observation": None,
+                "replan": None,
+                "replan_execution": None,
+            }
+        )
+
     def _attach_clarification(
         self,
         response: AgentRecommendResponse,
@@ -765,11 +1118,32 @@ class DemoAgentService:
         session_id: str,
         *,
         kind: str,
+        constraints: Sequence[AgentConstraintItem] = (),
+        clarification_count: int = 1,
     ) -> AgentRecommendResponse:
         """Record and expose one pending question for ``session_id``."""
         if response.terminal.termination_reason != "awaiting_user":
             return self._attach_intent_and_reasons(response, intent)
         clarification_id = uuid.uuid4().hex
+        research_view = getattr(response, "research", None)
+        if (
+            research_view is not None
+            and clarification_count > MAX_RESEARCH_CLARIFICATIONS
+        ):
+            raise DemoAgentError(
+                "the research clarification limit was reached for this shopping task",
+                code="clarification_limit_reached",
+            )
+        research_calls_used = (
+            len(research_view.actions) if research_view is not None else 0
+        )
+        research_clarification = build_research_clarification(
+            research_view,
+            allow_compare=(
+                research_calls_used < MAX_TASK_RESEARCH_CALLS
+                and clarification_count < MAX_RESEARCH_CLARIFICATIONS
+            ),
+        )
         with self._lock:
             for key, value in list(self._pending_clarifications.items()):
                 if value.get("session_id") == session_id:
@@ -779,12 +1153,61 @@ class DemoAgentService:
                 "question": response.message,
                 "kind": kind,
                 "created_at": time.time(),
+                # Phase 6C: preserve the real observation, not a policy claim, so the next
+                # turn can offer/execute only options the catalogue actually supports.
+                "research": research_view.model_dump() if research_view is not None else None,
+                "research_clarification": (
+                    research_clarification.model_dump()
+                    if research_clarification is not None
+                    else None
+                ),
+                "clarification_count": int(clarification_count),
+                "research_calls_used": int(research_calls_used),
+                # A research clarification is a resumption of the same shopping task, so the
+                # hard constraints already in force must survive the answer.  Ordinary
+                # conflict/unverified questions do not carry them: their answer intentionally
+                # redefines the requirement.
+                "constraints": (
+                    [item.model_dump() for item in constraints]
+                    if research_view is not None
+                    else []
+                ),
             }
             self._clarified_sessions.add(session_id)
         view = AgentClarificationView(
             clarification_id=clarification_id,
             question=response.message,
             kind=kind,
+            options=(
+                tuple(option.label for option in research_clarification.options)
+                if research_clarification is not None
+                else ()
+            ),
+            reason=(
+                research_clarification.reason
+                if research_clarification is not None
+                else None
+            ),
+            missing_attributes=(
+                research_clarification.missing_attributes
+                if research_clarification is not None
+                else ()
+            ),
+            products=(
+                research_clarification.products
+                if research_clarification is not None
+                else ()
+            ),
+            known_facts=(
+                research_clarification.known_facts
+                if research_clarification is not None
+                else {}
+            ),
+            research_options=(
+                research_clarification.options
+                if research_clarification is not None
+                else ()
+            ),
         )
         return response.model_copy(
             update={"clarification": view, "intent": _intent_view(intent)}
@@ -855,6 +1278,11 @@ class DemoAgentService:
         clarification_question: str | None = None,
         clarify_unresolved: bool = False,
         intent_terms: Sequence[str] = (),
+        dynamic_research: bool = False,
+        research_resume: ResearchResume | None = None,
+        research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
+        clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
+        task_preference: TaskPreference | None = None,
     ) -> AgentRecommendResponse:
         """Run one plan and project it.  Shared by the request-declared and LLM-selected paths.
 
@@ -887,6 +1315,10 @@ class DemoAgentService:
             clarification_question=clarification_question,
             clarify_unresolved=clarify_unresolved,
             intent_terms=intent_terms,
+            dynamic_research=dynamic_research,
+            research_resume=research_resume,
+            research_budget_remaining=research_budget_remaining,
+            clarification_budget_remaining=clarification_budget_remaining,
         )
         task_state = _task_state(payload)
         agent_input = AgentInput(
@@ -911,7 +1343,22 @@ class DemoAgentService:
         from .agent_trajectory import presentable_candidates
 
         presentable = presentable_candidates(result.state)
-        ranking = self._memory_ranking(result, ledger, payload, preference_snapshot)
+        # A current-task soft preference is applied *after* hard-constraint filtering.  It may
+        # reorder the presentable set but can never add a candidate the constraint projection
+        # excluded.  With no task preference this branch is inert and the accepted memory
+        # ranking path is unchanged.
+        task_ranking = (
+            rank_with_task_preference(
+                presentable,
+                getattr(self._metadata, "records", {}) or {},
+                task_preference,
+            )
+            if task_preference is not None
+            else None
+        )
+        ranking = task_ranking or self._memory_ranking(
+            result, ledger, payload, preference_snapshot
+        )
         # Route is derived from the run's own trusted artifacts.  A run that produced no
         # candidate set is a direct turn *or* a failed one, and an empty recommendation list is
         # the honest answer in both cases - so a failure is never dressed up as a successful
@@ -934,6 +1381,14 @@ class DemoAgentService:
         eligibility_view = build_eligibility_view(result)
         terminal_view = build_terminal_view(result)
         trajectory_view = build_trajectory_summary(result)
+        awaiting_user = terminal_view.termination_reason == "awaiting_user"
+        # A suspended run must not present candidates: the answer that would decide their
+        # eligibility/fact position is still outstanding.  Keep the question text intact as
+        # well; reconciling it against a product list would replace the question with the list
+        # the question is explicitly withholding.  A failed run likewise retains its verified
+        # candidates for audit, but never presents them as a successful answer.
+        if awaiting_user or not terminal_view.succeeded:
+            recommendations = ()
         # The run-level observation and the deterministic replan gate (E-03A).  Built here, after
         # every decision is final, from the frozen views above and nothing else: no tool runs, the
         # planner is not consulted again, no query changes and no controller state is written - so
@@ -951,11 +1406,8 @@ class DemoAgentService:
             requested_k=payload.k,
             presented_count=len(recommendations),
         )
-        # A run the completion guard refused because no candidate could be *verified* compliant
-        # ends with no text at all.  The reason is already the trusted eligibility view, so the
-        # answer states it instead of returning an empty string: an empty constrained run is a
-        # constraint outcome, not a transport failure.  Completed empty runs are rendered by the
-        # finalizer itself; this covers the refused-completion path only.
+        # A completed run's explanation must name exactly the answer's own products.  A waiting
+        # run's message is its question and is never reconciled against a product list.
         message = result.final_response
         if not message and not recommendations:
             projection = result.state.get("constraint_projection")
@@ -963,10 +1415,8 @@ class DemoAgentService:
                 from ..agent.rendering import build_constraint_empty_response
 
                 message = build_constraint_empty_response(projection.view)
-        # The explanation must name exactly the answer's own products, in its own order.  The
-        # final list is already built above (fusion, constraints, optional memory re-rank), so
-        # this is the one correct input; a matching accepted text is kept unchanged.
-        message = _consistent_message(message, recommendations, self._metadata)
+        if not awaiting_user:
+            message = _consistent_message(message, recommendations, self._metadata)
         response = AgentRecommendResponse(
             route="recommend" if produced_candidates else "direct",
             message=message,
@@ -977,6 +1427,7 @@ class DemoAgentService:
             terminal=terminal_view,
             trajectory=trajectory_view,
             observation=observation,
+            research=build_research_view(result),
             replan=decide_replan(observation),
             replan_execution=replan_execution,
             timing=AgentTimingView(
@@ -1116,6 +1567,88 @@ def _similar_items_enabled() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _preference_evidence_view(prompt: PreferencePrompt) -> AgentPreferenceEvidenceView:
+    return AgentPreferenceEvidenceView(
+        attribute=prompt.attribute,
+        label=prompt.label,
+        reason=prompt.reason,
+        products=prompt.products,
+        values=dict(prompt.values),
+        comparison_kind=prompt.comparison_kind,
+        options=tuple(
+            AgentPreferenceOptionView(
+                option_id=option.option_id,
+                label=option.label,
+                action=option.action,
+                attribute=option.attribute,
+                value=option.value,
+            )
+            for option in prompt.options
+        ),
+    )
+
+
+def _preference_prompt_from_payload(raw: Any) -> PreferencePrompt:
+    if not isinstance(raw, Mapping):
+        raise DemoAgentError(
+            "the preference question is unavailable; start a new shopping turn",
+            code="invalid_preference_option",
+        )
+    options = tuple(
+        PreferenceOption(
+            option_id=str(item["option_id"]),
+            label=str(item["label"]),
+            action=str(item["action"]),
+            attribute=str(item["attribute"]),
+            value=item.get("value"),
+        )
+        for item in raw.get("options") or ()
+    )
+    return PreferencePrompt(
+        attribute=str(raw.get("attribute") or ""),
+        label=str(raw.get("label") or ""),
+        reason=str(raw.get("reason") or ""),
+        products=tuple(str(item) for item in raw.get("products") or ()),
+        values=dict(raw.get("values") or {}),
+        comparison_kind=str(raw.get("comparison_kind") or ""),
+        options=options,
+    )
+
+
+def _merge_previous_research(
+    response: AgentRecommendResponse,
+    previous: AgentResearchView,
+    resume: ResearchResume | None,
+) -> AgentRecommendResponse:
+    """Expose prior research facts after a recovery turn without re-running a tool."""
+    action = "show_known_facts" if resume is None else resume.action
+    if action == "stop_research":
+        note = "research stopped; previously verified facts are shown without a new tool call"
+    elif action == "compare_attributes":
+        note = "follow-up comparison after the selected option; previously verified facts retained"
+    else:
+        note = "previously verified facts shown; no new research tool was called"
+    current = response.research
+    if current is None:
+        merged = previous.model_copy(update={"note": note})
+    else:
+        merged = AgentResearchView(
+            executed=True,
+            actions=previous.actions + current.actions,
+            note=note,
+        )
+    return response.model_copy(update={"research": merged})
+
+
+#: Wording that makes a named catalogue attribute an explicit information request rather than a
+#: soft recommendation hint.  Only an explicit question/detail request makes research *required*;
+#: research added to a recommendation remains optional and may degrade to its candidates.
+_DETAIL_REQUEST = re.compile(
+    r"\b(is|are|does|do|what|which|tell me|show me|details?|compare)\b",
+    re.IGNORECASE,
+)
+
+
 def _task_state(payload: AgentRecommendRequest) -> TaskState:
     """Build the run's task state from the request's stated constraints.
 
@@ -1125,6 +1658,18 @@ def _task_state(payload: AgentRecommendRequest) -> TaskState:
     unconstrained run behaves exactly as it did before constraints existed.
     """
     state = TaskState(request_text=payload.message)
+    if wants_comparison(payload.message):
+        state = state.model_copy(update={"intent": TaskIntent.COMPARE})
+    elif requested_attributes(payload.message):
+        state = state.model_copy(
+            update={
+                "intent": (
+                    TaskIntent.DETAILS
+                    if _DETAIL_REQUEST.search(payload.message)
+                    else TaskIntent.RECOMMEND
+                )
+            }
+        )
     for constraint in payload.constraints:
         state = state.with_constraint(
             TaskConstraint(

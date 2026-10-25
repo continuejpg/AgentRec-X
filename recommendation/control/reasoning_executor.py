@@ -58,6 +58,8 @@ from .schemas import (
     CompatibilityObservation,
     DetailObservation,
     PolicyActionError,
+    ProductComparisonObservation,
+    ProductInspectionObservation,
     READ_ONLY_ACTIONS,
     TradeOffObservation,
     ValidatedAction,
@@ -179,6 +181,10 @@ class ReasoningExecutor:
 
         if action.action is ActionKind.GET_DETAILS:
             return self._details(action, arguments)
+        if action.action is ActionKind.INSPECT_PRODUCT:
+            return self._inspect_product(action, arguments)
+        if action.action is ActionKind.COMPARE_PRODUCTS:
+            return self._compare_products(action, arguments)
         if action.action is ActionKind.COMPARE:
             return self._compare(action, arguments)
         if action.action is ActionKind.TRADE_OFF:
@@ -239,7 +245,13 @@ class ReasoningExecutor:
         Read from the declared argument model rather than by guessing at attributes, so an
         action that grows an identity field cannot slip past the membership check.
         """
-        return tuple(str(a) for a in (getattr(arguments, "parent_asins", ()) or ()))
+        values = getattr(arguments, "parent_asins", None)
+        if values:
+            return tuple(str(a) for a in values)
+        single = getattr(arguments, "parent_asin", None)
+        if single is not None:
+            return (str(single),)
+        return ()
 
     def _requested(self, arguments: Any) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Split requested identities into grounded and unknown, preserving order.
@@ -276,6 +288,69 @@ class ReasoningExecutor:
             unknown=unknown,
             verification_note=(
                 f"{len(facts)} grounded, {len(unknown)} not in the catalogue"
+            ),
+        )
+
+    def _inspect_product(
+        self, action: ValidatedAction, arguments: Any
+    ) -> ProductInspectionObservation:
+        """Phase 6A: read one known catalogue identity with explicit absences."""
+        from .product_research import ProductResearchError
+
+        parent_asin = str(getattr(arguments, "parent_asin", "") or "")
+        attributes = tuple(getattr(arguments, "attributes", ()) or ())
+        try:
+            result = self._reasoner.inspect_product(parent_asin, attributes=attributes)
+        except ProductResearchError as exc:
+            raise PolicyActionError(str(exc), code=exc.code) from exc
+        return ProductInspectionObservation(
+            action_id=action.action_id,
+            step_index=action.step_index,
+            action=action.action,
+            status=result.status,
+            parent_asin=result.parent_asin,
+            facts={name: fact.as_dict() for name, fact in result.facts.items()},
+            requested_attributes=result.requested_attributes,
+            missing_attributes=result.missing_attributes,
+            unreadable_attributes=result.unreadable_attributes,
+            unsupported_attributes=result.unsupported_attributes,
+            catalog_source=result.catalog_source,
+            verification_note=(
+                f"{sum(1 for fact in result.facts.values() if fact.is_present)} value(s), "
+                f"{len(result.missing_attributes)} missing, "
+                f"{len(result.unreadable_attributes)} unreadable, "
+                f"{len(result.unsupported_attributes)} unsupported"
+            ),
+        )
+
+    def _compare_products(
+        self, action: ValidatedAction, arguments: Any
+    ) -> ProductComparisonObservation:
+        """Phase 6A: compare 2–5 known identities in the caller's order."""
+        from .product_research import ProductResearchError
+
+        parent_asins = tuple(str(value) for value in getattr(arguments, "parent_asins", ()) or ())
+        attributes = tuple(getattr(arguments, "attributes", ()) or ())
+        try:
+            result = self._reasoner.compare_products(parent_asins, attributes=attributes)
+        except ProductResearchError as exc:
+            raise PolicyActionError(str(exc), code=exc.code) from exc
+        return ProductComparisonObservation(
+            action_id=action.action_id,
+            step_index=action.step_index,
+            action=action.action,
+            status=result.status,
+            products=result.products,
+            rows=tuple(row.model_dump() for row in result.rows),
+            requested_attributes=result.requested_attributes,
+            missing_attributes=result.missing_attributes,
+            unreadable_attributes=result.unreadable_attributes,
+            unsupported_attributes=result.unsupported_attributes,
+            catalog_source=result.catalog_source,
+            verification_note=(
+                f"{len(result.products)} product(s), "
+                f"{sum(1 for row in result.rows if row.status == 'comparable')} comparable "
+                f"attribute(s)"
             ),
         )
 

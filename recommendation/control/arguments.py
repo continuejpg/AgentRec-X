@@ -50,14 +50,18 @@ from recommendation.tools.schemas import MAX_K, MIN_K
 __all__ = [
     "ASK_QUESTION_MAX_LENGTH",
     "MAX_COMPARE_ITEMS",
+    "MAX_COMPARE_PRODUCTS",
+    "MAX_INSPECT_ATTRIBUTES",
     "MAX_SEARCH_TERMS",
     "AskClarificationArguments",
     "BundleArguments",
     "CandidateSource",
     "CheckCompatibilityArguments",
     "CompareArguments",
+    "CompareProductsArguments",
     "EmptyArguments",
     "GetDetailsArguments",
+    "InspectProductArguments",
     "SearchCatalogArguments",
     "SelectSourceArguments",
     "TradeOffArguments",
@@ -72,6 +76,11 @@ MAX_SEARCH_TERMS = 16
 
 #: Upper bound on how many products one comparison may name.
 MAX_COMPARE_ITEMS = 6
+
+#: Phase 6A product-research limits.  Kept separate from ``MAX_COMPARE_ITEMS`` so the older
+#: ``COMPARE`` action's accepted contract does not change.
+MAX_INSPECT_ATTRIBUTES = 12
+MAX_COMPARE_PRODUCTS = 5
 
 
 class CandidateSource(str, Enum):
@@ -224,6 +233,52 @@ class CompareArguments(BaseModel):
     parent_asins: tuple[str, ...] = Field(..., min_length=2, max_length=MAX_COMPARE_ITEMS)
     #: Which catalogue attributes to compare.  Empty means "the comparison defaults".
     attributes: tuple[str, ...] = Field(default=(), max_length=8)
+
+
+class InspectProductArguments(BaseModel):
+    """Arguments for ``INSPECT_PRODUCT``: one trusted identity and optional attributes.
+
+    The action is read-only and does not introduce a candidate.  ``parent_asin`` is checked
+    against the run's grounded allowlist by the executor before the catalogue is read; the
+    catalogue check inside the tool then distinguishes a valid record from an unknown one.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_asin: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        description="A trusted product identity, normally a parent_asin.",
+    )
+    attributes: tuple[str, ...] = Field(
+        default=(),
+        max_length=MAX_INSPECT_ATTRIBUTES,
+        description="Catalogue attributes to inspect; empty means the tool defaults.",
+    )
+
+
+class CompareProductsArguments(BaseModel):
+    """Arguments for ``COMPARE_PRODUCTS``: 2-5 trusted identities, in caller order.
+
+    The action is read-only.  It preserves input order and does not accept a sort request:
+    ordering, if a caller wants it, must be an explicit later decision over the returned
+    comparison, not a hidden side effect of retrieval.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_asins: tuple[str, ...] = Field(
+        ...,
+        min_length=2,
+        max_length=MAX_COMPARE_PRODUCTS,
+        description="Two to five trusted product identities, in the order to report.",
+    )
+    attributes: tuple[str, ...] = Field(
+        default=(),
+        max_length=MAX_INSPECT_ATTRIBUTES,
+        description="Catalogue attributes to compare; empty means the tool defaults.",
+    )
 
 
 class TradeOffArguments(BaseModel):

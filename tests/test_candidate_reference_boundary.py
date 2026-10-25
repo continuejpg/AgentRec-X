@@ -207,6 +207,7 @@ def test_only_read_only_actions_name_product_identities() -> None:
         ActionKind.TRADE_OFF,
         ActionKind.CHECK_COMPATIBILITY,
         ActionKind.BUNDLE,
+        ActionKind.COMPARE_PRODUCTS,
     }
     from recommendation.control import READ_ONLY_ACTIONS
 

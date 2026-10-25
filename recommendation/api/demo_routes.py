@@ -303,6 +303,24 @@ def map_demo_exception(exc: BaseException) -> DemoHTTPError:
             return DemoHTTPError(
                 503, "memory_unavailable", "shopping requires the preference store"
             )
+        if exc.code == "invalid_clarification_option":
+            return DemoHTTPError(
+                422,
+                "invalid_clarification_option",
+                "the selected research option is not available on this clarification",
+            )
+        if exc.code == "invalid_preference_option":
+            return DemoHTTPError(
+                422,
+                "invalid_preference_option",
+                "the selected preference option is not available on this clarification",
+            )
+        if exc.code == "clarification_limit_reached":
+            return DemoHTTPError(
+                422,
+                "clarification_limit_reached",
+                "this shopping task reached its research clarification limit",
+            )
         return DemoHTTPError(502, "agent_failed", "the agent could not complete this request")
     if isinstance(exc, MalformedDecision):
         return DemoHTTPError(
@@ -735,6 +753,8 @@ def build_demo_router() -> APIRouter:
                     sources=payload.sources,
                     constraints=payload.constraints,
                     clarification_id=payload.clarification_id,
+                    clarification_option=payload.clarification_option,
+                    preference_discovery=payload.preference_discovery,
                     user_key=session.user_key,
                 )
                 return runtime.agent_service().run_shopping_turn(

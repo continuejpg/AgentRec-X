@@ -72,6 +72,7 @@
     shop: {
       sending: false,
       pendingId: null,
+      pendingOption: null,
       turns: 0
     }
   };
@@ -413,6 +414,7 @@
 
   function resetShopView() {
     state.shop.pendingId = null;
+    state.shop.pendingOption = null;
     state.shop.turns = 0;
     els.shopMessage.value = "";
     els.shopMaxPrice.value = "";
@@ -439,17 +441,67 @@
     els.shopTranscript.scrollTop = els.shopTranscript.scrollHeight;
   }
 
-  function showShopClarification(clarification) {
+  function appendPreferenceEvidence(preference) {
+    if (!preference) { return; }
+    var box = el("div", "shop-preference-evidence");
+    box.appendChild(el("div", "shop-preference-title",
+      "Why this question — trusted candidate difference"));
+    box.appendChild(el("div", "hint", preference.reason || ""));
+    var list = el("ul", "shop-preference-values");
+    var values = preference.values || {};
+    Object.keys(values).forEach(function (identity) {
+      var value = values[identity];
+      var text = Array.isArray(value) ? value.join(", ") : String(value);
+      list.appendChild(el("li", null, identity + ": " + preference.attribute + " = " + text));
+    });
+    if ((preference.missing || []).length) {
+      list.appendChild(el("li", "muted",
+        "Missing on: " + preference.missing.join(", ")));
+    }
+    box.appendChild(list);
+    els.shopClarification.appendChild(box);
+  }
+
+  function showShopClarification(clarification, preference) {
     els.shopClarification.hidden = false;
     clear(els.shopClarification);
+    state.shop.pendingOption = null;
     var title = clarification.kind === "conflict"
       ? "Conflicting requirements"
-      : "The catalogue could not verify a requirement";
+      : clarification.kind === "preference"
+        ? "Help me narrow your search"
+        : "The catalogue could not verify a requirement";
     els.shopClarification.appendChild(el("div", "shop-clarification-title", title));
     els.shopClarification.appendChild(el("div", null, clarification.question));
+    if (clarification.kind === "preference") {
+      appendPreferenceEvidence(preference || clarification.preference || null);
+    }
     if (clarification.options && clarification.options.length) {
       els.shopClarification.appendChild(el("div", "hint",
         "Options: " + clarification.options.join(" / ")));
+    }
+    function addOptionButtons(options) {
+      if (!options || !options.length) { return; }
+      var choices = el("div", "shop-research-options");
+      options.forEach(function (option) {
+        var button = el("button", "secondary", option.label);
+        button.type = "button";
+        button.addEventListener("click", function () {
+          state.shop.pendingOption = option.option_id;
+          els.shopMessage.value = option.label;
+          if (els.shopForm.requestSubmit) {
+            els.shopForm.requestSubmit();
+          } else {
+            shopSend();
+          }
+        });
+        choices.appendChild(button);
+      });
+      els.shopClarification.appendChild(choices);
+    }
+    addOptionButtons(clarification.research_options || []);
+    if (preference && preference.options && preference.options.length) {
+      addOptionButtons(preference.options);
     }
   }
 
@@ -510,6 +562,32 @@
     });
   }
 
+  function appendShopResearch(research) {
+    if (!research || !research.executed) { return; }
+    var note = research.note || "Product research ran.";
+    var facts = [];
+    (research.actions || []).forEach(function (action) {
+      if (action.tool === "inspect_product" && action.facts) {
+        Object.keys(action.facts).forEach(function (attribute) {
+          var fact = action.facts[attribute];
+          if (fact && fact.status === "value" && facts.length < 6) {
+            facts.push((action.products && action.products[0] || "") + " " + attribute + "=" + String(fact.value));
+          }
+        });
+      }
+      (action.rows || []).forEach(function (row) {
+        Object.keys(row.facts || {}).forEach(function (identity) {
+          var fact = row.facts[identity];
+          if (fact && fact.status === "value" && facts.length < 6) {
+            facts.push(identity + " " + row.attribute + "=" + String(fact.value));
+          }
+        });
+      });
+    });
+    appendShopTurn("agent", "Agent — research",
+      note + (facts.length ? " Facts: " + facts.join("; ") : ""));
+  }
+
   function shopSend(event) {
     if (event) { event.preventDefault(); }
     if (!state.sessionId || state.shop.sending || state.expired) { return; }
@@ -541,10 +619,14 @@
       message: message,
       k: 5,
       sources: ["history", "catalog_search"],
-      constraints: constraints
+      constraints: constraints,
+      preference_discovery: true
     };
     if (state.shop.pendingId) {
       body.clarification_id = state.shop.pendingId;
+      if (state.shop.pendingOption) {
+        body.clarification_option = state.shop.pendingOption;
+      }
     }
 
     request("/sessions/" + encodeURIComponent(state.sessionId) + "/agent/shopping", {
@@ -555,6 +637,7 @@
         els.shopMessage.value = "";
         state.shop.turns += 1;
         renderShopIntent(payload.intent || null);
+        appendShopResearch(payload.research || null);
         var clarification = payload.clarification || null;
         if (clarification) {
           state.shop.pendingId = clarification.clarification_id;
@@ -563,17 +646,21 @@
           } else if (clarification.kind === "unverified") {
             setShopStatus("waiting",
               "Waiting for your answer: the catalogue could not verify a requirement.");
+          } else if (clarification.kind === "preference") {
+            setShopStatus("waiting", "Waiting for your preference.");
           } else {
             setShopStatus("waiting", "Waiting for your answer.");
           }
-          showShopClarification(clarification);
-          appendShopTurn("agent", "Agent — question",
+          showShopClarification(clarification, payload.preference || null);
+          appendShopTurn("agent",
+            clarification.kind === "preference" ? "Agent — preference question" : "Agent — question",
             payload.message || clarification.question);
           clear(els.shopCards);
           els.shopCards.appendChild(el("p", "muted",
             "No product is shown while a clarification is pending."));
         } else {
           state.shop.pendingId = null;
+          state.shop.pendingOption = null;
           els.shopClarification.hidden = true;
           clear(els.shopClarification);
           var recommendations = payload.recommendations || [];

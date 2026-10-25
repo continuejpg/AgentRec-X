@@ -35,6 +35,8 @@ from .agent_schemas import (
     AgentCandidateView,
     AgentEligibilityView,
     AgentRecommendationView,
+    AgentResearchActionView,
+    AgentResearchView,
     AgentTerminalView,
     GroundedCandidateView,
     TrajectoryStepView,
@@ -45,6 +47,7 @@ __all__ = [
     "build_eligibility_view",
     "build_grounded_view",
     "build_recommendations_view",
+    "build_research_view",
     "build_terminal_view",
     "build_trajectory_summary",
 ]
@@ -83,6 +86,70 @@ def build_trajectory_summary(result: Any) -> TrajectorySummaryView:
         refusals=result.trajectory.refusals(),
         steps=tuple(steps),
     )
+
+
+def build_research_view(result: Any) -> AgentResearchView | None:
+    """Project Phase 6B research observations into the response block.
+
+    Only real executed observations are projected.  A proposal that was never validated, a
+    policy's rationale or a model's claim about a fact cannot appear here; a failed tool call
+    is retained with its stable code so the caller can see that research did not succeed.
+    """
+    actions: list[AgentResearchActionView] = []
+    notes: list[str] = []
+    for step in getattr(getattr(result, "trajectory", None), "steps", ()):
+        observation = getattr(step, "observation", None)
+        if not isinstance(observation, dict):
+            continue
+        kind = observation.get("kind")
+        if kind == "product_inspection":
+            actions.append(
+                AgentResearchActionView(
+                    tool="inspect_product",
+                    status=str(observation.get("status") or "unknown"),
+                    products=(str(observation.get("parent_asin") or ""),),
+                    attributes=tuple(observation.get("requested_attributes") or ()),
+                    missing_attributes=tuple(observation.get("missing_attributes") or ()),
+                    unsupported_attributes=tuple(observation.get("unsupported_attributes") or ()),
+                    facts=dict(observation.get("facts") or {}),
+                )
+            )
+            missing = ", ".join(observation.get("missing_attributes") or ()) or "none"
+            notes.append(
+                f"inspected {observation.get('parent_asin')} (missing: {missing})"
+            )
+        elif kind == "product_comparison":
+            actions.append(
+                AgentResearchActionView(
+                    tool="compare_products",
+                    status=str(observation.get("status") or "unknown"),
+                    products=tuple(observation.get("products") or ()),
+                    attributes=tuple(observation.get("requested_attributes") or ()),
+                    missing_attributes=tuple(observation.get("missing_attributes") or ()),
+                    unsupported_attributes=tuple(observation.get("unsupported_attributes") or ()),
+                    rows=tuple(observation.get("rows") or ()),
+                )
+            )
+            notes.append(
+                "compared " + ", ".join(observation.get("products") or ())
+            )
+        elif kind == "product_research_failure":
+            actions.append(
+                AgentResearchActionView(
+                    tool=str(observation.get("tool") or "inspect_product"),
+                    status="failed",
+                    products=tuple(observation.get("products") or ()),
+                    code=str(observation.get("code") or "research_failed"),
+                )
+            )
+            notes.append(
+                f"{observation.get('tool')} failed ({observation.get('code')}); "
+                "this research did not complete, so no new comparison or fact is claimed"
+            )
+    if not actions:
+        return None
+    note = "; ".join(notes)[:280]
+    return AgentResearchView(executed=True, actions=tuple(actions), note=note)
 
 
 def build_terminal_view(result: Any) -> AgentTerminalView:

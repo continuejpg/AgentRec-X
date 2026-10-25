@@ -67,6 +67,7 @@ from .schemas import (
     ControlState,
     LoopLimits,
     PolicyActionError,
+    ProductResearchFailureObservation,
     RecommendationDomainResult,
     RecommendationObservation,
     RunStatus,
@@ -75,7 +76,7 @@ from .schemas import (
     ValidatedAction,
     VerificationResult,
 )
-from .task_state import TaskState
+from .task_state import TaskIntent, TaskState
 from .trajectory import TrajectoryRecorder
 from .validation import ActionValidator
 from .verification import ObservationAdapter, ResultVerifier
@@ -561,11 +562,12 @@ class _LoopEngine:
         return tuple(offered)
 
     def grounded_identities(self) -> tuple[str, ...]:
-        """Return the identities of the run's grounded candidates, in order.
+        """Return the identities of the run's grounded candidates, in run order.
 
-        Read from the **verified** candidate set the run holds, never from a request and never
-        from the ledger's ungrounded audit entries.  A policy uses these to *refer* to products
-        in read-only reasoning actions; it cannot add one.
+        ``tool_result`` is the live, merged candidate set: a non-empty plane source adds its
+        verified identities to the set already adopted from earlier sources, while an empty
+        plane source leaves it unchanged.  Reading this live state (rather than a cache) is
+        what lets a later narrowing be reflected immediately.
         """
         tool_result = self.state.get("tool_result")
         if tool_result is None:
@@ -579,14 +581,13 @@ class _LoopEngine:
 
         Counts and an opaque reference only: no ``parent_asin``, no ``item_id``, no score.
         """
-        tool_result = self.state.get("tool_result")
-        if tool_result is None:
+        identities = self.grounded_identities()
+        if not identities:
             return CandidateState()
-        count = len(getattr(tool_result, "recommendations", ()) or ())
         return CandidateState(
             grounded=bool(self.candidates_grounded),
-            candidate_count=count,
-            candidate_set_ref=f"verified:{count}",
+            candidate_count=len(identities),
+            candidate_set_ref=f"verified:{len(identities)}",
             verification_status="verified" if self.candidates_grounded else "unverified",
         )
 
@@ -958,10 +959,40 @@ class _LoopEngine:
             )
             for position, parent_asin in enumerate(identities, start=1)
         )
+        # Keep the run's live candidate set additive: a later source must be able to narrow a
+        # capability result only through an explicit candidate-producing action, not silently
+        # erase identities that are still grounded by an earlier source.  The per-source
+        # ranking is recorded separately below for presentation/fusion.
+        existing = self.state.get("tool_result")
+        if existing is not None:
+            merged = list(getattr(existing, "recommendations", ()) or ())
+            seen = {str(item.parent_asin) for item in merged}
+            for item in recommendations:
+                if str(item.parent_asin) not in seen:
+                    merged.append(item.model_copy(update={"rank": len(merged) + 1}))
+                    seen.add(str(item.parent_asin))
+            adopted = existing.model_copy(
+                update={
+                    "recommendations": merged,
+                    "returned_k": len(merged),
+                    "requested_k": result.requested_k,
+                }
+            )
+        else:
+            adopted = RecommendationToolResult(
+                recommendations=list(recommendations),
+                requested_k=result.requested_k,
+                returned_k=len(recommendations),
+                history_length=len(tuple(self.state.get("trusted_user_history", ()))),
+                effective_history_length=0,
+                history_truncated=False,
+                eligible_candidates=0,
+            )
         # Record which trusted source produced this candidate set, so the renderer can name it
         # instead of implying the sequential recommender.
         self.state["candidate_source"] = str(getattr(result, "source", "") or "")
-        adopted = RecommendationToolResult(
+        self.state["tool_result"] = adopted
+        source_result = RecommendationToolResult(
             recommendations=list(recommendations),
             requested_k=result.requested_k,
             returned_k=len(recommendations),
@@ -970,10 +1001,9 @@ class _LoopEngine:
             history_truncated=False,
             eligible_candidates=0,
         )
-        self.state["tool_result"] = adopted
         self._record_candidate_ranking(
             source=str(getattr(result, "source", "") or self.validated.action.value),
-            tool_result=adopted,
+            tool_result=source_result,
         )
 
     def _record_candidate_ranking(
@@ -1181,11 +1211,18 @@ class _LoopEngine:
         )
         if self.verification.verified and self.domain_result is not None and not is_reasoning:
             self.produced_recommendation = True
-            self.candidates_grounded = self.domain_result.returned_k > 0
-            # A plane step adopted its candidates at execution time (the plane returns
-            # identities, not a history-Tool payload), so adopting again here would overwrite
-            # them with ``None`` fields.
-            if not self._is_plane_step():
+            if self._is_plane_step():
+                # A plane returns only the identities *this source* contributed.  An empty
+                # source is not an empty run: candidates already adopted from an earlier
+                # source remain valid.  Adopt a non-empty plane result and keep the existing
+                # candidate state otherwise.
+                if self.domain_result.returned_k > 0:
+                    self.candidates_grounded = True
+            else:
+                self.candidates_grounded = self.domain_result.returned_k > 0
+                # A plane step adopted its candidates at execution time (the plane returns
+                # identities, not a history-Tool payload), so adopting again here would
+                # overwrite them with ``None`` fields.
                 self._adopt_candidates(self.domain_result)
         elif is_reasoning:
             # Reasoning adds no candidates and removes none: the candidate state is left
@@ -1303,13 +1340,36 @@ class _LoopEngine:
                 detail=f"reasoning raised {type(exc).__name__}",
                 checks=("execution",),
             )
-            self.observation = self.observation_adapter.failed_observation(
-                action_id=self.validated.action_id,
-                step_index=self.control.step_count,
-                action=self.validated.action,
-                code=_error_code(exc),
-            )
-        return StepOutcome.proceed()
+            if self.validated.action in (
+                ActionKind.INSPECT_PRODUCT,
+                ActionKind.COMPARE_PRODUCTS,
+            ):
+                arguments = self.validated.arguments
+                products = tuple(getattr(arguments, "parent_asins", ()) or ())
+                if not products and getattr(arguments, "parent_asin", None):
+                    products = (str(arguments.parent_asin),)
+                tool = (
+                    "inspect_product"
+                    if self.validated.action is ActionKind.INSPECT_PRODUCT
+                    else "compare_products"
+                )
+                self.observation = ProductResearchFailureObservation(
+                    action_id=self.validated.action_id,
+                    step_index=self.control.step_count,
+                    action=self.validated.action,
+                    verification_status="refused",
+                    tool=tool,
+                    products=products,
+                    code=_error_code(exc),
+                )
+            else:
+                self.observation = self.observation_adapter.failed_observation(
+                    action_id=self.validated.action_id,
+                    step_index=self.control.step_count,
+                    action=self.validated.action,
+                    code=_error_code(exc),
+                )
+            return StepOutcome.proceed()
 
     # -- clarification branch ---------------------------------------------- #
 
@@ -1402,6 +1462,17 @@ class _LoopEngine:
         """Check whether the validated FINISH proposal is a legal end to the run."""
         if not self.has_current_action():
             return StepOutcome.proceed()
+        research_failure = bool(
+            getattr(self.last_observation, "kind", None) == "product_research_failure"
+        )
+        # A comparison / details request *requires* the research it asks for.  Research that a
+        # policy adds while the task is only a recommendation is optional: its failure may
+        # degrade to the already-grounded candidates, but it may never be presented as a
+        # successful research result.
+        research_required = self.task_state.intent in (
+            TaskIntent.COMPARE,
+            TaskIntent.DETAILS,
+        )
         self.completion = self.completion_guard.check(
             self.validated,
             state=self.control,
@@ -1409,6 +1480,8 @@ class _LoopEngine:
             last_observation=self.last_observation,
             produced_recommendation=self.produced_recommendation,
             candidates_grounded=self.candidates_grounded,
+            research_failure=research_failure,
+            research_failure_optional=research_failure and not research_required,
             execution_failed=(
                 self.last_verification is not None and not self.last_verification.verified
             ),

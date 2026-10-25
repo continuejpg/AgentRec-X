@@ -593,6 +593,41 @@ class GroundedReasoner:
                 profiles.append(profile)
         return tuple(profiles)
 
+    # -- Phase 6A structured product research ------------------------------- #
+    def inspect_product(
+        self,
+        parent_asin: str,
+        *,
+        attributes: Sequence[str] = (),
+    ) -> Any:
+        """Return the rich Phase 6A inspection for one catalogue identity.
+
+        The implementation lives in :mod:`recommendation.control.product_research` so the
+        catalogue-level rules are independent of the reasoner and of the action protocol.
+        A missing identity raises ``ProductResearchError``; it is never returned as an empty
+        fact profile.
+        """
+        from .product_research import inspect_record
+
+        records = getattr(self._catalog, "records", None)
+        if not isinstance(records, dict):
+            raise TypeError("the catalogue does not expose a records mapping")
+        return inspect_record(records, parent_asin, attributes=attributes)
+
+    def compare_products(
+        self,
+        parent_asins: Sequence[str],
+        *,
+        attributes: Sequence[str] = (),
+    ) -> Any:
+        """Return the rich Phase 6A comparison for 2–5 identities, in caller order."""
+        from .product_research import compare_records
+
+        records = getattr(self._catalog, "records", None)
+        if not isinstance(records, dict):
+            raise TypeError("the catalogue does not expose a records mapping")
+        return compare_records(records, parent_asins, attributes=attributes)
+
     # -- comparison -------------------------------------------------------- #
 
     _COMPARISON_ATTRIBUTES: tuple[str, ...] = (

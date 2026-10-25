@@ -74,8 +74,10 @@ from .arguments import (
     BundleArguments,
     CheckCompatibilityArguments,
     CompareArguments,
+    CompareProductsArguments,
     EmptyArguments,
     GetDetailsArguments,
+    InspectProductArguments,
     SearchCatalogArguments,
     SelectSourceArguments,
     TradeOffArguments,
@@ -98,6 +100,9 @@ __all__ = [
     "CandidateSetObservation",
     "ClarificationObservation",
     "ComparisonObservation",
+    "ProductComparisonObservation",
+    "ProductInspectionObservation",
+    "ProductResearchFailureObservation",
     "ControlState",
     "CompatibilityObservation",
     "DetailObservation",
@@ -211,6 +216,10 @@ class ActionKind(str, Enum):
     # carry.  Not a reasoning action: it does not read facts the run already has, it *acquires*
     # new ones, so it consumes a tool call like the candidate sources do.
     ACQUIRE_EVIDENCE = "acquire_evidence"
+    # Phase 6A: structured product research over the normalized catalogue.  Both actions are
+    # read-only and identity-scoped; they never add or reorder candidates.
+    INSPECT_PRODUCT = "inspect_product"
+    COMPARE_PRODUCTS = "compare_products"
 
 
 #: The accepted Stage 1 action space.  Kept as a named constant because the Stage 1 policy
@@ -240,6 +249,8 @@ READ_ONLY_ACTIONS: tuple[ActionKind, ...] = (
     ActionKind.CHECK_COMPATIBILITY,
     ActionKind.BUNDLE,
     ActionKind.VERIFY,
+    ActionKind.INSPECT_PRODUCT,
+    ActionKind.COMPARE_PRODUCTS,
 )
 
 #: Phase 4: actions that acquire **new trusted facts** about candidates the run already holds.
@@ -256,6 +267,10 @@ EVIDENCE_ACTIONS: tuple[ActionKind, ...] = (
 TOOL_CALL_ACTIONS: tuple[ActionKind, ...] = (
     *CANDIDATE_ACTIONS,
     *EVIDENCE_ACTIONS,
+    # Product research reaches the catalogue; charging it to the tool budget is what bounds
+    # how many product reads one run may perform.
+    ActionKind.INSPECT_PRODUCT,
+    ActionKind.COMPARE_PRODUCTS,
 )
 
 #: Actions that do not execute anything and do not touch the candidate set.
@@ -286,6 +301,8 @@ ARGUMENTS_BY_ACTION: dict[ActionKind, type[BaseModel]] = {
     ActionKind.BUNDLE: BundleArguments,
     ActionKind.VERIFY: EmptyArguments,
     ActionKind.ACQUIRE_EVIDENCE: AcquireEvidenceArguments,
+    ActionKind.INSPECT_PRODUCT: InspectProductArguments,
+    ActionKind.COMPARE_PRODUCTS: CompareProductsArguments,
 }
 
 
@@ -818,6 +835,65 @@ class ComparisonObservation(Observation):
     compared: tuple[str, ...] = ()
     rows: tuple[dict[str, Any], ...] = ()
     unsupported_attributes: tuple[str, ...] = ()
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class ProductInspectionObservation(Observation):
+    """Phase 6A: structured facts for one catalogue identity.
+
+    Every fact is copied from the trusted catalogue or explicitly marked absent/unreadable.
+    The observation names the tool and the inspected identity so the trajectory can attribute
+    the read without consulting an out-of-band log.
+    """
+
+    kind: str = "product_inspection"
+    tool: Literal["inspect_product"] = "inspect_product"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    parent_asin: str
+    facts: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    requested_attributes: tuple[str, ...] = ()
+    missing_attributes: tuple[str, ...] = ()
+    unreadable_attributes: tuple[str, ...] = ()
+    unsupported_attributes: tuple[str, ...] = ()
+    catalog_source: str | None = None
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class ProductComparisonObservation(Observation):
+    """Phase 6A: a comparison of 2–5 identities in the caller's order.
+
+    Rows retain each product's own fact and the reason an attribute was not comparable.  The
+    observation never carries a "better product" verdict; a numeric comparison is a min/max
+    observation over one same-unit field, not a preference.
+    """
+
+    kind: str = "product_comparison"
+    tool: Literal["compare_products"] = "compare_products"
+    status: Literal["ok", "empty", "failed"] = "ok"
+    products: tuple[str, ...] = ()
+    rows: tuple[dict[str, Any], ...] = ()
+    requested_attributes: tuple[str, ...] = ()
+    missing_attributes: tuple[str, ...] = ()
+    unreadable_attributes: tuple[str, ...] = ()
+    unsupported_attributes: tuple[str, ...] = ()
+    catalog_source: str | None = None
+    verification_note: str | None = Field(default=None, max_length=280)
+
+
+class ProductResearchFailureObservation(Observation):
+    """Phase 6A: a failed product-research call, with the tool and its input identities.
+
+    This is separate from :class:`FailureObservation` because the product-research contract
+    must make the *tool* and *requested products* auditable even when no fact was read.  It is
+    still a failure: ``status='failed'`` and ``verification_status='refused'``; it is never
+    converted into an empty successful inspection.
+    """
+
+    kind: str = "product_research_failure"
+    tool: Literal["inspect_product", "compare_products"]
+    status: Literal["failed"] = "failed"
+    code: str
+    products: tuple[str, ...] = ()
     verification_note: str | None = Field(default=None, max_length=280)
 
 

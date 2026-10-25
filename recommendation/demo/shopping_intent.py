@@ -30,6 +30,7 @@ from recommendation.control.grounded_reasoning import (
     attribute_value,
     first_attribute,
     parse_price,
+    parse_weight_kg,
 )
 
 __all__ = [
@@ -472,6 +473,25 @@ def build_reason(record: Any, intent: ShoppingIntent) -> str:
             parts.append(f"matches your interest in '{entry.value}'")
         elif entry.kind == "brand" and _match_brand(record, entry.value):
             parts.append(f"matches your preferred brand '{entry.value}'")
+        elif entry.kind == "price" and price is not None:
+            # This is a soft direction, never a hard price bound.  It states only that the
+            # preference was applied to this product's real catalogue price.
+            parts.append(
+                f"price preference applied (catalogue price ${price:.2f})"
+            )
+        elif entry.kind == "weight":
+            raw = first_attribute(record, ("Item Weight", "Package Weight"))
+            weight = parse_weight_kg(raw) if raw else None
+            if weight is not None:
+                parts.append(f"weight preference applied (catalogue {weight:g} kg)")
+        elif entry.kind == "color":
+            colour = attribute_value(record, "Color")
+            if colour and str(entry.value).casefold() in colour.casefold():
+                parts.append(f"matches your preferred colour '{entry.value}'")
+        elif entry.kind == "material":
+            material = attribute_value(record, "Material")
+            if material and str(entry.value).casefold() in material.casefold():
+                parts.append(f"matches your preferred material '{entry.value}'")
     if not parts:
         facts: list[str] = []
         if brand:

@@ -259,7 +259,7 @@ class DemoSourcePlanPolicy:
         (``source`` for ``SELECT_SOURCE``, the query for ``SEARCH_CATALOG``) differ per source,
         so the plan advances by position.  Both paths are bounded by the plan length.
         """
-        if context.candidate_state.grounded and source in self._served:
+        if source in self._served:
             return None
         if action is ActionKind.SEARCH_CATALOG:
             self._served.add(source)

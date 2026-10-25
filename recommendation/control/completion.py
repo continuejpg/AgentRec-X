@@ -55,6 +55,8 @@ class CompletionGuard:
         produced_recommendation: bool = False,
         candidates_grounded: bool = False,
         execution_failed: bool = False,
+        research_failure: bool = False,
+        research_failure_optional: bool = False,
         constraints_active: bool = False,
         feasible_candidate_count: int = 0,
         unresolved_candidate_count: int = 0,
@@ -78,7 +80,15 @@ class CompletionGuard:
             True when that candidate set passed identity verification.
         execution_failed:
             True when the most recent execution failed.  A failed run may not be reported
-            as a completed one.
+            as a completed one, except for the explicitly bounded optional-research case
+            described below.
+        research_failure:
+            True when the failure is a ``product_research_failure`` observation, not a
+            generic capability or verification failure.
+        research_failure_optional:
+            True only when the failed research was not required by the task's intent.  An
+            optional failure may degrade to already-grounded candidates; a required failure
+            may not.  This never makes the failed research look successful.
         constraints_active:
             True when at least one hard constraint is in force for this task.  The guard does
             **not** evaluate constraints - the eligibility layer owns that - it only refuses
@@ -127,7 +137,62 @@ class CompletionGuard:
         # ending, below.
         checks.append("budget_available")
 
-        if execution_failed:
+        observation_is_research_failure = bool(
+            getattr(last_observation, "kind", None) == "product_research_failure"
+        )
+        constraints_satisfied = (
+            not constraints_active
+            or (feasible_candidate_count > 0 and unresolved_candidate_count == 0)
+        )
+        # A failed optional research call is not an empty recommendation and not a reason to
+        # discard the verified candidates already in hand.  It may degrade only when:
+        #   * the observation really is a research failure;
+        #   * the request did not require that research;
+        #   * a recommendation existed and its identities are verified;
+        #   * every active hard constraint is proved satisfied (not merely undecided).
+        degradable_research_failure = bool(
+            research_failure
+            and observation_is_research_failure
+            and research_failure_optional
+            and produced_recommendation
+            and candidates_grounded
+            and constraints_satisfied
+        )
+        if execution_failed and not degradable_research_failure:
+            if research_failure:
+                if not research_failure_optional:
+                    code = "required_research_failed"
+                    detail = (
+                        "the request requires this research, so the grounded candidates "
+                        "may not be presented as a completed answer"
+                    )
+                elif not produced_recommendation or not candidates_grounded:
+                    code = "research_failure_unusable_candidates"
+                    detail = (
+                        "research failed and the run has no verified recommendation set to "
+                        "degrade to"
+                    )
+                elif constraints_active and unresolved_candidate_count > 0:
+                    code = "research_failure_constraints_unresolved"
+                    detail = (
+                        "research failed and at least one active hard constraint remains "
+                        "undecided for a grounded candidate"
+                    )
+                elif constraints_active and feasible_candidate_count <= 0:
+                    code = "research_failure_no_verified_candidate"
+                    detail = (
+                        "research failed and no grounded candidate is proved to satisfy the "
+                        "active hard constraints"
+                    )
+                else:  # pragma: no cover - defensive
+                    code = "research_failure_not_degradable"
+                    detail = "research failed but a safe degraded result is not available"
+                return VerificationResult(
+                    verified=False,
+                    code=code,
+                    detail=detail,
+                    checks=(*checks, "fail_closed", "research_failure"),
+                )
             return VerificationResult(
                 verified=False,
                 code="last_execution_failed",
@@ -137,6 +202,8 @@ class CompletionGuard:
                 ),
                 checks=(*checks, "fail_closed"),
             )
+        if degradable_research_failure:
+            checks.extend(("research_failure_optional", "research_degraded"))
         checks.append("fail_closed")
 
         if produced_recommendation and not candidates_grounded:
@@ -191,7 +258,11 @@ class CompletionGuard:
         if constraints_active:
             checks.append("constraint_eligibility")
 
-        if last_verification is not None and not last_verification.verified:
+        if (
+            last_verification is not None
+            and not last_verification.verified
+            and not degradable_research_failure
+        ):
             return VerificationResult(
                 verified=False,
                 code="last_verification_refused",

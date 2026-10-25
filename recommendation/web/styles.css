@@ -369,6 +369,19 @@ button.danger:hover:not(:disabled) { border-color: var(--bad); color: var(--bad)
   font-size: 0.88rem;
 }
 .shop-clarification .shop-clarification-title { font-weight: 650; margin-bottom: 0.25rem; color: var(--warn); }
+.shop-research-options { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.shop-research-options button { font-size: 0.8rem; padding: 0.3rem 0.55rem; }
+.shop-preference-evidence {
+  margin-top: 0.55rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #c9d7e5;
+  border-radius: 7px;
+  background: #f4f8fc;
+  white-space: normal;
+}
+.shop-preference-title { font-weight: 600; font-size: 0.78rem; color: #315a7d; }
+.shop-preference-values { margin: 0.35rem 0 0 0; padding-left: 1.1rem; font-size: 0.8rem; }
+.shop-preference-values li { margin: 0.12rem 0; }
 .shop-subhead {
   margin: 0.9rem 0 0.4rem 0;
   font-size: 0.72rem;
