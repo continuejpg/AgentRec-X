@@ -65,7 +65,6 @@ from recommendation.memory import PreferenceKind
 from recommendation.control.task_state import TaskConstraint, TaskState, TaskIntent
 
 from .agent_policy import (
-    DEFAULT_SOURCE_PLAN,
     ClarificationPolicy,
     DemoSourcePlanPolicy,
     IntentQueryPolicy,

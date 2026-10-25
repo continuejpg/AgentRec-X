@@ -64,7 +64,7 @@ import hashlib
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, Sequence, runtime_checkable
 
 __all__ = [
     "EVIDENCE_ARTIFACT_VERSION",
