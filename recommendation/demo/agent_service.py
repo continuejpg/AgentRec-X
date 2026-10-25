@@ -84,6 +84,7 @@ from .agent_schemas import (
     AgentIntentView,
     AgentPreferenceEvidenceView,
     AgentPreferenceOptionView,
+    AgentPreferenceOutcomeView,
     AgentRecommendRequest,
     AgentRecommendResponse,
     AgentResearchClarificationView,
@@ -93,13 +94,14 @@ from .agent_schemas import (
 from .preference_construction import (
     PreferenceOption,
     PreferencePrompt,
+    PreferenceState,
     TaskPreference,
     augment_intent,
     blocked_attributes_from_history,
     blocked_attributes_from_intent,
-    build_preference_prompt,
+    choose_preference_action,
     preference_from_option,
-    rank_with_task_preference,
+    rank_with_task_preferences,
     resolve_preference_option,
 )
 from .research_clarification import (
@@ -318,10 +320,11 @@ class DemoAgentService:
         #: Sessions that already had one clarification.  A second undecidable run degrades
         #: through the accepted termination path instead of looping on questions.
         self._clarified_sessions: set[str] = set()
-        #: Candidate-aware preference construction is a shopping-only capability.  One prompt
-        #: per task/session, and the chosen soft preference lives only in this task state.
-        self._preference_asked: set[str] = set()
-        self._task_preferences: dict[str, TaskPreference] = {}
+        #: Candidate-aware preference construction is a shopping-only capability.  One or two
+        #: bounded questions per task, and the chosen soft preferences live only in task state.
+        self._preference_rounds: dict[str, int] = {}
+        self._preference_second_enabled: dict[str, bool] = {}
+        self._task_preferences: dict[str, tuple[TaskPreference, ...]] = {}
         #: Built once, because the catalogue search index is a per-process cost, not a
         #: per-request one.
         self._catalog_search = CatalogSearchSource(metadata)
@@ -699,7 +702,7 @@ class DemoAgentService:
         research_resume: ResearchResume | None = None,
         research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
         clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
-        task_preference: TaskPreference | None = None,
+        task_preferences: tuple[TaskPreference, ...] = (),
     ) -> AgentRecommendResponse:
         """Serve one request: validate the plan, run the loop, project the result.
 
@@ -725,7 +728,7 @@ class DemoAgentService:
             research_resume=research_resume,
             research_budget_remaining=research_budget_remaining,
             clarification_budget_remaining=clarification_budget_remaining,
-            task_preference=task_preference,
+            task_preferences=task_preferences,
         )
 
     def run_shopping_turn(
@@ -733,80 +736,32 @@ class DemoAgentService:
         payload: AgentRecommendRequest,
         *,
         session_id: str,
+        task_id: str | None = None,
     ) -> AgentRecommendResponse:
         """Serve one turn of a multi-turn shopping session.
 
-        The preference store remains the only memory.  This method previews this turn's
-        extraction against the active snapshot to build the **current** intent, so a new,
-        corrected or withdrawn requirement changes this turn's hard constraints and query
-        immediately, without writing the turn twice: the loop still commits the user's message
-        once, when a recommendation completes.
-
-        A provable contradiction or an undecidable candidate set becomes one pending question.
-        The question is a suspension (`awaiting_user`), never a successful completion, never a
-        fabricated candidate, and never a relaxation of a hard constraint.
+        ``session_id`` is the preference-memory namespace.  ``task_id`` is the concrete demo
+        session that owns pending questions and task preferences.  They are separate because
+        several sessions may share one memory user key; task choices must not leak across
+        those sessions.
         """
         if self._memory_service is None:
             raise DemoAgentError(
                 "multi-turn shopping requires the preference-memory store",
                 code="memory_unavailable",
             )
-        preference_choice = self._task_preferences.get(session_id)
-        preference_answer = False
+        task_key = task_id or session_id
         if payload.clarification_id:
-            # A candidate-aware preference question is a shopping-task suspension, not a
-            # research observation.  Validate its option and session/TTL before consuming it.
+            pending_preference = None
             with self._lock:
                 pending = self._pending_clarifications.get(payload.clarification_id)
                 if pending is not None and pending.get("kind") == "preference":
-                    if pending.get("session_id") != session_id:
-                        raise DemoAgentError(
-                            "the clarification id is unknown or belongs to another session",
-                            code="unknown_clarification",
-                        )
-                    if (
-                        time.time() - float(pending.get("created_at", 0.0))
-                        > CLARIFICATION_TTL_SECONDS
-                    ):
-                        self._pending_clarifications.pop(payload.clarification_id, None)
-                        raise DemoAgentError(
-                            "the clarification has expired; start a new shopping turn",
-                            code="expired_clarification",
-                        )
-                    prompt = _preference_prompt_from_payload(pending.get("preference_prompt"))
-                    option, error = resolve_preference_option(
-                        prompt,
-                        option_id=payload.clarification_option,
-                        message=payload.message,
-                    )
-                    if error is not None:
-                        raise DemoAgentError(error, code="invalid_preference_option")
-                    assert option is not None
-                    self._pending_clarifications.pop(payload.clarification_id, None)
-                    self._preference_asked.add(session_id)
-                    if option.action in {"none", "skip"}:
-                        preference_choice = None
-                        self._task_preferences.pop(session_id, None)
-                    else:
-                        preference_choice = preference_from_option(
-                            prompt, option, turn_id=payload.clarification_id
-                        )
-                        self._task_preferences[session_id] = preference_choice
-                    stored = pending.get("request") or {}
-                    payload = payload.model_copy(
-                        update={
-                            "message": str(stored.get("message") or payload.message),
-                            "k": int(stored.get("k") or payload.k),
-                            "sources": tuple(stored.get("sources") or payload.sources),
-                            "constraints": tuple(
-                                AgentConstraintItem.model_validate(item)
-                                for item in (stored.get("constraints") or ())
-                            ),
-                            "clarification_id": None,
-                            "clarification_option": None,
-                        }
-                    )
-                    preference_answer = True
+                    pending_preference = pending
+            if pending_preference is not None:
+                return self._answer_preference(
+                    payload, pending_preference, task_key, user_key=session_id
+                )
+        preference_choice = self._task_preferences.get(task_key, ())
         if payload.clarification_id:
             pending = None
             research_resume: ResearchResume | None = None
@@ -818,7 +773,7 @@ class DemoAgentService:
                         "the clarification id is unknown or belongs to another session",
                         code="unknown_clarification",
                     )
-                if pending.get("session_id") != session_id:
+                if pending.get("session_id") != task_key:
                     # Do not consume another session's question: a cross-session attempt must
                     # not be able to invalidate it.
                     raise DemoAgentError(
@@ -913,8 +868,8 @@ class DemoAgentService:
             snapshot, extraction, turn_id=turn_id, explicit_constraints=explicit
         )
         terms = query_terms(intent, payload.message)
-        if preference_choice is not None:
-            intent = augment_intent(intent, preference_choice)
+        for preference in preference_choice:
+            intent = augment_intent(intent, preference)
         if intent.conflicts:
             response = self.run(
                 payload.model_copy(update={"user_key": session_id, "constraints": ()}),
@@ -922,7 +877,7 @@ class DemoAgentService:
                 dynamic_research=True,
             )
             self._commit_clarify_turn(session_id, payload.message, turn_id)
-            return self._attach_clarification(response, intent, session_id, kind="conflict")
+            return self._attach_clarification(response, intent, task_key, kind="conflict")
         constraints = tuple(
             AgentConstraintItem(kind=str(item["kind"]), value=str(item["value"]))
             for item in intent.hard_constraints()
@@ -930,11 +885,11 @@ class DemoAgentService:
         response = self.run(
             payload.model_copy(
                 update={
-                    "user_key": None if preference_answer else session_id,
+                    "user_key": session_id,
                     "constraints": constraints,
                 }
             ),
-            clarify_unresolved=session_id not in self._clarified_sessions,
+            clarify_unresolved=task_key not in self._clarified_sessions,
             intent_terms=terms,
             dynamic_research=True,
             research_resume=research_resume,
@@ -944,7 +899,7 @@ class DemoAgentService:
             clarification_budget_remaining=max(
                 0, MAX_RESEARCH_CLARIFICATIONS - pending_clarification_count
             ),
-            task_preference=preference_choice,
+            task_preferences=preference_choice,
         )
         if previous_research is not None:
             response = _merge_previous_research(
@@ -955,13 +910,13 @@ class DemoAgentService:
             return self._attach_clarification(
                 response,
                 intent,
-                session_id,
+                task_key,
                 kind="unverified",
                 constraints=constraints,
                 clarification_count=pending_clarification_count + 1,
             )
         preference_response = self._maybe_attach_preference_question(
-            response, intent, session_id, payload
+            response, intent, task_key, payload, terms=terms, user_key=session_id
         )
         if preference_response is not None:
             return preference_response
@@ -996,26 +951,188 @@ class DemoAgentService:
             update={"recommendations": recommendations, "intent": _intent_view(intent)}
         )
 
+    def _answer_preference(
+        self,
+        payload: AgentRecommendRequest,
+        pending: Mapping[str, Any],
+        session_id: str,
+        *,
+        user_key: str,
+    ) -> AgentRecommendResponse:
+        """Apply a confirmed preference to the same candidate set that produced the question.
+
+        Rerunning retrieval here would let a memory write from the first turn change the
+        candidate universe under the counterfactual test.  The preference is therefore applied
+        to the exact response stored with the pending question; this is both cheaper and the
+        only way the before/expected/actual top-K chain is causally comparable.
+        """
+        prompt = _preference_prompt_from_payload(pending.get("preference_prompt"))
+        with self._lock:
+            if pending.get("session_id") != session_id:
+                raise DemoAgentError(
+                    "the clarification id is unknown or belongs to another session",
+                    code="unknown_clarification",
+                )
+            if time.time() - float(pending.get("created_at", 0.0)) > CLARIFICATION_TTL_SECONDS:
+                self._pending_clarifications.pop(payload.clarification_id or "", None)
+                raise DemoAgentError(
+                    "the clarification has expired; start a new shopping turn",
+                    code="expired_clarification",
+                )
+        option, error = resolve_preference_option(
+            prompt,
+            option_id=payload.clarification_option,
+            message=payload.message,
+        )
+        if error is not None:
+            raise DemoAgentError(error, code="invalid_preference_option")
+        assert option is not None
+        with self._lock:
+            stored = pending.get("request") or {}
+            base = AgentRecommendResponse.model_validate(pending.get("base_response"))
+            self._pending_clarifications.pop(payload.clarification_id or "", None)
+            round_no = int(pending.get("round") or 1)
+            self._preference_rounds[session_id] = max(
+                self._preference_rounds.get(session_id, 0), round_no
+            )
+            current = self._task_preferences.get(session_id, ())
+            if option.action in {"none", "skip"}:
+                prefs = current
+                self._preference_second_enabled[session_id] = False
+            else:
+                selected = preference_from_option(
+                    prompt, option, turn_id=payload.clarification_id
+                )
+                prefs = (
+                    current
+                    if any(item.attribute == selected.attribute for item in current)
+                    else (*current, selected)
+                )
+                self._task_preferences[session_id] = prefs
+                self._preference_second_enabled[session_id] = round_no < 2
+        request_payload = AgentRecommendRequest(
+            message=str(stored.get("message") or payload.message),
+            history=list(payload.history),
+            k=int(stored.get("k") or payload.k),
+            sources=tuple(stored.get("sources") or payload.sources),
+            constraints=tuple(
+                AgentConstraintItem.model_validate(item)
+                for item in (stored.get("constraints") or ())
+            ),
+            preference_discovery=bool(
+                stored.get("preference_discovery", payload.preference_discovery)
+            ),
+        )
+        snapshot = self._memory_service.get_active_preferences(user_key)
+        extraction = self._memory_service.extractor.extract(request_payload.message)
+        explicit = tuple(
+            {
+                "kind": getattr(item.kind, "value", str(item.kind)),
+                "value": str(item.value),
+            }
+            for item in request_payload.constraints
+        )
+        intent = derive_intent(
+            snapshot,
+            extraction,
+            turn_id=f"{session_id}:preference",
+            explicit_constraints=explicit,
+        )
+        terms = query_terms(intent, request_payload.message)
+        for preference in prefs:
+            intent = augment_intent(intent, preference)
+
+        if option.action in {"none", "skip"}:
+            return self._attach_intent_and_reasons(base, intent)
+
+        candidates = list(base.recommendations)
+        # The trusted comparison tool compares at most five products, so the preference
+        # question deliberately scopes its counterfactual to the prompt's candidate window.
+        # Reorder exactly that window and leave any remaining requested-k products untouched;
+        # otherwise expected (5-item window) and actual (full k list) would use different
+        # Top-K definitions and could report a false mismatch.
+        scope = tuple(str(identity) for identity in prompt.products)
+        scope_set = set(scope)
+        scoped = [item for item in candidates if item.parent_asin in scope_set]
+        remainder = [item for item in candidates if item.parent_asin not in scope_set]
+        ranking = rank_with_task_preferences(
+            scoped,
+            getattr(self._metadata, "records", {}) or {},
+            prefs,
+        )
+        if ranking is not None:
+            ordered = ranking.by_identity()
+            scoped.sort(key=lambda item: ordered[item.parent_asin].reranked_rank)
+        candidates = scoped + remainder
+        candidates = [
+            item.model_copy(update={"rank": position})
+            for position, item in enumerate(candidates, start=1)
+        ]
+        message = _consistent_message(
+            base.message, candidates, getattr(self._metadata, "records", {})
+        )
+        response = base.model_copy(
+            update={
+                "recommendations": tuple(candidates),
+                "message": message,
+                "intent": _intent_view(intent),
+            }
+        )
+        window = len(prompt.baseline_top_k) or len(scope)
+        actual = tuple(item.parent_asin for item in candidates[:window])
+        expected = tuple(
+            prompt.counterfactual.get(option.option_id, ())
+        )
+        response = response.model_copy(
+            update={
+                "preference_outcome": AgentPreferenceOutcomeView(
+                    selected_option_id=option.option_id,
+                    attribute=prompt.attribute,
+                    before_top_k=prompt.baseline_top_k,
+                    expected_top_k=expected,
+                    actual_top_k=actual,
+                    changed=actual != prompt.baseline_top_k,
+                    verified=bool(expected) and expected == actual,
+                )
+            }
+        )
+        preference_response = self._maybe_attach_preference_question(
+            response,
+            intent,
+            session_id,
+            request_payload,
+            terms=terms,
+            user_key=user_key,
+        )
+        if preference_response is not None:
+            return preference_response
+        return self._attach_intent_and_reasons(response, intent)
+
     def _maybe_attach_preference_question(
         self,
         response: AgentRecommendResponse,
         intent: Any,
         session_id: str,
         payload: AgentRecommendRequest,
+        *,
+        terms: Sequence[str] = (),
+        user_key: str | None = None,
     ) -> AgentRecommendResponse | None:
-        """Ask at most one evidence-backed preference question per shopping task.
+        """Ask at most two evidence-backed preference questions per shopping task.
 
-        The feature is shopping-only and only precedes a normal completed recommendation.  It
-        skips explicit comparison/details tasks, failed research, an existing task preference,
-        and any task where the visible candidates do not differ on a trustworthy attribute.
+        The feature is shopping-only and only precedes a normal completed recommendation.  The
+        second question is allowed only after a first substantive answer and only when the
+        counterfactual effect of another dimension is still material.  Every ask is validated
+        against real candidate values and top-K consequences; a SKIP is a valid decision.
         """
         if not response.terminal.succeeded or response.terminal.status != "finished":
             return None
         if not payload.preference_discovery:
             return None
-        if session_id in self._preference_asked:
+        rounds = int(self._preference_rounds.get(session_id, 0))
+        if rounds >= 2:
             return None
-        if self._task_preferences.get(session_id) is not None:
+        if rounds >= 1 and not self._preference_second_enabled.get(session_id, False):
             return None
         if _task_state(payload).intent in (TaskIntent.COMPARE, TaskIntent.DETAILS):
             return None
@@ -1026,21 +1143,42 @@ class DemoAgentService:
         ids = tuple(item.parent_asin for item in response.recommendations)
         if len(ids) < 2:
             return None
+        current = self._task_preferences.get(session_id, ())
         blocked = blocked_attributes_from_intent(intent)
+        revoked: set[str] = set()
         try:
-            history = self._memory_service.get_memory_history(session_id)
-            blocked |= blocked_attributes_from_history(history.entries)
+            history = self._memory_service.get_memory_history(user_key or session_id)
+            revoked |= blocked_attributes_from_history(history.entries)
+            blocked |= revoked
         except Exception:  # noqa: BLE001 - absence of history must not fabricate a block
             pass
-        prompt = build_preference_prompt(
+        state = PreferenceState(
+            explicit=frozenset(blocked_attributes_from_intent(intent)),
+            confirmed=frozenset(preference.attribute for preference in current),
+            revoked=frozenset(revoked),
+        )
+        decision = choose_preference_action(
             ids,
             getattr(self._metadata, "records", {}) or {},
+            intent=intent,
+            current_preferences=current,
             blocked_attributes=tuple(blocked),
+            message=payload.message,
+            top_k=payload.k,
+            round_no=rounds + 1,
+            state=state,
         )
-        if prompt is None:
+        if decision.action == "SKIP" or decision.dimension is None:
+            self._preference_second_enabled[session_id] = False
             return None
         return self._attach_preference_question(
-            response, prompt, intent, session_id, payload
+            response,
+            decision.dimension,
+            intent,
+            session_id,
+            payload,
+            round_no=rounds + 1,
+            terms=terms,
         )
 
     def _attach_preference_question(
@@ -1050,15 +1188,27 @@ class DemoAgentService:
         intent: Any,
         session_id: str,
         payload: AgentRecommendRequest,
+        *,
+        round_no: int,
+        terms: Sequence[str] = (),
     ) -> AgentRecommendResponse:
         """Replace a completed list with one evidence-backed preference suspension."""
         from dataclasses import asdict
 
         clarification_id = uuid.uuid4().hex
-        question = (
-            f"These candidates differ on {prompt.label}. Which do you prefer? "
-            f"{prompt.reason}"
-        )
+        if prompt.interaction == "ASK_DIRECT":
+            question = (
+                f"Which {prompt.label} do you prefer? {prompt.reason}"
+            )
+        elif prompt.interaction == "EXPLAIN" and prompt.explanation:
+            question = (
+                f"{prompt.explanation} Which {prompt.label} do you prefer? {prompt.reason}"
+            )
+        else:
+            question = (
+                f"These candidates differ on {prompt.label}. Which do you prefer? "
+                f"{prompt.reason}"
+            )
         evidence = _preference_evidence_view(prompt)
         terminal = response.terminal.model_copy(
             update={
@@ -1074,7 +1224,7 @@ class DemoAgentService:
             kind="preference",
             blocks="preference",
             options=tuple(option.label for option in prompt.options),
-            reason="candidate_attribute_difference",
+            reason=f"preference_{prompt.interaction.lower()}",
             products=prompt.products,
             preference=evidence,
         )
@@ -1087,16 +1237,21 @@ class DemoAgentService:
                 "question": question,
                 "kind": "preference",
                 "created_at": time.time(),
+                "round": round_no,
                 "preference_prompt": asdict(prompt),
                 "preference": evidence.model_dump(),
+                "base_response": response.model_dump(),
                 "request": {
                     "message": payload.message,
                     "k": payload.k,
                     "sources": list(payload.sources),
                     "constraints": [item.model_dump() for item in payload.constraints],
+                    "preference_discovery": bool(payload.preference_discovery),
+                    "intent_terms": list(terms),
                 },
             }
-            self._preference_asked.add(session_id)
+            self._preference_rounds[session_id] = round_no
+            self._preference_second_enabled[session_id] = False
         return response.model_copy(
             update={
                 "message": question,
@@ -1282,7 +1437,7 @@ class DemoAgentService:
         research_resume: ResearchResume | None = None,
         research_budget_remaining: int = MAX_TASK_RESEARCH_CALLS,
         clarification_budget_remaining: int = MAX_RESEARCH_CLARIFICATIONS,
-        task_preference: TaskPreference | None = None,
+        task_preferences: tuple[TaskPreference, ...] = (),
     ) -> AgentRecommendResponse:
         """Run one plan and project it.  Shared by the request-declared and LLM-selected paths.
 
@@ -1348,12 +1503,12 @@ class DemoAgentService:
         # excluded.  With no task preference this branch is inert and the accepted memory
         # ranking path is unchanged.
         task_ranking = (
-            rank_with_task_preference(
+            rank_with_task_preferences(
                 presentable,
                 getattr(self._metadata, "records", {}) or {},
-                task_preference,
+                task_preferences,
             )
-            if task_preference is not None
+            if task_preferences
             else None
         )
         ranking = task_ranking or self._memory_ranking(
@@ -1585,6 +1740,12 @@ def _preference_evidence_view(prompt: PreferencePrompt) -> AgentPreferenceEviden
             )
             for option in prompt.options
         ),
+        interaction=prompt.interaction,
+        status="unconfirmed",
+        impact=prompt.impact,
+        baseline_top_k=prompt.baseline_top_k,
+        counterfactual=dict(prompt.counterfactual),
+        explanation=prompt.explanation,
     )
 
 
@@ -1612,6 +1773,19 @@ def _preference_prompt_from_payload(raw: Any) -> PreferencePrompt:
         values=dict(raw.get("values") or {}),
         comparison_kind=str(raw.get("comparison_kind") or ""),
         options=options,
+        interaction=str(raw.get("interaction") or "SHOW_CONTRAST"),
+        status=str(raw.get("status") or "unconfirmed"),
+        coverage=float(raw.get("coverage") or 0.0),
+        difference=float(raw.get("difference") or 0.0),
+        relevance=float(raw.get("relevance") or 0.0),
+        impact=float(raw.get("impact") or 0.0),
+        utility=float(raw.get("utility") or 0.0),
+        baseline_top_k=tuple(str(item) for item in raw.get("baseline_top_k") or ()),
+        counterfactual={
+            str(key): tuple(str(item) for item in value)
+            for key, value in (raw.get("counterfactual") or {}).items()
+        },
+        explanation=raw.get("explanation"),
     )
 
 

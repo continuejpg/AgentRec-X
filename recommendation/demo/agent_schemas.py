@@ -69,6 +69,7 @@ __all__ = [
     "AgentShoppingRequest",
     "AgentPreferenceEvidenceView",
     "AgentPreferenceOptionView",
+    "AgentPreferenceOutcomeView",
     "AgentReplanView",
     "AgentResearchActionView",
     "AgentResearchClarificationView",
@@ -884,6 +885,26 @@ class AgentPreferenceEvidenceView(BaseModel):
     comparison_kind: Literal["numeric", "categorical"]
     missing: tuple[str, ...] = ()
     options: tuple[AgentPreferenceOptionView, ...] = ()
+    interaction: Literal["ASK_DIRECT", "SHOW_CONTRAST", "EXPLAIN"] = "SHOW_CONTRAST"
+    status: Literal["known", "confirmed", "unconfirmed", "revoked"] = "unconfirmed"
+    impact: float = 0.0
+    baseline_top_k: tuple[str, ...] = ()
+    counterfactual: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    explanation: str | None = None
+
+
+class AgentPreferenceOutcomeView(BaseModel):
+    """Causal check between the selected preference and the final top-K."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selected_option_id: str
+    attribute: str
+    before_top_k: tuple[str, ...] = ()
+    expected_top_k: tuple[str, ...] = ()
+    actual_top_k: tuple[str, ...] = ()
+    changed: bool = False
+    verified: bool = False
 
 
 class AgentClarificationView(BaseModel):
@@ -980,6 +1001,13 @@ class AgentRecommendResponse(BaseModel):
         description=(
             "Candidate-aware preference evidence when the shopping agent asks one bounded "
             "question about a real catalogue difference.  Evidence, not a final list."
+        ),
+    )
+    preference_outcome: AgentPreferenceOutcomeView | None = Field(
+        default=None,
+        description=(
+            "The counterfactual top-K check for a preference answer, when this turn applied "
+            "one.  Present only after an actual user confirmation."
         ),
     )
     replan: ReplanDecisionView | None = Field(

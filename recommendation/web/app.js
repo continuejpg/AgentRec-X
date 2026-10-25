@@ -446,12 +446,31 @@
     var box = el("div", "shop-preference-evidence");
     box.appendChild(el("div", "shop-preference-title",
       "Why this question — trusted candidate difference"));
+    if (preference.interaction) {
+      box.appendChild(el("div", "hint",
+        "Interaction: " + preference.interaction
+        + (preference.impact ? " · projected top-K change: " + preference.impact.toFixed(2) : "")));
+    }
     box.appendChild(el("div", "hint", preference.reason || ""));
+    if (preference.explanation) {
+      box.appendChild(el("div", "hint", preference.explanation));
+    }
     var list = el("ul", "shop-preference-values");
     var values = preference.values || {};
     Object.keys(values).forEach(function (identity) {
       var value = values[identity];
-      var text = Array.isArray(value) ? value.join(", ") : String(value);
+      var text;
+      if (typeof value === "number") {
+        if (preference.attribute === "price") {
+          text = "$" + value.toFixed(2);
+        } else if (preference.attribute === "weight") {
+          text = value.toFixed(3) + " kg";
+        } else {
+          text = String(value);
+        }
+      } else {
+        text = Array.isArray(value) ? value.join(", ") : String(value);
+      }
       list.appendChild(el("li", null, identity + ": " + preference.attribute + " = " + text));
     });
     if ((preference.missing || []).length) {
@@ -460,6 +479,19 @@
     }
     box.appendChild(list);
     els.shopClarification.appendChild(box);
+  }
+
+  function appendPreferenceOutcome(outcome) {
+    if (!outcome) { return; }
+    var verification = outcome.verified
+      ? "counterfactual top-K verified"
+      : "counterfactual top-K could not be verified";
+    appendShopTurn("agent", "Agent — preference applied",
+      "Selected " + outcome.selected_option_id + " for " + outcome.attribute
+      + "; before: " + (outcome.before_top_k || []).join(", ")
+      + "; after: " + (outcome.actual_top_k || []).join(", ")
+      + " (" + (outcome.changed ? "changed" : "unchanged") + ", "
+      + verification + ").");
   }
 
   function showShopClarification(clarification, preference) {
@@ -638,6 +670,7 @@
         state.shop.turns += 1;
         renderShopIntent(payload.intent || null);
         appendShopResearch(payload.research || null);
+        appendPreferenceOutcome(payload.preference_outcome || null);
         var clarification = payload.clarification || null;
         if (clarification) {
           state.shop.pendingId = clarification.clarification_id;

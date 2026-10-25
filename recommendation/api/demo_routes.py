@@ -758,7 +758,9 @@ def build_demo_router() -> APIRouter:
                     user_key=session.user_key,
                 )
                 return runtime.agent_service().run_shopping_turn(
-                    agent_payload, session_id=session.user_key
+                    agent_payload,
+                    session_id=session.user_key,
+                    task_id=session.session_id,
                 )
         except DemoHTTPError:
             raise
