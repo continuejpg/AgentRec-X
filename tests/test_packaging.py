@@ -138,10 +138,20 @@ def test_canonical_scenario_runs_and_filters(tmp_path: Path, monkeypatch: pytest
     assert not (presented & {item["parent_asin"] for item in excluded}), (
         "an ineligible candidate must never be presented as a recommendation"
     )
-    # Every presented identity is attributed to a source.
+    # Provenance is ledger-owned.  The accepted history capability is not a plane source and
+    # therefore has no ledger record; catalogue candidates must carry their real ledger source.
+    sources_present = set(body["grounded"]["sources_present"])
+    grounded = {candidate["parent_asin"]: candidate for candidate in body["grounded"]["candidates"]}
     for item in body["recommendations"]:
-        assert item["sources"], "a presented candidate must carry provenance"
         assert item["score_kind"], "a score must say what it measures"
+        assert set(item["sources"]) <= sources_present
+        if grounded[item["parent_asin"]]["provenance"]:
+            assert item["sources"], "a plane candidate must carry its ledger provenance"
+        else:
+            assert not item["sources"], "a capability-only candidate has no ledger provenance"
+    assert any(item["sources"] for item in body["recommendations"]), (
+        "the canonical scenario must exercise at least one plane-provided candidate"
+    )
 
     # The summary the documentation shows is renderable from the same response.
     rendered = format_trajectory(body)
@@ -338,6 +348,9 @@ PLACEHOLDER_MARKERS: tuple[str, ...] = (
     "MUST-NOT-BE",
     "MUST_NOT_BE",
     "NOTAREALKEY",
+    # The redaction/leak tests spell their intentional canaries this way; real keys do not.
+    "THISMUSTNEVER",
+    "SUBPROCESSMUSTNOT",
 )
 
 #: Shapes a committed credential would have.  Deliberately specific: ``AGENTRECX_LLM_API_KEY``

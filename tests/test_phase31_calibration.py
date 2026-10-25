@@ -372,8 +372,8 @@ PHASE3_RECORDING = Path("/tmp/agentrecx-phase3/revised_live.jsonl")
 
 
 def _require_recording(path: Path) -> Path:
-    if not path.exists():
-        pytest.skip(f"Phase-3 recording not present at {path}")
+    if not path.exists() or path.stat().st_size == 0:
+        pytest.skip(f"Phase-3 recording not present or empty at {path}")
     return path
 
 
@@ -458,6 +458,7 @@ def test_a_read_only_step_carries_a_bounded_read_signature() -> None:
     """
     from experiments._metrics import _repeated_read_only
 
+    _require_recording(PHASE3_RECORDING)
     outcomes = _replay_suite(PHASE3_RECORDING, system_prompt=_prompt_v1())[0]
     signatures = [
         record.read_signature
@@ -484,6 +485,7 @@ def test_a_read_only_step_carries_a_bounded_read_signature() -> None:
 
 def test_a_candidate_action_carries_no_read_signature() -> None:
     """Only a read-only step has a read signature; a retrieval is not a "read"."""
+    _require_recording(PHASE3_RECORDING)
     outcomes = _replay_suite(PHASE3_RECORDING, system_prompt=_prompt_v1())[0]
     for outcome in outcomes:
         for record in outcome.trajectory.records:

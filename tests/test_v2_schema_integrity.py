@@ -71,7 +71,8 @@ CARD_FIELDS = {
 
 AGENT_RESPONSE_FIELDS = {
     "api_version", "route", "message", "control_plane", "recommendations", "grounded",
-    "eligibility", "terminal", "trajectory", "observation", "replan", "replan_execution", "timing",
+    "eligibility", "terminal", "trajectory", "observation", "research", "preference",
+    "preference_outcome", "replan", "replan_execution", "clarification", "intent", "timing",
 }
 
 RAG_AUDIT_FIELDS = {

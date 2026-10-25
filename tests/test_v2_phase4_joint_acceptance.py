@@ -845,7 +845,8 @@ def test_other_paths_are_untouched_by_the_joint_capabilities(
         assert all(card["reason"] is None and card["reason_status"] == "not_attempted"
                    for card in body["recommendations"])
 
-        # The request-declared agent endpoint: no explanation fields, no RAG audit.
+        # The request-declared agent endpoint: reason is part of the current card schema but
+        # remains null here, and there is no RAG audit/knowledge evidence.
         profile_history = list(harness.manager.get(session).trusted_user_history)
         agent_response = harness.client.post(
             "/v1/demo/agent/recommend",
@@ -853,7 +854,9 @@ def test_other_paths_are_untouched_by_the_joint_capabilities(
                   "history": profile_history},
         )
         assert agent_response.status_code == 200, agent_response.text
+        # The request-declared agent endpoint publishes the current AgentRecommendationView:
+        # ``reason`` exists but stays null, and RAG knowledge evidence is absent.
         for card in agent_response.json()["recommendations"]:
-            assert "reason" not in card and "knowledge_evidence" not in card
+            assert card["reason"] is None and "knowledge_evidence" not in card
     finally:
         close_harness(harness)

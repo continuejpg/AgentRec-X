@@ -261,8 +261,14 @@ def test_availability_reports_a_reason_instead_of_claiming_llm_mode() -> None:
         assert state["reason"] in {"not_configured", "missing_api_key"}
 
 
-def test_decision_modes_are_the_two_documented_ones() -> None:
-    assert DECISION_MODES == ("deterministic", "llm")
+def test_decision_modes_are_the_documented_ones() -> None:
+    """The closed mode set includes the additive ``llm_agent`` control-plane mode.
+
+    ``llm`` is the legacy graph plan; ``llm_agent`` is the later tool-selection plan.  The
+    public schema and ``docs/USAGE.md`` document all three, so this test pins the current set
+    rather than the pre-``llm_agent`` pair.
+    """
+    assert DECISION_MODES == ("deterministic", "llm", "llm_agent")
 
 
 # --------------------------------------------------------------------------- #

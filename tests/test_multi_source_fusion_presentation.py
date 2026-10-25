@@ -603,10 +603,10 @@ def test_the_presentable_artifact_is_what_the_ranking_receives(
             "the accumulated envelope names its own multi-source nature"
         )
         assert [str(item.parent_asin) for item in presentable_candidates(result.state)] == _ids(body)
-        # The run's *current* candidate set is still the last adopted one: this fix changes what is
-        # presented, not what the policy or the completion guard sees step by step.
-        assert [str(item.parent_asin) for item in result.state["tool_result"].recommendations] == (
-            list(LEXICAL_DISJOINT)
+        # The live candidate set is additive across adopted sources (fa55b9d): it holds the
+        # union, while the presentable artifact is the RRF ordering of the same identities.
+        assert {str(item.parent_asin) for item in result.state["tool_result"].recommendations} == (
+            set(_ids(body))
         )
     finally:
         close_harness(harness)

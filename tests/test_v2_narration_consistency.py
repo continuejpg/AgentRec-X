@@ -365,7 +365,10 @@ def test_other_modes_keep_the_accepted_narration(tmp_path: Path, configured: Non
         assert llm.json()["recommendations"]
         assert any(marker in llm.json()["message"] for marker in _OLD_NARRATION_MARKERS)
 
-        # legacy Agent Recommend: returns the agent response itself, no chat projection at all.
+        # The request-declared control-plane endpoint is not the old AgentGraph projection:
+        # it returns the loop's own final-list narration and the current AgentRecommendationView.
+        # The legacy chat modes above keep their accepted narration; this endpoint intentionally
+        # follows the control-plane contract.
         session = harness.create_session()["session_id"]
         agent_response = harness.client.post(
             "/v1/demo/agent/recommend",
@@ -375,8 +378,8 @@ def test_other_modes_keep_the_accepted_narration(tmp_path: Path, configured: Non
         assert agent_response.status_code == 200, agent_response.text
         body = agent_response.json()
         assert body["recommendations"]
-        assert any(marker in body["message"] for marker in _OLD_NARRATION_MARKERS)
-        assert all("reason" not in card for card in body["recommendations"])
+        assert body["message"].startswith("Final recommendation list")
+        assert all("reason" in card and card["reason"] is None for card in body["recommendations"])
     finally:
         close_harness(harness)
 
