@@ -257,9 +257,14 @@ class DemoSourcePlanPolicy:
         A source counts as served once the run holds grounded candidates and this is the only
         source in the plan; with several planned sources the fields in each proposal
         (``source`` for ``SELECT_SOURCE``, the query for ``SEARCH_CATALOG``) differ per source,
-        so the plan advances by position.  Both paths are bounded by the plan length.
+        so the plan advances by position.  Both paths are bounded by the plan length.  A
+        single-source plan may retry an ungrounded source within the controller budget; a
+        multi-source plan advances to the next source so one failed source does not block the
+        fallback source.
         """
-        if source in self._served:
+        if source in self._served and (
+            len(self._plan) > 1 or context.candidate_state.grounded
+        ):
             return None
         if action is ActionKind.SEARCH_CATALOG:
             self._served.add(source)

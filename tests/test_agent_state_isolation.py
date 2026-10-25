@@ -179,7 +179,9 @@ def test_a_second_request_reports_only_its_own_grounded_candidates() -> None:
 def test_a_failed_run_does_not_change_the_next_run() -> None:
     """A failed run leaves nothing behind: the next identical run is a normal successful run."""
     service, engine = _build()
-    payload = _payload("history", "catalog_search")
+    # A single-source plan is the failure contract: in a multi-source plan, a failed history
+    # source is allowed to fall through to the next source, so it is not a failed run.
+    payload = _payload("history")
     healthy = service.run(payload)
 
     engine.error = RuntimeError("engine exploded")
@@ -349,7 +351,9 @@ def test_budgets_still_bound_a_run_and_the_terminal_state_stays_truthful() -> No
     failing, engine = _build(limits=LoopLimits(max_steps=6, max_tool_calls=2, max_retries=0))
     engine.error = RuntimeError("engine exploded")
     try:
-        failed = failing.run(_payload("history", "catalog_search"))
+        # Single-source failure: a two-source plan may legitimately fall through to the
+        # catalogue source, which is a successful degraded run rather than this contract.
+        failed = failing.run(_payload("history"))
     finally:
         engine.error = None
     assert failed.terminal.succeeded is False
