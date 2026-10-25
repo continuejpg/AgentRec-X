@@ -209,7 +209,94 @@ refinement; older confirmed preferences remain tie-breakers.
 
 ---
 
-## 6. Defaults and optional components
+## 6. Control plane
+
+`LoopController` executes a bounded sequence of validated actions. The policy sees a
+`PolicyContext` (task state, observations, budgets) and returns an `ActionProposal`;
+`ActionValidator` checks the action name, arguments and candidate references before the
+controller calls a capability. The loop owns step/tool/retry budgets and a typed termination
+reason. The controller is composed per request; no run state survives into the next request.
+
+This is the control plane used by the shopping Agent. It is not an autonomous planner: the
+allowed action set and the candidate universe are fixed by trusted code.
+
+## 7. Candidate plane (Stage 2, IMPLEMENTED)
+
+`CandidatePlane` owns the registered candidate sources, the `CandidateLedger` and the
+grounded presentable set. Each source records provenance; the ledger is the run-local record
+of what was retrieved. The feasible-candidate projection is a **separate** view over the
+candidate/constraint state.
+
+```text
+CandidateLedger != FeasibleCandidateView
+```
+
+The ledger records retrieval provenance and candidate identity; the feasible view records
+which candidates satisfy the evaluated constraints. `provenance is preserved; eligibility is constrained.`
+Neither view can invent an identity or a score.
+
+### Not implemented (documented, not claimed)
+
+The candidate plane is not unrestricted web search, a vector database, or a source that the
+model may add at will. The policy can select only from registered sources, within its budget.
+
+## 8. Interaction and personalization plane (Stage 3, IMPLEMENTED)
+
+`ShoppingIntent` separates hard constraints from soft preferences; conflicts produce a
+structured clarification. The task state owns turn-scoped facts, while explicit preference
+memory remains a separate user_key-scoped store. A clarification is a suspension: the task
+resumes only through the matching pending id and input.
+
+Task preferences are not long-term memory. They are applied after hard filtering and remain
+visible in the response intent and final reasons.
+
+## 9. Reasoning plane (Stage 4, IMPLEMENTED)
+
+The reasoning plane adds bounded product inspection/comparison through
+`ProductResearchTool`, observation construction, grounding checks, and research/replan
+budgets. A research result is an observation over trusted catalogue records, not a model
+claim. Tool and research failures are recorded and may produce a clarification or a
+degraded terminal state; they are not silently converted into facts.
+
+## 10. Model-driven policy (Phase 1, IMPLEMENTED)
+
+When configured, an LLM policy may return a typed proposal containing a route and/or
+supported preference actions. The proposal schema forbids extra fields. `ActionValidator`
+checks the proposal before any capability runs; the model cannot write a `parent_asin`,
+score, evidence record, final rank or memory result.
+
+### Not implemented (documented, not claimed)
+
+The model is not the source of candidate identity or ranking, and no provider call is part of
+the deterministic default. `constraint narrowing` remains trusted code, not a model reasoning
+step.
+
+## 11. Hard-constraint enforcement and the feasible candidate view (Phase 2, IMPLEMENTED)
+
+Hard constraints (price, weight, category, brand and explicit task requirements) are
+evaluated before soft preferences. The three evidence states are:
+
+* `MATCH` — the catalogue record satisfies the requirement;
+* `VIOLATION` — it explicitly fails;
+* `UNKNOWN` — the record cannot prove the requirement.
+
+Unknown or violated candidates are not presented as if the constraint passed. Soft
+preferences only reorder the survivors; they never widen the feasible set.
+
+## 12. Evaluation planes (Stage 6, IMPLEMENTED)
+
+The evaluation package separates:
+
+* recommendation ranking metrics (shared evaluator, temporal split and masking);
+* agent/control-plane diagnostics (trajectory, tool calls, grounding and failure attribution);
+* constructed scenario checks (constraint adherence, recovery, preference behavior).
+
+An agent metric is not an NDCG quality claim. Evaluation outputs are separate from serving
+policy and do not feed back into a live request.
+
+---
+
+## 13. Defaults and optional components
 
 | Component | Default | How it is enabled | Status |
 | --- | --- | --- | --- |
@@ -227,7 +314,7 @@ default demo. The optional LLM Agent mode is a proposal layer only.
 
 ---
 
-## 7. Evaluation boundaries
+## 14. Evaluation boundaries
 
 | Layer | Entry points | What it answers |
 | --- | --- | --- |
@@ -246,7 +333,7 @@ are not committed.
 
 ---
 
-## 8. Trust boundaries
+## 15. Trust boundaries
 
 ```text
 [ UNTRUSTED / CONVERSATIONAL ]        may influence:
@@ -271,7 +358,7 @@ stable error; it never becomes a partial mutation or a deterministic-looking ans
 
 ---
 
-## 9. Failure behaviour
+## 16. Failure behaviour
 
 * **Model/engine unavailable:** `/health` reports `model_loaded=false` or a fallback reason;
   recommendation endpoints return a typed error.
@@ -291,7 +378,7 @@ stable error; it never becomes a partial mutation or a deterministic-looking ans
 
 ---
 
-## 10. Determinism and reproducibility
+## 17. Determinism and reproducibility
 
 * Temporal leave-two-out; no random split.
 * `PAD=0`; canonical `parent_asin` identity; seen-item masking.
@@ -304,7 +391,7 @@ stable error; it never becomes a partial mutation or a deterministic-looking ans
 
 ---
 
-## 11. Directory map
+## 18. Directory map
 
 ```text
 recommendation/
@@ -340,7 +427,7 @@ documentation index is [`docs/README.md`](README.md); the historical architectur
 
 ---
 
-## 12. Known limitations
+## 19. Known limitations
 
 * Offline evaluation only; no live inventory, pricing, cart, CTR/CVR or online A/B claims.
 * No preference-conditioned relevance labels; no satisfaction or user-quality claim.
