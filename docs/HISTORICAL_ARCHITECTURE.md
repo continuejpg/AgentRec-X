@@ -1,4 +1,15 @@
-# AgentRec-X — Architecture
+# AgentRec-X — Historical Architecture (superseded)
+
+> **Status: HISTORICAL.** This document describes the architecture at the point it was
+> frozen. It is retained because it contains the milestone-by-milestone reasoning and the
+> evidence boundaries that shaped the current system. It is **not** a description of the
+> current serving or shopping-agent path. For the current architecture, see
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
+>
+> Known superseded statements include: “one candidate generator on the serving path”
+> (current Serving V1 has three sources), “Two-Tower is research-only” (Two-Tower is a
+> Serving V1 source), and “two orchestration stacks only” (the shopping agent now has a
+> dedicated `DemoAgentService` composition over `LoopController`).
 
 This document explains **what each part of the system owns and where its boundaries are**.
 It is deliberately not API-reference documentation: per-package READMEs next to the code

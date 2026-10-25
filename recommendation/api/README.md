@@ -20,8 +20,10 @@ no authentication, database or user accounts.
 
 **Milestone 11 addition.** The same FastAPI application can additionally serve the
 multi-turn web demo (`/v1/demo/*`, opt-in via `create_app(..., enable_demo=True)`, which is
-how the module-level `app` is built). The demo endpoints delegate to the accepted
-`AgentGraph` through [`../demo/`](../demo/) and are registered by
+how the module-level `app` is built). The `/chat` endpoint delegates to the accepted
+`AgentGraph`; `/v1/demo/sessions/{session_id}/agent/shopping` and the stateless
+`/v1/demo/agent/recommend` delegate to `DemoAgentService` + `LoopController`. Both live under
+[`../demo/`](../demo/) and are registered by
 [`demo_routes.py`](demo_routes.py); the three Milestone 6 endpoints above keep their exact
 paths, schemas and semantics and are never routed through the agent. See
 [`../demo/README.md`](../demo/README.md).

@@ -1,4 +1,10 @@
-# Multi-turn web demo (Milestone 11)
+# Multi-turn web demo (chat + shopping paths)
+
+> **Status: CURRENT.** The browser/session/API surface is current. The diagram and detailed
+> `ChatResponse` contract below describe the `/chat` **AgentGraph** path; the richer
+> `/v1/demo/sessions/{session_id}/agent/shopping` endpoint uses `DemoAgentService` +
+> `LoopController` + `CandidatePlane` and returns `AgentRecommendResponse`. See
+> [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md) for the current end-to-end shopping flow.
 
 A browser-usable, multi-turn shopping-agent demo over the **already accepted** backend.
 Milestone 11 is a productization/integration milestone: it adds a web layer, a session

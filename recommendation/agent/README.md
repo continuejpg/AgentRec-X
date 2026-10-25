@@ -1,4 +1,10 @@
-# Minimal LangGraph Agent (Milestones 7B-10D)
+# Minimal LangGraph Agent (base / historical graph)
+
+> **Status: BASE COMPONENT.** This package documents the original bounded LangGraph graph used by
+> `POST /v1/demo/sessions/{session_id}/chat`. The richer multi-turn shopping Agent lives in
+> [`../demo/`](../demo/) (`DemoAgentService` + `LoopController` + `CandidatePlane`) and is described
+> in [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md). This README's “not a shopping assistant”
+> statement describes only this base graph, not the current shopping endpoint.
 
 A deliberately small LangGraph workflow that proves the orchestration contract
 around the already accepted Milestone 7A Recommendation Tool, and composes the

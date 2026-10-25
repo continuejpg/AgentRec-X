@@ -1,4 +1,9 @@
-# AgentRec-X — 纯文字架构图
+# AgentRec-X — Historical Text Architecture Diagrams
+
+> **Status: HISTORICAL.** These diagrams were captured after commit `b14398c` and are retained
+> for chronology. Several diagrams say “SASRec only” or “Two-Tower research only”; both are
+> superseded by current Serving V1 (SASRec + Two-Tower + catalogue lexical, fused by RRF).
+> Use [`ARCHITECTURE.md`](ARCHITECTURE.md) for the current shape.
 
 本文件是 AgentRec-X 的**纯文字（ASCII / text-only）架构图集**：没有图片、没有 Mermaid、没有外部
 渲染依赖，只需要等宽字体。
@@ -11,7 +16,7 @@
 [SHARED]         两条轨道真正共用的东西（数据、协议、评测器）
 ```
 
-权威描述顺序仍然是：代码 → [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) 的编号章节 → 本文件。
+权威描述顺序仍然是：代码 → [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) → 本文件。
 本文件写于检视提交 `b14398c` 之后；状态与数值取自 [`docs/PROJECT_STATE.md`](PROJECT_STATE.md)、
 [`docs/M4_RESULT.md`](M4_RESULT.md) 与 [`docs/M4_EXECUTION_MANIFEST.md`](M4_EXECUTION_MANIFEST.md)。
 
