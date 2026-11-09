@@ -1,0 +1,58 @@
+P17 SOURCE DIFF
+================================================================================
+Milestone: official MCP Python SDK v2 local stdio server + independent MCP client.
+No new Agent runtime; no training; no BGE rebuild; no Reserved Test; no remote HTTP; no commit.
+
+NEW SOURCE / TEST FILES
+recommendation/mcp/__init__.py
+  bytes=46 sha256=69040eeab3a4d5318d84ea3b6eb8298a85cb5a2952c0faad06fda8406b2e78b7
+recommendation/mcp/server.py
+  bytes=19856 sha256=8ce766d52c3f6d9ea6c1fc83c73e7672499901fd44f6834cf47d1fbae19f25c8
+experiments/p17/__init__.py
+  bytes=43 sha256=24e032b331071f0abb27c9dd39b0238de581e983627ce5c13cbfd0d6fe5538ad
+experiments/p17/mcp_client_e2e.py
+  bytes=10569 sha256=c86b1fda22e75f7e8bc78dc677f350e7d5efe4bae47c34e766eb0795ff317d9c
+tests/test_p17_mcp.py
+  bytes=6941 sha256=03894d2f754fa678228a540c466c01fc7e7aeca9716d9b8d8b6d65408354ab1f
+requirements-mcp.txt
+  bytes=275 sha256=5ec3b4871f9b30dd5e668ed2a28a38efd24655d5cc089db1848a61983fa42023
+
+MODIFIED FILES
+recommendation/skills/clarification.py
+  bytes=5477 sha256=f451467482c5896934ca2427ca6052137e63500857d20cac1d71d77739988f8e
+
+NEW REPORT
+P17_REPORT.md
+  bytes=10159 sha256=394d03eca67f676b3f21ad0725abc76b9be3875b3533731b798833683a9aae71
+
+MCP / E2E / METRICS ARTIFACTS (git-ignored)
+runs/p17/sdk_manifest.json
+  bytes=1083 sha256=fb423f746030b4d13d12ff2d53ddc4a549eae629ed4b1e1c6dbcd8e1c10be234
+runs/p17/tool_schemas.json
+  bytes=4692 sha256=b5a63d927e34ad1cf7534d7167e679e1a767b096fa2eac34b0969d975e23133a
+runs/p17/client_transcript.json
+  bytes=250526 sha256=7ce874fe080d5967600f91f4a56b87d45f62fcee2ba5a0c87cce8feb0f039519
+runs/p17/metrics.json
+  bytes=2351 sha256=78701ada66fa5645545cebd77af1d8f30062eeac7cdea5d0dbfcf774b43922fe
+runs/p17/decision.json
+  bytes=1830 sha256=22e2945a16238a9396777644650312fb48c28f4ca63adbb34264ba26dc1bfec3
+
+MCP INTEGRATION
+- Official mcp==2.3.0, MCPServer (not v1 FastMCP), protocol 2026-07-28, local stdio.
+- Thin adapters over existing Catalogue/Search, P15 Evidence, P16 Skills, Rule Planner+Executor, M9.
+- Seven tools: search_products, get_product_info, recommend_products, get_active_preferences,
+  compare_products, request_preference_clarification, submit_clarification_reply.
+- No caller user_id; server startup binds a trusted local user; writes disabled by default;
+  explicit test confirmation required; cross-user/expired/unconfirmed refused.
+- Remote Streamable HTTP and unauthenticated Memory exposure deliberately not implemented.
+
+E2E
+- Independent official mcp.Client over stdio: 2 servers, 7/7 tools discovered, 26 calls.
+- 16 successful calls, 10 expected errors; real BGE/BM25 search, Product Info evidence,
+  real recommendation/Gate, P16 comparison/clarification, M9 update and idempotency.
+- Server startup 35.8 s; discovery 2.33 ms; BGE first search 18.2 s (CPU); recommendation 148 ms.
+- No GPU/Qwen service was connected or needed for P17.
+
+DECISION
+- MCP_PROTOCOL PASS; TOOL_DISCOVERY PASS; SEARCH_RECOMMEND_TOOLS PASS; SKILLS_EXPOSURE PASS;
+  MEMORY_ACCESS_CONTROL LIMITED; END_TO_END_CLIENT PASS; LEGACY_REGRESSION PASS; P17 GO.

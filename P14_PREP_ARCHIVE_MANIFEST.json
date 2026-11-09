@@ -1,0 +1,372 @@
+{
+  "schema_version": "agentrecx.p14.archive_manifest.v1",
+  "created_at": "2026-11-08T15:39:47+08:00",
+  "git_head": "4dec6d2081902f1e89265a06ea4ded595087dd43",
+  "repo_root": ".",
+  "groups": [
+    {
+      "group": "v2_pipeline_gates",
+      "phase": "S2/S4/S6 (V2 E-04 gates, Gate C-1/C-2, TIGER canonical pre-steps)",
+      "reason": "Historical V2 gate/acceptance runners and TIGER step24/25 + t03lite one-off scripts. Superseded by frozen reports and by the P14-0 research boundary; not imported by current code or tests.",
+      "archive_path": "archive/legacy_experiments/v2_pipeline_gates.tar.gz",
+      "archive_sha256": "14ee1b1387a9cd58377d266d9f355f20e7ecc5c9bd339b4ecd8c126e3812846f",
+      "file_count": 14,
+      "files": [
+        {
+          "original_path": "experiments/e04a_provider_smoke.py",
+          "sha256": "e6e1fa8fe3ada9b12f23d98c8b2d80a7b897aff50c506c3b8babe019538986b1",
+          "size": 25023
+        },
+        {
+          "original_path": "experiments/e04b_gate_b1_sasrec.py",
+          "sha256": "8c401ebb2b94450362f9ea18aa972bd6575f69db96c828e69a2638e0c250d594",
+          "size": 11544
+        },
+        {
+          "original_path": "experiments/e04b_gate_b2_twotower.py",
+          "sha256": "145230f74421aab5376556a7e2c45a76e7c4e8609f5eb1f2452756292383b1c7",
+          "size": 14812
+        },
+        {
+          "original_path": "experiments/e04b_gate_b3_tiger.py",
+          "sha256": "c06ddf67afb26fb4098ce23726c6b0be3ff0e6f4e13b953365d25330df8c1be6",
+          "size": 13210
+        },
+        {
+          "original_path": "experiments/e04b_gate_b3_final_diag.py",
+          "sha256": "95a38f09db8be2505ffb1e32794077fb1a967a9b7e47ec3202e7b8ae7f56a68d",
+          "size": 9407
+        },
+        {
+          "original_path": "experiments/gate_c12_backend_acceptance.py",
+          "sha256": "febf55668c0ee285d779bc7a69da67a995d173751572a6c7c597623b4ce084ed",
+          "size": 11990
+        },
+        {
+          "original_path": "experiments/gate_c12_service_validation.py",
+          "sha256": "eac65239837a1fcd1c60eaa1a9a6ef3f6e498fd49eff010f87083284d3d2441f",
+          "size": 17380
+        },
+        {
+          "original_path": "experiments/audit_tiger_sid.py",
+          "sha256": "1f02d3d75f30a3fda9fb30d7f13edd8841c3c4a963b0613727b296ffccc1ab5b",
+          "size": 17068
+        },
+        {
+          "original_path": "experiments/gate_d_tiger_training.py",
+          "sha256": "91e966b203e9bc412b3b45b8688b419af12cc9b564de6872afbf7ea719ff8bbb",
+          "size": 17012
+        },
+        {
+          "original_path": "experiments/smoke_tiger_step24.py",
+          "sha256": "0425a4e80d2d6d3292e33c27b0030be9b330319ecdf8f42b3f2ffd5def0dece1",
+          "size": 15053
+        },
+        {
+          "original_path": "experiments/smoke_tiger_step25.py",
+          "sha256": "45c845dc956fba421cdd42373b03b7a71cd87672d66d5a809771f35819dd704d",
+          "size": 28874
+        },
+        {
+          "original_path": "experiments/t03lite_tiger_increment.py",
+          "sha256": "4d49730170d4415c993df2d65765d592c0e7b7036b66209ddbc799532a0a196b",
+          "size": 20613
+        },
+        {
+          "original_path": "experiments/t03lite_tiger_increment_verify.py",
+          "sha256": "2bc5ba3580e5385153e75ba4bb87d9c5c242db7126a0fe2576ab6a8676bf9efa",
+          "size": 17442
+        },
+        {
+          "original_path": "experiments/b1_fusion_paired_evidence.py",
+          "sha256": "b9cc8d3d8bd4cd8170c2eba53310b4a5570c4b3f315ebef78c531b5b25e3ae19",
+          "size": 33136
+        }
+      ]
+    },
+    {
+      "group": "tiger_canonical_step26_28",
+      "phase": "S4 TIGER canonical remediation (Step 2.6 / 2.7 / 2.8)",
+      "reason": "Canonical TIGER benchmark/report runners that produced the frozen docs/reports artifacts. Preserved as recoverable archive; no current code path imports them (step27_tiger_engines.py stays in place because tests import it).",
+      "archive_path": "archive/legacy_experiments/tiger_canonical_step26_28.tar.gz",
+      "archive_sha256": "10750556452d39b51c965e9b906eeb8b1c43206e8a9da2e215cc9db83420894e",
+      "file_count": 10,
+      "files": [
+        {
+          "original_path": "experiments/step26_final_report.py",
+          "sha256": "ae143a6748aa9e0ba56857ce8c4a6dadf05eb3979e9e00bb77c2774d662c5b60",
+          "size": 21249
+        },
+        {
+          "original_path": "experiments/step26_gates.py",
+          "sha256": "136a453d68d00001790960c62b8199b6d4228e7e8e5904c5d228548bdec28edc",
+          "size": 19649
+        },
+        {
+          "original_path": "experiments/step26_h7_certificate.py",
+          "sha256": "9180e80ae1e6ac3df819ec45c1d298626ca893c8672d9439b216341c219afc04",
+          "size": 7900
+        },
+        {
+          "original_path": "experiments/step26_report.py",
+          "sha256": "6c35d5d7d38633455c7dc955174510b71a5f2592978cc2db3d3cfc961ee638fc",
+          "size": 19549
+        },
+        {
+          "original_path": "experiments/step26_tiger_benchmark.py",
+          "sha256": "8eecd3da91b57c3c49d3d9e7bee849ba9a96d01b05e13fbb22c3939a1c2c67f8",
+          "size": 5916
+        },
+        {
+          "original_path": "experiments/step26_tiger_hits.py",
+          "sha256": "e053158da26c099cff8f6328afca2cdbfd3b3b94cefec7faea92ae37599578d3",
+          "size": 6409
+        },
+        {
+          "original_path": "experiments/step27_qualification.py",
+          "sha256": "fdb66f1a62b2c50c705d64cc3a3fb3f0c143921e8c7711bc56748ab8ca2e4668",
+          "size": 21214
+        },
+        {
+          "original_path": "experiments/step28_fusion_experiment.py",
+          "sha256": "be2553fceb8bce5914df06d4113d8136335820ac315c9c96284fe1ccc19d277a",
+          "size": 12313
+        },
+        {
+          "original_path": "experiments/step28b_depth_sensitivity.py",
+          "sha256": "aeb3b1a5931440d296932150fbe4147bb2e0843299f05f13cd83ec13c28ab5b9",
+          "size": 11729
+        },
+        {
+          "original_path": "experiments/tiger_retrieval_arm.py",
+          "sha256": "4d81078ca72ab9b4973ff8f96b410633be8e382c7bf6ce0dc63f58d4e254716f",
+          "size": 13952
+        }
+      ]
+    },
+    {
+      "group": "learned_ranker_v1",
+      "phase": "S7 / R-LR (LightGBM LambdaRank V1)",
+      "reason": "Learned-ranker exploration scripts. The serving code, tests and frozen reports stay; the training/materialization/parity scripts are historical and are not imported by current code or tests.",
+      "archive_path": "archive/legacy_experiments/learned_ranker_v1.tar.gz",
+      "archive_sha256": "462cf0826ffa2bc1815c459b642647e237fc56659c11c83c4071b1e6de0777f1",
+      "file_count": 6,
+      "files": [
+        {
+          "original_path": "experiments/r_lr01_materialize.py",
+          "sha256": "806a3da859b3a901126dc12c7f1be8d6f15df93b285c656a7459a1bb4dfa606f",
+          "size": 10657
+        },
+        {
+          "original_path": "experiments/r_lr02_train.py",
+          "sha256": "66593e9516fc207b055af1d34638f99c64ccf06ee56fdf2ba694fd454816f7bf",
+          "size": 7955
+        },
+        {
+          "original_path": "experiments/r_lr02b_train.py",
+          "sha256": "842bb049623c12e44d0cc589470734d97245c0d6738d8f9debf328880830d9a7",
+          "size": 10802
+        },
+        {
+          "original_path": "experiments/r_lr05_baseline_rootcause.py",
+          "sha256": "4e71608f49d948d06d4d415fb4ac2126ae8ac4f21bab3f4878b81188ed9e9771",
+          "size": 4155
+        },
+        {
+          "original_path": "experiments/r_lr05_feature_parity.py",
+          "sha256": "26902c948ee94b39c696292fe020b3d454400fd698fb84da8666b3227de8fd3e",
+          "size": 6287
+        },
+        {
+          "original_path": "experiments/r_lr05_independent_eval.py",
+          "sha256": "7804aa1dae59c928a4cf31b9f3d669045e41216b94e0e1d1a4a43d2078767006",
+          "size": 23031
+        }
+      ]
+    },
+    {
+      "group": "p2b_agent_diagnostics",
+      "phase": "P2B/P2C (agent source-limit ablation diagnostics)",
+      "reason": "Historical P2B diagnostics/audits. The P2B metric/proxy-query test targets stay in place (tests import them); the three standalone runners, credential audit and latency probe are archived.",
+      "archive_path": "archive/legacy_experiments/p2b_agent_diagnostics.tar.gz",
+      "archive_sha256": "3d941cf84b13813661c6f088773c34665073d76cc61bfa4fa0454877bcb17c0a",
+      "file_count": 6,
+      "files": [
+        {
+          "original_path": "experiments/p2b4_source_diagnosis.py",
+          "sha256": "c4c25c2c39782901fe7355762d205c22dce2ed7370b5f2b93e34e9d854cf6192",
+          "size": 8380
+        },
+        {
+          "original_path": "experiments/p2b4_three_source_comparison.py",
+          "sha256": "8b7b9d7807a8a1089d46ebf6093d7b87fc2ad10225f577908d704874e2ad5fbf",
+          "size": 23261
+        },
+        {
+          "original_path": "experiments/p2b6_query_scale_validation.py",
+          "sha256": "653aa6e90890a2833a4d74423f29cae4d7df8a122c68fcdda986f297f5de989e",
+          "size": 17031
+        },
+        {
+          "original_path": "experiments/credential_audit.py",
+          "sha256": "7d786e67491dd3945e8a63d9c802ba3d03fd83ed1175f0fbeb34f5558e8e1aa5",
+          "size": 7671
+        },
+        {
+          "original_path": "experiments/serving_fusion_latency.py",
+          "sha256": "94eac43f339fad8a163ef2a85669dfaf62da9ab2dd7e104d6780b590f96d4fe5",
+          "size": 5001
+        },
+        {
+          "original_path": "experiments/agent_evaluation_smoke.py",
+          "sha256": "d3271ae63c97eb9c381583184009d8a166e97b58b94b0e4cf80fdf2d3b6bb9a9",
+          "size": 12504
+        }
+      ]
+    },
+    {
+      "group": "m4_frozen_materialization",
+      "phase": "S5 M4 (frozen execution / materialization tooling)",
+      "reason": "M4 materialization helpers whose frozen outputs already live in runs/m4_evidence and docs/M4_*; no current code or test imports them after the keep-closure check.",
+      "archive_path": "archive/legacy_experiments/m4_frozen_materialization.tar.gz",
+      "archive_sha256": "ce35283f8f198da8cdaf49d766af57c2b8774965396d40358be8be71016fcc95",
+      "file_count": 7,
+      "files": [
+        {
+          "original_path": "experiments/m4_build_similar_index.py",
+          "sha256": "4c15a073605a6f41d49e6c6e0905d63d47abe5168fe032420d2f2d275fa3c913",
+          "size": 4291
+        },
+        {
+          "original_path": "experiments/m4_execution_manifest.py",
+          "sha256": "1bb9f33a9a693e7b7d7d5a5cbe9b05d0f6c001d1540fd767813fbb78cfa3842f",
+          "size": 19755
+        },
+        {
+          "original_path": "experiments/m4_materialize_heads.py",
+          "sha256": "053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b",
+          "size": 26449
+        },
+        {
+          "original_path": "experiments/m4_provider_probe.py",
+          "sha256": "66c2af14377f5a4e2d992cb25c3d034015c917367f900bcd2f94b1198369333e",
+          "size": 8061
+        },
+        {
+          "original_path": "experiments/m4_similar_neighbours.py",
+          "sha256": "da60c8fe2b00ae2d028b185959ac3b65b91a502bacc8f73bdd4e76dcb5a4a0a7",
+          "size": 5884
+        },
+        {
+          "original_path": "experiments/m4_twotower_batch.py",
+          "sha256": "1b0ba202ccaec426d510df6b11e7902508a698bbaf21127f3e50c6673e38b5f7",
+          "size": 7726
+        },
+        {
+          "original_path": "experiments/m4_twotower_batch_bench.py",
+          "sha256": "55dbc9c24758bfe64c5b0f711319e157256b7924058c74fe276e3a3c87cd1c62",
+          "size": 12491
+        }
+      ]
+    },
+    {
+      "group": "root_scratch_p7p8",
+      "phase": "P7/P8 local runs (transient scratch artifacts)",
+      "reason": "Runtime stdout logs written to the repo root by P7/P8 planner comparisons, plus two one-off debug scripts. None is referenced by any report, doc, test or config; kept only as a recoverable archive.",
+      "archive_path": "archive/legacy_experiments/root_scratch_p7p8.tar.gz",
+      "archive_sha256": "8e2f94237fd6ebeb84c9c7848979a4ecd42d1d24b6a72171bd9288fca428ca72",
+      "file_count": 17,
+      "files": [
+        {
+          "original_path": "p7b_base_budget_retry.log",
+          "sha256": "9c7bbb860eae7a33f3c4fcdaa1ee2992a7cc644ba6dbab00d4f4be5f01482e9d",
+          "size": 886
+        },
+        {
+          "original_path": "p7b_base_full.log",
+          "sha256": "a0340f63b2b5102b0dad5ca94dd702c7f5b7ae7a6628c1c1050866b31a8ea6a9",
+          "size": 2282
+        },
+        {
+          "original_path": "p7b_base_full2.log",
+          "sha256": "8ade412cf293e6447ee8dbbe779715ad60901459165455e3adc121e155b7b61f",
+          "size": 1442
+        },
+        {
+          "original_path": "p7b_base_full_fixed.log",
+          "sha256": "356c559780b70253300461bc288a32e62cd24874c57844d83edfce6082f38a33",
+          "size": 1384
+        },
+        {
+          "original_path": "p7b_base_mini.log",
+          "sha256": "dad1598f312011f02baf55b24d344c641de43fed27ceb20324fa8d709855c1ff",
+          "size": 886
+        },
+        {
+          "original_path": "p7b_base_pref_check.log",
+          "sha256": "8ff5a60f585695ac7c6c4aaf54a83567a23c4878b798f9ba8108948422c0f664",
+          "size": 896
+        },
+        {
+          "original_path": "p7b_sft_full.log",
+          "sha256": "3b423f9022f5abe60dc1695649a920462807cdef4b03e7ca3b8108af0316d83a",
+          "size": 1504
+        },
+        {
+          "original_path": "p7b_sft_full_fixed.log",
+          "sha256": "055834e84791729cba1c9b15519d21c7f35174ae8d96d5b77bd38a5e2a714463",
+          "size": 1504
+        },
+        {
+          "original_path": "p7b_sft_mini.log",
+          "sha256": "1aff29f875c2ffd0b8c17f419f553b61679cb57c58e50f3715d51f6c4ef6e8d3",
+          "size": 884
+        },
+        {
+          "original_path": "p7b_sft_pref_check.log",
+          "sha256": "8de765e47fc4607a40be1eac041ebb11c2935444860ff649795d9427c51685e7",
+          "size": 900
+        },
+        {
+          "original_path": "p7d_rule_final.log",
+          "sha256": "51520e27a31cc810f2a311f7b6834182ad1f4a6612a1a107d7a0579716c1fd61",
+          "size": 1012
+        },
+        {
+          "original_path": "p7e_base.log",
+          "sha256": "8bbe4b219f35249e2c4cdd2207924f074761241d50e7fbae83a132a9d047691d",
+          "size": 1412
+        },
+        {
+          "original_path": "p7e_rule.log",
+          "sha256": "e42de125c237ce8a7bcc69e9cc6e6c4c41018f8276f9a16fc036e71225ce5b08",
+          "size": 1482
+        },
+        {
+          "original_path": "p7e_sft.log",
+          "sha256": "2a90524b0ab7be97720d3ee2a496ad039dc4eb7ba9739883f7f44285c92f8429",
+          "size": 1480
+        },
+        {
+          "original_path": "p8a_run.log",
+          "sha256": "eb5398f75a78d3abe374093cc057a88775e2ddee3278dfd8e6c5828fa8dacabc",
+          "size": 9424
+        },
+        {
+          "original_path": "inspect_p6_case.py",
+          "sha256": "a0b9b3f9cccbb0dccd8ff5874eb47870235b2d71765a4d30381731b0f6307a99",
+          "size": 292
+        },
+        {
+          "original_path": "verify_p8d.py",
+          "sha256": "821dcdec37c16f38908adf1b8fc8e6c67d54577a6bf5b23881d6b02b3d3b6f46",
+          "size": 984
+        }
+      ]
+    }
+  ],
+  "restore": {
+    "command": "tar -xzf archive/legacy_experiments/<group>.tar.gz -C .",
+    "verification": "sha256 manifest lists above; archive_sha256 recorded per group"
+  }
+}

@@ -1,0 +1,50 @@
+P13-R source/data diff (curated)
+================================
+
+New isolated code:
++ experiments/p13r/prepare_data.py
+  - Electronics MemRerank data + C4 query text + official target timestamp CSV;
+  - independent C4 sampled Electronics catalogue; no old Sports 5-core item2id;
+  - target history strictly before target timestamp; target review never a history feature;
+  - target/history text-vs-identity coverage reported.
++ experiments/p13r/clean_split.py
+  - deterministic removal of dev/test rows whose user or target overlaps an earlier split;
+  - train unchanged; final train/dev/test overlap = 0.
++ experiments/p13r/retrieval.py
+  - BM25 top100 + BGE-base top100;
+  - fixed BM25 50 + BGE 50 Top-100 pool, dedup, deterministic fill;
+  - history category/text/time features for diagnostic only.
++ experiments/p13r/diagnose.py
+  - observed-positive hit/MRR/NDCG proxy;
+  - query-only vs fixed Query+History rank comparison;
+  - test split never retrieved.
++ tests/test_p13r_pipeline.py
+  - history-before-target, target-not-history, split isolation, test-not-retrieved invariants.
+
+New artifacts (not committed):
++ data/p13r/electronics/manifest.json
++ data/p13r/electronics/tasks.jsonl
++ data/p13r/electronics/eval_tasks.jsonl
++ data/p13r/electronics/catalog_meta.jsonl
++ data/p13r/electronics/tasks_raw.jsonl
++ runs/p13r/retrieval/{queries.jsonl,summary.json}
++ runs/p13r/diagnosis/summary.json
++ P13R_REPORT.md
++ P13R_SOURCE_DIFF.txt
+
+Preserved P13 negative results:
+- P13_REPORT.md / P13_SOURCE_DIFF.txt / data/p13 / runs/p13 unchanged.
+
+Unchanged:
+- default Serving V1 and Source Policy;
+- SASRec / Two-Tower / BGE parameters;
+- M5 core semantics, Planner Contract, CandidateLedger, Role Gate, Eligibility;
+- P11/P12 original tasks and evaluation artifacts;
+- frozen P6/P8/P9 Holdout.
+
+External/downloaded artifacts outside source control:
+- C4 sampled metadata, MemRerank category files, timestamp benchmark CSVs,
+  BGE index/vectors and raw review data on the remote host.
+
+No new Ranker training, no LambdaMART in P13-R, no Planner/SFT-v1, no reserved-test run,
+no old Holdout run, no commit/push/deploy.

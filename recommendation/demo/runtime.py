@@ -76,6 +76,8 @@ from .control_plane import (
 from .decision import DEFAULT_DEMO_K, DemoDecisionModel
 from .profiles import DEFAULT_DEMO_PROFILE_COUNT, DemoProfile, build_demo_profiles
 from .sessions import DEFAULT_MAX_SESSIONS, DemoSessionManager
+from .operational_metrics import OperationalMetricsCollector
+from .checkpoint import DurableCheckpointStore
 
 __all__ = [
     "DEFAULT_DEMO_MEMORY_DB",
@@ -152,6 +154,10 @@ class DemoRuntime:
     reranker: PreferenceReranker
     profiles: Mapping[str, DemoProfile]
     sessions: DemoSessionManager
+    operational_metrics: OperationalMetricsCollector = field(
+        default_factory=OperationalMetricsCollector
+    )
+    checkpoint: Any = field(default=None, repr=False)
     decision_model_factory: Callable[[int], DecisionModel] = DemoDecisionModel
     metadata_artifact: Path | None = None
     memory_artifact: Path | None = None
@@ -173,6 +179,11 @@ class DemoRuntime:
     _graphs: dict[tuple[int, str], AgentGraph] = field(default_factory=dict, repr=False)
     _loops: dict[tuple[int, str], DemoLoopRunner] = field(default_factory=dict, repr=False)
     _agent_service: Any = field(default=None, repr=False)
+    #: The process-scoped M5.1 decision-state integration, composed together with the agent
+    #: service (one store, one manager) and shared by every shopping turn.  ``None`` until the
+    #: agent service is first needed, so a deployment that never serves an agent turn never
+    #: opens the decision-state database.
+    _state_integration: Any = field(default=None, repr=False)
     _llm_planner: Any = field(default=None, repr=False)
     #: The one structured-model client both policy-backed modes share.  Held separately from the
     #: planners built over it, because the tool-selection mode needs the client itself (provider
@@ -920,7 +931,25 @@ class DemoRuntime:
         with self._graph_lock:
             if self._agent_service is None:
                 from .agent_service import DemoAgentService
+                from .state_integration import (
+                    ShoppingStateIntegration,
+                    StateIntegrationError,
+                )
 
+                # M5.1: exactly one decision-state integration per process, composed next to
+                # the one agent service and handed to it.  Composition validates the mode and
+                # configuration only -- the SQLite store is opened lazily on the first
+                # integrated turn -- so a misconfigured reference is impossible while a
+                # per-request store failure still follows the mode-specific policy.  An
+                # invalid mode is refused here, not silently degraded to OFF.
+                if self._state_integration is None:
+                    try:
+                        self._state_integration = ShoppingStateIntegration.from_env()
+                    except StateIntegrationError as exc:
+                        raise DemoRuntimeError(
+                            "the decision-state configuration is invalid: "
+                            f"{exc.code}"
+                        ) from exc
                 # ``from_env`` is what applies the two explicit opt-ins
                 # (AGENTRECX_AGENT_SIMILAR_ITEMS, AGENTRECX_AGENT_POLICY).  Both default to
                 # off, so the composed service is offline unless the deployment asked
@@ -937,6 +966,8 @@ class DemoRuntime:
                     # explicit construction argument) decides whether an LLM-selected run may add
                     # one extra source.  The service never learns about models itself.
                     replanning=self._replanning,
+                    checkpoint=self.checkpoint,
+                    state_integration=self._state_integration,
                 )
             return self._agent_service
 
@@ -950,6 +981,20 @@ class DemoRuntime:
             for key in stale_loops:
                 self._loops.pop(key, None)
             return len(stale) + len(stale_loops)
+
+    def forget_task(self, task_id: str) -> None:
+        """Forget a reset session's task state in an already-composed Agent service.
+
+        The durable store is cleaned by ``DemoSessionManager.delete()``; this removes the
+        process-local pending/task dictionaries too, so an old service object cannot keep
+        serving state for a session the registry has already retired.
+        """
+        service = self._agent_service
+        if service is None:
+            return
+        forget = getattr(service, "forget_task", None)
+        if callable(forget):
+            forget(task_id)
 
     @property
     def compiled_graph_count(self) -> int:
@@ -999,6 +1044,19 @@ class DemoRuntime:
         closer = getattr(getattr(self.memory_service, "store", None), "close", None)
         if callable(closer):
             closer()
+        if self.checkpoint is not None:
+            self.checkpoint.close()
+        # M5.1: the decision-state store is owned by the integration, not by the agent
+        # service.  Closing it last (and clearing the reference) makes shutdown idempotent
+        # and leaves the agent service's lifetimes unchanged.
+        integration, self._state_integration = self._state_integration, None
+        if integration is not None:
+            state_closer = getattr(integration, "close", None)
+            if callable(state_closer):
+                try:
+                    state_closer()
+                except Exception:  # noqa: BLE001 - shutdown must not raise
+                    pass
 
     # -- composition ------------------------------------------------------- #
 
@@ -1018,6 +1076,7 @@ class DemoRuntime:
         clock: Callable[[], float] = time.time,
         memory_db: Path | None = None,
         control_plane: str | None = None,
+        checkpoint_db: Path | None = None,
     ) -> DemoRuntime:
         """Compose the demo runtime from ``AGENTRECX_*`` configuration.
 
@@ -1036,6 +1095,7 @@ class DemoRuntime:
             clock=clock,
             memory_db=memory_db,
             control_plane=control_plane,
+            checkpoint_db=checkpoint_db,
         )
 
 
@@ -1056,6 +1116,7 @@ def build_demo_runtime(
     control_plane: str | None = None,
     explanations: bool | None = None,
     replanning: bool | None = None,
+    checkpoint_db: Path | None = None,
 ) -> DemoRuntime:
     """Compose the demo runtime, constructing heavy objects once.
 
@@ -1112,6 +1173,21 @@ def build_demo_runtime(
 
     resolved_profiles = profiles if profiles is not None else build_demo_profiles(count=profile_count)
 
+    checkpoint_store = None
+    configured_checkpoint = os.environ.get("AGENTRECX_DURABLE_DB", "").strip()
+    checkpoint_path: Path | None = checkpoint_db
+    if checkpoint_path is None and configured_checkpoint:
+        checkpoint_path = Path(configured_checkpoint)
+    if checkpoint_path is None and resolved_db is not None:
+        memory_text = str(resolved_db)
+        if memory_text != ":memory:":
+            memory_path = Path(memory_text)
+            checkpoint_path = memory_path.with_name(
+                f"{memory_path.stem}.checkpoint.sqlite3"
+            )
+    if checkpoint_path is not None:
+        checkpoint_store = DurableCheckpointStore(checkpoint_path)
+
     return DemoRuntime(
         settings=settings,
         engine=resolved_engine,
@@ -1123,8 +1199,14 @@ def build_demo_runtime(
         reranker=PreferenceReranker(),
         profiles=resolved_profiles,
         sessions=DemoSessionManager(
-            resolved_profiles, max_sessions=max_sessions, ttl_seconds=ttl_seconds, clock=clock
+            resolved_profiles,
+            max_sessions=max_sessions,
+            ttl_seconds=ttl_seconds,
+            clock=clock,
+            checkpoint=checkpoint_store,
         ),
+        operational_metrics=OperationalMetricsCollector(),
+        checkpoint=checkpoint_store,
         decision_model_factory=decision_model_factory,
         metadata_artifact=artifact,
         memory_artifact=resolved_db,

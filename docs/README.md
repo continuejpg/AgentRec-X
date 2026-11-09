@@ -44,6 +44,11 @@
 | [SEMANTIC_ID.md](SEMANTIC_ID.md) | the frozen historical GenRec v0 / Semantic-ID baseline |
 | [TWOTOWER.md](TWOTOWER.md) | the Two-Tower study, complementarity and fusion controls |
 | [MODEL_EXPANSION_HANDOFF.md](MODEL_EXPANSION_HANDOFF.md) | the model-expansion handoff and its evidence boundaries |
+| [M5_UNIFIED_DECISION_STATE.md](M5_UNIFIED_DECISION_STATE.md) | the M5-MVP unified decision state, event store, belief transitions and projections; state infrastructure only, not on the serving path |
+| [M5_1_SHOPPING_LOOP_INTEGRATION.md](M5_1_SHOPPING_LOOP_INTEGRATION.md) | M5.1: opt-in OFF/SHADOW/APPLY_CONSTRAINTS integration of the state engine with the existing shopping Agent route |
+| [M5_2_INTERACTION_FEEDBACK_LOOP.md](M5_2_INTERACTION_FEEDBACK_LOOP.md) | M5.2: clarification feedback, correction/retraction, stable turn identity, trusted candidate/ranking snapshots and effective-constraint consistency |
+| [M6_1_RANKING_PROTOCOL.md](M6_1_RANKING_PROTOCOL.md) | M6.1: preregistered frozen paired ranking protocol (A0/A1/A2, contract and quality metrics, promotion criteria) |
+| [M6_1_BELIEF_AWARE_RANKING.md](M6_1_BELIEF_AWARE_RANKING.md) | M6.1: trusted candidate snapshot resolver, belief-aware feature builder, offline ranking arms and evaluation implementation |
 
 ## Historical
 

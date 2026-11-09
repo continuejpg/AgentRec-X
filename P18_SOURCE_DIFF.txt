@@ -1,0 +1,73 @@
+P18 SOURCE DIFF
+================================================================================
+Final integration, three CPU MCP demos, performance diagnosis, one-time reserved run, docs.
+No model training/finetuning, no BGE rebuild, no new Skill/Reranker, no second reserved run.
+
+NEW DOCS / SOURCE / TEST FILES
+PROJECT_ARCHITECTURE.md
+  bytes=2923 sha256=5e803dfcbd83ee2aa76937c52a6dc66deb6af908dce95ba5b5f68ebfd72463a0
+DEMO_GUIDE.md
+  bytes=3947 sha256=da5af54805391540a9697d9ec5942f1343cdfe25486bdbba2fdd7eceafa5af26
+EXPERIMENT_SUMMARY.md
+  bytes=3744 sha256=81accf5c6bc73ebcc144bcb203c4c2d6a6fd5b8eda869360f365773a201a2d92
+P18_FINAL_REPORT.md
+  bytes=7483 sha256=1c52c4dc6f74422c7625db8e45b53f52a80f9761e64ebd06613b9a0c77893ded
+experiments/p18/__init__.py
+  bytes=55 sha256=e524bb9908ea9f37a55b86f3358b99abc1d649345b58857d3f0bb38bb4f16d47
+experiments/p18/demos.py
+  bytes=7093 sha256=d8fa7203e88800ddf11f1c22a0cbb518901304506fd5e7053436cd228f7fe1e4
+experiments/p18/performance.py
+  bytes=2737 sha256=2b6b039c9126887641aa8c536ef41704d941c2ff0ea52474d80e7e2d9af77204
+experiments/p18/freeze.py
+  bytes=3065 sha256=6ba6ba3cbf2305bbc433e9ca60321ad61fe421d149245be3752679ae38b82c83
+experiments/p18/run_reserved.py
+  bytes=4583 sha256=759a2274873092b0b8bfc5845297741deaf07524a1656830333a819970095924
+tests/test_p18_final.py
+  bytes=5017 sha256=539bb2986e737792be358d1b8f10c42bab3e93af7daff981b6c41923d80b1b71
+
+MODIFIED FILES
+README.md
+  bytes=22251 sha256=4db2e1daac93e5a4a06375e5a1c056cac33d95e1d9f53fa9d0d444a0feac788f
+
+P18 / DEMO / FINAL ARTIFACTS (git-ignored)
+runs/p18/freeze_manifest.json
+  bytes=3480 sha256=7c9938ae24bab520d650d1eec5311bc62d1f2677faf3aaab6610a4f32581d57a
+runs/p18/demos/demo_transcript.json
+  bytes=178264 sha256=bd3bc9392db3c6f62d93c3d9dcb1cd294510475d7798a3edd2b5cbbd6217ea2d
+runs/p18/demos/search_and_recommend.json
+  bytes=38714 sha256=8363fa488bf6e5188867df653d5c340f128102344e0ab07b74a387b81cf36b1c
+runs/p18/demos/multi_product_comparison.json
+  bytes=77375 sha256=75ce3f6b63ef1b0beddeba120b53c8e7d3205a42c6f1d540a4465b8ae57f118e
+runs/p18/demos/clarification_and_memory.json
+  bytes=56527 sha256=112f1530eeb59e422ebfdf6c6a686140bafb13edd41ddadf86256a4fe045a495
+runs/p18/performance.json
+  bytes=1303 sha256=833d04aaf9b093f39559de698a6efceab525fcdb1b4d747cc306c75f227c47ea
+runs/p18/performance_components.json
+  bytes=670 sha256=75eb234dd560a623d31c9a77e1c85ea69107b4198f6fec943efd33757a262c80
+runs/p18/human_review_materials.jsonl
+  bytes=106241 sha256=9b1ab108e973b1028600154301b2d0912a2a8e5520cb467ccc659f64f6a75330
+runs/p18/human_review_status.json
+  bytes=278 sha256=7e685aaa7dca84d528fa01a0bf61a406fb2570b8cebbce5efd2667bc41a1cf17
+runs/p18/qwen_replay.json
+  bytes=12717 sha256=690c1fa1825472a774abfcd3ffbc4a305370a76960f3239517b97802b843a01c
+runs/p18/reserved/reserved_run_manifest.json
+  bytes=698 sha256=a4d017debb548520e9858932940bbe6f55ca0385e887f181a6d895421497cd75
+runs/p18/reserved/summary.json
+  bytes=339361 sha256=0bf24e4c7e513032926f200b01d339153c9bc08beac634e28a7531bcd972530e
+runs/p18/reserved/reserved_results.jsonl
+  bytes=7377 sha256=41feb9bd9cbf07ff8d9c3b4ac8be6ec51b97ef06b7430b9192108e0461c3897d
+
+FINAL EVIDENCE
+- Freeze: runs/p18/freeze_manifest.json, 16 core file hashes, git HEAD 4dec6d2...;
+  CPU MCP Mode vs Qwen Agent Mode documented; Qwen is replay-only (live_call=false).
+- Demos: 3 CPU-MCP scenarios with real tool traces; demo1 finalized B004K6R43G; demo2
+  comparison_ready; demo3 ASK -> explicit test reply -> M9 update -> finalized.
+- Performance: MCP cold start ~34.2/40.4 s; BGE encoder load ~16.9 s; first BGE search
+  ~18.6 s; hot BGE search ~0.15 s; recommendation 148 ms; comparison 4.4 ms (CPU).
+- Reserved Test: one-time run after freeze; 20/20 completed, 12 recommend, 11 Top-1,
+  8 non-recommend, 4 clarifications, 4 unknown terminations, 0 errors/hard violations.
+  Simulated rule labels; workflow check only, no retuning/rerun.
+- Human review: 20 materials created, all pending_human_review; 0 reviewed;
+  semantic_truth_verified=false.
+- Tests: P18 + P17/P16/P15/P14-C1/D2/C0-R/Eval100 targeted regression 55 passed.
+- No GPU was connected or required for P18.

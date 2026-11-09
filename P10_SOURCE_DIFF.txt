@@ -1,0 +1,76 @@
+P10 source diff (curated)
+==========================
+
+Modified:
+- recommendation/models/sasrec.py
+  + added item_representations() as the single item-table entry point;
+  + encode(), training_logits(), full_catalog_scores() now use it;
+  + base implementation returns the original item embedding, so original behaviour is
+    unchanged (84 model tests passed).
+
+- recommendation/models/__init__.py
+  + export BGEEnhancedSASRec / build_bge_sasrec
+  + export LightGCN / LightGCNConfig / LightGCNError
+
+New:
+- recommendation/models/lightgcn.py
+  + LightGCNConfig, LightGCN, propagate(), scores(), bpr_loss()
+  + no attention/nonlinearity/variants
+
+- recommendation/models/bge_sasrec.py
+  + BGEEnhancedSASRec(SASRec)
+  + frozen BGE vectors (non-persistent buffer)
+  + trainable projection + scale
+  + item_representations() override used by inherited input/logits/full scoring
+
+- recommendation/datasets/bge_features.py
+  + build_bge_item_matrix(): align existing P8-B BGE index to item2id;
+  + PAD row zero, duplicate/missing/out-of-range identities fail loudly.
+
+- recommendation/datasets/lightgcn.py
+  + build_normalized_adjacency(): one shared symmetric-normalization implementation
+    for training and evaluation, with item row offset U+i-1.
+
+- experiments/p10_train_lightgcn.py
+  + graph from train_history only; BPR; negative sampling excludes known train positives;
+  + fixed 10-epoch primary config; checkpoint + run record.
+
+- experiments/p10_train_bge_sasrec.py
+  + reuses accepted SASRec dataset/trainer/loss;
+  + initializes from existing SASRec checkpoint, adds content projection;
+  + frozen BGE; 3-epoch fixed config; checkpoint + run record.
+
+- experiments/p10_eval_four.py
+  + same 300 P8-D cases / mapping / seen masking / evaluator for four models;
+  + Recall@10/50/100, NDCG@10, MRR@10, top-k reachability, unique hits,
+    candidate overlap, fixed-budget RRF fusion.
+
+- tests/test_p10_models.py
+  + no validation-target graph edges;
+  + BGE feature mapping/PAD/missing mapping;
+  + LightGCN propagation / output shape;
+  + Enhanced SASRec representation and full-catalog scores.
+
+Unchanged:
+- recommendation/inference/*
+- recommendation/control/*
+- default Serving V1, CandidateLedger, SourceFusion
+- M5, Planner, Source Policy, Role Gate, Eligibility
+- Gold/Evaluator, frozen Holdout
+- original SASRec / Two-Tower checkpoints and files
+
+Generated:
++ runs/p10/lightgcn/checkpoint.pt
++ runs/p10/lightgcn/run.json
++ runs/p10/lightgcn/session.log
++ runs/p10/bge_sasrec/checkpoint.pt
++ runs/p10/bge_sasrec/run.json
++ runs/p10/bge_sasrec/train.log
++ runs/p10/eval/summary.json
++ runs/p10/eval/per_case.jsonl
++ P10_REPORT.md
++ P10_SOURCE_DIFF.txt
+
+Failed attempts were removed; no failed checkpoint is presented as a result.
+No training of BGE, original SASRec, Two-Tower, Qwen, or Planner SFT-v1.
+No commit/push/deploy.

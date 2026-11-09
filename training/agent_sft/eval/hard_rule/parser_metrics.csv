@@ -1,0 +1,2 @@
+provider,model,adapter,samples,schema_valid_rate,operation_exact_match,operation_macro_f1,operation_micro_f1,slot_accuracy,retraction_accuracy,unsupported_proposal_rate,failure_or_abstention_rate,p50_latency_ms,p95_latency_ms,retraction_samples
+rule,rule,,100,1.0,0.08,0.1921207150667998,0.3783783783783784,0.375,0.13333333333333333,0.0,0.0,0.02559996210038662,0.030189880635589358,15

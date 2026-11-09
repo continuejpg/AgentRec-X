@@ -1,0 +1,37 @@
+P8-D source/data diff (curated)
+=================================
+
+New experiment code (no production architecture change):
++ experiments/p8d_build_multiuser_dataset.py
+  - extends P6 Dev cohort from 157 canonical cases to 300 Dev users using the SAME
+    temporal leave-two-out validation position and user_id hash split;
+  - never selects Holdout users, never stores/uses items[-1] test target;
+  - runs real Serving V1 history Top-50 and real Hybrid BM25+BGE Top-50 once per case;
+  - reuses P8-C Candidate Cache for 118 cases;
+  - replays the accepted weighted RRF through the same source_policy function;
+  - writes cases, candidate cache, policy results, summary, reachability, strict wins,
+    and pre/post-retrieval feature blocks.
++ experiments/p8d_intent_retrieval.py
+  - real BM25/BGE/Hybrid over six synthetic Dev shopping requests;
+  - only role, hard-price, and synthetic-seed proxies; no human relevance claim;
+  - explicitly records that ESCI/relevance labels were not used.
+
+New data products:
++ runs/p8_d/multiuser/cases.jsonl
++ runs/p8_d/multiuser/candidate_cache.jsonl
++ runs/p8_d/multiuser/policy_results.jsonl
++ runs/p8_d/multiuser/summary.json
++ runs/p8_d/current_intent/retrieval_eval.json
++ P8_D_DATA_CARD.md
++ P8_D_REPORT.md
+
+Frozen / unchanged:
+- recommendation/control/candidate_ledger.py (P8-C weights; no new policy)
+- recommendation/control/loop.py
+- recommendation/demo/agent_service.py
+- recommendation/demo/planner_*.py
+- Serving V1, Gold/Evaluator, M5, Eligibility, Role Gate
+- BGE index/model and P8-B artifacts
+- Frozen Holdout untouched
+
+No commit/push/deploy. No new LoRA training.

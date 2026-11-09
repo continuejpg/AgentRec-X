@@ -1,0 +1,353 @@
+--- /dev/null
++++ experiments/p6_benchmark/build_benchmark.py
+@@ -0,0 +1,192 @@
++"""Build the P6 Benchmark v0 protocol artifacts (CPU only)."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from collections import Counter
++from pathlib import Path
++
++from recommendation.api.app import ServiceSettings
++from recommendation.catalog import MetadataIndex
++from recommendation.evaluation.split import MIN_SEQUENCE_LENGTH
++
++ROOT = Path("data/p6_benchmark_v0")
++SEQUENCES = Path("data/processed/Sports_and_Outdoors_sequences.json")
++MAX_DEV = 160
++MAX_HOLDOUT = 40
++
++
++def split_for_user(user_id: str) -> str:
++    digest = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
++    return "holdout" if int(digest, 16) % 5 == 0 else "dev"
++
++
++def _classical_rows() -> tuple[list[dict], dict]:
++    payload = json.loads(SEQUENCES.read_text(encoding="utf-8"))
++    dev: list[dict] = []
++    holdout: list[dict] = []
++    by_split = Counter()
++    seen_items: set[str] = set()
++    for record in payload["sequences"]:
++        items = list(record.get("item_ids") or ())
++        asins = list(record.get("parent_asins") or ())
++        times = list(record.get("unix_ms") or ())
++        if len(items) < MIN_SEQUENCE_LENGTH or len(asins) != len(items) or len(times) != len(items):
++            continue
++        if 0 in items or any(not isinstance(item, int) for item in items):
++            continue
++        # Strict chronology: every observed interaction is ordered; the two targets are
++        # the final two interactions, so no future event enters history.
++        if any(times[i] > times[i + 1] for i in range(len(times) - 1)):
++            continue
++        user_id = str(record["user_id"])
++        split = split_for_user(user_id)
++        if split == "dev" and len(dev) >= MAX_DEV:
++            continue
++        if split == "holdout" and len(holdout) >= MAX_HOLDOUT:
++            continue
++        histories = asins[:-2]
++        target_validation = asins[-2]
++        target_test = asins[-1]
++        # Exclude cases where the target identity is already in history only after
++        # recording an explicit overlap flag; the accepted protocol keeps the target
++        # eligible by removing it from the seen mask, so overlap is not silently hidden.
++        row = {
++            "schema_version": "agentrecx.p6.classical_case.v0",
++            "case_id": f"classical-{split}-{len(dev) + len(holdout):05d}",
++            "split": split,
++            "user_id": user_id,
++            "user_int_id": int(record["user_int_id"]),
++            "history_parent_asins": histories,
++            "history_item_ids": items[:-2],
++            "validation_parent_asin": target_validation,
++            "validation_item_id": items[-2],
++            "test_parent_asin": target_test,
++            "test_item_id": items[-1],
++            "validation_time_ms": times[-2],
++            "test_time_ms": times[-1],
++            "history_len": len(histories),
++            "target_in_history": target_test in histories or target_validation in histories,
++        }
++        (dev if split == "dev" else holdout).append(row)
++        by_split[split] += 1
++        seen_items.update(asins)
++        if len(dev) >= MAX_DEV and len(holdout) >= MAX_HOLDOUT:
++            break
++    dev_targets = {row["test_parent_asin"] for row in dev}
++    holdout_targets = {row["test_parent_asin"] for row in holdout}
++    report = {
++        "artifact": str(SEQUENCES),
++        "num_users_total": payload["num_users"],
++        "num_items": payload["num_items"],
++        "eligible_cases": by_split,
++        "dev": len(dev),
++        "holdout": len(holdout),
++        "user_overlap": len({row["user_id"] for row in dev} & {row["user_id"] for row in holdout}),
++        "dev_test_targets": len(dev_targets),
++        "holdout_test_targets": len(holdout_targets),
++        "test_target_overlap": len(dev_targets & holdout_targets),
++        "history_target_overlap_cases": sum(row["target_in_history"] for row in dev + holdout),
++    }
++    return dev + holdout, report
++
++
++def _catalogue_records() -> list:
++    return list(MetadataIndex.load(ServiceSettings.from_env().catalog_path).records.values())
++
++
++def _dynamic_tasks(records: list) -> tuple[list[dict], list[dict]]:
++    def pick(keyword: str, offset: int = 0) -> list[str]:
++        rows = [
++            str(record.parent_asin)
++            for record in records
++            if keyword in str(getattr(record, "title", "") or "").casefold()
++            and str(getattr(record, "price_text", "") or "")
++        ]
++        rows.sort()
++        return rows[offset:offset + 3]
++
++    dev_specs = [
++        ("budget_update", "dev", "I need a water filter under $40 for camping.", ["update price_max to 60", "remove budget"]),
++        ("preference_retract", "dev", "I need a water filter and prefer lighter options.", ["retract lighter preference"]),
++        ("goal_switch", "dev", "I need a water filter for hiking.", ["switch goal to water bottle"]),
++        ("role_constraint", "dev", "I need a replacement filter cartridge for my water filter.", ["request replacement accessory role"]),
++        ("normal_termination", "dev", "Show me camping cookware under $50.", ["finalize if eligible candidates exist"]),
++        ("insufficient_candidates", "dev", "I need a water filter under $1.", ["do not loosen hard constraint"]),
++    ]
++    holdout_specs = [
++        ("holdout_budget_update", "holdout", "I need a sleeping pad under $60 for backpacking.", ["update price_max to 80"]),
++        ("holdout_preference_retract", "holdout", "I need a lantern and prefer lighter options.", ["retract weight preference"]),
++        ("holdout_goal_switch", "holdout", "I need a water bottle for hiking.", ["switch goal to water filter"]),
++        ("holdout_insufficient", "holdout", "I need a cookware set under $2.", ["preserve hard constraint and report UNKNOWN"]),
++    ]
++    tasks = []
++    for template_id, split, query, turns in dev_specs + holdout_specs:
++        keyword = next((word for word in ("water filter", "cookware", "sleeping pad", "lantern", "water bottle", "stove") if word in query.casefold()), "water filter")
++        tasks.append({
++            "schema_version": "agentrecx.p6.dynamic_task.v0",
++            "task_id": f"dynamic-{split}-{template_id}",
++            "split": split,
++            "synthetic_user_request": True,
++            "template_id": template_id,
++            "source": {"catalogue": "amazon_reviews_2023:meta_categories", "not_frozen": True},
++            "initial_request": query,
++            "turns": [{"message": query}] + [{"message": turn} for turn in turns],
++            "catalogue_seed_asins": pick(keyword),
++            "checks": {
++                "must_preserve_hard_constraints": True,
++                "must_not_present_role_mismatch": True,
++                "must_report_unknown_when_no_eligible": "under $1" in query or "under $2" in query,
++                "forbidden_presentation": ["hard-constraint violator", "role MISMATCH as match"],
++            },
++            "max_steps": 6,
++            "max_tool_calls": 4,
++        })
++    return [t for t in tasks if t["split"] == "dev"], [t for t in tasks if t["split"] == "holdout"]
++
++
++def main() -> int:
++    ROOT.mkdir(parents=True, exist_ok=True)
++    rows, report = _classical_rows()
++    for split in ("dev", "holdout"):
++        part = [row for row in rows if row["split"] == split]
++        (ROOT / f"classical_{split}.jsonl").write_text(
++            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in part), encoding="utf-8"
++        )
++    records = _catalogue_records()
++    dev_tasks, holdout_tasks = _dynamic_tasks(records)
++    for split, tasks in (("dev", dev_tasks), ("holdout", holdout_tasks)):
++        (ROOT / f"dynamic_{split}.jsonl").write_text(
++            "".join(json.dumps(task, ensure_ascii=False) + "\n" for task in tasks), encoding="utf-8"
++        )
++    protocol = {
++        "schema_version": "agentrecx.p6.benchmark_protocol.v0",
++        "status": "DEV_ONLY",
++        "classical": {
++            "protocol": "temporal_leave_two_out",
++            "candidate_set": "full catalogue excluding seen history (target re-admitted)",
++            "split_policy": "user_id hash: 80% dev / 20% holdout; user-disjoint",
++            "metrics": ["Recall@10", "Recall@50", "NDCG@10", "MRR@10", "CatalogueCoverage"],
++            "leakage_rule": "history is items[:-2]; targets are items[-2], items[-1]; chronological timestamps required",
++            "target_item_overlap_is_reported": True,
++        },
++        "dynamic": {
++            "task_source": "synthetic shopping requests over real catalogue",
++            "split_policy": "template_id disjoint dev/holdout",
++            "metrics": ["VerifiedTaskSuccess", "HardConstraintViolationRate", "ProductRoleCorrectness", "PreferenceUpdateConsistency", "EligibleCandidateCoverage", "ToolCallsPerTask", "UnknownRate"],
++            "no_frozen_tasks": True,
++        },
++        "arms": {"traditional_recommendation": "Serving V1", "rule_agent": "default Rule Agent", "qwen_base_planner": "P3D Base /plan", "planner_sft_v0": "P4B Adapter /plan"},
++        "fixed_controls": {"catalogue": "Sports_and_Outdoors", "candidate_sources": ["history", "catalog_search"], "max_steps": 6, "max_tool_calls": 4, "eligibility": "unchanged", "k": 5},
++        "holdout_policy": "holdout is never used for SFT, prompt tuning, or model selection",
++    }
++    (ROOT / "protocol.json").write_text(json.dumps(protocol, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
++    report["dynamic"] = {"dev": len(dev_tasks), "holdout": len(holdout_tasks)}
++    (ROOT / "leakage_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
++    print(json.dumps(report, indent=2, ensure_ascii=False))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+--- /dev/null
++++ experiments/p6_benchmark/metrics.py
+@@ -0,0 +1,72 @@
++"""P6 Benchmark v0 metric definitions and minimal CPU calculators."""
++
++from __future__ import annotations
++
++import math
++from collections import Counter
++from typing import Any, Iterable, Mapping, Sequence
++
++
++def rank_of_target(ranked_ids: Sequence[str], target: str) -> int | None:
++    """1-based rank of the single positive target, or None when absent."""
++    for position, identity in enumerate(ranked_ids, start=1):
++        if str(identity) == str(target):
++            return position
++    return None
++
++
++def classical_case_metrics(ranked_ids: Sequence[str], target: str) -> dict[str, float]:
++    rank = rank_of_target(ranked_ids, target)
++    if rank is None:
++        return {"Recall@10": 0.0, "Recall@50": 0.0, "NDCG@10": 0.0, "MRR@10": 0.0}
++    return {
++        "Recall@10": float(rank <= 10),
++        "Recall@50": float(rank <= 50),
++        "NDCG@10": (1.0 / math.log2(rank + 1)) if rank <= 10 else 0.0,
++        "MRR@10": (1.0 / rank) if rank <= 10 else 0.0,
++    }
++
++
++def aggregate_classical(
++    cases: Iterable[tuple[Sequence[str], str]],
++    *,
++    catalogue_size: int,
++) -> dict[str, Any]:
++    rows = list(cases)
++    totals = Counter()
++    recommended: set[str] = set()
++    for ranked, target in rows:
++        metrics = classical_case_metrics(ranked, target)
++        for key, value in metrics.items():
++            totals[key] += value
++        recommended.update(str(item) for item in ranked[:10])
++    count = max(1, len(rows))
++    return {
++        "cases": len(rows),
++        **{key: totals[key] / count for key in ("Recall@10", "Recall@50", "NDCG@10", "MRR@10")},
++        "CatalogueCoverage@10": len(recommended) / max(1, int(catalogue_size)),
++    }
++
++
++def dynamic_metrics(results: Iterable[Mapping[str, Any]]) -> dict[str, float]:
++    """Metrics from a controlled result schema.
++
++    Required per-task result fields:
++    verified_success, hard_constraint_violations, role_correct, role_total,
++    preference_update_consistent, eligible_candidate_present, tool_calls, unknown.
++    """
++    rows = list(results)
++    count = max(1, len(rows))
++    violations = sum(1 for row in rows if int(row.get("hard_constraint_violations", 0)) > 0)
++    role_correct = sum(int(row.get("role_correct", 0)) for row in rows)
++    role_total = sum(int(row.get("role_total", 0)) for row in rows)
++    return {
++        "tasks": len(rows),
++        "VerifiedTaskSuccess": sum(bool(row.get("verified_success")) for row in rows) / count,
++        "HardConstraintViolationRate": violations / count,
++        "ProductRoleCorrectness": role_correct / max(1, role_total),
++        "PreferenceUpdateConsistency": sum(bool(row.get("preference_update_consistent")) for row in rows) / count,
++        "EligibleCandidateCoverage": sum(bool(row.get("eligible_candidate_present")) for row in rows) / count,
++        "ToolCallsPerTask": sum(int(row.get("tool_calls", 0)) for row in rows) / count,
++        "UnknownRate": sum(bool(row.get("unknown")) for row in rows) / count,
++    }
+--- /dev/null
++++ experiments/p6_benchmark/__init__.py
+@@ -0,0 +1 @@
++"""P6 recommendation-quality benchmark v0."""
+--- /dev/null
++++ tests/test_p6_benchmark.py
+@@ -0,0 +1,76 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++from experiments.p6_benchmark.metrics import (
++    aggregate_classical,
++    classical_case_metrics,
++    dynamic_metrics,
++)
++
++ROOT = Path("data/p6_benchmark_v0")
++
++
++def _rows(name: str) -> list[dict]:
++    return [json.loads(line) for line in (ROOT / name).read_text(encoding="utf-8").splitlines() if line.strip()]
++
++
++def test_classical_metrics_known_values() -> None:
++    assert classical_case_metrics(["x", "target", "y"], "target") == {
++        "Recall@10": 1.0,
++        "Recall@50": 1.0,
++        "NDCG@10": 1.0 / 1.584962500721156,
++        "MRR@10": 0.5,
++    }
++    assert classical_case_metrics(["x", "y"], "missing")["Recall@10"] == 0.0
++    summary = aggregate_classical([(["a", "b", "target"], "target"), (["a"], "target")], catalogue_size=100)
++    assert summary["cases"] == 2
++    assert 0.0 < summary["Recall@10"] <= 1.0
++    assert 0.0 < summary["CatalogueCoverage@10"] <= 1.0
++
++
++def test_classical_split_has_no_future_history() -> None:
++    dev = _rows("classical_dev.jsonl")
++    holdout = _rows("classical_holdout.jsonl")
++    assert len(dev) == 160
++    assert len(holdout) == 40
++    assert not ({row["user_id"] for row in dev} & {row["user_id"] for row in holdout})
++    for row in dev + holdout:
++        assert row["validation_time_ms"] < row["test_time_ms"]
++        assert len(row["history_parent_asins"]) == row["history_len"]
++        assert len(row["history_item_ids"]) == len(row["history_parent_asins"])
++        assert row["history_len"] >= 1
++        assert 0 not in row["history_item_ids"]
++    report = json.loads((ROOT / "leakage_report.json").read_text(encoding="utf-8"))
++    assert report["user_overlap"] == 0
++    assert report["history_target_overlap_cases"] >= 0
++
++
++def test_dynamic_tasks_are_split_by_template_and_have_checks() -> None:
++    dev = _rows("dynamic_dev.jsonl")
++    holdout = _rows("dynamic_holdout.jsonl")
++    assert len(dev) == 6
++    assert len(holdout) == 4
++    assert not ({row["template_id"] for row in dev} & {row["template_id"] for row in holdout})
++    for row in dev + holdout:
++        assert row["synthetic_user_request"] is True
++        assert row["source"]["not_frozen"] is True
++        assert row["turns"]
++        assert "must_preserve_hard_constraints" in row["checks"]
++        assert row["max_steps"] > 0
++
++
++def test_dynamic_metric_definitions() -> None:
++    rows = [
++        {"verified_success": True, "hard_constraint_violations": 0, "role_correct": 2, "role_total": 2,
++         "preference_update_consistent": True, "eligible_candidate_present": True, "tool_calls": 3, "unknown": False},
++        {"verified_success": False, "hard_constraint_violations": 1, "role_correct": 1, "role_total": 2,
++         "preference_update_consistent": False, "eligible_candidate_present": False, "tool_calls": 1, "unknown": True},
++    ]
++    metrics = dynamic_metrics(rows)
++    assert metrics["VerifiedTaskSuccess"] == 0.5
++    assert metrics["HardConstraintViolationRate"] == 0.5
++    assert metrics["ProductRoleCorrectness"] == 0.75
++    assert metrics["ToolCallsPerTask"] == 2.0
++    assert metrics["UnknownRate"] == 0.5

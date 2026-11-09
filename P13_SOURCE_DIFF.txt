@@ -1,0 +1,51 @@
+P13 source/data diff (curated)
+================================
+
+New isolated P13 experiment code:
++ experiments/p13/prepare_data.py
+  - MemRerank Sports rows + Amazon-C4 query text + target timestamp;
+  - exactly one observed positive per query; unjudged items labelled unjudged/weak;
+  - histories strictly before target timestamp; target review never a history feature;
+  - current Sports catalogue and mapping; split overlap report.
++ experiments/p13/target_timestamps.py
+  - streams raw Amazon reviews; exact user_id+parent_asin+normalized review text+rating;
+  - target timestamp only; no target review in history.
++ experiments/p13/retrieval.py
+  - BM25, BGE-base-en-v1.5, BLaIR-RoBERTa-Base;
+  - fixed candidate budget: BM25 50 + BGE 25 + BLaIR 25, dedup, max 100;
+  - source ranks/scores + history features (true/unrelated/removed).
++ experiments/p13/retrieval_targets.py
+  - full top-100 source target-rank diagnostics, separate from pooled ranking.
++ experiments/p13/retrieval_metrics.py
+  - observed-positive hit/MRR/NDCG proxy and fixed-pool reachability.
++ experiments/p13/ranking.py
+  - fixed-pool ranking; Query-only vs Query+History;
+  - LightGBM LambdaRank exploratory weak-supervision training;
+  - true/unrelated/removed history ablation; reserved test excluded.
++ tests/test_p13_pipeline.py
+  - history strictly before target; target not in history; reserved test; metrics; no target feature.
+
+New artifacts (not committed):
++ data/p13/sports/{train,dev,test}.jsonl
++ data/p13/sports/tasks.jsonl
++ data/p13/sports/manifest.json
++ data/p13/sports/amazon_c4_test.csv
++ data/p13/target_keys.jsonl
++ runs/p13/reviews/*
++ runs/p13/retrieval/{queries.jsonl,metrics.json,source_summary.json,source_target_ranks.jsonl,summary.json}
++ runs/p13/ranking/{summary.json,per_query.jsonl,*.txt}
++ P13_REPORT.md
++ P13_SOURCE_DIFF.txt
+
+Unchanged:
+- default Serving V1 and Source Policy;
+- SASRec / Two-Tower / BGE parameters;
+- M5 core semantics, Planner Contract, CandidateLedger, Role Gate, Eligibility;
+- P11/P12 original tasks, evidence, and evaluation artifacts;
+- frozen P6/P8/P9 Holdout.
+
+External/downloaded artifacts kept outside source control:
+- BLaIR model (remote), BLaIR vectors (remote), raw Amazon reviews (remote),
+  C4 query CSV and MemRerank category files (data/p13, not committed).
+
+No Planner training/SFT-v1, no default Serving change, no Holdout run, no commit/push/deploy.

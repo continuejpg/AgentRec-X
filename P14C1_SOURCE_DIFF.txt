@@ -1,0 +1,73 @@
+P14-C1 SOURCE DIFF
+================================================================================
+Milestone: BGE integration into existing Search Backend + one fixed QLoRA Planner SFT + Rule/Base/SFT Dev20 comparison.
+No reranker training, no V0/Gate/Memory/Planner contract changes, no Reserved Test, no commit.
+
+NEW SOURCE / TEST FILES
+experiments/p14c1/__init__.py
+  bytes=50 sha256=819bb53e9c377ade088b7c78427aeb1dabedb00b60c5deb9dec208ab140b4ea6
+experiments/p14c1/search_backend.py
+  bytes=4496 sha256=ebc9a82b6611d1324e955c20ed1e55f0351cc38d5e66fc79c7141f310193f854
+experiments/p14c1/build_sft_data.py
+  bytes=6683 sha256=78234f48590a9de73d74c4dd5d43511f4a9c19bb1b8ad789a07bcbeece4cefda
+experiments/p14c1/run_dev.py
+  bytes=2918 sha256=af824b03856e2df5dff566b815c750e61f4e1493871b2ffe60a0ed1505155933
+experiments/p14c1/compare.py
+  bytes=4394 sha256=f46e7a8b5f8fc14093a780956695f633b7f4a1e87717034b5c5dc9a6bf3d4994
+tests/test_p14c1.py
+  bytes=4762 sha256=055e65827a744be2852d03c891074eabd676609b7f68566c8007d2462ac2fdc5
+
+NEW REPORT
+P14C1_REPORT.md
+  bytes=9215 sha256=cdb9b19861808136a5151090f6bf568da5f1d9169e1dc8bf714d0356d4f5ba8c
+
+BGE / SFT / EVALUATION ARTIFACTS (git-ignored)
+runs/p14c1/bge_integration.json
+  bytes=989 sha256=6040563a1a7636a7a794d3e47f73b1acbbc9c2c79cdc7f5b0c7b43dac93965bf
+runs/p14c1/sft_train.jsonl
+  bytes=623201 sha256=4cfd941328b9646ef9dc0792880dd567020b94e439ff8d3623fbb5331d091ce0
+runs/p14c1/sft_data_manifest.json
+  bytes=906 sha256=f725903f6a83661099cf78f4bcc384b2892c7c62db91bb710bb1a4222d7ecf9f
+runs/p14c1/rule_train_traces.json
+  bytes=4205 sha256=fc8141e73c1db146f315b1570d78c3eedc4f15312b89d9caf6eff4ba3a824272
+runs/p14c1/training_manifest.json
+  bytes=1822 sha256=b65437cece4c57b2ff0e9ce804a3f373f188be2d03d3fa08d7834bf19b8e3102
+runs/p14c1/sft_adapter/adapter_config.json
+  bytes=1279 sha256=a6ba2859fc085fdf70701cae8f726a10e05d33ab00ade23331b0171630eddae8
+runs/p14c1/sft_adapter/adapter_model.safetensors
+  bytes=173181072 sha256=f191c811cab6f1f3da98466c0c0341ccfd0bfa4105b371e1c1af4500631326b8
+runs/p14c1/rule/summary.json
+  bytes=291249 sha256=1fad71756cf65afa4ef536f5e6b90daaff8c4b073362f12049a97b79d7662169
+runs/p14c1/qwen_base/summary.json
+  bytes=254209 sha256=473bf9a30093c049e8d5da4bde91336a9267ca452b6dcb9bc535206c971ceba0
+runs/p14c1/qwen_sft/summary.json
+  bytes=293349 sha256=626cd342032e60673b934f6573a9575b8dcf087a799bdae90eb1e5e175d6576d
+runs/p14c1/comparison.json
+  bytes=31833 sha256=3d2916ef4115d0e74aee12d3c807b8823a65d1fcfc14c59d88db5fd0187bacbe
+runs/p14c1/per_task.jsonl
+  bytes=22014 sha256=7064221a5dadca93fdcd579314e70ec8691a92a98d0a3b2a2b1e1e46f68a859e
+runs/p14c1/model_manifest.json
+  bytes=1507 sha256=072ef33c68fee57b650c61f2e0ffbcbd4b885e44be3d32ac8f999f0d0fea1dbb
+runs/p14c1/decision.json
+  bytes=626 sha256=f1abc83eeeeace7bb8a5b93407764d9a74bd9e2dcdeb889707d77c87f5e172bb
+
+BGE INTEGRATION
+- Reuses runs/p14d2/bge_index.npz (76,263 identities exact catalogue; index sha256 in bge_integration.json).
+- Uses existing CatalogSearchSource mode='bge'; BM25 remains the default/Serving V1 and the recorded fallback.
+- Hits are namespaced amazon_electronics_c4:<parent_asin> and resolve through the same catalogue records/CandidateLedger.
+
+SFT
+- Train-only: 40 tasks, 134 legal accepted-action samples; RETRIEVE/RERANK/FINALIZE/ASK = 40/44/44/6;
+  10 Gate-recovery samples; no evaluator fields or target IDs in inputs.
+- QLoRA: Qwen3.5-9B Base, NF4 4-bit, r16/alpha32, 2 epochs, max_seq1536, 134 samples, train 250.12 s,
+  train loss 0.0658; adapter saved; 53 targeted tests passed.
+
+DEV20 UNDER SAME BGE
+- Rule 12/15 Top-1, 14/15 FINALIZE, 1 false refusal;
+- Qwen Base 15/15 Top-1, 15/15 FINALIZE, 0 false refusal, 1 non-recommend contract error;
+- Qwen SFT 12/15 Top-1, 14/15 FINALIZE, 1 false refusal, 0 errors, but 8.5 s vs 3.1 s latency.
+- SFT does not beat Base; keep Qwen Base and BGE retrieval; no SFT deployment.
+
+DECISION
+- BGE_INTEGRATION PASS; SFT_DATA_QUALITY LIMITED; SFT_TRAINING PASS; BASE_VS_SFT FAIL;
+  LEGACY_REGRESSION PASS; P14-C1 LIMITED.

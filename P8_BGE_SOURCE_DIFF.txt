@@ -1,0 +1,35 @@
+P8 BGE minimal source diff
+==========================
+
+File: recommendation/inference/dense_catalog.py
+
+The BGE builder previously fell through to the hashed lexical fallback when
+``encoder_kind="bge"`` was requested without a local model_path. That could create an
+artifact labelled/assumed as BGE when no BGE model was involved.
+
+-        if encoder_kind == "bge" and model_path:
++        if encoder_kind == "bge":
++            if not model_path:
++                # A BGE request without a local model must not silently become the
++                # hashed lexical fallback.  Callers opt into BGE explicitly; a missing
++                # asset is a configuration error, not permission to change encoder kind.
++                raise ValueError(
++                    "building a BGE index requires an explicit local model_path; "
++                    "refusing to substitute the hashed fallback"
++                )
+             try:
+                 from sentence_transformers import SentenceTransformer
+
+File: tests/test_dense_catalog.py
+
++import pytest
++
++def test_bge_build_does_not_silently_fall_back_to_hashed_encoder() -> None:
++    with pytest.raises(ValueError, match="requires an explicit local model_path"):
++        DenseCatalogIndex.build(_records(), encoder_kind="bge", model_path=None)
+
+No changes to:
+- default Agent behavior / Serving V1;
+- BM25 path;
+- Role gate / Eligibility / CandidateLedger;
+- Planner or memory.

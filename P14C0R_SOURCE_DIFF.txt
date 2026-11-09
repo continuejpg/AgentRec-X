@@ -1,0 +1,59 @@
+P14-C0-R SOURCE DIFF
+================================================================================
+Milestone: P14-C0-R Product Type/Role minimal repair.
+P14-C0 artifacts, old attempts and frozen benchmark labels are preserved; Reserved Test untouched.
+
+NEW SOURCE / TEST FILES
+recommendation/preference/product_role.py
+  bytes=10236 sha256=a79c90c3f5630455b7dcdde9dbca94c7dddf1b0ee8f639121236de5c06dd2252
+experiments/p14c0r/__init__.py
+  bytes=40 sha256=29ae5334314c2a55441cc63283ae7d8910d7041e78b17b51534c9e0dbc31ebc3
+experiments/p14c0r/diagnose.py
+  bytes=4075 sha256=ff0f173352fe718ac4d284845dea4b6bf22b8d03d8406aab0a8d85afd137ff72
+experiments/p14c0r/run_fixed.py
+  bytes=7847 sha256=517c38b2b33d94e3b5d2c55b29e19ce81f7dfd5e85d99103fa787766fafbb0a1
+tests/test_p14c0r_product_role.py
+  bytes=7674 sha256=0d19be9acb4e23676f52f011e5f3865b1d518759bfc03f265cc210bf132cf45c
+
+MODIFIED SHARED FILES (3; no model/scorer-weight/planner-default change)
+recommendation/preference/decision_gate.py
+  reason: optional expected_product_type/role; role MATCH/NOT_REQUIRED required for presentable; UNKNOWN/MISMATCH never presented; bounded role retry + role fields in decision payload; legacy calls without a role target unchanged
+  bytes=19840 sha256=fe0fa43422535bc975704b0f51a0e74e261ecfab7c982572a5ebf700f0cb932e
+experiments/p14c0/electronics_executor.py
+  reason: infer ProductTarget once; annotate candidates with role assessment; filter role-incompatible candidates from Planner/Finalize visibility (ledger preserved); one bounded re-search; bounded terminal on role/retrieval exhaustion; retry messages include role evidence
+  bytes=17575 sha256=bf18fa300f1486ff1bc98ec467c79cd0cf8baec514f98ce4c0ac02cd64952913
+experiments/p14c0/run_dev.py
+  reason: map run_planner max-step/nonterminal states to bounded terminal status (Gate retry terminal fix); no scorer-weight/planner-contract change
+  bytes=19104 sha256=84f0db0e7b89686d97885d8c7b608c9ed87b9a4e78aac88299165eb298d72434
+
+NEW REPORT
+P14C0R_REPORT.md
+  bytes=12219 sha256=cc6badcc91c50b9f142174b45079f3ac4e2e255c6ed4bfd2d16ef009299bc3d9
+
+RUN ARTIFACTS (git-ignored)
+runs/p14c0r/comparison.json
+  bytes=6525 sha256=c7889d831cd5e381cf668ad4dc0e36ca9b07ceaffc598beff2be211b0ec734cb
+runs/p14c0r/config.json
+  bytes=2727 sha256=8b0575827827d6e76690b2a7426c0c93902a198c80d97771a0ac65153854ec1e
+runs/p14c0r/error_analysis.jsonl
+  bytes=55916 sha256=a022417065188eaefed0d431303c73291ecf262b7434c003b000bd174a9bc15e
+runs/p14c0r/rule_dev/summary.json
+  bytes=271538 sha256=4b1e0cc14069894bffdd0d68ae079e032c4dd5ba63806026b63b7f70f5a910bb
+runs/p14c0r/qwen_dev/summary.json
+  bytes=245329 sha256=6a58b9275d527cd9242d08079d1eced45a3f4c188eb11529d602cff14b4891f6
+runs/p14c0r/diagnostics/summary.json
+  bytes=6904 sha256=e27e104e48a782036c53e849cd887021c4880fcad013fa3c25383220cc40936d
+
+UNCHANGED / NOT MODIFIED
+- Preference Scorer V0 weights/logic, P14-B1 Gate legacy semantics, M5/M9, Planner contract,
+  CandidateLedger, Eligibility, Serving V1, P13-R catalogue, P14-E/E2 labels.
+- P14-C0 comparison/trajectories and all prior attempts untouched.
+
+RESULTS
+- New Dev 20: Rule 6->13 correct / type errors 9->0; Qwen 8->13 correct / type errors 7->0;
+  Rule 15/15 finalize, Qwen 13/15 finalize; no non-recommend wrong FINALIZE.
+- Qwen residual failures preserved: 0050 bounded refusal, 0051 unnecessary ASK, 0060 invalid ASK rejected.
+- Extra retrieval: Rule 20->20, Qwen 21->22 search calls; Qwen 67->69 model calls; 46,626/5,863 tokens.
+
+TESTS
+- tests/test_p14c0r_product_role.py + P14-C0 contract + P14-B1 Gate: 31 passed in 31.0 s.

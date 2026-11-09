@@ -48,7 +48,13 @@
     shopSend: document.getElementById("shop-send"),
     shopClarification: document.getElementById("shop-clarification"),
     shopIntent: document.getElementById("shop-intent"),
-    shopCards: document.getElementById("shop-cards")
+    shopCards: document.getElementById("shop-cards"),
+    shopChoice: document.getElementById("shop-choice"),
+    shopChoiceHistory: document.getElementById("shop-choice-history"),
+    shopChoiceStatus: document.getElementById("shop-choice-status"),
+    choiceSatisfaction: document.getElementById("choice-satisfaction"),
+    choiceConfidence: document.getElementById("choice-confidence"),
+    shopNoSuitable: document.getElementById("shop-no-suitable")
   };
 
   var state = {
@@ -73,7 +79,14 @@
       sending: false,
       pendingId: null,
       pendingOption: null,
-      turns: 0
+      turns: 0,
+      /* M8.2 choice feedback: the page renders only server records; enabling is discovered
+         from the documented GET endpoint, so a deployment with collection switched off
+         keeps the original page behaviour (the panel stays hidden). */
+      choiceEnabled: false,
+      choiceSending: false,
+      choiceRecord: null,
+      currentRecommendations: []
     }
   };
 
@@ -319,7 +332,41 @@
     renderStatusChips();
   }
 
+  function applySessionPayload(payload, activePreferences) {
+    state.sessionId = payload.session_id;
+    state.profileId = payload.profile.profile_id;
+    state.turns = payload.turn || 0;
+    state.expired = false;
+    /* The session's own mode, as the server recorded it - not what the page asked for. */
+    state.decisionMode = payload.decision_mode || "deterministic";
+    els.session.textContent = payload.session_id;
+    els.turn.textContent = String(state.turns);
+    els.route.textContent = "—";
+    els.candidates.textContent = "—";
+    els.moved.textContent = "—";
+    els.rankedWith.textContent = "—";
+    clear(els.originalOrder);
+    clear(els.rerankedOrder);
+    clear(els.transcript);
+    clear(els.cards);
+    els.cards.appendChild(el("p", "muted",
+      "Send a message that asks for recommendations to see cards here."));
+    renderPreferences(activePreferences || []);
+    clear(els.memoryNote);
+    els.memoryNote.hidden = true;
+    clear(els.tracePanel);
+    els.tracePanel.appendChild(el("p", "muted", "Send a message to see this turn's trace."));
+    renderModeChoice();
+    renderStatusChips();
+    resetShopView();
+    setBusy(false);
+    setState("ready");
+    els.input.focus();
+    return loadChoiceHistory();
+  }
+
   function createSession() {
+    forgetRememberedSession();
     hideBanner();
     setState("initializing");
     setBusy(true);
@@ -333,34 +380,9 @@
     }
     return request("/sessions", { method: "POST", body: body })
       .then(function (payload) {
-        state.sessionId = payload.session_id;
-        state.profileId = payload.profile.profile_id;
-        state.turns = payload.turn || 0;
-        state.expired = false;
-        /* The session's own mode, as the server recorded it - not what the page asked for. */
-        state.decisionMode = payload.decision_mode || "deterministic";
-        els.session.textContent = payload.session_id;
-        els.turn.textContent = String(state.turns);
-        els.route.textContent = "—";
-        els.candidates.textContent = "—";
-        els.moved.textContent = "—";
-        els.rankedWith.textContent = "—";
-        clear(els.originalOrder);
-        clear(els.rerankedOrder);
-        clear(els.transcript);
-        clear(els.cards);
-        els.cards.appendChild(el("p", "muted", "Send a message that asks for recommendations to see cards here."));
-        renderPreferences([]);
-        clear(els.memoryNote);
-        els.memoryNote.hidden = true;
-        clear(els.tracePanel);
-        els.tracePanel.appendChild(el("p", "muted", "Send a message to see this turn's trace."));
-        renderModeChoice();
-        renderStatusChips();
-        resetShopView();
-        setBusy(false);
-        setState("ready");
-        els.input.focus();
+        return applySessionPayload(payload, []).then(function (choiceEnabled) {
+          if (choiceEnabled) { rememberSession(payload.session_id); }
+        });
       })
       .catch(function (error) {
         setBusy(false);
@@ -369,6 +391,28 @@
         setShopStatus("error", "Session unavailable. Start a new session to shop.");
         setShopBusy(false);
         showBanner("error", "Could not start a session", describeError(error));
+      });
+  }
+
+  function restoreSession() {
+    var remembered = rememberedSessionId();
+    if (!remembered) { return createSession(); }
+    setState("initializing");
+    return request("/sessions/" + encodeURIComponent(remembered))
+      .then(function (payload) {
+        return applySessionPayload(payload, payload.active_preferences || [])
+          .then(function (choiceEnabled) {
+            if (!choiceEnabled) {
+              forgetRememberedSession();
+              return createSession();
+            }
+            rememberSession(payload.session_id);
+            return null;
+          });
+      })
+      .catch(function () {
+        forgetRememberedSession();
+        return createSession();
       });
   }
 
@@ -410,6 +454,7 @@
     els.shopSend.textContent = busy ? "Sending…" : "Ask";
     els.newSession.disabled = busy || state.sending;
     els.resetSession.disabled = busy || state.sending || !state.sessionId;
+    updateChoiceControls();
   }
 
   function resetShopView() {
@@ -427,10 +472,202 @@
       "Final recommendations and their evidence-bound reasons appear here."));
     els.shopClarification.hidden = true;
     clear(els.shopClarification);
+    state.shop.choiceEnabled = false;
+    state.shop.choiceRecord = null;
+    state.shop.choiceSending = false;
+    state.shop.currentRecommendations = [];
+    els.shopChoice.hidden = true;
+    clear(els.shopChoiceHistory);
+    renderChoiceStatus("", "");
+    els.choiceSatisfaction.disabled = true;
+    els.choiceConfidence.disabled = true;
+    els.choiceSatisfaction.value = "";
+    els.choiceConfidence.value = "";
+    els.shopNoSuitable.hidden = true;
     setShopStatus("", state.sessionId
       ? "Ready. Ask for something, or answer the pending question."
       : "Create a session to start.");
     setShopBusy(false);
+  }
+
+  function choiceValue(select) {
+    var raw = select.value;
+    if (!raw) { return null; }
+    var value = Number(raw);
+    return isFinite(value) ? value : null;
+  }
+
+  function rememberSession(sessionId) {
+    if (!window.history || !window.history.replaceState || !sessionId) { return; }
+    var base = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", base + "#session=" + encodeURIComponent(sessionId));
+  }
+
+  function rememberedSessionId() {
+    var hash = window.location.hash || "";
+    var marker = "#session=";
+    if (hash.indexOf(marker) !== 0) { return null; }
+    try {
+      return decodeURIComponent(hash.slice(marker.length));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function forgetRememberedSession() {
+    if (!window.history || !window.history.replaceState) { return; }
+    var base = window.location.pathname + window.location.search;
+    window.history.replaceState(null, "", base);
+  }
+
+  function choiceText(record) {
+    if (!record) { return ""; }
+    if (record.no_suitable_item) { return "No suitable product"; }
+    return "Selected " + (record.selected_parent_asin || "a product");
+  }
+
+  /* The choice panel renders exactly the server's persisted records.  The label
+     "choice confidence" is feedback about the user's decision, not a model score. */
+  function renderChoiceHistory() {
+    clear(els.shopChoiceHistory);
+    var record = state.shop.choiceRecord;
+    if (!record) {
+      els.shopChoiceHistory.appendChild(el("div", "muted",
+        "No choice has been submitted for this session yet."));
+      return;
+    }
+    var line = choiceText(record);
+    if (record.satisfaction !== null && record.satisfaction !== undefined) {
+      line += " 路 satisfaction " + record.satisfaction;
+    }
+    if (record.confidence !== null && record.confidence !== undefined) {
+      line += " 路 choice confidence " + record.confidence;
+    }
+    els.shopChoiceHistory.appendChild(el("div", "shop-choice-record", line));
+  }
+
+  function renderChoiceStatus(kind, text) {
+    els.shopChoiceStatus.className = "shop-choice-status" + (kind ? " " + kind : "");
+    els.shopChoiceStatus.textContent = text || "";
+  }
+
+  function updateChoiceControls() {
+    var enabled = !!(state.shop.choiceEnabled && state.sessionId);
+    els.shopChoice.hidden = !enabled;
+    if (!enabled) { return; }
+    var recorded = !!(state.shop.choiceRecord);
+    var busy = !!state.shop.choiceSending;
+    els.choiceSatisfaction.disabled = recorded || busy;
+    els.choiceConfidence.disabled = recorded || busy;
+    els.shopNoSuitable.hidden = recorded || busy || !state.shop.currentRecommendations.length;
+    els.shopNoSuitable.disabled = recorded || busy;
+    var buttons = els.shopCards.querySelectorAll("button.shop-card-choice");
+    for (var i = 0; i < buttons.length; i += 1) {
+      buttons[i].disabled = recorded || busy;
+    }
+  }
+
+  function renderChoiceFeedback(recommendations) {
+    state.shop.currentRecommendations = recommendations || [];
+    if (!state.shop.choiceEnabled) { return; }
+    els.shopChoice.hidden = false;
+    renderChoiceHistory();
+    updateChoiceControls();
+    if (!state.shop.choiceRecord && !state.shop.choiceSending) {
+      renderChoiceStatus("", "");
+    }
+  }
+
+  function loadChoiceHistory() {
+    if (!state.sessionId) { return Promise.resolve(false); }
+    return request("/sessions/" + encodeURIComponent(state.sessionId) + "/agent/choices")
+      .then(function (records) {
+        state.shop.choiceEnabled = true;
+        var list = records || [];
+        state.shop.choiceRecord = list.length ? list[list.length - 1] : null;
+        renderChoiceHistory();
+        updateChoiceControls();
+        return true;
+      })
+      .catch(function () {
+        /* Collection disabled or an old server: keep the accepted page behaviour by
+           keeping the choice panel hidden. */
+        state.shop.choiceEnabled = false;
+        state.shop.choiceRecord = null;
+        els.shopChoice.hidden = true;
+        return false;
+      });
+  }
+
+  function applyChoiceRecord(record) {
+    if (!record) { return; }
+    state.shop.choiceRecord = record;
+    renderChoiceHistory();
+    updateChoiceControls();
+    renderChoiceStatus("success", record.duplicate
+      ? "This choice was already recorded; no duplicate row was written."
+      : "Choice recorded. Thank you — this feedback is stored locally for offline evaluation.");
+  }
+
+  function submitChoice(body) {
+    if (!state.sessionId || state.shop.choiceSending) { return; }
+    if (state.shop.choiceRecord) {
+      renderChoiceStatus("error",
+        "A choice is already recorded for this session; it is not written twice.");
+      return;
+    }
+    var satisfaction = choiceValue(els.choiceSatisfaction);
+    var confidence = choiceValue(els.choiceConfidence);
+    if (satisfaction !== null) { body.satisfaction = satisfaction; }
+    if (confidence !== null) { body.confidence = confidence; }
+    state.shop.choiceSending = true;
+    updateChoiceControls();
+    renderChoiceStatus("pending", "Recording…");
+    request("/sessions/" + encodeURIComponent(state.sessionId) + "/agent/choice", {
+      method: "POST",
+      body: body
+    })
+      .then(function (record) {
+        state.shop.choiceSending = false;
+        applyChoiceRecord(record);
+        rememberSession(state.sessionId);
+        els.shopChoiceStatus.focus();
+      })
+      .catch(function (error) {
+        state.shop.choiceSending = false;
+        updateChoiceControls();
+        if (error && (error.code === "choice_collection_disabled"
+            || error.code === "m8_disabled")) {
+          state.shop.choiceEnabled = false;
+          els.shopChoice.hidden = true;
+          return;
+        }
+        if (error && error.code === "m8_choice_conflict") {
+          renderChoiceStatus("error",
+            "A different choice was already recorded for this session; it was not overwritten.");
+          loadChoiceHistory();
+          return;
+        }
+        if (error && error.code === "m8_invalid_choice") {
+          renderChoiceStatus("error",
+            "Only a product in the current final Top-K can be selected.");
+          return;
+        }
+        renderChoiceStatus("error",
+          "The choice could not be recorded. No partial record was fabricated.");
+        showBanner("error", "Choice not recorded",
+          (error && error.message) || "The choice request failed.");
+      });
+  }
+
+  function chooseProduct(identity) {
+    if (!identity || state.shop.choiceRecord || state.shop.choiceSending) { return; }
+    submitChoice({ selected_parent_asin: String(identity) });
+  }
+
+  function chooseNoSuitable() {
+    if (state.shop.choiceRecord || state.shop.choiceSending) { return; }
+    submitChoice({ no_suitable_item: true });
   }
 
   function appendShopTurn(kind, meta, body) {
@@ -449,7 +686,7 @@
     if (preference.interaction) {
       box.appendChild(el("div", "hint",
         "Interaction: " + preference.interaction
-        + (preference.impact ? " · projected top-K change: " + preference.impact.toFixed(2) : "")));
+        + (preference.impact ? " 路 projected top-K change: " + preference.impact.toFixed(2) : "")));
     }
     box.appendChild(el("div", "hint", preference.reason || ""));
     if (preference.explanation) {
@@ -483,9 +720,15 @@
 
   function appendPreferenceOutcome(outcome) {
     if (!outcome) { return; }
-    var verification = outcome.verified
-      ? "counterfactual top-K verified"
-      : "counterfactual top-K could not be verified";
+    var verification;
+    if (outcome.comparison_status === "not_comparable") {
+      verification = "M6.1 experimental category-aware refresh applied; the M7 "
+        + "pre-refresh counterfactual is not directly comparable";
+    } else {
+      verification = outcome.verified
+        ? "counterfactual top-K verified"
+        : "counterfactual top-K could not be verified";
+    }
     appendShopTurn("agent", "Agent — preference applied",
       "Selected " + outcome.selected_option_id + " for " + outcome.attribute
       + "; before: " + (outcome.before_top_k || []).join(", ")
@@ -570,6 +813,7 @@
     if (!list.length) {
       els.shopCards.appendChild(el("p", "muted shop-empty",
         message || "No recommendations were returned."));
+      renderChoiceFeedback([]);
       return;
     }
     /* The server's order is the only order: no sorting, no filtering, no lookups. */
@@ -590,8 +834,15 @@
         wrap.appendChild(el("p", "shop-reason muted",
           "No reason was returned for this item."));
       }
+      if (state.shop.choiceEnabled && !state.shop.choiceRecord) {
+        var choose = el("button", "secondary shop-card-choice", "Choose this product");
+        choose.type = "button";
+        choose.addEventListener("click", function () { chooseProduct(card.parent_asin); });
+        wrap.appendChild(choose);
+      }
       els.shopCards.appendChild(wrap);
     });
+    renderChoiceFeedback(list);
   }
 
   function appendShopResearch(research) {
@@ -796,7 +1047,7 @@
         els.turn.textContent = String(payload.turn);
         els.route.textContent = payload.route;
         state.lastRoute = payload.route;
-        appendTurn("agent", "Agent · " + payload.turn_id, payload.message);
+        appendTurn("agent", "Agent 路 " + payload.turn_id, payload.message);
         renderTrace(payload.trace);
         renderStatusChips();
         renderMemoryUpdate(payload.memory_update);
@@ -1298,6 +1549,7 @@
   els.shopForm.addEventListener("submit", shopSend);
   els.newSession.addEventListener("click", function () { createSession(); });
   els.resetSession.addEventListener("click", function () { resetSession(); });
+  els.shopNoSuitable.addEventListener("click", chooseNoSuitable);
   els.profileSelect.addEventListener("change", function () {
     state.profileId = els.profileSelect.value;
   });
@@ -1315,9 +1567,10 @@
   checkHealth()
     .then(function () { return loadDecisionModes(); })
     .then(function () { return loadProfiles(); })
-    .then(function () { return createSession(); })
+    .then(function () { return restoreSession(); })
     .catch(function (error) {
       setState("error");
       showBanner("error", "Demo unavailable", describeError(error));
     });
 })();
+

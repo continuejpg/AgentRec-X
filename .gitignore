@@ -4,6 +4,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+# Environment variants (ranker / backend / embedding venvs) are machine-local
+# rebuildable environments and must never be committed.  `.venv/` above covers the
+# canonical one; this keeps the sibling variants equally invisible.
+.venv-*/
 
 # IDE
 .vscode/
@@ -70,3 +74,19 @@ wandb/
 
 # M4 provider credential (local only, never committed)
 .m4_credential
+
+# P14-A committed test fixtures.  data/ and *.jsonl above intentionally exclude all
+# real data/artifacts; the small, reviewable JSONL fixtures under tests/data/p14a are the
+# exception (they are required for the offline test suite to run on a fresh checkout).
+!tests/data/
+!tests/data/p14a/
+!tests/data/p14a/*.jsonl
+
+# Archive round (2026-11-09): large model weights and local training adapters are
+# machine-specific artifacts and must never enter the Git archive. The small JSON
+# metrics under training/agent_sft/output/ remain commit-able; only the tarballs
+# are excluded. The BGE model directory is restored from HuggingFace as documented
+# in docs/ARCHIVE_MANIFEST.md.  Anchor this to the repository root: a bare `models/`
+# pattern would also hide source packages such as recommendation/models/.
+/models/
+training/agent_sft/output/*.tar.gz

@@ -86,8 +86,14 @@ def persist_memory_stage(
     """
     if memory_service is None or user_key is None:
         return {}
+    # A Planner RETRIEVE query is a retrieval rewrite, not a user-authored turn.  The
+    # controlled runner sets ``skip_memory_persist`` for every step after the first
+    # retrieval and supplies ``memory_user_message`` (the real user text) for the one
+    # canonical write, so repeated queries cannot add/retract M9 preferences.
+    if state.get("skip_memory_persist"):
+        return {}
 
-    user_message = state.get("user_message")
+    user_message = state.get("memory_user_message") or state.get("user_message")
     if not isinstance(user_message, str) or not user_message.strip():
         return {}
 

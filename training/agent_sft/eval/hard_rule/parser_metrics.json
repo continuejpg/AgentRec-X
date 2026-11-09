@@ -1,0 +1,17 @@
+{
+  "provider": "rule",
+  "model": "rule",
+  "adapter": null,
+  "samples": 100,
+  "schema_valid_rate": 1.0,
+  "operation_exact_match": 0.08,
+  "operation_macro_f1": 0.1921207150667998,
+  "operation_micro_f1": 0.3783783783783784,
+  "slot_accuracy": 0.375,
+  "retraction_accuracy": 0.13333333333333333,
+  "unsupported_proposal_rate": 0.0,
+  "failure_or_abstention_rate": 0.0,
+  "p50_latency_ms": 0.02559996210038662,
+  "p95_latency_ms": 0.030189880635589358,
+  "retraction_samples": 15
+}

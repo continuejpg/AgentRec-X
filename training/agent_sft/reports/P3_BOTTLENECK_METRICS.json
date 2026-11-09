@@ -1,0 +1,103 @@
+{
+  "C": {
+    "pass": 12,
+    "pass_set": [
+      "dev_01_goal_correction_withdraw",
+      "dev_02_accessory_then_restore",
+      "dev_03_accessory_target",
+      "dev_04_goal_change_to_filter",
+      "dev_08_filter_lightweight_withdraw",
+      "dev_09_ambiguous_to_cookware",
+      "dev_10_cross_turn_reference",
+      "dev_11_filter_bottle_role",
+      "dev_15_filter_straw_pref",
+      "dev_16_cookware_to_stove",
+      "dev_19_cookware_set_reference",
+      "dev_20_broad_gear_to_filter"
+    ],
+    "pass_set_equal_C": true
+  },
+  "D0": {
+    "pass": 12,
+    "pass_set": [
+      "dev_01_goal_correction_withdraw",
+      "dev_02_accessory_then_restore",
+      "dev_03_accessory_target",
+      "dev_04_goal_change_to_filter",
+      "dev_08_filter_lightweight_withdraw",
+      "dev_09_ambiguous_to_cookware",
+      "dev_10_cross_turn_reference",
+      "dev_11_filter_bottle_role",
+      "dev_15_filter_straw_pref",
+      "dev_16_cookware_to_stove",
+      "dev_19_cookware_set_reference",
+      "dev_20_broad_gear_to_filter"
+    ],
+    "pass_set_equal_C": true
+  },
+  "D1": {
+    "pass": 12,
+    "pass_set": [
+      "dev_01_goal_correction_withdraw",
+      "dev_02_accessory_then_restore",
+      "dev_03_accessory_target",
+      "dev_04_goal_change_to_filter",
+      "dev_08_filter_lightweight_withdraw",
+      "dev_09_ambiguous_to_cookware",
+      "dev_10_cross_turn_reference",
+      "dev_11_filter_bottle_role",
+      "dev_15_filter_straw_pref",
+      "dev_16_cookware_to_stove",
+      "dev_19_cookware_set_reference",
+      "dev_20_broad_gear_to_filter"
+    ],
+    "pass_set_equal_C": true
+  },
+  "D1v2": {
+    "pass": 12,
+    "pass_set": [
+      "dev_01_goal_correction_withdraw",
+      "dev_02_accessory_then_restore",
+      "dev_03_accessory_target",
+      "dev_04_goal_change_to_filter",
+      "dev_08_filter_lightweight_withdraw",
+      "dev_09_ambiguous_to_cookware",
+      "dev_10_cross_turn_reference",
+      "dev_11_filter_bottle_role",
+      "dev_15_filter_straw_pref",
+      "dev_16_cookware_to_stove",
+      "dev_19_cookware_set_reference",
+      "dev_20_broad_gear_to_filter"
+    ],
+    "pass_set_equal_C": true
+  },
+  "pairwise": {
+    "C_vs_D0": {
+      "final_id_changed_tasks": 2,
+      "same_v2_tasks": 20
+    },
+    "C_vs_D1": {
+      "final_id_changed_tasks": 3,
+      "same_v2_tasks": 20
+    },
+    "D0_vs_D1": {
+      "final_id_changed_tasks": 1,
+      "same_v2_tasks": 20
+    },
+    "D1_vs_D1v2": {
+      "final_id_changed_tasks": 1,
+      "same_v2_tasks": 20
+    }
+  },
+  "d1": {
+    "valid_turns": 52,
+    "accepted_ops": 52,
+    "proposal_m5_events": 38,
+    "all_m5_events": 213,
+    "tasks_with_proposal_events": 20
+  },
+  "d0": {
+    "proposal_turns": 61,
+    "invalid_proposals": 60
+  }
+}

@@ -194,6 +194,9 @@ class DemoSessionManager:
         when a new session is created.
     clock:
         Injectable time source, so expiry is testable without sleeping.
+    checkpoint:
+        Optional durable checkpoint store.  When present, active sessions are restored
+        at construction and every turn/mode/presentation change is written through.
     """
 
     def __init__(
@@ -203,6 +206,7 @@ class DemoSessionManager:
         max_sessions: int = DEFAULT_MAX_SESSIONS,
         ttl_seconds: float | None = None,
         clock: Callable[[], float] = time.time,
+        checkpoint: Any = None,
     ) -> None:
         if max_sessions < 1:
             raise ValueError("max_sessions must be at least 1")
@@ -216,6 +220,62 @@ class DemoSessionManager:
         self._retired_user_keys: set[str] = set()
         self._creation_counter = 0
         self._registry_lock = threading.Lock()
+        self._checkpoint = checkpoint
+        if checkpoint is not None:
+            self._restore_sessions()
+
+    def _restore_sessions(self) -> None:
+        """Load active sessions from the durable checkpoint.
+
+        A row whose profile no longer exists or whose decision mode is unknown is not
+        silently coerced: it is retired so the caller gets an explicit unknown-session
+        response rather than a session with changed semantics.
+        """
+        for row in self._checkpoint.load_sessions():
+            session_id = str(row["session_id"])
+            profile_id = str(row["profile_id"])
+            if profile_id not in self._profiles:
+                self._checkpoint.mark_session_retired(session_id)
+                continue
+            mode = str(row["decision_mode"])
+            if mode not in DECISION_MODES:
+                self._checkpoint.mark_session_retired(session_id)
+                continue
+            session = DemoSession(
+                session_id=session_id,
+                user_key=str(row["user_key"]),
+                profile_id=profile_id,
+                trusted_user_history=tuple(str(item) for item in row["trusted_user_history"]),
+                created_at=float(row["created_at"]),
+                creation_index=int(row["creation_index"]),
+                next_turn_sequence=int(row["next_turn_sequence"]),
+                decision_mode=mode,
+                last_presentation=tuple(row.get("last_presentation") or ()),
+                last_presentation_turn=row.get("last_presentation_turn"),
+            )
+            self._sessions[session_id] = session
+            self._creation_counter = max(self._creation_counter, session.creation_index)
+        # Restoring must not make an expired session count against capacity or keep its
+        # task-scoped pending rows alive.  The same retire path deletes those rows.
+        with self._registry_lock:
+            self._sweep_expired_locked()
+
+    def persist(self, session: DemoSession) -> None:
+        """Write one session snapshot, when checkpointing is enabled."""
+        if self._checkpoint is None:
+            return
+        self._checkpoint.save_session(
+            session_id=session.session_id,
+            user_key=session.user_key,
+            profile_id=session.profile_id,
+            trusted_user_history=session.trusted_user_history,
+            created_at=session.created_at,
+            creation_index=session.creation_index,
+            next_turn_sequence=session.next_turn_sequence,
+            decision_mode=session.decision_mode,
+            last_presentation=session.last_presentation,
+            last_presentation_turn=session.last_presentation_turn,
+        )
 
     # -- introspection ----------------------------------------------------- #
 
@@ -307,6 +367,7 @@ class DemoSessionManager:
                 decision_mode=decision_mode,
             )
             self._sessions[session_id] = session
+            self.persist(session)
             return session
 
     def get(self, session_id: str) -> DemoSession:
@@ -355,6 +416,8 @@ class DemoSessionManager:
                 if self._sessions.pop(session_id, None) is None:
                     raise UnknownSession(f"no live demo session {session_id!r}")
                 self._retired_user_keys.add(session.user_key)
+                if self._checkpoint is not None:
+                    self._checkpoint.mark_session_retired(session_id)
         return session
 
     def reset(self, session_id: str) -> DemoSession:
@@ -382,11 +445,16 @@ class DemoSessionManager:
                     self._retire_locked(session)
                     raise UnknownSession(f"demo session {session_id!r} has expired")
             session.next_turn_sequence += 1
-            yield TurnAllocation(
-                session=session,
-                turn_number=session.next_turn_sequence,
-                turn_id=session.turn_id_for(session.next_turn_sequence),
-            )
+            self.persist(session)
+            try:
+                yield TurnAllocation(
+                    session=session,
+                    turn_number=session.next_turn_sequence,
+                    turn_id=session.turn_id_for(session.next_turn_sequence),
+                )
+            finally:
+                # A turn may update last_presentation or decision mode inside the body.
+                self.persist(session)
 
     # -- internals --------------------------------------------------------- #
 
@@ -399,6 +467,8 @@ class DemoSessionManager:
         """Remove a session and retire its namespace.  Caller holds the registry lock."""
         self._sessions.pop(session.session_id, None)
         self._retired_user_keys.add(session.user_key)
+        if self._checkpoint is not None:
+            self._checkpoint.mark_session_retired(session.session_id)
 
     def _sweep_expired_locked(self) -> tuple[str, ...]:
         """Drop expired sessions.  Caller holds the registry lock."""

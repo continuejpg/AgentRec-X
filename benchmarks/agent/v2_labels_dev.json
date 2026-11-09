@@ -1,0 +1,684 @@
+{
+  "schema_version": "agentrecx.eval_v2.labels.1",
+  "split": "dev",
+  "reviewer": "P1C_audit",
+  "reviewed_at": "2026-11-05",
+  "label_status": "provisional_dev",
+  "note": "Independent V2 rubric. Frozen tasks/Gold are unchanged; exact_identity_hit is diagnostic for broad_role tasks.",
+  "labels": {
+    "dev_01_goal_correction_withdraw": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_02_accessory_then_restore": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "independent rubric: a complete filter whose title mentions included bottles is not a bottle product",
+      "inactive_preference_attributes": [],
+      "active_preference_attributes": []
+    },
+    "dev_03_accessory_target": {
+      "target_type": "water_filter",
+      "target_role": "accessory",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "mouthpiece"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "complete water filter",
+        "water filter pump",
+        "filtration system"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "accessory role task; exact ASIN is diagnostic only",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_04_goal_change_to_filter": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_05_budget_conflict": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [
+        {
+          "kind": "price_max",
+          "value": "50"
+        }
+      ],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [
+        "price_max"
+      ],
+      "inactive_preference_attributes": []
+    },
+    "dev_06_cookware_material": {
+      "target_type": "cookware",
+      "target_role": "main",
+      "accept_category_terms": [
+        "cookware",
+        "open fire cookware",
+        "pots, pans"
+      ],
+      "accept_title_terms_any": [
+        "cookware",
+        "cook set",
+        "mess kit"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [
+        "material"
+      ],
+      "inactive_preference_attributes": []
+    },
+    "dev_07_cookware_lightweight_pref": {
+      "target_type": "cookware",
+      "target_role": "main",
+      "accept_category_terms": [
+        "cookware",
+        "open fire cookware",
+        "pots, pans"
+      ],
+      "accept_title_terms_any": [
+        "cookware",
+        "cook set",
+        "mess kit"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [
+        "weight"
+      ],
+      "inactive_preference_attributes": []
+    },
+    "dev_08_filter_lightweight_withdraw": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": [
+        "weight"
+      ]
+    },
+    "dev_09_ambiguous_to_cookware": {
+      "target_type": "cookware",
+      "target_role": "main",
+      "accept_category_terms": [
+        "cookware",
+        "open fire cookware",
+        "pots, pans"
+      ],
+      "accept_title_terms_any": [
+        "cookware",
+        "cook set",
+        "mess kit"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_10_cross_turn_reference": {
+      "target_type": "cookware",
+      "target_role": "main",
+      "accept_category_terms": [
+        "cookware",
+        "open fire cookware",
+        "pots, pans"
+      ],
+      "accept_title_terms_any": [
+        "cookware",
+        "cook set",
+        "mess kit"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_11_filter_bottle_role": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "independent rubric: a complete filter whose title mentions included bottles is not a bottle product",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_12_goal_change_sleeping_to_lantern": {
+      "target_type": "lantern",
+      "target_role": "main",
+      "accept_category_terms": [
+        "electric lanterns",
+        "lanterns"
+      ],
+      "accept_title_terms_any": [
+        "lantern"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "sleeping pad"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": [
+        "sleeping pad"
+      ]
+    },
+    "dev_13_goal_change_tablets_to_filter": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_14_gravity_filter_pref": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [
+        "weight"
+      ],
+      "inactive_preference_attributes": []
+    },
+    "dev_15_filter_straw_pref": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "filter straw",
+        "water filtration",
+        "water purifier"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_16_cookware_to_stove": {
+      "target_type": "stove",
+      "target_role": "main",
+      "accept_category_terms": [
+        "camping stoves",
+        "backpacking stoves"
+      ],
+      "accept_title_terms_any": [
+        "stove",
+        "burner"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "broad stove role; the two expected ASINs are not the only acceptable stove identities",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": [
+        "cookware"
+      ]
+    },
+    "dev_17_filter_budget_pref": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [
+        {
+          "kind": "price_max",
+          "value": "50"
+        }
+      ],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [
+        "price_max"
+      ],
+      "inactive_preference_attributes": []
+    },
+    "dev_18_filter_color_correction": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_19_cookware_set_reference": {
+      "target_type": "cookware",
+      "target_role": "main",
+      "accept_category_terms": [
+        "cookware",
+        "open fire cookware",
+        "pots, pans"
+      ],
+      "accept_title_terms_any": [
+        "cookware",
+        "cook set",
+        "mess kit"
+      ],
+      "reject_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "reject_title_terms": [
+        "water filter",
+        "lantern"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    },
+    "dev_20_broad_gear_to_filter": {
+      "target_type": "water_filter",
+      "target_role": "main",
+      "accept_category_terms": [
+        "water filters",
+        "water purifiers"
+      ],
+      "accept_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier",
+        "filter straw"
+      ],
+      "reject_category_terms": [
+        "sports water bottles"
+      ],
+      "reject_title_terms": [
+        "replacement",
+        "cartridge",
+        "mouthpiece",
+        "adapter",
+        "tablet",
+        "tablets"
+      ],
+      "hard_constraints": [],
+      "task_kind": "broad_role",
+      "exact_identity_required": false,
+      "reviewer": "P1C_audit",
+      "reviewed_at": "2026-11-05",
+      "label_status": "provisional_dev",
+      "notes": "provisional rubric for evaluator development; frozen Gold unchanged",
+      "active_preference_attributes": [],
+      "inactive_preference_attributes": []
+    }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "stage": "G0",
+  "model": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "checks": {
+    "dataset_schema": true,
+    "non_thinking_template": true,
+    "completion_only_mask": true,
+    "model_type": true,
+    "json_generation": true,
+    "lora_targets": true
+  },
+  "blocked": [],
+  "tokenizer_class": "Qwen3_5Tokenizer",
+  "chat_template_present": true,
+  "template_preview": "<|im_start|>user\nReturn the JSON object.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+  "lengths": {
+    "max_total_tokens": 487,
+    "max_prompt_tokens": 428,
+    "truncated_count": 0,
+    "completion_tokens_min": 50,
+    "masked_prompt_tokens": 12794
+  },
+  "model_info": {
+    "class": "Qwen3_5ForCausalLM",
+    "model_type": "qwen3_5_text",
+    "model_family_expected": "Qwen3.5",
+    "model_id_expected": "Qwen/Qwen3.5-9B",
+    "class_expected": "Qwen3_5ForCausalLM",
+    "parameter_count": 8953803264,
+    "dtype": "torch.bfloat16",
+    "model_type_recognized": true
+  },
+  "architecture": {
+    "layer_types": [
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention",
+      "linear_attention",
+      "linear_attention",
+      "linear_attention",
+      "full_attention"
+    ],
+    "linear_attention_layers": 24,
+    "full_attention_layers": 8,
+    "causal_conv1d_available": false,
+    "fla_available": false,
+    "kernel_mode": "pytorch_fallback"
+  },
+  "gpu": {
+    "cuda_available": true,
+    "device_count": 1,
+    "device_name": "NVIDIA RTX 6000D",
+    "compute_capability": [
+      12,
+      0
+    ],
+    "torch_cuda_version": "12.8",
+    "total_memory_gib": 83.0489501953125,
+    "allocated_gib_after_load": 16.67778491973877,
+    "allocated_gib_after_lora": 16.846954345703125,
+    "peak_allocated_gib": 16.853768348693848
+  },
+  "generation": {
+    "latency_ms": 3478.4137662500143,
+    "raw_preview": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_constraint\",\"attribute\":\"price_max\",\"value\":30,\"direction\":null,\"scope\":\"task\",\"evidence\":\"under $30\"}],\"clarification\":null}",
+    "schema_errors": []
+  },
+  "lora": {
+    "target_modules": "all-linear",
+    "trainable_parameters": 43278336,
+    "lora_module_count": 2232,
+    "module_distribution": {
+      "out_proj": 144,
+      "lora_dropout": 248,
+      "lora_A": 248,
+      "lora_B": 248,
+      "in_proj_qkv": 144,
+      "in_proj_z": 144,
+      "in_proj_b": 144,
+      "in_proj_a": 144,
+      "gate_proj": 192,
+      "up_proj": 192,
+      "down_proj": 192,
+      "q_proj": 48,
+      "k_proj": 48,
+      "v_proj": 48,
+      "o_proj": 48
+    }
+  },
+  "final_recommendation": "proceed_to_G1"
+}

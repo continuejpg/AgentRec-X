@@ -116,6 +116,45 @@
         <div id="shop-cards" class="cards shop-cards">
           <p class="muted">Final recommendations and their evidence-bound reasons appear here.</p>
         </div>
+        <div id="shop-choice" class="shop-choice" hidden>
+          <h3 class="shop-subhead">Your choice (optional research feedback)</h3>
+          <p class="hint">
+            This local research demo records what you choose after the final list. There is no
+            correct answer, and your choice is not a ground-truth target: target labels stay
+            offline with the evaluator. Satisfaction and choice confidence are optional feedback,
+            never correctness labels. This page has no authentication; do not use it on an
+            untrusted network.
+          </p>
+          <div id="shop-choice-history" class="shop-choice-history" aria-live="polite"></div>
+          <div id="shop-choice-status" class="shop-choice-status" role="status"></div>
+          <div class="shop-choice-feedback">
+            <label for="choice-satisfaction">
+              Satisfaction (optional)
+              <select id="choice-satisfaction" disabled>
+                <option value="">not rated</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <label for="choice-confidence">
+              Choice confidence (optional)
+              <select id="choice-confidence" disabled>
+                <option value="">not rated</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+          </div>
+          <button id="shop-no-suitable" type="button" class="secondary" hidden>
+            No suitable product
+          </button>
+        </div>
       </section>
 
       <section class="panel conversation" aria-label="Conversation">

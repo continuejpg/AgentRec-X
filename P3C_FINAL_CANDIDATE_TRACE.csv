@@ -1,0 +1,8 @@
+﻿turn,item_id,parent_asin,stage,role,price_eligibility,action
+1,38577,B00CBR1UI6,final_api,MATCH,MATCH,returned
+1,123918,B08XJQ9HPX,final_api,MATCH,MATCH,returned
+1,136697,B09Y53NYDK,final_api,MATCH,MATCH,returned
+2,123918,B08XJQ9HPX,candidate,MATCH,eligible,removed_after_R1
+2,136697,B09Y53NYDK,candidate,MATCH,eligible,removed_after_R1
+2,38577,B00CBR1UI6,candidate,MATCH,eligible,removed_after_R1
+2,11687,B001HBUW1I,candidate,UNKNOWN,unresolved,removed_after_R1

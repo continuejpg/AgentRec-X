@@ -1,0 +1,69 @@
+P14-B1 SOURCE DIFF
+================================================================================
+Milestone: P14-B1 Evidence-Aware Recommendation Decision Gate
+Scope: one additive Executor hook + new deterministic decision gate + diagnosis/runtime harness + tests.
+P14-E labels and P14-B0 results are read-only; no weights or labels were tuned or modified.
+
+NEW SOURCE / TEST FILES
+recommendation/preference/decision_gate.py
+  bytes=15928 sha256=e654c38374eb2be1b672ef32fc770d146756065d815057c6765630886c288ea1
+experiments/p14b1/__init__.py
+  bytes=34 sha256=39c6cba316adb88100c69395df5f6f6fe4493128dec7b8c90db369cef0b0fb52
+experiments/p14b1/diagnose.py
+  bytes=17635 sha256=02e19283cd9b6e154f23ae752d2b6865e5fcba9d89e1b73a79e93d20d2d17ecc
+experiments/p14b1/runtime_smoke.py
+  bytes=14165 sha256=15fe7ab7116ff24062d5526a2a22217647037088ae80c7bc03018b7aeabae99b
+tests/test_p14b1_decision_gate.py
+  bytes=5779 sha256=93bfb0400ed011945ab63bfb3641856fbac2d82117b012ab76a7943773b377b5
+
+MODIFIED SHARED FILE (1)
+recommendation/shopping_companion/planner_bridge.py
+  reason: additive optional finalize_gate hook + max_gate_retries; gate=None preserves legacy FINALIZE exactly; blocked decisions become ASK / RERANK / RETRIEVE / bounded terminal refusal; no default behaviour change
+  bytes=29961 sha256=fe4b0a617ec760a507bdeb421af55feb01e32e709976ddae9e15e40f3a15801d
+
+NEW REPORTS
+P14B1_REPORT.md
+  bytes=13081 sha256=6555db606a7fe31380b958e1ea67986508412e54a5036d7e70bb6e4974ece5ce
+
+RUN ARTIFACTS (git-ignored)
+runs/p14b1/summary.json
+  bytes=5227 sha256=c8bce8f7f91db70a82bf3db9809b4906d16459b01ba9cbca09ff9211dc534c43
+runs/p14b1/candidate_decisions.jsonl
+  bytes=166631 sha256=64427236dc24da9ddb6bc53a5ec0a1c2b247c3360f39ec4143bf7773c1c22ebe
+runs/p14b1/gate_diagnosis.json
+  bytes=200964 sha256=7fb473605d03eaca73ad0babc5239a5b48e47de1ffcc9ffbf4b52a96935677dd
+runs/p14b1/runtime/summary.json
+  bytes=2867 sha256=2a9fe5febc370fed98087084bf5f9464549e66791a71b81f90d44ed16a9512ad
+runs/p14b1/runtime/p14e_pilot_0001.json
+  bytes=8782 sha256=859e7ed2766822ff40b8eefbf30f2c144059577463e248c754cb01e7044cd8fc
+runs/p14b1/runtime/p14e_pilot_0026.json
+  bytes=6533 sha256=fc73d9336bb6cfa411548cdf5a960f0876f39743d18eb614a99410f5a0499758
+runs/p14b1/runtime/p14e_pilot_0036.json
+  bytes=9991 sha256=be559c3adb97f71ec312067d8a0cc4fce77d533afe3e41fa7ae7bc149e5ad4e5
+runs/p14b1/runtime/p14e_pilot_0039.json
+  bytes=10168 sha256=81d07f27b1497cdef7c8ec061f9a091bc1f7a31fb8a1cb2e0b20c231053caa6d
+runs/p14b1/runtime/p14e_pilot_0029.json
+  bytes=7747 sha256=07840e68eecab667a71040567a1cef0fc2891dd30e50ed88a206f48a488b8bef
+runs/p14b1/runtime/p14e_pilot_0031.json
+  bytes=5423 sha256=a3dbab8a76dbeeec9545eb2fc1ce1b486459138e9881dd615ae9809cbaf9661c
+
+UNCHANGED / NOT MODIFIED
+- data/p14e/benchmark/* (frozen labels/tasks; hash test passes)
+- runs/p14b0/* (P14-B0 four-way results preserved; not overwritten)
+- preference scorer weights / implementation, Memory M9 fix from P14-B0, M5 events
+- CandidateLedger, GroundedReasoner, CandidateEligibilityEvaluator, Planner default actions
+- Serving V1, SASRec, Two-Tower, P13-R catalogue, training/, benchmarks/, api/
+- no dependency changes; no GPU/AutoDL operations
+
+TESTS
+- tests/test_p14b1_decision_gate.py: 14 gate/isolation tests (all pass)
+- combined targeted regression: 174 passed in 38.1 s (P14-B1 + P14-B0 + P14-A planner/memory + P14-E benchmark + memory service + eligibility + planner contract + serving fusion)
+
+BEHAVIOUR IMPACT
+- gate=None: P14-A executor FINALIZE path unchanged (legacy planner-runtime tests pass).
+- gate installed: non-allow decisions never present a product; ASK requires a real question; bounded retries; UNKNOWN hard constraints are never treated as satisfied; bounded-scope refusal only.
+- The gate reads only agent-visible evidence (scorer rows, active history preferences, query constraints, budget).
+
+NOTES
+- Conclusions are provisional / pilot-dev: 15/40 P14-E tasks remain pending human review.
+- Runtime integration: executor hook + real-tool decision loop validated; full P14-A production Electronics run and unification of hard-status producers (text evidence vs Eligibility) remain follow-ups.

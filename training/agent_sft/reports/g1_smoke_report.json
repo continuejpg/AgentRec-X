@@ -1,0 +1,39 @@
+{
+  "stage": "G1",
+  "model": {
+    "class": "Qwen3_5ForCausalLM",
+    "model_type": "qwen3_5_text",
+    "model_family_expected": "Qwen3.5",
+    "model_id_expected": "Qwen/Qwen3.5-9B",
+    "class_expected": "Qwen3_5ForCausalLM",
+    "parameter_count": 8997081600,
+    "dtype": "torch.bfloat16",
+    "model_type_recognized": true
+  },
+  "losses": [
+    0.4633815884590149,
+    0.19295990467071533
+  ],
+  "finite": true,
+  "trainable_parameters": 43278336,
+  "reload_trainable_parameters": 0,
+  "adapter": "/root/autodl-tmp/agentrecx/training/agent_sft/output/qwen3_5_9b_smoke/adapter",
+  "reload_generation_preview": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"under $30\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":30}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+  "reload_schema_errors": [],
+  "reload_json_valid": true,
+  "gpu": {
+    "device_name": "NVIDIA RTX 6000D",
+    "total_memory_gib": 83.0489501953125,
+    "peak_allocated_gib": 23.85121202468872
+  },
+  "kernels": {
+    "causal_conv1d_available": false,
+    "fla_available": false
+  },
+  "data_hash": {
+    "train": "fa3b1c828bdc9d8cbaca51e7eddd656fb495fbf15bc4cb3fe6751fa08bc8df97",
+    "val": "c8317ad3d9d8822096bf557559407d82f10af18fcaa3738751b413758f95dd05",
+    "test": "e85f85767508d0a2533134e031dd78e46553c93360b3866566532bd6b6807b02"
+  },
+  "note": "G1 smoke only; not a quality or final training result"
+}

@@ -1,0 +1,50 @@
+{
+  "C": {
+    "tasks": 20,
+    "v2_pass": 12,
+    "v2_fail": 5,
+    "v2_unknown": 3,
+    "legacy_pass": 8,
+    "p50_wall_ms": 9172.871649963781,
+    "p95_wall_ms": 20166.755500016734,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "D0": {
+    "tasks": 20,
+    "v2_pass": 12,
+    "v2_fail": 5,
+    "v2_unknown": 3,
+    "legacy_pass": 8,
+    "p50_wall_ms": 12138.862950028852,
+    "p95_wall_ms": 19755.114999832585,
+    "input_tokens": 21739,
+    "output_tokens": 4234,
+    "total_tokens": 25973
+  },
+  "D1": {
+    "tasks": 20,
+    "v2_pass": 12,
+    "v2_fail": 5,
+    "v2_unknown": 3,
+    "legacy_pass": 7,
+    "p50_wall_ms": 17823.144750087522,
+    "p95_wall_ms": 33085.94070002437,
+    "input_tokens": 22087,
+    "output_tokens": 3673,
+    "total_tokens": 25760
+  },
+  "D1v2": {
+    "tasks": 20,
+    "v2_pass": 12,
+    "v2_fail": 5,
+    "v2_unknown": 3,
+    "legacy_pass": 7,
+    "p50_wall_ms": 15341.188449994661,
+    "p95_wall_ms": 20625.120300101116,
+    "input_tokens": 22087,
+    "output_tokens": 3634,
+    "total_tokens": 25721
+  }
+}

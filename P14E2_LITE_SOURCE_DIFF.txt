@@ -1,0 +1,71 @@
+P14-E2 Lite SOURCE DIFF
+================================================================================
+Milestone: P14-E2 Lite Focused Benchmark Expansion
+Scope: additive only: new task-generation/validation/smoke code + 80 tasks + review queue.
+
+TRACKED FILES MODIFIED BY P14-E2: none
+PRE-EXISTING WORKTREE MODIFICATIONS: unchanged by this round (P5-P14-B1 state).
+
+NEW SOURCE / TEST FILES
+experiments/p14e2/__init__.py
+  bytes=39 sha256=9aa9641ad30b521953fb4fdce1bdff79bb02ffa13e119493fb023fa00152894d
+experiments/p14e2/build_lite.py
+  bytes=36903 sha256=2c797760e573633a07b1666b7b29683045fdddb6662fa779f1e69f7c2eecd500
+experiments/p14e2/validate_lite.py
+  bytes=16434 sha256=d5cc2f516207321ab201fd39e52a814abb26ab836862116df7671823958e5e4f
+experiments/p14e2/smoke.py
+  bytes=8024 sha256=e23edcfb8add585f27dae73a94af0791a3370c7302c5306e769048a44c86b2a2
+tests/test_p14e2_lite.py
+  bytes=7701 sha256=bf1238ccbf3e8a4a95fa351a8cc7cbbbf09ef8a9a3e733c768f4c3a62fc838a2
+
+NEW REPORTS
+P14E2_LITE_REPORT.md
+  bytes=9354 sha256=97ab2f07158921b7e0f594d63b64303caff5e2bc44ebd09937a2582df6bb1fcd
+
+NEW DATA ARTIFACTS (git-ignored) — train/dev/reserved_test are separated files
+data/p14e2/benchmark/train.agent.jsonl
+  bytes=57112 sha256=f80f4df71dc6ac3cdfffc287b16afe52c55fc7055892de11fbb3b4600c05cf2f
+data/p14e2/benchmark/train.evaluator.jsonl
+  bytes=299347 sha256=6770814f16f8f4a7c40cf824dac2301325c1f7002bd2aeda50e52e9f9b858235
+data/p14e2/benchmark/dev.agent.jsonl
+  bytes=27908 sha256=a1bd72a755c77b129926f9b01d26ef4f123ced22cd26480aa9889dc3b55cc579
+data/p14e2/benchmark/dev.evaluator.jsonl
+  bytes=145317 sha256=055740da015e771c802432996a500b4a923aeece27d110285ae851385a01ca6c
+data/p14e2/benchmark/reserved_test.agent.jsonl
+  bytes=28728 sha256=405be3de57118ebf1715f648d4ec54435ab959c183929f21789542cff2e87b9f
+data/p14e2/benchmark/reserved_test.evaluator.jsonl
+  bytes=140274 sha256=d0a271394a2a439d0203574687fab86efb64eb60a4f4d832115472f299b3d3e9
+data/p14e2/benchmark/personas.jsonl
+  bytes=37856 sha256=c86f4a225efa3d67261f200a6782960bdfd77a0d17ca41afef3437645e84dbf7
+data/p14e2/benchmark/history_events.jsonl
+  bytes=137653 sha256=3e229ed7178f2bcc9853fddb77a43e8f8876c71218201d193ecc2695cb1420b8
+data/p14e2/benchmark/schema_v0.2.json
+  bytes=6113 sha256=19fe616b0cda7043dcd9fdfd26f2a2b036254383abf76fd14f48fd73946411ac
+data/p14e2/benchmark/manifest.json
+  bytes=8761 sha256=b15c51461814bdca9c55ec9a8446d593e0fd1c75cf0d4c5840735e2daf75ce92
+data/p14e2/benchmark/review_checklist.json
+  bytes=10505 sha256=5245985ebc214272835b0b2baff4eed2f7e1b102521d493735db28f8aaeca804
+
+RUN EVIDENCE
+runs/p14e2/validation/summary.json
+  bytes=1454 sha256=33b47b09d5c58cf91b7b7704ae0422a4db72aaebf290ec9b8152cdcc5c1377de
+runs/p14e2/smoke/summary.json
+  bytes=13687 sha256=0e28e0067d2443ac57fbcc7197450d569533207ab7c8ab8f9b6401ee0d236214
+
+UNCHANGED / NOT MODIFIED
+- data/p14e/benchmark/* (frozen pilot_dev; hash test passes)
+- runs/p14b0/* and runs/p14b1/* (P14-B0/B1 results preserved)
+- Preference Scorer V0, Decision Gate v0.1, M5/M9, Planner Contract, Serving V1, CandidateLedger, Eligibility
+- P13-R catalogue, old SASRec/Two-Tower models, training/, benchmarks/, api/
+- no dependency changes; no GPU/AutoDL operations; no commit/push/deploy
+
+TESTS
+- tests/test_p14e2_lite.py: 10 passed (counts/splits/types, persona/family/pair isolation, provenance, leakage, no-history/ASK/evidence families, reserved guard, frozen pilot hashes)
+- related regression: 45 passed in 27.65 s (P14-E2 + P14-B1 gate + P14-B0 scorer + P14-E benchmark)
+
+DATA CONSTRUCTION NOTES
+- 80 tasks: train 40 / dev 20 / reserved_test 20; no persona/family/same-query pair crosses splits.
+- All non-pair queries have a deterministic context clause; no query+history signature repeats (within E2 or against P14-E).
+- Labels are produced by the frozen independent evidence labeler (not copied from Scorer/Gate output).
+- reserved_test: schema/leakage/ID checks only; no search/scorer/gate/planner execution.
+- 23/80 new tasks marked pending_human_review; original 15 pilot pending tasks unchanged; nothing marked human_verified.

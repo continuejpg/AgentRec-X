@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from recommendation.api.schemas import MAX_K, MIN_K
 from recommendation.control.candidate_ledger import (
@@ -58,6 +58,8 @@ __all__ = [
     "MAX_CONSTRAINTS",
     "MAX_HISTORY_ITEMS",
     "AgentCandidateView",
+    "AgentChoiceRequest",
+    "AgentChoiceResultView",
     "AgentConstraintItem",
     "AgentEligibilityView",
     "AgentExecutionView",
@@ -318,6 +320,64 @@ class AgentShoppingRequest(BaseModel):
             "The prompt is presented as evidence, never as a final recommendation list."
         ),
     )
+    idempotency_key: OpaqueId | None = Field(
+        default=None,
+        description=(
+            "Optional client-supplied stable key for this logical turn. Re-sending the same "
+            "turn with the same key reuses the same M5.2 event identities, so a transport "
+            "retry cannot duplicate decision-state facts. Distinct turns with identical "
+            "message text still get distinct server turn ids when this is omitted."
+        ),
+    )
+
+
+class AgentChoiceRequest(BaseModel):
+    """Body of the M8.1 demo decision-choice endpoint.
+
+    Exactly one of ``selected_parent_asin`` / ``no_suitable_item`` is required.  Optional
+    satisfaction and confidence are *feedback*, never correctness labels; the endpoint is
+    only productive when the M8 decision-evaluation experiment switch is enabled.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selected_parent_asin: OpaqueId | None = None
+    no_suitable_item: bool = False
+    satisfaction: int | None = Field(default=None, ge=1, le=5)
+    confidence: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=500)
+    idempotency_key: OpaqueId | None = None
+
+    @model_validator(mode="after")
+    def _validate_choice(self) -> "AgentChoiceRequest":
+        if self.no_suitable_item and self.selected_parent_asin is not None:
+            raise ValueError(
+                "no_suitable_item and selected_parent_asin are mutually exclusive"
+            )
+        if not self.no_suitable_item and self.selected_parent_asin is None:
+            raise ValueError(
+                "selected_parent_asin or no_suitable_item=True is required"
+            )
+        return self
+
+
+class AgentChoiceResultView(BaseModel):
+    """One persisted real user choice (no target/correctness field)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    choice_id: str
+    session_id: str
+    task_id: str
+    trajectory_id: str
+    trajectory_digest: str
+    selected_parent_asin: str | None = None
+    no_suitable_item: bool = False
+    satisfaction: int | None = None
+    confidence: int | None = None
+    comment: str | None = None
+    final_top_k: tuple[str, ...] = ()
+    duplicate: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -801,7 +861,14 @@ class AgentExecutionView(BaseModel):
 
 
 class AgentIntentConstraintView(BaseModel):
-    """One active entry of the current shopping intent."""
+    """One active entry of the current shopping intent.
+
+    ``origin`` keeps the three provenances apart in the user-visible view: a constraint
+    the user stated in **this** turn (``user_stated``), one validated from an earlier turn
+    and still active (``validated_existing``), or an authorized decision-state constraint
+    merged by M5.2 (``decision_state``).  Remembered or state-authorized constraints are
+    therefore never presented as something the user said in the current turn.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -810,6 +877,7 @@ class AgentIntentConstraintView(BaseModel):
     polarity: str
     strength: Literal["hard", "soft"]
     source_turn_id: str = ""
+    origin: Literal["user_stated", "validated_existing", "decision_state"] = "user_stated"
 
 
 class AgentIntentView(BaseModel):
@@ -885,7 +953,14 @@ class AgentPreferenceEvidenceView(BaseModel):
     comparison_kind: Literal["numeric", "categorical"]
     missing: tuple[str, ...] = ()
     options: tuple[AgentPreferenceOptionView, ...] = ()
-    interaction: Literal["ASK_DIRECT", "SHOW_CONTRAST", "EXPLAIN"] = "SHOW_CONTRAST"
+    interaction: Literal["ASK_DIRECT", "SHOW_CONTRAST", "EXPLAIN", "COMPARE"] = "SHOW_CONTRAST"
+    grounded_action: Literal["ASK", "COMPARE", "EXPLAIN"] | None = Field(
+        default=None,
+        description=(
+            "M7 experiment only: the four-action policy's selected interaction. Null on "
+            "the accepted serving path, which has no M7 policy."
+        ),
+    )
     status: Literal["known", "confirmed", "unconfirmed", "revoked"] = "unconfirmed"
     impact: float = 0.0
     baseline_top_k: tuple[str, ...] = ()
@@ -905,6 +980,9 @@ class AgentPreferenceOutcomeView(BaseModel):
     actual_top_k: tuple[str, ...] = ()
     changed: bool = False
     verified: bool = False
+    comparison_status: Literal["verified", "not_verified", "not_comparable"] = (
+        "not_verified"
+    )
 
 
 class AgentClarificationView(BaseModel):

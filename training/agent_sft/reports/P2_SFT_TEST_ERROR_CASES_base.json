@@ -1,0 +1,72 @@
+[
+  {
+    "sample_id": "p2sft_test_00001",
+    "scenario": "price_retract",
+    "user_message": "The budget no longer matters; clear it.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"The budget no longer matters; clear it.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":10,\"direction\":null,\"scope\":\"task\",\"evidence\":\"The budget no longer matters; clear it.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00003",
+    "scenario": "material_pref",
+    "user_message": "I would rather have the titanium version.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"I would rather have the titanium version.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"add_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"I would rather have the titanium version.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00005",
+    "scenario": "role_correction",
+    "user_message": "Not the bottle version; give me the complete purifier instead.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"role\",\"direction\":null,\"evidence\":\"complete purifier\",\"op\":\"update_goal\",\"scope\":\"task\",\"value\":\"main\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_goal\",\"attribute\":\"product_type\",\"value\":\"complete_purifier\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"complete purifier\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00012",
+    "scenario": "price_retract",
+    "user_message": "The budget no longer matters; clear it.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"The budget no longer matters; clear it.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":10,\"direction\":null,\"scope\":\"task\",\"evidence\":\"The budget no longer matters; clear it.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00014",
+    "scenario": "material_pref",
+    "user_message": "I would rather have the titanium version.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"I would rather have the titanium version.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"add_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"I would rather have the titanium version.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00016",
+    "scenario": "role_correction",
+    "user_message": "Not the bottle version; give me the complete purifier instead.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"role\",\"direction\":null,\"evidence\":\"complete purifier\",\"op\":\"update_goal\",\"scope\":\"task\",\"value\":\"main\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_goal\",\"attribute\":\"product_type\",\"value\":\"complete_purifier\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"complete purifier\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00023",
+    "scenario": "price_retract",
+    "user_message": "The budget no longer matters; clear it.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"The budget no longer matters; clear it.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":10,\"direction\":null,\"scope\":\"task\",\"evidence\":\"The budget no longer matters; clear it.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00025",
+    "scenario": "material_pref",
+    "user_message": "I would rather have the titanium version.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"I would rather have the titanium version.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"I would rather have the titanium version.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00027",
+    "scenario": "role_correction",
+    "user_message": "Not the bottle version; give me the complete purifier instead.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"role\",\"direction\":null,\"evidence\":\"complete purifier\",\"op\":\"update_goal\",\"scope\":\"task\",\"value\":\"main\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_goal\",\"attribute\":\"product_type\",\"value\":\"complete_purifier\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"give me the complete purifier instead\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "p2sft_test_00034",
+    "scenario": "price_retract",
+    "user_message": "The budget no longer matters; clear it.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"The budget no longer matters; clear it.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":10,\"direction\":null,\"scope\":\"task\",\"evidence\":\"The budget no longer matters; clear it.\"}],\"clarification\":null}"
+  }
+]

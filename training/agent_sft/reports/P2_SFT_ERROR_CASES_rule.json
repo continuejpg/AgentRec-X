@@ -1,0 +1,98 @@
+[
+  {
+    "sample_id": "p2sft_test_00008",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00009",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00019",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00020",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00030",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00031",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00041",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00042",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00052",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00053",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00063",
+    "scenario": "noop",
+    "user_message": "I have no further requirement right now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I have no further requirement right now.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  },
+  {
+    "sample_id": "p2sft_test_00064",
+    "scenario": "unsupported",
+    "user_message": "I want a teleportation device.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I want a teleportation device.\",\"op\":\"abstain\",\"reason\":\"unsupported_request\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "validation_errors": []
+  }
+]

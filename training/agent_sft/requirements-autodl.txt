@@ -1,0 +1,10 @@
+# AutoDL-only dependencies for Qwen3.5-9B LoRA SFT.
+# The CPU preparation environment does not need these; do not install them into the
+# serving environment.  Qwen3.5 requires a Transformers build with Qwen3_5 classes.
+transformers>=5.9.0
+peft>=0.18.0
+accelerate>=1.10.0
+pyyaml>=6.0
+safetensors>=0.4
+sentencepiece>=0.2
+protobuf>=5.0

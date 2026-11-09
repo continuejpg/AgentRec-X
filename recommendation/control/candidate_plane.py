@@ -218,8 +218,8 @@ class _CatalogSearchSourceTool:
 
     @property
     def score_kind(self) -> str:
-        """BM25: a lexical score over catalogue text, not a model score."""
-        return CATALOG_SEARCH_SCORE_KIND
+        """The source's own score kind (BM25 or hybrid BM25+dense in R2)."""
+        return getattr(self._search, "score_kind", CATALOG_SEARCH_SCORE_KIND)
 
     def propose(
         self,

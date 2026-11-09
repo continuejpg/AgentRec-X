@@ -1,0 +1,75 @@
+P14-B0 SOURCE DIFF
+================================================================================
+Milestone: P14-B0 Memory Repair & Preference-Aware Recommendation Baseline
+Scope: two minimal M9 fixes + new history-state reader + Preference-Aware Scorer V0 + evaluation harness.
+
+NEW SOURCE / TEST FILES
+recommendation/preference/__init__.py
+  bytes=883 sha256=71bf81e61b958ab4af31e7d9206f826dc0ba4e5d1b0488dbc8322a1110b5ed80
+recommendation/preference/history.py
+  bytes=6184 sha256=08ae0264d0428964137fab561b0c8a14eb4894374609651089e5dd1ff66d5b06
+recommendation/preference/scorer.py
+  bytes=10243 sha256=a2a008ce760693c99380e995877e3f949f5eed2367cba8d64a42fd4498db0260
+experiments/p14b0/__init__.py
+  bytes=80 sha256=e7fc0f4de586b46c5de6d2b53a518fb2ace06ddc695b6b9698d412dde2a3a172
+experiments/p14b0/evaluate.py
+  bytes=29396 sha256=a1eb04569334778e2c5c80815caf89a662bf8fc57c91c7dedc1c15d3e3dd485a
+tests/test_p14b0_memory_scorer.py
+  bytes=9469 sha256=be57a14eb3467bd452ddc0d703df7752a9f9d62be0ebcde94ec2d94e080eb5b7
+
+MODIFIED SHARED FILES (2; preserved M5/M9 contracts, Planner/Serving untouched)
+recommendation/memory/extraction.py
+  reason: retraction regex accepts hyphenated values; _retraction_target strips discourse/filler words; no new preference semantics, no new store, no API change
+  bytes=30635 sha256=0b5e37a32707d8552eaa11330f1bcbc1472fb60b0d1f11869388ec1436839d93
+recommendation/memory/service.py
+  reason: _apply_locked value-only retraction match uses deterministic normalised comparison; kind-based retraction and REPLACE semantics unchanged
+  bytes=24207 sha256=d5289db18279db66ec43d9d13d9bb22062f8eb52aeac3dea7309313e00e6b027
+
+NEW REPORTS
+P14B0_REPORT.md
+  bytes=18928 sha256=f1f80c0fceb971efced00ac64e968e63cc6bb5c30e1acf3d46d5bc2f6ced4909
+
+RUN ARTIFACTS (git-ignored)
+runs/p14b0/candidate_pools.jsonl
+  bytes=41102 sha256=b7ef7558783ef7adf009acc16fa3acf24b18e66026e4438b65ca87c5f896c748
+runs/p14b0/search_only.jsonl
+  bytes=46565 sha256=88f4e5bebd70b7ee1494a825aa8bc1763257135cbe6bbe1018403d6510dfd55c
+runs/p14b0/search_preferences.jsonl
+  bytes=61658 sha256=66209474c54d4883b49bb4d49a6062ce7707d38ed75143036a754edc17521a14
+runs/p14b0/no_history.jsonl
+  bytes=46315 sha256=66a947b2d0053257cc0c02f4c65cf67ae96dea002d12353c50dfd9977ef3517b
+runs/p14b0/shuffled_history.jsonl
+  bytes=61505 sha256=5a237aea3ff7f82764e74d8a3c4301e180cbc49662a6d1df208c5b84697cbc79
+runs/p14b0/memory_reads.jsonl
+  bytes=51076 sha256=8ffae3d3ae583e751ef2ef7ea62ffa189445454527df84d6423e1135d8215c66
+runs/p14b0/same_query_cross_persona.jsonl
+  bytes=7865 sha256=dc1177b09f9f52bf8cd4d8bcf1f25830b4e17f18f2872cd2845cc2e243e5ae9e
+runs/p14b0/error_analysis.jsonl
+  bytes=21953 sha256=5ff8ecbd9090f320d3f59a9cc3ced97e945bf4af6910d9b810f24a9cab37796f
+runs/p14b0/non_recommend_audit.jsonl
+  bytes=5766 sha256=6e55a6007fd409e4902d62ad2fff4f0c8d0c545db766cb1626b28b01319e1f0b
+runs/p14b0/timings.jsonl
+  bytes=3001 sha256=26fae28037e381c0b520eeed27956f2666d2c1ceb2fdf11279e4dfb8f656e79d
+runs/p14b0/summary.json
+  bytes=48359 sha256=d8b8fe56638ce93891d80e79a121541ea72a50a771500f061dc1eec28ca55e54
+runs/p14b0/manifest.json
+  bytes=972 sha256=796efb9cb1d19b62adf4c6d06ad5a4a48a33d81c29eced8e69f83e4f5f94ae36
+
+UNCHANGED / NOT MODIFIED
+- recommendation/serving V1, SASRec / Two-Tower checkpoints, P13-R catalogue files
+- data/p14e/benchmark/* (P14-E labels/tasks frozen; test_p14e_benchmark_files_unchanged passes)
+- Planner contract / rule planner, CandidateLedger, GroundedReasoner, CandidateEligibilityEvaluator, M5 event schema
+- training/, benchmarks/, api/, legacy Sports paths; no dependency changes
+
+TESTS
+- tests/test_p14b0_memory_scorer.py: 13 passed
+- related regression in one batch: 199 passed (memory service/store/query_adapter/bm25, P14-A memory, P14-E benchmark, constraint eligibility, serving fusion)
+
+BEHAVIOUR IMPACT
+- M9: explicit value retractions now match hyphenated/normalised values across kinds; ordinary additions still do not supersede; avoid/negation semantics unchanged.
+- No API/schema/contract change; HistoryStateReader is read-only through the accepted service.
+- Scorer is a new pure re-ranker over a fixed candidate set; it does not search or train.
+
+NOTES
+- P14-B0 conclusions are provisional / pilot-dev (15 pending human review, 10/26 recommend tasks).
+- no commit / push / deploy; no GPU / AutoDL operations; no full-repository pytest.

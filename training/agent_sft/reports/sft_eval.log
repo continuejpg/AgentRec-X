@@ -1,0 +1,22 @@
+Loading weights:   0%|          | 0/427 [00:00<?, ?it/s]Loading weights:   0%|          | 1/427 [00:00<02:03,  3.45it/s]Loading weights:   0%|          | 2/427 [00:00<02:23,  2.96it/s]Loading weights:   4%|▎         | 15/427 [00:00<00:15, 26.78it/s]Loading weights:   7%|▋         | 28/427 [00:00<00:08, 48.70it/s]Loading weights:  10%|▉         | 41/427 [00:00<00:05, 67.59it/s]Loading weights:  12%|█▏        | 51/427 [00:01<00:05, 66.27it/s]Loading weights:  15%|█▌        | 66/427 [00:01<00:04, 85.92it/s]Loading weights:  19%|█▊        | 80/427 [00:01<00:03, 93.44it/s]Loading weights:  22%|██▏       | 93/427 [00:01<00:03, 102.36it/s]Loading weights:  25%|██▍       | 105/427 [00:01<00:03, 85.83it/s]Loading weights:  28%|██▊       | 120/427 [00:01<00:03, 95.75it/s]Loading weights:  31%|███▏      | 134/427 [00:01<00:02, 99.55it/s]Loading weights:  34%|███▍      | 147/427 [00:02<00:02, 105.90it/s]Loading weights:  37%|███▋      | 159/427 [00:02<00:02, 95.70it/s] Loading weights:  41%|████      | 173/427 [00:02<00:02, 101.35it/s]Loading weights:  44%|████▍     | 187/427 [00:02<00:02, 103.26it/s]Loading weights:  47%|████▋     | 201/427 [00:02<00:02, 105.38it/s]Loading weights:  50%|████▉     | 212/427 [00:02<00:02, 101.32it/s]Loading weights:  53%|█████▎    | 226/427 [00:02<00:01, 105.43it/s]Loading weights:  56%|█████▌    | 239/427 [00:02<00:01, 111.47it/s]Loading weights:  59%|█████▉    | 252/427 [00:03<00:01, 116.01it/s]Loading weights:  62%|██████▏   | 264/427 [00:03<00:01, 93.43it/s] Loading weights:  65%|██████▌   | 279/427 [00:03<00:01, 101.63it/s]Loading weights:  68%|██████▊   | 292/427 [00:03<00:01, 108.29it/s]Loading weights:  72%|███████▏  | 306/427 [00:03<00:01, 111.92it/s]Loading weights:  74%|███████▍  | 318/427 [00:03<00:01, 98.33it/s] Loading weights:  78%|███████▊  | 332/427 [00:03<00:00, 103.42it/s]Loading weights:  81%|████████  | 345/427 [00:03<00:00, 109.90it/s]Loading weights:  84%|████████▎ | 357/427 [00:04<00:00, 103.82it/s]Loading weights:  86%|████████▌ | 368/427 [00:04<00:00, 92.04it/s] Loading weights:  90%|█████████ | 385/427 [00:04<00:00, 107.38it/s]Loading weights:  93%|█████████▎| 399/427 [00:04<00:00, 111.64it/s]Loading weights:  97%|█████████▋| 413/427 [00:04<00:00, 111.28it/s]Loading weights: 100%|█████████▉| 425/427 [00:04<00:00, 100.67it/s]Loading weights: 100%|██████████| 427/427 [00:04<00:00, 90.67it/s] 
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `chunk_gated_delta_rule` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+[transformers] `causal_conv1d_update` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `fused_recurrent_gated_delta_rule` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+{
+  "provider": "sft",
+  "model": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "adapter": "training/agent_sft/output/qwen3_5_9b_lora/adapter",
+  "samples": 200,
+  "schema_valid_rate": 0.97,
+  "operation_exact_match": 0.945,
+  "operation_macro_f1": 0.703170731707317,
+  "operation_micro_f1": 0.9593908629441624,
+  "slot_accuracy": 0.945,
+  "retraction_accuracy": 1.0,
+  "unsupported_proposal_rate": 0.03,
+  "failure_or_abstention_rate": 0.03,
+  "p50_latency_ms": 2972.9106687009335,
+  "p95_latency_ms": 4955.069262860338,
+  "retraction_samples": 19
+}

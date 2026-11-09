@@ -1,0 +1,72 @@
+[
+  {
+    "sample_id": "hard_0003",
+    "scenario": "multi_condition",
+    "user_message": "Budget $40 max, titanium material, and the least heavy option.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"titanium\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"least heavy option\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_constraint\",\"attribute\":\"price_max\",\"value\":40,\"direction\":null,\"scope\":\"task\",\"evidence\":\"Budget $40 max\"},{\"op\":\"add_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"titanium material\"},{\"op\":\"add_preference\",\"attribute\":\"weight\",\"value\":\"min\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"the least heavy option\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0007",
+    "scenario": "multi_condition",
+    "user_message": "Budget $70 max, aluminum material, and the least heavy option.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"aluminum\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"aluminum\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"least heavy option\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_constraint\",\"attribute\":\"price_max\",\"value\":70,\"direction\":null,\"scope\":\"task\",\"evidence\":\"Budget $70 max\"},{\"op\":\"add_preference\",\"attribute\":\"material\",\"value\":\"aluminum\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"aluminum material\"},{\"op\":\"add_preference\",\"attribute\":\"weight\",\"value\":\"min\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"least heavy option\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0018",
+    "scenario": "complex_retraction",
+    "user_message": "Drop the material requirement and leave the budget alone.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":null,\"evidence\":\"Drop the material requirement\",\"op\":\"retract_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"Drop the material requirement\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0020",
+    "scenario": "complex_retraction",
+    "user_message": "Remove the titanium preference.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":null,\"evidence\":\"Remove the titanium preference\",\"op\":\"retract_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"Remove the titanium preference.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0029",
+    "scenario": "implicit_unconfirmed",
+    "user_message": "I am considering titanium, but do not lock it in.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"I am considering titanium, but do not lock it in.\",\"op\":\"noop\",\"reason\":\"no_change\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"add_preference\",\"attribute\":\"material\",\"value\":\"titanium\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"I am considering titanium\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0038",
+    "scenario": "accessory_role",
+    "user_message": "I only need the replacement cartridge.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"role\",\"direction\":null,\"evidence\":\"replacement cartridge\",\"op\":\"update_goal\",\"scope\":\"task\",\"value\":\"accessory\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_goal\",\"attribute\":\"product_type\",\"value\":\"replacement_cartridge\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"I only need the replacement cartridge\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0040",
+    "scenario": "accessory_role",
+    "user_message": "Give me the replacement part rather than the main unit.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"role\",\"direction\":null,\"evidence\":\"replacement part\",\"op\":\"update_goal\",\"scope\":\"task\",\"value\":\"accessory\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"update_goal\",\"attribute\":\"product_type\",\"value\":\"replacement_part\",\"direction\":null,\"scope\":\"task\",\"evidence\":\"replacement part\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0062",
+    "scenario": "retract_constraint",
+    "user_message": "Forget the maximum budget now.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"Forget the maximum budget now.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":60,\"direction\":null,\"scope\":\"task\",\"evidence\":\"Forget the maximum budget now.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0063",
+    "scenario": "retract_constraint",
+    "user_message": "Clear the spending ceiling.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"Clear the spending ceiling.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":60,\"direction\":null,\"scope\":\"task\",\"evidence\":\"Clear the spending ceiling.\"}],\"clarification\":null}"
+  },
+  {
+    "sample_id": "hard_0064",
+    "scenario": "retract_constraint",
+    "user_message": "Remove the price cap entirely.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"Remove the price cap entirely.\",\"op\":\"retract_constraint\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"schema_version\":\"agentrecx.preference_operation.v1\",\"operations\":[{\"op\":\"retract_constraint\",\"attribute\":\"price_max\",\"value\":60,\"direction\":null,\"scope\":\"task\",\"evidence\":\"Remove the price cap entirely.\"}],\"clarification\":null}"
+  }
+]

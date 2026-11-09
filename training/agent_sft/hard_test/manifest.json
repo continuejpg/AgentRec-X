@@ -1,0 +1,10 @@
+{
+  "version": "p2sft.hard_test.v1",
+  "samples": 100,
+  "sha256": "9162c867224c2efb336a9fb75e85f8aad15eb1f2f33c1700235c3a48f61dbcad",
+  "human_review_status": "pending",
+  "human_reviewed_count": 0,
+  "source": "independent manual semantic configuration; no train/val/test template copy; not LLM-generated",
+  "label_status": "frozen_pending_human_review",
+  "contains_product_identity": false
+}

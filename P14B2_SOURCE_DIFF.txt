@@ -1,0 +1,62 @@
+P14-B2 SOURCE DIFF
+================================================================================
+Milestone: P14-B2 Preference-Conditioned Neural Reranker (pretrained inference only).
+No recommendation training/SFT/LTR; no frozen Memory/Scorer V0/Gate/Planner changes.
+P14-C0-R results and all old artifacts preserved; Reserved Test untouched.
+
+NEW SOURCE / TEST FILES
+experiments/p14b2/__init__.py
+  bytes=38 sha256=3efe49a898338c53e20ec13c7a7af3550a50eaa3ededaff3abc31932110c578c
+experiments/p14b2/build_pools.py
+  bytes=6692 sha256=efbc5d48c5b3ce8f16b8715caa8f7624f7e52c801898faafc730895f44582d8d
+experiments/p14b2/evaluate.py
+  bytes=15566 sha256=f47fa6667fb85d7d10c6423ab4b563b79e11be6f83e058cdb567cd374c850b52
+tests/test_p14b2_reranker.py
+  bytes=7055 sha256=9eba0cc1a588ec6d13993fecebe9066603d4c5c40a233f0e1ebea7dfede9a74d
+
+NEW REPORT
+P14B2_REPORT.md
+  bytes=10688 sha256=bc48519e03b7a9fdae6a986598a92b1cf70b28b3773f54aefaf7764eec522a4f
+
+RUN ARTIFACTS (git-ignored)
+runs/p14b2/pools/train_smoke.jsonl
+  bytes=37810 sha256=9415793134ea1dcdbcd796a4e7e765115e9a4be919c85e29814596ac5e302a5a
+runs/p14b2/pools/dev.jsonl
+  bytes=111437 sha256=cf429c5f1e54415e0da10b4d55f82a258092ea9403f070d8db96f9dc4fab6689
+runs/p14b2/scores_train_smoke.json
+  bytes=3059 sha256=b1a5986acb860192b05f96d415967a472fe26652ce7a1eaa14e05a577acecbcc
+runs/p14b2/scores_dev.json
+  bytes=8054 sha256=ba07cc776f30bda6c91e52fc56e0f335ce93c73f4e7757cade5867b3f6b161d9
+runs/p14b2/model_manifest.json
+  bytes=1199 sha256=6679ceec1577038acfa5db3e41737e85905ea86e67523c86e5dc95386ee32873
+runs/p14b2/comparison.json
+  bytes=101965 sha256=ed17b23b4c913821fb37e495749c73146fbbd6fda250431561d37d71052b2342
+runs/p14b2/per_task.jsonl
+  bytes=52644 sha256=2fb2662ac8f24c6574346f6373a254b9a0d3cddefe7034595447e9d9bd88a4bc
+runs/p14b2/training_supervision.json
+  bytes=5775 sha256=437c56969ab11968f248f468530005ec50d52762288759a7a3ca8aa28b3c8baa
+runs/p14b2/input_manifest.json
+  bytes=1236 sha256=923ec36e70c8ae92dfa272efda7bc8c18141545721af8c9fea5905e72af72242
+
+MODEL
+- BAAI/bge-reranker-base (XLM-RoBERTa base cross-encoder, 278,044,417 params), MIT license.
+- revision 2cfc18c9415c912f9d8155881c133215df768a70; model.safetensors sha256 ced967c45fd1902eb92716c9ceeca7c95a936770ea9db611f5a841b926e33fbd.
+- Hugging Face via hf-mirror.com, cached at /root/autodl-tmp/models/bge-reranker-base on the
+  existing AutoDL instance; loaded fp16 one-shot, peak 580.2 MiB GPU while Qwen service kept running.
+
+UNCHANGED / NOT MODIFIED
+- Memory, Product Type/Role Gate, Decision Gate, Scorer V0, Planner, Qwen service, P13-R catalogue,
+  P14-E/E2 labels, Reserved Test, old SASRec/Two-Tower/Serving.
+
+TESTS
+- tests/test_p14b2_reranker.py + P14-C0-R + P14-C0 contract regression: see run log; targeted only.
+
+RESULTS
+- Dev 20, same role-filtered BM25 pool: BM25 Top1 6/15 MRR .611; V0 11/15 MRR .833;
+  Neural Query Only 8/15 MRR .678; Neural Query+Prefs 10/15 MRR .744; top5 14/14/13/14.
+- Preference ablation: Q+Prefs changes order on 8/11 history tasks and top1 on 4; +2 valid top1
+  vs Query Only; no-history tasks identical (no fabricated preferences). Negative prefs ignored in
+  0045/0053; V0 violated fewer.
+- Candidate unreachable: 0046 (1 role-compatible candidate, zero verified) affects all methods equally.
+- V0 remains the best reranker; neural model not adopted. No LTR trained (independent negatives limited:
+  288 near-miss examples, 21,881 unjudged, 32,820 positives across 32 recommend Train tasks).

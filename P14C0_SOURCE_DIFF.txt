@@ -1,0 +1,60 @@
+P14-C0 SOURCE DIFF (REAL QWEN BASE RUN)
+================================================================================
+Milestone: P14-C0 real Qwen3.5-9B Base planner vs Rule planner on new Dev 20.
+Initial blocked run (stale SSH endpoints) preserved in runs/p14c0_pre_qwen/ and NOT mixed with these results.
+
+TRACKED FILES MODIFIED BY P14-C0: none (additive experiments/tests only).
+PRE-EXISTING WORKTREE MODIFICATIONS: unchanged.
+
+NEW SOURCE / TEST FILES
+experiments/p14c0/__init__.py
+  bytes=34 sha256=df4688564b364784248f47b74aa5bb3d224321a386cca7a747f229b78297411d
+experiments/p14c0/electronics_executor.py
+  bytes=13882 sha256=fddb4e0116c65f68ede02ae593ffa20c22baf30672348595dd4fc1f94aa22a58
+experiments/p14c0/run_dev.py
+  bytes=18207 sha256=cb7b0b438a4a9089b965d79be2cc798e03164ac982b3c77fa13ac83033ffc09a
+experiments/p14c0/finalize.py
+  bytes=10321 sha256=41112416d2a6da3b6837c2b363ebccfa098a70f76bbaabe3e37286e83c0ada99
+experiments/p14c0/probe_qwen.py
+  bytes=3784 sha256=ac278fa74b29d238bd4255bfd7e22766e995d61e99e14798adf0a775ebb14ee8
+tests/test_p14c0_contract.py
+  bytes=7599 sha256=2b6d2ac1dfde011e8ccd0bc0f250f3c838f6a4831f4f7e1fff64000685d4adc5
+
+NEW REPORTS
+P14C0_REPORT.md
+  bytes=12205 sha256=ea415b93adf535922b669cfa1aa238fad8664988ab78891e44ee5ffc2b54aa65
+
+RUN ARTIFACTS (git-ignored)
+runs/p14c0/config.json
+  bytes=2347 sha256=1b3330b263afbb2dea117fea09d8a6de28319e27ea2ae7c6aa51b9c7fd39c9f2
+runs/p14c0/comparison.json
+  bytes=18833 sha256=92724fcccf7a7ea9e1a628594ed94647e113daee48e9078bbac30e9638557a25
+runs/p14c0/qwen_manifest.json
+  bytes=1964 sha256=0e87422b5d5b3978c3b31edd7f67aa0b902381451a99c161124c9416c5a16324
+runs/p14c0/error_analysis.jsonl
+  bytes=4587 sha256=c45b44a0bb16183a63980e9476bb059e39521fab9ef1249e505212ae9da4f87e
+runs/p14c0/train_smoke/summary.json
+  bytes=1420 sha256=11102063696c30b0dabd907734d254ce4deb99f7157816d1a35c3597b533f59b
+runs/p14c0/rule_dev/summary.json
+  bytes=295233 sha256=e0b04bbca538714db143671cd234fcc8f0af7459619c89243bf32e13cdd3b4b2
+runs/p14c0/qwen_dev/summary.json
+  bytes=258677 sha256=3c57b877f48ceecf1e27820a8a52cd4684aed8760acc068362b7e889d458caa1
+
+REAL QWEN SERVICE
+- existing AutoDL instance connect.cqa1.seetacloud.com:39793 (GPU RTX 4090D 24GB, running)
+- model /root/autodl-tmp/models/Qwen3.5-9B-ms (Base, adapter=None)
+- existing training/agent_sft/model_server.py on 127.0.0.1:8009, tunneled to localhost:18009
+- 67 real /plan calls, 47872 input tokens, 5770 output tokens, avg 3905.6 ms, max 7308.1 ms
+
+UNCHANGED / NOT MODIFIED
+- Preference Scorer V0, Decision Gate v0.1, M5/M9, Planner contract, CandidateLedger, Eligibility, Serving V1
+- P13-R catalogue, P14-E/P14-E2 labels, Reserved Test (never loaded), no training/SFT, no AutoDL lifecycle ops
+
+TESTS
+- tests/test_p14c0_contract.py + P14-B1/E2 regression: 32 passed in 32.4 s (real Qwen trajectories, same tools, reserved untouched, no fabricated outputs)
+
+RESULTS (new Dev 20, provisional labels)
+- Rule: finalized 15/15 recommend; Top-1 6/15; false ask/refusal 0; hard violations 0; false non-recommend finalize 0/5.
+- Qwen Base: finalized 15/15 recommend; Top-1 8/15; false ask/refusal 0; hard violations 0; false non-recommend finalize 0/5; 1 invalid-ASK action rejected; 0 parser failures.
+- Per-task: both right 4, Qwen-only right 4, Rule-only right 2, both wrong 5.
+- Error main source for both: product-type/role grounding (Rule 9, Qwen 7 wrong selections); Gate lacks type/role constraint.

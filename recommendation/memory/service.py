@@ -487,12 +487,15 @@ class PreferenceMemoryService:
         active = list(self._store.get_entries(user_key, active_only=True))
 
         # -- retractions ---------------------------------------------------- #
+        def _normalised(value: str) -> str:
+            return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
         for removal in removals:
             for entry in list(active):
                 matches = (
                     entry.kind is removal.kind
                     if removal.kind is not None
-                    else entry.value.casefold() == (removal.value or "").casefold()
+                    else _normalised(entry.value) == _normalised(removal.value or "")
                 )
                 if not matches:
                     continue

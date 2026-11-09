@@ -1,0 +1,143 @@
+P14-A / P14A_SOURCE_DIFF
+==============================================================================
+generated_at   : 2026-11-08T17:51:31+0800
+repo_head      : 4dec6d2081902f1e89265a06ea4ded595087dd43   (nothing committed)
+
+1. SUMMARY
+------------------------------------------------------------------------------
+tracked modified entries: 29 (28 pre-existing P5-P13R modifications untouched + .gitignore by P14-A)
+tracked deleted entries : 43 (P14-0 archive, unchanged)
+new P14-A source/test files: 30 listed below
+
+2. NEW / MODIFIED SOURCE AND TEST FILES (with size + sha256)
+------------------------------------------------------------------------------
+  recommendation/shopping_companion/__init__.py
+      reason: new package: P14-A adapter layer documentation
+      size=2134 sha256=04c877940e1f2eca151049b20bf2c70836e5447ea8df13a9ee8998cb555693ee
+  recommendation/shopping_companion/namespace.py
+      reason: new: shopping_companion identity helpers on contracts.namespaces
+      size=4349 sha256=e9ee652d0848ac5d197a218570236fafef341336867490d8e1b5c90b750ac582
+  recommendation/shopping_companion/catalogue.py
+      reason: new: real limited catalogue -> accepted ProductMetadata contract
+      size=16481 sha256=67e9d04e4e1dfd0a68bbba35ade33169451ac396918ddff7ada83905bb4a4de2
+  recommendation/shopping_companion/search.py
+      reason: new: real BM25 product_search tool (reuses CatalogSearchSource)
+      size=10191 sha256=1e33e7d8ca6290f593383dd71d4f5528d009bbcf6b1e3ab55e635a232df3724c
+  recommendation/shopping_companion/product_info.py
+      reason: new: Product Info tool with UNKNOWN semantics + namespace refusal
+      size=19687 sha256=95331872314145bd6e79b0d60dd26c20e0b21c67c7011614fb69731663957715
+  recommendation/shopping_companion/planner_bridge.py
+      reason: new: Planner Action contract -> real tool executor bridge
+      size=26650 sha256=a5729ffe7bc93d8889274a708f2aa69ee7e40330f31882fe65a6ce7dbee4d781
+  recommendation/shopping_companion/runtime.py
+      reason: new: one-task stage_1+stage_2 runtime over the accepted core
+      size=21599 sha256=ddee927e51780d3d9b8cd3a8a39f038dd4c2bfe821939386af565ca116aa2bdb
+  recommendation/shopping_companion/evaluator.py
+      reason: new: post-run evaluator reading evaluator-only ground truth
+      size=8950 sha256=8168a053deafd72f733361897fef3865fff5be87c29a4c9b3a7b869ad2b61a1b
+  recommendation/shopping_companion/dataset.py
+      reason: new (dataset workstream): official train task adapter, oracle isolation
+      size=28060 sha256=1836d07740d9c3df476482eb6d722eddf95340adc087f4c219f083cfd9875391
+  recommendation/shopping_companion/memory.py
+      reason: new (memory workstream): M5/M9 memory adapter, honest history_unavailable
+      size=71136 sha256=b3da3e6960b45df0308d3af14748103af77af63101479bf2ded84805936fba03
+  recommendation/contracts/namespaces.py
+      reason: modified: register shopping_companion namespace (additive)
+      size=7882 sha256=d7287736bf398b82afa58286cf13718b5c1c489bd99d0a3d678ad93140630984
+  experiments/p14a_build_catalogue.py
+      reason: new: streaming/parallel-range limited-catalogue builder
+      size=47550 sha256=9b01357e8d4a97c2e2384423ed0c919f56cadc3118a05030f82d2d2bd32fbc7e
+  experiments/p14a_prepare_dataset.py
+      reason: new: train.parquet -> agent-visible tasks + evaluator-only eval
+      size=47837 sha256=e80b7f63c97cf446e681b725db775f80320938376bed9d884e85f1cb9edaa25c
+  experiments/p14a_run_task.py
+      reason: new: one-task E2E CLI + trajectory/eval writer
+      size=8390 sha256=77791c02be2f2271c588be04e25bdd0dc8a891ddcd0d421c5fbd3aafbb4d52d1
+  experiments/p14a_probe_search.py
+      reason: new: catalogue/search resource + latency probe
+      size=5966 sha256=7a62ff22c9b6bd9370b5050117a69605203cc28e8ddc93918c605a5145155099
+  tests/test_p14a_namespace.py
+      reason: new: namespace contract tests
+      size=3254 sha256=091f71eea1c2131b6e37afab240e7f445b6a3869ce78662b70a4202274433a39
+  tests/test_p14a_catalogue_search.py
+      reason: new: catalogue + search tool tests
+      size=6520 sha256=77c691c3924dd4bfd94ee2aa3c6f7711348e7727125f7eebf91f4bd0ed821a3b
+  tests/test_p14a_product_info.py
+      reason: new: Product Info tests
+      size=5153 sha256=2487aee0e7e4cc7227e1c1be2ac78cf4bc042e8b38cee66b94c2cdbbef25e7ec
+  tests/test_p14a_planner_runtime.py
+      reason: new: planner bridge + runtime + structural-smoke tests
+      size=12906 sha256=87e970d2a840150cee7276838caeab642731c5f433864999fb11f03de5cba00c
+  tests/test_p14a_dataset.py
+      reason: new (dataset workstream): dataset adapter/pairing/oracle isolation tests
+      size=20868 sha256=313fb1b2692f728ba2ff8e68da8fc7e84ad30c1204d556ecd10887bc07f1403b
+  tests/test_p14a_memory.py
+      reason: new (memory workstream): memory adapter/M5-M9 tests
+      size=25491 sha256=622fd74a5ab3d704c688dbbd313f0b7f0eb9e3dc414e28f898a7b0dd0435962b
+  tests/data/p14a/catalogue_fixture.jsonl
+      reason: new: 6 real catalogue products (description clipped)
+      size=4715 sha256=c161bfb50b457d02e6d01ddbad56c7683f87fba3c128870493091f3a571283bf
+  tests/data/p14a/tasks_fixture.jsonl
+      reason: new: 3 real agent-visible tasks
+      size=16087 sha256=db9b328f90e0e52cc4b3e60979790156a85e434b4425a955eacb7591830f8ee3
+  tests/data/p14a/eval_fixture.jsonl
+      reason: new: evaluator-only fixture for the 3 tasks
+      size=44204 sha256=9f39d4ea38263b9dfd5feccf067a67a12c5d3f44606276a9af84b50640d7542a
+  tests/data/p14a/memory_fixture.jsonl
+      reason: new: clearly-marked synthetic memory dialogues
+      size=1509 sha256=2eb081a4b15b15bbc92b8a543a1ebf01624afcaaef72624f0db385a7dde75c9c
+  .gitignore
+      reason: modified: keep tests/data/p14a fixtures tracked despite data/ & *.jsonl rules
+      size=1973 sha256=ed491b69d044dc5287b7fd26baf4c7a81046f1fd08bc35f19e6d9768590f2da5
+  P14A_REPORT.md
+      reason: new: P14-A report (updated with corrected ASK/single-product semantics)
+      size=23979 sha256=010d0d3eba223ab01af4f79bbd314ef9096ed495ab34465786767c95f9a60bf9
+  P14A_BLOCKER_VERIFICATION.md
+      reason: new: P14-A blocker verification report (memory/catalogue/trajectory)
+      size=24850 sha256=c005874f71cc5feef24c85168cb13df92e553cdb4419b73d465742527d8833cb
+  P14A_DATA_MANIFEST.json
+      reason: new: data/index/environment manifest
+      size=20874 sha256=58cfabf4d9340534a112d49e2bbcd6c1640f3359a1d9341300a53798fe1d2c29
+  P14A_SOURCE_DIFF.txt
+      reason: new: this file
+      size=9659 sha256=83fa23aec44ce46521efaabd960ab349c1c045af6a1b2737dbe7fd945969543b
+
+3. LARGE ARTIFACTS (git-ignored; not committed)
+------------------------------------------------------------------------------
+  data/p14a/catalogue/products_prefix.jsonl  size=1288490188 sha256=86804471783eb56948e42e3e0366e7bb2d2c2bf4d488255900ef5fb4589b526d
+  data/p14a/catalogue/docs.jsonl  size=120676740 sha256=29dc078ee278486977ca815c5365f61fb3614391e17c331d12ffd56b8bed0b56
+  data/p14a/catalogue/manifest.json  size=6101 sha256=fcc2086844eeb0bcd9744715f836d4db12b769ae64af274a5719b9ac006668ae
+  data/p14a/dataset/train_tasks.jsonl  size=4332995 sha256=8caeee244870ab389e3ccb9395258e2b835d573f286f0bef08bba617d11ed074
+  data/p14a/dataset/train_eval.jsonl  size=11702561 sha256=ee4a9e0bd144f25e2330d4070b0281878358d81e745cc5c419b90d9f501815f6
+  data/p14a/dataset/manifest.json  size=8697 sha256=570af5bb4bab3d560f9f6d6fe694c13f4a9feb60f0e013ba7b0ec752a40939ea
+  data/p14a/manifest.json  size=3189 sha256=336b10decc30bc802824e88d09eccb780e56f5df2b059a96a069fb1c9e182d4b
+  runs/p14a/logs/search_probe.json  size=3310 sha256=7712ccb4597fd9d8feec1cb31749a8847a90a97a38c680961957ba8bc91f8e9b
+  runs/p14a/logs/isolation_check.json  size=2592 sha256=dde7a0df1ce6ed3569588c40740369baca3b6863d28dc71ea88f41362507484f
+  runs/p14a/logs/longmemeval_provenance_check.json  size=3380 sha256=1bc3e865dd37b1c6a66fdb1c34bfd1b9bf7639f3f1862908794579beeff246fe
+  runs/p14a/logs/catalogue_coverage.json  size=1458 sha256=c1f7ae366e3fec0f47c00c4801cc66a8b9914de685839264838e022752715375
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1.jsonl  size=11577 sha256=92fb80b856cb2b11dc96abc67d20a7e13de47614fc6424ac8d93e1d4121287ba
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1.eval.json  size=1913 sha256=7abebe077bb4137924d63a4272537b5bc66ceebf79800ad941850959e67c08b5
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_2.jsonl  size=12567 sha256=5c3c771b18a9b46f24a23bf2412a04b004100fbd60a7f395029a3215bac08806
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_2.eval.json  size=2119 sha256=2d4201febf30328eef16bc01c69055033288bdeca0fe6e9ebf908e5050916eca
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1_diagnostic_stage2.jsonl  size=810083 sha256=3cc038edd066ca971ca7e2fc267a9d069f30ce33e0d3b1bd27e320d23a77f7e2
+  runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1_diagnostic_stage2.eval.json  size=1990 sha256=2f5a931539098343d4ea696d0a96489efaa85bc3fc28bbd12b30165186d9d63c
+
+4. DELIBERATELY UNCHANGED (P14-A touched no behaviour)
+------------------------------------------------------------------------------
+  recommendation/{api,control,demo,inference,evaluation,state,memory,models,...}: no edits by P14-A
+  Serving V1 default profile / SASRec / Two-Tower / CandidateLedger core / GroundedReasoner /
+  Eligibility / M5 schema / M9 schema / Planner Action contract: unchanged (reused only)
+  data/ (Sports, P11/P12/P13/P13R), runs/ (all previous experiments), models/: untouched
+  the 28 pre-existing uncommitted P5-P13R modifications: untouched
+
+5. NOTES
+------------------------------------------------------------------------------
+  * Recommendation: shopping_companion/search reuses recommendation.control.catalog_search.
+    CatalogSearchSource (accepted BM25) and catalogue/product_info normalises real records to
+    recommendation.catalog.schemas.ProductMetadata, so no second search/metric/constraint stack
+    was introduced.
+  * The runtime reuses recommendation.demo.planner_contract run_planner + PlannerAction; the
+    Rule planner is a deterministic policy, not a second planner runtime.
+  * The memory adapter reuses M9 PreferenceMemoryService/store/extractor and M5
+    build_turn_events/StateManager/BeliefUpdater/state_projector; no second memory store.
+  * No commit / push / deploy performed.  No GPU used.  AutoDL not used.

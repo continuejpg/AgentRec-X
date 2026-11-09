@@ -1,0 +1,79 @@
+P14-D1-R SOURCE DIFF
+================================================================================
+Milestone: real-history metadata recovery and retrieval/history ablation diagnosis.
+No training/fine-tuning; no V0/Gate/Planner/Memory/label changes; old results and Reserved Test preserved.
+
+NEW SOURCE / TEST FILES
+experiments/p14d1r/__init__.py
+  bytes=54 sha256=d0df238938311db2439c940658165f9fedb417bb0df94a637b2827b20f94c6ae
+experiments/p14d1r/build_history.py
+  bytes=11626 sha256=34ab85f98675c588038d4fde20c583664c9e0fe4b6ee9be4ac3267358adbc687
+experiments/p14d1r/retrieval_diagnosis.py
+  bytes=4509 sha256=93d8ecafe2766dcfb7becce4974a9c55a486811c2d56d08abe31e231fce74e12
+experiments/p14d1r/evaluate.py
+  bytes=14496 sha256=d0dd9ff1b6f65c03a7c187fb12e0c256db6b9482a71a5fe1d77a06bfe7c0a537
+tests/test_p14d1r_history.py
+  bytes=6472 sha256=5c2b0f41ea2b20e82c705d59180ec474edf335a6b5bdb7407f012e29062acfa9
+
+NEW REPORT
+P14D1R_REPORT.md
+  bytes=10760 sha256=ef68f0568612fbd407f11082169c88ea08636350386930680744050a9945255d
+
+DATA (recovered metadata; target never used as a query)
+data/p14d1r/c4_sampled_history_meta.jsonl
+  bytes=418576 sha256=cfb868599050bb3389bf3366c01bf3ebb65670d86a4e5b87692c3a9650fd3867
+data/p14d1r/official_history_meta.jsonl
+  bytes=8547765 sha256=8cea59fc632772811e8179cd34878e0b12566961abb85a88169a5ca2ef79759d
+data/p14d1r/history_metadata.jsonl
+  bytes=8866612 sha256=4a3db783be99b82399c4f6637cb1a32a0d9bf9526b31329653acd9bf6162d5c2
+data/p14d1r/history_metadata_manifest.json
+  bytes=29877 sha256=fe1d5d41daa8f7e1c62b7a28caa2c0300b841de9be3a397f508c3fb940192d47
+
+RUN ARTIFACTS (git-ignored)
+runs/p14d1r/pools/natural.jsonl
+  bytes=2740461 sha256=872ccbfca6fdf592493885761c4d3df0614d78e5ae756f32c39cd693a4544669
+runs/p14d1r/pools/target5.jsonl
+  bytes=1014016 sha256=56676400ce224653c3089068894312e58daabb95c368e96b9b6cb355e39cd39e
+runs/p14d1r/pools/natural_rewritten_retrieval.jsonl
+  bytes=2579595 sha256=900298be9f9969d28a21ba340da31cb9f566f56b5bebf7ec73dc52407294da1d
+runs/p14d1r/scores_natural.json
+  bytes=190252 sha256=38f6edafff91d0f01bdf9100d652cef94ee82c954f0690462c982c0d01715161
+runs/p14d1r/scores_target5.json
+  bytes=50488 sha256=719a188828a3d3cd40737045ce7b4c56a8657a6abe912f342ce53323d434802a
+runs/p14d1r/scores_improved.json
+  bytes=278511 sha256=b31ea66830b9edb0b149f88f0b7e1535b495bcc64890aee648e56c9b5ca044f0
+runs/p14d1r/retrieval_diagnosis.json
+  bytes=81005 sha256=575ebd6d2a2051bd5aa72904d002d090ffa7c50d30d54489d934c3fa564cd67e
+runs/p14d1r/retrieval_improved_manifest.json
+  bytes=397 sha256=4efd6ef54618d6883b3b87536dd0b0b01a978af5377522753ada1d7067ea1760
+runs/p14d1r/rewritten_retrieval_evaluation.json
+  bytes=150426 sha256=ce0e4356b712cfbfde366d81f64bd0ac011228a433ab248c43c0eac05d57a929
+runs/p14d1r/comparison.json
+  bytes=639146 sha256=33910dc756b1e51df295b425f39de9c2a8a1d499f0a2cde79b2da8d852c50664
+runs/p14d1r/per_task.jsonl
+  bytes=277108 sha256=68d1bfb92f0af03f0df87a00dabc013161c05b96456140fd171e617eb83b8a07
+runs/p14d1r/blind_review.json
+  bytes=123751 sha256=0ecaf49bc2b065dd9a8b1ce4bc7f3b0cf409a3a2c7450556b12919f195302853
+runs/p14d1r/decision.json
+  bytes=900 sha256=0487c88cd2efcd2af20910c33009e02e536aee2613206795777254982eac9a5d
+runs/p14d1r/model_manifest.json
+  bytes=1820 sha256=30f9e42e77cec4af7faee5aedd0d0f029b1c4e45014f9c64c641c0280cc6507b
+
+METADATA RECOVERY
+- unique history ASIN coverage 126 -> 5,576 / 14,655 (38.0%); tasks with metadata 50 -> 135;
+  history items with metadata 126 -> 5,783; proxy tasks 35 -> 126.
+- sources: existing C4 sampled cache (803 unique) + official Amazon-Reviews-2023 category
+  metadata streamed for Grocery/Health/Pet/Beauty/Electronics (5,155 unique); network cap 15GB;
+  no full 33-category download, no full catalogue index rebuild.
+
+RETRIEVAL / ABLATION
+- BM25 target Top-20/100: original 10/20; rewritten 18/30; combined 10/22; history-expanded 8/17.
+- BGE existing P8 index identities intersect P13-R Electronics catalogue by 0; aligned=false; no BGE run.
+- Same Qwen3-Reranker-4B, Query Only vs recovered real history vs shuffled control:
+  natural 6/7/8 Hit@1; target5 108/100/102; rewritten-retrieval 9/8/9.
+- Recovered real history does not beat Query Only or shuffled; target-included history worsened.
+
+DECISION
+- HISTORY_METADATA_RECOVERY LIMITED; RETRIEVAL_DIAGNOSIS LIMITED; HISTORY_ABLATION FAIL;
+  V0_REAL_HISTORY_COMPATIBILITY LIMITED; P14-D1-R LIMITED; learned real-history model not worth now.
+- 25 blind review cases pending; no human_verified; Dev is exposed; target time not independently recomputed.

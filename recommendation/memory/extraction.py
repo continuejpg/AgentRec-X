@@ -185,7 +185,7 @@ _NOT_TRAILING = r"(?!(?:anymore|any\s+more|now|please)\b)"
 _RETRACTION = re.compile(
     r"(?:(?P<leading>"
     + _NOT_TRAILING
-    + r"[a-z0-9 ]{2,40}?)\s+)?"
+    + r"[a-z0-9 '\-]{2,40}?)\s+)?"
     r"\b(?:"
     r"(?:i\s+)?(?:don'?t|do\s+not|no\s+longer)\s+care\s+about|"
     r"forget\s+(?:about\s+)?(?:my\s+)?|"
@@ -193,7 +193,7 @@ _RETRACTION = re.compile(
     r"clear\s+(?:my\s+)?|"
     r"(?:it\s+)?(?:does\s+not|doesn'?t)\s+matter(?:\s+to\s+me)?"
     r")\s*"
-    r"(?P<trailing>(?:(?!\b(?:anymore|any\s+more|now|please)\b)[a-z0-9 ]){0,40}?)"
+    r"(?P<trailing>(?:(?!\b(?:anymore|any\s+more|now|please)\b)[a-z0-9 '\-]){0,40}?)"
     r"\s*(?:anymore|any\s+more|now)?\s*[.!]?$",
     re.IGNORECASE,
 )
@@ -582,7 +582,15 @@ class RuleBasedPreferenceExtractor:
             kind = _RETRACTION_SLOTS.get(word)
             if kind is not None:
                 return kind, None
-        remainder = [word for word in words if word not in _RETRACTION_FILLER]
+        filler = set(_RETRACTION_FILLER)
+        filler.update(
+            {
+                "earlier", "previous", "previously", "old", "former", "original",
+                "for", "about", "of", "the", "a", "an", "my", "your", "our",
+                "that", "this", "it", "i", "said", "as", "to", "from", "on",
+            }
+        )
+        remainder = [word for word in words if word not in filler]
         if not remainder:
             return None, None
         return None, " ".join(remainder)

@@ -361,6 +361,15 @@ class SASRec(nn.Module):
             )
         return torch.arange(seq_len, dtype=torch.long, device=self.item_embedding.weight.device)
 
+    def item_representations(self) -> torch.Tensor:
+        """Return the shared item table used for input, logits and full scoring.
+
+        The base model uses its ID embedding.  A content-enhanced subclass may override
+        this method; using one table in all three places keeps training and inference
+        representations identical.
+        """
+        return self.item_embedding.weight
+
     # -- encoding ---------------------------------------------------------- #
 
     def encode(
@@ -382,7 +391,7 @@ class SASRec(nn.Module):
             )
 
         blocked = build_causal_attention_mask(input_ids, self.config.num_items)
-        hidden = self.item_embedding(input_ids) + self.position_embedding(
+        hidden = self.item_representations()[input_ids] + self.position_embedding(
             self.positional_ids(input_ids.shape[1])
         )
         hidden = self.embedding_dropout(hidden)
@@ -437,7 +446,7 @@ class SASRec(nn.Module):
         hidden = self.encode(input_ids)
         assert isinstance(hidden, torch.Tensor)
 
-        weights = self.item_embedding.weight
+        weights = self.item_representations()
         positive_logits = (hidden * weights[positive_ids]).sum(dim=-1)
         negative_logits = (hidden * weights[negative_ids]).sum(dim=-1)
 
@@ -476,7 +485,7 @@ class SASRec(nn.Module):
         positions = torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
         last_valid = (positions * valid.long()).max(dim=1).values  # [batch]
         summary = hidden[torch.arange(hidden.shape[0], device=hidden.device), last_valid]
-        return summary @ self.item_embedding.weight.t()
+        return summary @ self.item_representations().t()
 
     # -- metadata ---------------------------------------------------------- #
 

@@ -1,0 +1,209 @@
+{
+  "review_status": "pending_human",
+  "human_verified_count": 0,
+  "sample_count": 20,
+  "unique_sample_ids": 20,
+  "automated_precheck_pass": true,
+  "checks": [
+    {
+      "sample_id": "p2sft_test_00032",
+      "scenario": "cross_turn_reference",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00174",
+      "scenario": "unsupported",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00038",
+      "scenario": "role_correction",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00154",
+      "scenario": "price_update",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00025",
+      "scenario": "material_pref",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00105",
+      "scenario": "accessory_role",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00157",
+      "scenario": "material_pref",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00162",
+      "scenario": "noop",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00043",
+      "scenario": "cross_turn_reference",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00108",
+      "scenario": "unsupported",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00076",
+      "scenario": "cross_turn_reference",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00169",
+      "scenario": "new_goal",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00191",
+      "scenario": "new_goal",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00194",
+      "scenario": "ambiguity",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00116",
+      "scenario": "accessory_role",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00080",
+      "scenario": "material_pref",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00047",
+      "scenario": "material_pref",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00006",
+      "scenario": "accessory_role",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00078",
+      "scenario": "price_retract",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    },
+    {
+      "sample_id": "p2sft_test_00068",
+      "scenario": "soft_weight",
+      "exists_in_current_test": true,
+      "schema_valid": true,
+      "gold_json_matches_test": true,
+      "user_message_matches_test": true,
+      "review_status": "pending",
+      "human_verified": false
+    }
+  ]
+}

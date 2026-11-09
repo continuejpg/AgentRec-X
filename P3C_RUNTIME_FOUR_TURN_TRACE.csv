@@ -1,0 +1,5 @@
+turn,message,merged,final_constraints,r1_actual_constraints,r1_action,eligibility_requirements,eligible,unresolved,final_ids,terminal_reason,terminal_status
+1,I need a water filter under $30 and I prefer the lighter option.,"[[""price_max"", ""30""]]","[[""price_max"", ""30""]]","[[""price_max"", ""30""]]",RETRIEVE,"[{""kind"": ""price_max"", ""expected"": ""30""}]",10,4,B00CBR1UI6|B08XJQ9HPX|B09Y53NYDK,completed,finished
+2,Actually make the budget $50 and forget the lighter preference.,"[[""price_max"", ""50""]]","[[""price_max"", ""50""]]","[[""price_max"", ""50""]]",RETRIEVE,"[{""kind"": ""price_max"", ""expected"": ""50""}]",6,4,,awaiting_user,waiting_for_user
+3,Remove the budget requirement.,[],[],[],RETRIEVE,[],0,0,B08XJQ9HPX|B09Y53NYDK|B00CBR1UI6,completed,finished
+4,Show more options.,[],[],null,,[],0,0,B08XJQ9HPX|B09Y53NYDK|B00CBR1UI6,completed,finished

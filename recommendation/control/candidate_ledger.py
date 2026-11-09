@@ -41,6 +41,7 @@ ranks.  A policy is nowhere in that call path.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +49,11 @@ from .arguments import CANDIDATE_PRODUCING_SOURCES, CandidateSource
 
 __all__ = [
     "LEDGER_VERSION",
+    "SOURCE_POLICIES",
+    "SOURCE_POLICY_WEIGHTS",
+    "source_policy_weights",
+    "normalize_source_policy",
+    "weighted_reciprocal_rank_fusion",
     "CandidateProvenance",
     "CandidateVerificationStatus",
     "CandidateLedger",
@@ -62,6 +68,36 @@ LEDGER_VERSION = 1
 #: RRF's smoothing constant.  The published default from the original reciprocal-rank
 #: fusion work; kept explicit and named so the fusion is reproducible and auditable.
 RRF_K = 60
+
+#: Agent-layer source policies.  They scale each source's reciprocal-rank contribution; they
+#: never change a source's own Top-N or the Serving V1 fusion inside the history source.
+SOURCE_POLICY_WEIGHTS: dict[str, dict[str, float]] = {
+    "balanced": {"history": 1.0, "catalog_search": 1.0},
+    "intent_focus": {"history": 1.0, "catalog_search": 2.0},
+    "history_focus": {"history": 2.0, "catalog_search": 1.0},
+}
+SOURCE_POLICIES = tuple(SOURCE_POLICY_WEIGHTS)
+
+
+def normalize_source_policy(value: object, *, default: str = "balanced") -> str:
+    """Validate a policy name; missing/empty means balanced, unknown is rejected."""
+    if value is None:
+        return default
+    text = str(value).strip().casefold()
+    if not text:
+        return default
+    if text not in SOURCE_POLICY_WEIGHTS:
+        raise ValueError(
+            f"unknown source_policy {value!r}; allowed: "
+            + ", ".join(SOURCE_POLICIES)
+        )
+    return text
+
+
+def source_policy_weights(source_policy: str) -> dict[str, float]:
+    """Return source weights for a validated policy; unnamed sources default to 1.0."""
+    policy = normalize_source_policy(source_policy)
+    return dict(SOURCE_POLICY_WEIGHTS[policy])
 
 
 class LedgerSourceError(Exception):
@@ -195,6 +231,31 @@ def reciprocal_rank_fusion(
     return sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
+def weighted_reciprocal_rank_fusion(
+    rankings: Mapping[str, Sequence[str]],
+    *,
+    source_policy: str = "balanced",
+    k: int = RRF_K,
+) -> list[tuple[str, float]]:
+    """Weighted RRF over named source rankings.
+
+    ``score(d) = sum_s weight[s] / (k + rank_s(d))``.  The ``balanced`` policy has
+    weight 1.0 for every source and is therefore numerically identical to the accepted
+    unweighted :func:`reciprocal_rank_fusion`; ties still break on identity.
+    """
+    if k < 1:
+        raise ValueError("k must be >= 1")
+    weights = source_policy_weights(source_policy)
+    totals: dict[str, float] = {}
+    for source, ranking in sorted(rankings.items(), key=lambda pair: str(pair[0])):
+        weight = float(weights.get(str(source), 1.0))
+        if weight == 0.0:
+            continue
+        for position, identity in enumerate(ranking, start=1):
+            totals[identity] = totals.get(identity, 0.0) + weight / (k + position)
+    return sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
 class CandidateLedger:
     """The run's trusted record of candidate identity and provenance.
 
@@ -203,9 +264,15 @@ class CandidateLedger:
     the caller's job because only the caller holds the trusted mapping.
     """
 
-    def __init__(self, *, version: int = LEDGER_VERSION) -> None:
+    def __init__(
+        self,
+        *,
+        version: int = LEDGER_VERSION,
+        source_policy: str = "balanced",
+    ) -> None:
         self._entries: dict[str, LedgerEntry] = {}
         self._version = version
+        self._source_policy = normalize_source_policy(source_policy)
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -213,6 +280,10 @@ class CandidateLedger:
     def version(self) -> int:
         """Ledger contract version."""
         return self._version
+
+    @property
+    def source_policy(self) -> str:
+        return self._source_policy
 
     def __len__(self) -> int:
         """Number of **grounded** entries."""
@@ -291,11 +362,16 @@ class CandidateLedger:
                 by_source.setdefault(record.source, []).append(
                     (record.source_rank, entry.parent_asin)
                 )
-        rankings = [
-            [asin for _, asin in sorted(pairs)]
-            for _, pairs in sorted(by_source.items(), key=lambda pair: pair[0].value)
+        rankings = {
+            source.value: [asin for _, asin in sorted(pairs)]
+            for source, pairs in by_source.items()
+        }
+        order = [
+            asin
+            for asin, _ in weighted_reciprocal_rank_fusion(
+                rankings, source_policy=self._source_policy
+            )
         ]
-        order = [asin for asin, _ in reciprocal_rank_fusion(rankings)]
         position = {asin: index for index, asin in enumerate(order)}
         return tuple(
             sorted(grounded, key=lambda entry: position.get(entry.parent_asin, len(order)))
@@ -318,11 +394,15 @@ class CandidateLedger:
                 by_source.setdefault(record.source, []).append(
                     (record.source_rank, entry.parent_asin)
                 )
-        rankings = [
-            [asin for _, asin in sorted(pairs)]
-            for _, pairs in sorted(by_source.items(), key=lambda pair: pair[0].value)
-        ]
-        return dict(reciprocal_rank_fusion(rankings))
+        rankings = {
+            source.value: [asin for _, asin in sorted(pairs)]
+            for source, pairs in by_source.items()
+        }
+        return dict(
+            weighted_reciprocal_rank_fusion(
+                rankings, source_policy=self._source_policy
+            )
+        )
 
     # -- mutation ---------------------------------------------------------- #
 
@@ -478,6 +558,7 @@ class CandidateLedger:
         """
         return {
             "version": self._version,
+            "source_policy": self._source_policy,
             "grounded": len(self.grounded_entries),
             "ungrounded": len(self.ungrounded_entries),
             "sources": [s.value for s in self.sources_present()],

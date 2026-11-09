@@ -1,0 +1,54 @@
+P11 source/data diff (curated)
+================================
+
+New code:
++ experiments/p11_build_benchmark.py
+  - uses existing P8-D cases, sequence/mapping artifacts, and product metadata;
+  - no review text -> Level A = 0;
+  - Level B = repeated matching train-history behaviour only;
+  - Level C = task-declared constraints;
+  - bounded catalogue-metadata-verified candidate pools (role + price), sorted by ASIN;
+  - BM25/BGE rank is not used as Gold;
+  - emits tasks.jsonl, schema.json, manifest.json, query_pools.json.
+
++ experiments/p11_evaluate.py
+  - real BM25/BGE/Hybrid source coverage on P11 tasks;
+  - real P8-D history-source cache coverage;
+  - candidate-pool reachability and Level B affinity proxy separated.
+
++ experiments/p11_agent_exec.py
+  - minimal real Rule-Agent execution on a stratified subset;
+  - real history + hybrid catalogue; no Qwen;
+  - strict pool success, catalog-validity success, invalid finalize, hard violations,
+    and errors reported separately.
+
++ tests/test_p11_benchmark.py
+  - required fields; no target leakage;
+  - no Level A claim without review text;
+  - same-query pair integrity;
+  - no fabricated pool for UNKNOWN/clarification;
+  - candidate evidence fields.
+
+New data/report artifacts:
++ data/p11_benchmark/tasks.jsonl
++ data/p11_benchmark/schema.json
++ data/p11_benchmark/manifest.json
++ data/p11_benchmark/query_pools.json
++ P11_BENCHMARK_SCHEMA.md
++ P11_REPORT.md
++ runs/p11/eval/summary.json
++ runs/p11/eval/per_task.jsonl
++ runs/p11/agent/summary.json
++ runs/p11/agent/results.jsonl
++ runs/p11/eval/retrieval.log
+
+Unchanged:
+- recommendation/models/*, training, Serving V1
+- CandidateLedger, Planner Contract, M5 semantics
+- Role Gate, Eligibility, Gold/Evaluator
+- frozen Holdout
+- BGE index/model and recommendation checkpoints
+
+Generated tasks use real user histories and real product metadata, but requests are
+synthetic benchmark templates. No review text exists locally, so no Level A preference
+claim is made. No training/fine-tuning, no Holdout, no commit/push/deploy.

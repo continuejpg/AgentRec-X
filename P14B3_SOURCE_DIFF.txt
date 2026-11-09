@@ -1,0 +1,60 @@
+P14-B3 SOURCE DIFF
+================================================================================
+Milestone: P14-B3 direct experiments with Qwen3-Reranker-4B and Qwen3.5-9B Setwise.
+No training/fine-tuning; no V0/Gate/Memory/Planner/label changes; Reserved Test untouched.
+
+NEW SOURCE / TEST FILES
+experiments/p14b3/__init__.py
+  bytes=38 sha256=3504455e2293dcaab94e3e85146d470c4d168d06c8796b4b0c116d58a4029b05
+experiments/p14b3/prepare_inputs.py
+  bytes=1500 sha256=1852bce79b9a0ef677548f7d59ccd7cbee9677c035e18500798ee7c1bee34ecd
+experiments/p14b3/evaluate.py
+  bytes=13771 sha256=3ae483117ee539bcd6213593cb565c7dd67eeb4d5531131b22a2e38625c42b40
+tests/test_p14b3_rerankers.py
+  bytes=6096 sha256=de33a3470cb492fdecf0d36cc3f9a9bc0a89c8492a6726247b1a69c9bcb6ffa6
+
+NEW REPORT
+P14B3_REPORT.md
+  bytes=11413 sha256=a3ae0be31a92c76cd27d1a6580754be5a1fba00748dd4e181e0c66ef8fc5adb7
+
+RUN ARTIFACTS (git-ignored)
+runs/p14b3/pools/train_smoke.jsonl
+  bytes=37810 sha256=9415793134ea1dcdbcd796a4e7e765115e9a4be919c85e29814596ac5e302a5a
+runs/p14b3/pools/dev.jsonl
+  bytes=111437 sha256=cf429c5f1e54415e0da10b4d55f82a258092ea9403f070d8db96f9dc4fab6689
+runs/p14b3/scores_qwen3reranker_train_smoke.json
+  bytes=4956 sha256=880d81aad4eee0aa1964c0fb904f3aafb23bde03621432991027211c7a359f37
+runs/p14b3/scores_qwen3reranker_dev.json
+  bytes=11435 sha256=b610ae912e5cc6d071f89334926dd98fac6c73f21b2997f548320fbb00cfa6df
+runs/p14b3/train_smoke_summary.json
+  bytes=3160 sha256=1abdbca0b3b68414843067703246c4b63e84750fda346d8484038a28424277b9
+runs/p14b3/setwise_status.json
+  bytes=2172 sha256=e620f41246db9fcdf75f869a7e723709cb76320f7ca44b1923aace319ff4635d
+runs/p14b3/model_manifest.json
+  bytes=2029 sha256=a233dd0e8a0e1c977af7caf6b15d826823c364959c8bee0ad2624968a8c62f43
+runs/p14b3/comparison.json
+  bytes=103469 sha256=a5753af5015b1dce58d81edc3192dba1028c7647cb737b19f749b56a3f0bef01
+runs/p14b3/per_task.jsonl
+  bytes=67911 sha256=441301edb3c4442132435a2803a2edce703fec8d77b05de9a09db9d0635d15ac
+runs/p14b3/input_manifest.json
+  bytes=491 sha256=ef773c5dca779df3bc721032cc1ac78e3ca4347546a4ed56cf1e070f23f4ba7f
+
+MODELS
+- Qwen/Qwen3-Reranker-4B, revision 22e683669bc0f0bd69640a1354a6d0aebcfeede5, Apache-2.0,
+  NF4 4-bit inference, official yes/no logit scoring; real Dev 333 pairs; peak 3520 MiB extra GPU.
+- Qwen/Qwen3.5-9B Base Setwise: BLOCKED_RESOURCE (9B service keeps 17.6 GiB of 23.6 GiB; 4-bit load
+  OOMs; CPU 9B one group >13 min). No Setwise result was produced or fabricated.
+
+RESULTS
+- Dev 20 recommend: BM25 6/15; V0 11/15 MRR .833; Qwen3 QueryOnly 8/15 .689;
+  Qwen3+Prefs 10/15 .769; Qwen3+PrefInstruction 12/15 .856 (best, +1 over V0).
+- Instruction ablation: +Prefs -> +Instruction Top1 10->12, MRR .769->.856, 5 top1 changed,
+  gained 0045/0049, no losses; negative-preference violations 3->1.
+- Setwise: no metrics (blocked); 0046 unreachable separate for all methods.
+
+TESTS
+- tests/test_p14b3_rerankers.py: 9 passed; targeted regression run separately.
+
+UNCHANGED / NOT MODIFIED
+- Preference Scorer V0, Memory, Product Type/Role Gate, Decision Gate, Planner, Qwen service,
+  P13-R catalogue, P14-E/E2 labels, old P14-B2/P14-C0-R artifacts, Reserved Test.

@@ -1,0 +1,21 @@
+﻿task_id,before_completed,before_passed,after_completed,after_passed,change,before_m5_state,after_m5_state,m5_evidence
+dev_01_goal_correction_withdraw,True,False,True,False,no_change,"M5 preference=0, hard_constraint=1; benchmark active_attributes=feature (legacy M9 memory)","M5 preference=0, hard_constraint=0; constraint feature=superseded; benchmark active_attributes=feature (legacy M9 memory)",targeted preference_retracted present; hard constraint retired
+dev_02_accessory_then_restore,True,False,True,False,no_change,,,
+dev_03_accessory_target,True,True,True,True,no_change,,,
+dev_04_goal_change_to_filter,True,False,True,False,no_change,,,
+dev_05_budget_conflict,True,False,True,False,no_change,,,
+dev_06_cookware_material,True,False,True,False,no_change,M5 preferences category + feature('titanium cookware'); no constraint,M5 preferences category + feature('titanium cookware'); no constraint,no change: extractor did not create material attribute
+dev_07_cookware_lightweight_pref,True,False,True,False,no_change,M5 preferences category + feature('lighter option'); no constraint,M5 preferences category + feature('lighter option'); no constraint,"no change: M7 asked research, not weight; no weight preference"
+dev_08_filter_lightweight_withdraw,False,False,True,True,pass,waiting_for_user; M5 category active; no preference_retracted,finished; M5 category + feature('lighter option') active; no preference_retracted,pending no longer traps; no weight fact existed to retract
+dev_09_ambiguous_to_cookware,True,False,True,False,no_change,,,
+dev_10_cross_turn_reference,True,False,True,False,no_change,,,
+dev_11_filter_bottle_role,True,False,True,False,no_change,,,
+dev_12_goal_change_sleeping_to_lantern,True,False,True,False,no_change,,,
+dev_13_goal_change_tablets_to_filter,True,False,True,False,no_change,,,
+dev_14_gravity_filter_pref,True,False,True,False,no_change,M5 feature('gravity water filter') active; no weight,M5 feature('gravity water filter') + feature('lighter option') active; no weight,"no change: M7 asked brand, not weight"
+dev_15_filter_straw_pref,True,False,True,False,no_change,,,
+dev_16_cookware_to_stove,True,False,True,False,no_change,,,
+dev_17_filter_budget_pref,True,False,True,False,no_change,,,
+dev_18_filter_color_correction,True,False,True,False,no_change,,,
+dev_19_cookware_set_reference,True,True,True,True,no_change,,,
+dev_20_broad_gear_to_filter,True,False,True,True,pass,,,

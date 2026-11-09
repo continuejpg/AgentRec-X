@@ -1,0 +1,1218 @@
+diff --git a/experiments/p6_benchmark/full_ranking.py b/experiments/p6_benchmark/full_ranking.py
+new file mode 100644
+--- /dev/null
++++ b/experiments/p6_benchmark/full_ranking.py
+@@ -0,0 +1,291 @@
++"""Read-only full-catalogue scorers for the P6 classical benchmark.
++
++Boundary contract
++-----------------
++A scorer turns one chronological history into one raw score per catalogue item::
++
++    scorer.score_catalog(history_item_ids) -> list[float], length == num_items + 1
++
++``scores[0]`` is the PAD slot (0); real item ids are ``1..num_items``.  The scorer
++
++* does **not** receive the evaluation target,
++* does **not** mask already-seen items,
++* does **not** rank, break ties or compute metrics.
++
++Masking, ranking and tie-breaking are owned by
++:mod:`recommendation.evaluation.metrics`, and the P6 metric formulas by
++:mod:`experiments.p6_benchmark.metrics`.  Keeping them out of the adapter means the P6
++benchmark measures the accepted serving models under the same canonical ranking contract
++as the rest of the repository instead of growing a second evaluator.
++
++Nothing in this module changes Serving V1, trains a model, or writes a model artifact.
++Both adapters call the existing full-catalogue ``score_catalog`` surface of the accepted
++inference engines; the only new code is identity plumbing and provenance.
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
++
++from recommendation.datasets.sasrec import encode_inference_history
++from recommendation.inference.sasrec import InferenceConfig, SASRecInferenceEngine
++from recommendation.inference.twotower import TwoTowerInferenceConfig, TwoTowerInferenceEngine
++from recommendation.training.checkpoint import sha256_file
++
++#: P6 benchmark v0 as delivered: the test target is predicted from ``items[:-2]``.
++P6_VARIANT = "p6_shared_history"
++#: The repository-wide ``agentrecx.eval_protocol.v1`` test mode: the validation interaction
++#: is an observed, earlier event and therefore part of the test history.
++CANONICAL_VARIANT = "eval_protocol_v1_test_history"
++
++#: The two documented classical history variants.  They are deliberately not merged:
++#: P6 v0 froze the shorter history, while every formal SASRec / Two-Tower number in the
++#: repository uses the longer one.  Results are therefore reported separately.
++VARIANTS: dict[str, str] = {
++    P6_VARIANT: "history = items[:-2] (P6 benchmark v0 as delivered)",
++    CANONICAL_VARIANT: (
++        "history = items[:-2] + validation target (repository eval_protocol.v1 test mode)"
++    ),
++}
++
++
++def history_for_row(row: Mapping[str, Any], variant: str) -> tuple[int, ...]:
++    """Return the model input history for one P6 classical row and one variant.
++
++    The target is never added by this function: the two targets are the final two
++    interactions of the user's sequence, and the only difference between the variants is
++    whether the *validation* interaction (which happened before the test interaction) is
++    visible at test time.
++
++    Raises
++    ------
++    ValueError
++        Unknown variant, or a row without the required integer fields.
++    """
++    if variant not in VARIANTS:
++        raise ValueError(f"unknown history variant {variant!r}; known: {sorted(VARIANTS)}")
++    try:
++        base = tuple(int(value) for value in row["history_item_ids"])
++    except (KeyError, TypeError) as exc:
++        raise ValueError("row is missing a usable 'history_item_ids' sequence") from exc
++    if variant == P6_VARIANT:
++        return base
++    try:
++        validation_target = int(row["validation_item_id"])
++    except (KeyError, TypeError) as exc:
++        raise ValueError("row is missing a usable 'validation_item_id'") from exc
++    return base + (validation_target,)
++
++
++@runtime_checkable
++class FullCatalogueScorer(Protocol):
++    """One model's raw full-catalogue scoring surface (PAD slot included)."""
++
++    name: str
++    score_kind: str
++    num_items: int
++
++    def score_catalog(self, history_item_ids: Sequence[int]) -> list[float]: ...
++
++    def item_id_to_parent_asin(self, item_id: int) -> str: ...
++
++    def model_metadata(self) -> dict[str, Any]: ...
++
++
++class SASRecFullCatalogueScorer:
++    """Read-only adapter over the accepted :class:`SASRecInferenceEngine`.
++
++    The engine is loaded once, in ``eval`` mode, and only its public
++    ``encode_history`` / ``score_catalog`` / identity methods are used.
++    """
++
++    name = "sasrec"
++    score_kind = "sasrec_logit"
++
++    def __init__(
++        self,
++        *,
++        checkpoint_path: str | Path,
++        mappings_path: str | Path,
++        manifest_path: str | Path | None = None,
++        device: str = "cpu",
++        expected_checkpoint_sha256: str | None = None,
++    ) -> None:
++        config = InferenceConfig(
++            checkpoint_path=Path(checkpoint_path),
++            mappings_path=Path(mappings_path),
++            manifest_path=Path(manifest_path) if manifest_path is not None else None,
++            device=device,
++            expected_checkpoint_sha256=expected_checkpoint_sha256,
++        )
++        self.engine = SASRecInferenceEngine(config)
++        self.num_items = int(self.engine.num_items)
++        self.checkpoint_sha256 = self.engine.checkpoint_sha256
++        self.checkpoint_path = str(Path(checkpoint_path))
++
++    def score_catalog(self, history_item_ids: Sequence[int]) -> list[float]:
++        """Raw SASRec logits for every catalogue id (index 0 = PAD)."""
++        history_parent_asins = [
++            self.engine.item_id_to_parent_asin(int(item_id)) for item_id in history_item_ids
++        ]
++        encoded, _truncated = self.engine.encode_history(history_parent_asins)
++        scores = self.engine.score_catalog(encoded)
++        if len(scores) != self.num_items + 1:
++            raise ValueError(
++                f"{self.name} returned {len(scores)} scores, expected {self.num_items + 1}"
++            )
++        return scores
++
++    def item_id_to_parent_asin(self, item_id: int) -> str:
++        return self.engine.item_id_to_parent_asin(int(item_id))
++
++    def model_metadata(self) -> dict[str, Any]:
++        payload = dict(self.engine.model_metadata())
++        payload.update({
++            "adapter": "SASRecFullCatalogueScorer",
++            "checkpoint_path": self.checkpoint_path,
++            "checkpoint_sha256": self.checkpoint_sha256,
++            "score_kind": self.score_kind,
++        })
++        return payload
++
++
++class TwoTowerFullCatalogueScorer:
++    """Read-only adapter over the accepted :class:`TwoTowerInferenceEngine`."""
++
++    name = "two_tower"
++    score_kind = "two_tower_cosine"
++
++    def __init__(
++        self,
++        *,
++        checkpoint_path: str | Path,
++        mappings_path: str | Path,
++        categories_path: str | Path | None = None,
++        device: str = "cpu",
++    ) -> None:
++        checkpoint = Path(checkpoint_path)
++        config = TwoTowerInferenceConfig(
++            checkpoint_path=checkpoint,
++            categories_path=Path(categories_path) if categories_path is not None else None,
++            mappings_path=Path(mappings_path),
++            device=device,
++        )
++        self.engine = TwoTowerInferenceEngine(config)
++        self.num_items = int(self.engine.num_items)
++        self.checkpoint_path = str(checkpoint)
++        self.checkpoint_sha256 = sha256_file(checkpoint)
++
++    def score_catalog(self, history_item_ids: Sequence[int]) -> list[float]:
++        """Raw Two-Tower cosine scores for every catalogue id (index 0 = PAD)."""
++        encoded = encode_inference_history(
++            [int(item_id) for item_id in history_item_ids],
++            self.engine.max_seq_len,
++            self.num_items,
++        )
++        scores = self.engine.score_catalog(encoded)
++        if len(scores) != self.num_items + 1:
++            raise ValueError(
++                f"{self.name} returned {len(scores)} scores, expected {self.num_items + 1}"
++            )
++        return scores
++
++    def item_id_to_parent_asin(self, item_id: int) -> str:
++        return self.engine.item_id_to_parent_asin(int(item_id))
++
++    def model_metadata(self) -> dict[str, Any]:
++        payload = dict(self.engine.model_metadata())
++        payload.update({
++            "adapter": "TwoTowerFullCatalogueScorer",
++            "checkpoint_path": self.checkpoint_path,
++            "checkpoint_sha256": self.checkpoint_sha256,
++            "score_kind": self.score_kind,
++        })
++        return payload
++
++
++def build_scorer(
++    model: str,
++    *,
++    sasrec_checkpoint: str | Path,
++    twotower_checkpoint: str | Path,
++    twotower_categories: str | Path | None,
++    mappings_path: str | Path,
++    sasrec_manifest: str | Path | None = None,
++    expected_sasrec_sha256: str | None = None,
++    device: str = "cpu",
++) -> FullCatalogueScorer:
++    """Build one named full-catalogue scorer.
++
++    Only ``cpu`` is accepted here: the P6 work described in the handoff is a CPU task and
++    the local CUDA stack is not a supported runtime for this torch build.  Training is
++    never involved.
++    """
++    if device != "cpu":
++        raise ValueError(f"P6 classical evaluation runs on CPU, got device={device!r}")
++    if model == "sasrec":
++        return SASRecFullCatalogueScorer(
++            checkpoint_path=sasrec_checkpoint,
++            mappings_path=mappings_path,
++            manifest_path=sasrec_manifest,
++            device=device,
++            expected_checkpoint_sha256=expected_sasrec_sha256,
++        )
++    if model == "two_tower":
++        return TwoTowerFullCatalogueScorer(
++            checkpoint_path=twotower_checkpoint,
++            mappings_path=mappings_path,
++            categories_path=twotower_categories,
++            device=device,
++        )
++    raise ValueError(f"unknown model {model!r}; known: ('sasrec', 'two_tower')")
++
++
++def scalar_identity_checksum(rows: Sequence[Mapping[str, Any]]) -> str:
++    """A deterministic digest of the identity facts this evaluation relies on.
++
++    Used only for provenance/reproducibility.  It is not a metric and it never feeds the
++    scorer.  It covers the split rows' case ids and target identities so a later run can
++    prove it evaluated the same frozen cases.
++    """
++    import hashlib
++
++    digest = hashlib.sha256()
++    for row in rows:
++        digest.update(
++            "\x1f".join(
++                (
++                    str(row.get("case_id", "")),
++                    str(row.get("user_id", "")),
++                    str(row.get("test_parent_asin", "")),
++                    str(row.get("test_item_id", "")),
++                )
++            ).encode("utf-8")
++        )
++        digest.update(b"\n")
++    return digest.hexdigest()
++
++
++def load_mapping_num_items(mappings_path: str | Path) -> int:
++    """Read ``num_items`` from the accepted mappings artifact without loading both tables."""
++    payload = json.loads(Path(mappings_path).read_text(encoding="utf-8"))
++    num_items = payload.get("num_items")
++    if not isinstance(num_items, int) or num_items < 1:
++        raise ValueError(f"mappings artifact has no usable num_items: {mappings_path}")
++    return int(num_items)
++
++
++__all__ = [
++    "CANONICAL_VARIANT",
++    "P6_VARIANT",
++    "VARIANTS",
++    "FullCatalogueScorer",
++    "SASRecFullCatalogueScorer",
++    "TwoTowerFullCatalogueScorer",
++    "build_scorer",
++    "history_for_row",
++    "load_mapping_num_items",
++    "scalar_identity_checksum",
++]
+diff --git a/experiments/p6_benchmark/run_classical.py b/experiments/p6_benchmark/run_classical.py
+new file mode 100644
+--- /dev/null
++++ b/experiments/p6_benchmark/run_classical.py
+@@ -0,0 +1,537 @@
++"""P6 classical full-catalogue evaluation runner (CPU only, read-only).
++
++What this measures
++------------------
++The frozen P6 classical rows (``data/p6_benchmark_v0/classical_{dev,holdout}.jsonl``) are
++scored by the accepted SASRec and Two-Tower inference engines through the adapters in
++:mod:`experiments.p6_benchmark.full_ranking`.  The runner then hands each **full
++catalogue score vector** to ``recommendation.evaluation.metrics.sorted_ranking``, which
++owns seen-item masking, target re-admission and the canonical tie rule, and reports the
++P6 metric definitions from :mod:`experiments.p6_benchmark.metrics`.
++
++Two history variants are evaluated and reported separately:
++
++``p6_shared_history``
++    ``history = items[:-2]`` - exactly the P6 benchmark v0 artifact as delivered.
++``eval_protocol_v1_test_history``
++    ``history = items[:-2] + validation target`` - the repository-wide
++    ``agentrecx.eval_protocol.v1`` test mode, in which the validation interaction is an
++    earlier observed event.  This is the variant comparable with the formal metrics
++    recorded in ``runs/sasrec_canonical_2026/run.json``.
++
++Why the metrics are exact under a top-50 truncation
++---------------------------------------------------
++Every P6 classical cutoff is ``<= 50`` (Recall@10, Recall@50, NDCG@10, MRR@10,
++CatalogueCoverage@10).  ``sorted_ranking`` produces the complete catalogue ordering; the
++runner keeps the first 50 for metric input.  A target ranked 51 or lower contributes
++exactly zero to every P6 cutoff, so the truncated list and the full list give identical
++metric values.  The truncated list is never treated as a retrieval head: it is read from
++a full-catalogue ranking.
++
++What is deliberately not evaluated
++----------------------------------
++``FusionInferenceEngine`` exposes only a fused top-k head, not a full-catalogue score
++vector, so Serving V1 Fusion has no defined strict full-ranking here.  It is not
++simulated by inventing a tail order; the report records it as not evaluated.  This
++runner also does not train, does not touch Serving V1 and does not modify Gold/Evaluator
++or the frozen P6 tasks.
++"""
++
++from __future__ import annotations
++
++import argparse
++import gc
++import json
++import platform
++import subprocess
++import sys
++import time
++from datetime import datetime, timezone
++from pathlib import Path
++from typing import Any, Mapping, Sequence
++
++REPO = Path(__file__).resolve().parents[2]
++if str(REPO) not in sys.path:
++    sys.path.insert(0, str(REPO))
++
++from experiments.p6_benchmark.full_ranking import (  # noqa: E402
++    CANONICAL_VARIANT,
++    P6_VARIANT,
++    VARIANTS,
++    build_scorer,
++    history_for_row,
++    load_mapping_num_items,
++    scalar_identity_checksum,
++)
++from experiments.p6_benchmark.metrics import (  # noqa: E402
++    aggregate_classical,
++    classical_case_metrics,
++)
++from recommendation.evaluation.metrics import sorted_ranking  # noqa: E402
++from recommendation.training.checkpoint import sha256_file  # noqa: E402
++
++P6_DIR = REPO / "data" / "p6_benchmark_v0"
++DEFAULT_MAPPINGS = REPO / "data" / "processed" / "Sports_and_Outdoors_mappings.json"
++DEFAULT_SASREC_CHECKPOINT = REPO / "runs" / "sasrec_canonical_2026" / "best.pt"
++DEFAULT_SASREC_MANIFEST = REPO / "runs" / "sasrec_canonical_2026" / "run.json"
++DEFAULT_TWOTOWER_CHECKPOINT = REPO / "runs" / "twotower_public_2026" / "checkpoint.pt"
++DEFAULT_TWOTOWER_CATEGORIES = REPO / "runs" / "twotower_public_2026" / "metadata_categories.json"
++DEFAULT_OUT = REPO / "runs" / "p6_classical_eval"
++
++#: Every P6 classical cutoff is at most 50; see the module docstring.
++TOP_K_FOR_METRICS = 50
++
++#: Which classical arms this runner supports.  Fusion is intentionally absent.
++MODEL_NAMES: tuple[str, ...] = ("sasrec", "two_tower")
++
++VARIANT_ALIASES: dict[str, str] = {
++    "p6": P6_VARIANT,
++    "canonical": CANONICAL_VARIANT,
++    P6_VARIANT: P6_VARIANT,
++    CANONICAL_VARIANT: CANONICAL_VARIANT,
++}
++
++
++def _utc_now() -> str:
++    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
++def _git_state() -> dict[str, Any]:
++    """Best-effort provenance; never makes the evaluation fail if git is unavailable."""
++    state: dict[str, Any] = {"head": None, "branch": None, "dirty_entry_count": None}
++    try:
++        state["head"] = subprocess.run(
++            ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True, check=True
++        ).stdout.strip()
++        state["branch"] = subprocess.run(
++            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
++            cwd=REPO,
++            capture_output=True,
++            text=True,
++            check=True,
++        ).stdout.strip()
++        status = subprocess.run(
++            ["git", "status", "--porcelain"], cwd=REPO, capture_output=True, text=True, check=True
++        ).stdout
++        state["dirty_entry_count"] = len([line for line in status.splitlines() if line.strip()])
++    except (OSError, subprocess.SubprocessError):
++        pass
++    return state
++
++
++def _resolve_variants(names: Sequence[str]) -> list[str]:
++    resolved: list[str] = []
++    for name in names:
++        try:
++            variant = VARIANT_ALIASES[name]
++        except KeyError as exc:
++            raise ValueError(
++                f"unknown variant {name!r}; known aliases: {sorted(VARIANT_ALIASES)}"
++            ) from exc
++        if variant not in resolved:
++            resolved.append(variant)
++    if not resolved:
++        raise ValueError("at least one history variant is required")
++    return resolved
++
++
++def _load_rows(split: str) -> list[dict[str, Any]]:
++    path = P6_DIR / f"classical_{split}.jsonl"
++    if not path.exists():
++        raise FileNotFoundError(f"P6 classical split not found: {path}")
++    rows = [
++        json.loads(line)
++        for line in path.read_text(encoding="utf-8").splitlines()
++        if line.strip()
++    ]
++    for row in rows:
++        if str(row.get("split")) != split:
++            raise ValueError(
++                f"row {row.get('case_id')!r} declares split {row.get('split')!r}, expected {split!r}"
++            )
++    if not rows:
++        raise ValueError(f"P6 classical split {split!r} is empty")
++    return rows
++
++
++def _unique_dir(base: Path) -> Path:
++    """Never overwrite an existing result directory."""
++    if not base.exists():
++        return base
++    for suffix in range(2, 100):
++        candidate = base.with_name(f"{base.name}_r{suffix}")
++        if not candidate.exists():
++            return candidate
++    raise RuntimeError(f"no free result directory next to {base}")
++
++
++def evaluate_rows(
++    *,
++    scorer: Any,
++    rows: Sequence[Mapping[str, Any]],
++    variant: str,
++    num_items: int,
++) -> dict[str, Any]:
++    """Evaluate one scorer over one split under one history variant.
++
++    The scorer sees history item ids only.  The evaluation target is used by this
++    function (and by the ranking kernel) to measure the result; it is never passed to
++    the model.
++    """
++    if variant not in VARIANTS:
++        raise ValueError(f"unknown history variant {variant!r}")
++    cases: list[tuple[Sequence[str], str]] = []
++    per_case: list[dict[str, Any]] = []
++    target_in_model_history_cases = 0
++    started = time.perf_counter()
++    for row in rows:
++        case_started = time.perf_counter()
++        history = history_for_row(row, variant)
++        target_item_id = int(row["test_item_id"])
++        target_parent_asin = str(row["test_parent_asin"])
++        if not history:
++            raise ValueError(f"case {row.get('case_id')!r} produced an empty model history")
++        if target_item_id in set(history):
++            # Legitimate only in the repeated-interaction case: the validation interaction
++            # equals the test target and happened before it.  Recorded, never hidden.
++            target_in_model_history_cases += 1
++
++        scores = scorer.score_catalog(history)
++        if len(scores) != num_items + 1:
++            raise ValueError(
++                f"case {row.get('case_id')!r}: scorer returned {len(scores)} scores, "
++                f"expected num_items + 1 = {num_items + 1}"
++            )
++        # One full-catalogue ranking: the evaluator kernel owns the seen mask, keeps a
++        # repeated target eligible, and applies the canonical tie rule.
++        ranking = sorted_ranking(
++            scores,
++            history=history,
++            target_item_id=target_item_id,
++            num_items=num_items,
++        )
++        try:
++            exact_rank = ranking.index(target_item_id) + 1
++        except ValueError as exc:  # pragma: no cover - the kernel guarantees eligibility
++            raise RuntimeError(
++                f"case {row.get('case_id')!r}: target {target_item_id} missing from the "
++                "candidate ranking"
++            ) from exc
++        top50 = ranking[:TOP_K_FOR_METRICS]
++        top10 = ranking[:10]
++        if (exact_rank <= TOP_K_FOR_METRICS) != (target_item_id in top50):
++            raise RuntimeError(
++                f"case {row.get('case_id')!r}: target rank {exact_rank} disagrees with "
++                "top-50 membership"
++            )
++
++        top50_parent_asins = [scorer.item_id_to_parent_asin(item_id) for item_id in top50]
++        top10_parent_asins = [scorer.item_id_to_parent_asin(item_id) for item_id in top10]
++        metrics = classical_case_metrics(top50_parent_asins, target_parent_asin)
++        cases.append((top50_parent_asins, target_parent_asin))
++        per_case.append(
++            {
++                "case_id": str(row["case_id"]),
++                "user_id": str(row["user_id"]),
++                "history_len": len(history),
++                "exact_rank": exact_rank,
++                "in_top10": exact_rank <= 10,
++                "in_top50": exact_rank <= TOP_K_FOR_METRICS,
++                "target_item_id": target_item_id,
++                "target_parent_asin": target_parent_asin,
++                "top10_parent_asins": top10_parent_asins,
++                "metrics": metrics,
++                "seconds": round(time.perf_counter() - case_started, 6),
++            }
++        )
++
++    summary = aggregate_classical(cases, catalogue_size=num_items)
++    ranks = [row["exact_rank"] for row in per_case]
++    history_lengths = [row["history_len"] for row in per_case]
++    diagnostics = {
++        "exact_rank_mean": round(sum(ranks) / len(ranks), 3),
++        "exact_rank_min": min(ranks),
++        "exact_rank_max": max(ranks),
++        "target_in_top10": sum(row["in_top10"] for row in per_case),
++        "target_in_top50": sum(row["in_top50"] for row in per_case),
++        "history_len_min": min(history_lengths),
++        "history_len_mean": round(sum(history_lengths) / len(history_lengths), 3),
++        "history_len_max": max(history_lengths),
++        # Provenance only: the P6 variant never feeds the test target to the model in this
++        # artifact.  The canonical variant does so only when the repeated interaction makes
++        # validation_target == test_target (the protocol re-admits the target from the mask).
++        "test_target_in_model_history_cases": target_in_model_history_cases,
++    }
++    return {
++        "variant": variant,
++        "variant_description": VARIANTS[variant],
++        "cases": len(per_case),
++        "metrics": summary,
++        "diagnostics": diagnostics,
++        "elapsed_seconds": round(time.perf_counter() - started, 3),
++        "per_case": per_case,
++    }
++
++
++def determinism_check(
++    *,
++    scorer: Any,
++    rows: Sequence[Mapping[str, Any]],
++    variant: str,
++    num_items: int,
++    count: int,
++) -> dict[str, Any]:
++    """Score the first ``count`` cases twice and require identical full rankings."""
++    checked = list(rows[:count])
++    mismatches: list[dict[str, Any]] = []
++    for row in checked:
++        history = history_for_row(row, variant)
++        target_item_id = int(row["test_item_id"])
++        first = sorted_ranking(
++            scorer.score_catalog(history),
++            history=history,
++            target_item_id=target_item_id,
++            num_items=num_items,
++        )
++        second = sorted_ranking(
++            scorer.score_catalog(history),
++            history=history,
++            target_item_id=target_item_id,
++            num_items=num_items,
++        )
++        if first != second:
++            mismatches.append({"case_id": row.get("case_id"), "identical": False})
++    return {
++        "variant": variant,
++        "cases_checked": len(checked),
++        "deterministic": not mismatches,
++        "mismatches": mismatches,
++    }
++
++
++def _format_metric_line(model: str, variant: str, metrics: Mapping[str, Any]) -> str:
++    return (
++        f"{model:<10s} {variant:<30s} "
++        f"R@10={metrics['Recall@10']:.4f} R@50={metrics['Recall@50']:.4f} "
++        f"NDCG@10={metrics['NDCG@10']:.4f} MRR@10={metrics['MRR@10']:.4f} "
++        f"Cov@10={metrics['CatalogueCoverage@10']:.6f}"
++    )
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(
++        description="P6 classical full-catalogue evaluation (CPU, read-only)"
++    )
++    parser.add_argument("--split", choices=("dev", "holdout"), default="dev")
++    parser.add_argument("--models", nargs="+", choices=MODEL_NAMES, default=list(MODEL_NAMES))
++    parser.add_argument(
++        "--variants",
++        nargs="+",
++        default=["p6", "canonical"],
++        help="history variants: p6 / canonical (or full variant names)",
++    )
++    parser.add_argument("--limit", type=int, default=0, help="evaluate only the first N cases")
++    parser.add_argument(
++        "--check-determinism",
++        type=int,
++        default=0,
++        metavar="N",
++        help="score the first N cases twice per model/variant and require identical rankings",
++    )
++    parser.add_argument("--out", type=Path, default=None, help="result directory (never overwritten)")
++    parser.add_argument("--device", choices=("cpu",), default="cpu")
++    parser.add_argument("--mappings", type=Path, default=DEFAULT_MAPPINGS)
++    parser.add_argument("--sasrec-checkpoint", type=Path, default=DEFAULT_SASREC_CHECKPOINT)
++    parser.add_argument("--sasrec-manifest", type=Path, default=DEFAULT_SASREC_MANIFEST)
++    parser.add_argument("--twotower-checkpoint", type=Path, default=DEFAULT_TWOTOWER_CHECKPOINT)
++    parser.add_argument("--twotower-categories", type=Path, default=DEFAULT_TWOTOWER_CATEGORIES)
++    args = parser.parse_args(argv)
++
++    variants = _resolve_variants(list(args.variants))
++    rows = _load_rows(args.split)
++    rows_all = rows
++    if args.limit:
++        if args.limit < 1:
++            parser.error("--limit must be >= 1 when supplied")
++        rows = rows[: args.limit]
++
++    num_items = load_mapping_num_items(args.mappings)
++    leakage = json.loads((P6_DIR / "leakage_report.json").read_text(encoding="utf-8"))
++    if int(leakage["num_items"]) != num_items:
++        parser.error(
++            f"num_items disagreement: mappings={num_items}, leakage_report={leakage['num_items']}"
++        )
++
++    expected_sasrec_sha = None
++    if args.sasrec_manifest.exists():
++        expected_sasrec_sha = (
++            json.loads(args.sasrec_manifest.read_text(encoding="utf-8"))
++            .get("checkpoints", {})
++            .get("best", {})
++            .get("sha256")
++        )
++
++    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
++    base_out = args.out or (DEFAULT_OUT / f"{args.split}_{timestamp}")
++    out = _unique_dir(Path(base_out))
++    out.mkdir(parents=True, exist_ok=False)
++
++    split_path = P6_DIR / f"classical_{args.split}.jsonl"
++    summary: dict[str, Any] = {
++        "schema_version": "agentrecx.p6.classical_eval.v0",
++        "created_utc": _utc_now(),
++        "argv": list(argv) if argv is not None else sys.argv[1:],
++        "split": args.split,
++        "limit": args.limit or None,
++        "results_dir": str(out),
++        "data": {
++            "split_file": str(split_path.relative_to(REPO)),
++            "split_sha256": sha256_file(split_path),
++            "mappings_file": str(args.mappings.relative_to(REPO))
++            if args.mappings.is_relative_to(REPO)
++            else str(args.mappings),
++            "mappings_sha256": sha256_file(args.mappings),
++            "leakage_report_sha256": sha256_file(P6_DIR / "leakage_report.json"),
++            "protocol_sha256": sha256_file(P6_DIR / "protocol.json"),
++            "cases_evaluated": len(rows),
++            "cases_in_split": len(rows_all),
++            "num_items": num_items,
++            "case_identity_checksum": scalar_identity_checksum(rows),
++        },
++        "environment": {
++            "python": sys.version.split()[0],
++            "platform": platform.platform(),
++            "torch": _torch_version(),
++            "device": args.device,
++        },
++        "git": _git_state(),
++        "protocol": {
++            "benchmark_schema": "agentrecx.p6.benchmark_protocol.v0",
++            "candidate_set": (
++                "full catalogue 1..num_items excluding seen history; target re-admitted"
++            ),
++            "ranking_kernel": "recommendation.evaluation.metrics.sorted_ranking",
++            "tie_rule": "higher score first, then lower item id",
++            "mask_rule": "excluded_seen(history, target) = set(history) - {target}",
++            "metric_source": "experiments.p6_benchmark.metrics.aggregate_classical",
++            "metrics": ["Recall@10", "Recall@50", "NDCG@10", "MRR@10", "CatalogueCoverage@10"],
++            "top_k_for_metrics": TOP_K_FOR_METRICS,
++            "top_k_note": (
++                "full-catalogue ranking is computed; the first 50 ids are passed to the "
++                "metric functions because every P6 cutoff is <= 50"
++            ),
++            "history_variants": {variant: VARIANTS[variant] for variant in variants},
++            "fusion": (
++                "NOT evaluated: FusionInferenceEngine exposes a head-fusion top-k, not a "
++                "full-catalogue score vector; strict full-ranking Fusion is undefined"
++            ),
++            "holdout_policy": (
++                "dev is evaluated first; holdout is evaluated once after the script is frozen "
++                "and is never used for prompt/model selection or tuning"
++            ),
++        },
++        "models": {},
++        "determinism": {},
++        "wall_seconds": 0.0,
++    }
++    run_started = time.perf_counter()
++
++    try:
++        for model in args.models:
++            model_started = time.perf_counter()
++            scorer = build_scorer(
++                model,
++                sasrec_checkpoint=args.sasrec_checkpoint,
++                twotower_checkpoint=args.twotower_checkpoint,
++                twotower_categories=args.twotower_categories,
++                mappings_path=args.mappings,
++                sasrec_manifest=args.sasrec_manifest if model == "sasrec" else None,
++                expected_sasrec_sha256=expected_sasrec_sha if model == "sasrec" else None,
++                device=args.device,
++            )
++            load_seconds = round(time.perf_counter() - model_started, 3)
++            model_result: dict[str, Any] = {
++                "scorer": {
++                    "name": scorer.name,
++                    "score_kind": scorer.score_kind,
++                    "num_items": scorer.num_items,
++                    "load_seconds": load_seconds,
++                    "metadata": scorer.model_metadata(),
++                },
++                "variants": {},
++            }
++            if scorer.num_items != num_items:
++                raise ValueError(
++                    f"{model} engine num_items {scorer.num_items} != mappings {num_items}"
++                )
++            for variant in variants:
++                result = evaluate_rows(
++                    scorer=scorer, rows=rows, variant=variant, num_items=num_items
++                )
++                model_result["variants"][variant] = {
++                    key: value for key, value in result.items() if key != "per_case"
++                }
++                with (out / "per_case.jsonl").open("a", encoding="utf-8") as handle:
++                    for case in result["per_case"]:
++                        handle.write(
++                            json.dumps(
++                                {
++                                    "model": model,
++                                    "split": args.split,
++                                    "variant": variant,
++                                    **case,
++                                },
++                                ensure_ascii=False,
++                            )
++                            + "\n"
++                        )
++                if args.check_determinism:
++                    determinism = determinism_check(
++                        scorer=scorer,
++                        rows=rows,
++                        variant=variant,
++                        num_items=num_items,
++                        count=min(args.check_determinism, len(rows)),
++                    )
++                    summary["determinism"].setdefault(model, {})[variant] = determinism
++                print(
++                    _format_metric_line(model, variant, result["metrics"]),
++                    flush=True,
++                )
++            summary["models"][model] = model_result
++            gc.collect()
++
++        summary["wall_seconds"] = round(time.perf_counter() - run_started, 3)
++        (out / "summary.json").write_text(
++            json.dumps(summary, indent=2, ensure_ascii=False, default=str) + "\n",
++            encoding="utf-8",
++        )
++        print(json.dumps({
++            "results_dir": str(out),
++            "split": args.split,
++            "cases": len(rows),
++            "wall_seconds": summary["wall_seconds"],
++        }, indent=2), flush=True)
++        return 0
++    finally:
++        summary["wall_seconds"] = round(time.perf_counter() - run_started, 3)
++        # Always leave a summary, even on failure, so a partial run is never mistaken for
++        # a complete one: a missing per-model entry is visible.
++        if (out / "summary.json").exists() is False:
++            (out / "summary.json").write_text(
++                json.dumps(summary, indent=2, ensure_ascii=False, default=str) + "\n",
++                encoding="utf-8",
++            )
++
++
++def _torch_version() -> str | None:
++    try:
++        import torch
++
++        return str(torch.__version__)
++    except Exception:  # noqa: BLE001 - provenance only
++        return None
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/experiments/p6_benchmark/uncertainty.py b/experiments/p6_benchmark/uncertainty.py
+new file mode 100644
+--- /dev/null
++++ b/experiments/p6_benchmark/uncertainty.py
+@@ -0,0 +1,154 @@
++"""Post-hoc bootstrap uncertainty for P6 classical evaluation artifacts.
++
++This is an **analysis** tool, not part of the frozen P6 metric definitions.  It reads a
++result directory produced by :mod:`experiments.p6_benchmark.run_classical` and resamples
++the per-case metric values with replacement to report a percentile confidence interval
++for the cohort mean.
++
++Why it exists
++-------------
++The P6 v0 cohort is small (160 dev / 40 holdout cases).  At the observed hit rates a
++difference of one or two hits moves Recall@10 by more than a percentage point, so a point
++estimate alone invites over-reading.  The interval makes that uncertainty explicit.  It
++uses only the already-frozen per-case metrics; it cannot change a model score, a ranking
++or a protocol decision, and it must never be used to tune the holdout.
++
++The bootstrap is seeded and documented so a reader can reproduce it exactly.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import random
++from pathlib import Path
++from typing import Any, Sequence
++
++REPO = Path(__file__).resolve().parents[2]
++
++#: Metrics that are per-case means and therefore bootstrap-able.  CatalogueCoverage@10 is
++#: a set-union over the cohort, not a mean of per-case values, so it is not resampled here.
++BOOTSTRAP_METRICS: tuple[str, ...] = ("Recall@10", "Recall@50", "NDCG@10", "MRR@10")
++
++CONFIDENCE = 0.95
++DEFAULT_RESAMPLES = 10000
++DEFAULT_SEED = 20261107
++
++
++def _percentile(sorted_values: Sequence[float], quantile: float) -> float:
++    """Linear-interpolation percentile of an already-sorted sequence."""
++    if not sorted_values:
++        raise ValueError("cannot take a percentile of an empty sequence")
++    if not 0.0 <= quantile <= 1.0:
++        raise ValueError(f"quantile must be in [0, 1], got {quantile!r}")
++    position = quantile * (len(sorted_values) - 1)
++    lower = int(position)
++    upper = min(lower + 1, len(sorted_values) - 1)
++    weight = position - lower
++    return sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
++
++
++def bootstrap_ci(
++    values: Sequence[float],
++    *,
++    resamples: int = DEFAULT_RESAMPLES,
++    seed: int = DEFAULT_SEED,
++    confidence: float = CONFIDENCE,
++) -> dict[str, float]:
++    """Percentile bootstrap interval for the mean of ``values``.
++
++    Returns ``mean``, ``ci_low`` and ``ci_high``.  The resampling is deterministic for a
++    fixed seed and case order.
++    """
++    if not values:
++        raise ValueError("bootstrap needs at least one case")
++    if resamples < 1:
++        raise ValueError(f"resamples must be >= 1, got {resamples}")
++    rng = random.Random(seed)
++    count = len(values)
++    means: list[float] = []
++    for _ in range(resamples):
++        total = 0.0
++        for _index in range(count):
++            total += values[rng.randrange(count)]
++        means.append(total / count)
++    means.sort()
++    alpha = (1.0 - confidence) / 2.0
++    return {
++        "mean": sum(values) / count,
++        "ci_low": _percentile(means, alpha),
++        "ci_high": _percentile(means, 1.0 - alpha),
++    }
++
++
++def _load_groups(results_dir: Path) -> tuple[dict[str, Any], dict[tuple[str, str], list[dict[str, Any]]]]:
++    summary = json.loads((results_dir / "summary.json").read_text(encoding="utf-8"))
++    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
++    per_case_path = results_dir / "per_case.jsonl"
++    for line in per_case_path.read_text(encoding="utf-8").splitlines():
++        if not line.strip():
++            continue
++        row = json.loads(line)
++        key = (str(row["model"]), str(row["variant"]))
++        groups.setdefault(key, []).append(row)
++    if not groups:
++        raise ValueError(f"no per-case rows in {per_case_path}")
++    return summary, groups
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(
++        description="Post-hoc bootstrap uncertainty for a P6 classical result directory"
++    )
++    parser.add_argument("--results-dir", type=Path, required=True)
++    parser.add_argument("--resamples", type=int, default=DEFAULT_RESAMPLES)
++    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
++    parser.add_argument("--out", type=Path, default=None)
++    args = parser.parse_args(argv)
++
++    summary, groups = _load_groups(args.results_dir)
++    payload: dict[str, Any] = {
++        "schema_version": "agentrecx.p6.classical_uncertainty.v0",
++        "note": (
++            "post-hoc percentile bootstrap over frozen per-case metrics; NOT part of the "
++            "frozen P6 protocol, never used for holdout tuning or model selection"
++        ),
++        "results_dir": str(args.results_dir),
++        "split": summary.get("split"),
++        "resamples": args.resamples,
++        "seed": args.seed,
++        "confidence": CONFIDENCE,
++        "metrics": list(BOOTSTRAP_METRICS),
++        "groups": {},
++    }
++    for (model, variant), rows in sorted(groups.items()):
++        frozen = summary["models"][model]["variants"][variant]["metrics"]
++        group: dict[str, Any] = {"cases": len(rows), "metrics": {}}
++        for metric in BOOTSTRAP_METRICS:
++            values = [float(row["metrics"][metric]) for row in rows]
++            interval = bootstrap_ci(values, resamples=args.resamples, seed=args.seed)
++            # The frozen aggregate must agree with the per-case mean; a mismatch means the
++            # artifact is internally inconsistent and the interval must not be trusted.
++            if abs(interval["mean"] - float(frozen[metric])) > 1e-12:
++                raise ValueError(
++                    f"{model}/{variant}/{metric}: per-case mean {interval['mean']!r} != "
++                    f"frozen aggregate {frozen[metric]!r}"
++                )
++            group["metrics"][metric] = interval
++        payload["groups"][f"{model}|{variant}"] = group
++
++    out = args.out or (args.results_dir / "uncertainty.json")
++    out.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
++    for key, group in payload["groups"].items():
++        print(f"{key} (n={group['cases']})")
++        for metric, interval in group["metrics"].items():
++            print(
++                f"  {metric:<10s} mean={interval['mean']:.4f} "
++                f"95%CI=[{interval['ci_low']:.4f}, {interval['ci_high']:.4f}]"
++            )
++    print(f"wrote {out}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/tests/test_p6_classical_eval.py b/tests/test_p6_classical_eval.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_p6_classical_eval.py
+@@ -0,0 +1,216 @@
++"""CPU-only tests for the P6 classical full-ranking evaluation path.
++
++These tests do not load a model checkpoint: they exercise the history variants, the
++scorer contract, the full-ranking -> P6-metric plumbing and the frozen split audit with a
++fake full-catalogue scorer.  The real SASRec / Two-Tower smoke run lives in the
++experiment report, not in the unit test suite.
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Any, Sequence
++
++import pytest
++
++from experiments.p6_benchmark.full_ranking import (
++    CANONICAL_VARIANT,
++    P6_VARIANT,
++    VARIANTS,
++    history_for_row,
++    scalar_identity_checksum,
++)
++from experiments.p6_benchmark.run_classical import determinism_check, evaluate_rows
++from experiments.p6_benchmark.uncertainty import bootstrap_ci
++
++ROOT = Path("data/p6_benchmark_v0")
++
++
++def _id2asin(num_items: int) -> list[str]:
++    return ["PAD"] + [f"A{item_id}" for item_id in range(1, num_items + 1)]
++
++
++class FakeScorer:
++    """Deterministic full-catalogue scorer with the adapter's public surface."""
++
++    name = "fake"
++    score_kind = "fake_score"
++
++    def __init__(self, scores: Sequence[float], num_items: int) -> None:
++        self._scores = [float(value) for value in scores]
++        self.num_items = num_items
++        self._id2asin = _id2asin(num_items)
++        self.model_histories: list[tuple[int, ...]] = []
++
++    def score_catalog(self, history_item_ids: Sequence[int]) -> list[float]:
++        self.model_histories.append(tuple(int(value) for value in history_item_ids))
++        return list(self._scores)
++
++    def item_id_to_parent_asin(self, item_id: int) -> str:
++        return self._id2asin[int(item_id)]
++
++    def model_metadata(self) -> dict[str, Any]:
++        return {"name": self.name, "num_items": self.num_items}
++
++
++def _row(
++    *,
++    num_items: int,
++    history: Sequence[int],
++    validation: int,
++    test: int,
++    case_id: str = "case-0",
++    user_id: str = "user-0",
++) -> dict[str, Any]:
++    id2asin = _id2asin(num_items)
++    return {
++        "case_id": case_id,
++        "user_id": user_id,
++        "split": "dev",
++        "history_item_ids": list(history),
++        "validation_item_id": validation,
++        "test_item_id": test,
++        "validation_parent_asin": id2asin[validation],
++        "test_parent_asin": id2asin[test],
++    }
++
++
++def _load_split(split: str) -> list[dict[str, Any]]:
++    return [
++        json.loads(line)
++        for line in (ROOT / f"classical_{split}.jsonl").read_text(encoding="utf-8").splitlines()
++        if line.strip()
++    ]
++
++
++def test_history_variants_differ_only_by_the_validation_interaction() -> None:
++    row = _row(num_items=10, history=(2, 3), validation=4, test=7)
++    assert history_for_row(row, P6_VARIANT) == (2, 3)
++    assert history_for_row(row, CANONICAL_VARIANT) == (2, 3, 4)
++    with pytest.raises(ValueError):
++        history_for_row(row, "not-a-variant")
++    assert set(VARIANTS) == {P6_VARIANT, CANONICAL_VARIANT}
++
++
++def test_known_scores_produce_exact_p6_metrics() -> None:
++    num_items = 10
++    scores = [0.0] * (num_items + 1)
++    scores[7] = 100.0  # target, rank 1
++    scores[2] = 50.0  # masked history item must not appear
++    scores[3] = 40.0  # masked history item must not appear
++    scorer = FakeScorer(scores, num_items)
++    row = _row(num_items=num_items, history=(2, 3), validation=4, test=7)
++
++    result = evaluate_rows(
++        scorer=scorer, rows=[row], variant=P6_VARIANT, num_items=num_items
++    )
++
++    assert result["variant"] == P6_VARIANT
++    assert result["cases"] == 1
++    assert result["metrics"] == {
++        "cases": 1,
++        "Recall@10": 1.0,
++        "Recall@50": 1.0,
++        "NDCG@10": 1.0,
++        "MRR@10": 1.0,
++        "CatalogueCoverage@10": 0.8,  # 8 eligible candidates / 10
++    }
++    assert result["diagnostics"]["exact_rank_mean"] == 1
++    assert result["diagnostics"]["target_in_top10"] == 1
++    # The model saw history only; the target was never a scorer input in this variant.
++    assert scorer.model_histories == [(2, 3)]
++
++
++def test_target_beyond_top50_contributes_zero_to_all_p6_metrics() -> None:
++    num_items = 100
++    scores = [0.0] * (num_items + 1)
++    scores[1] = -1.0  # target ranks last among the 98 eligible candidates
++    scorer = FakeScorer(scores, num_items)
++    row = _row(num_items=num_items, history=(2, 3), validation=4, test=1)
++
++    result = evaluate_rows(
++        scorer=scorer, rows=[row], variant=P6_VARIANT, num_items=num_items
++    )
++
++    assert result["diagnostics"]["exact_rank_mean"] == 98
++    assert result["diagnostics"]["target_in_top10"] == 0
++    assert result["diagnostics"]["target_in_top50"] == 0
++    assert result["metrics"] == {
++        "cases": 1,
++        "Recall@10": 0.0,
++        "Recall@50": 0.0,
++        "NDCG@10": 0.0,
++        "MRR@10": 0.0,
++        "CatalogueCoverage@10": 0.1,  # 10 distinct ids in top-10 / 100
++    }
++
++
++def test_scorer_must_return_full_catalogue_score_vector() -> None:
++    num_items = 10
++    scorer = FakeScorer([0.0] * num_items, num_items)  # missing the PAD slot
++    row = _row(num_items=num_items, history=(2, 3), validation=4, test=7)
++    with pytest.raises(ValueError, match="num_items \\+ 1"):
++        evaluate_rows(scorer=scorer, rows=[row], variant=P6_VARIANT, num_items=num_items)
++
++
++def test_frozen_p6_split_keeps_test_target_out_of_the_shared_history() -> None:
++    rows = _load_split("dev") + _load_split("holdout")
++    assert len(rows) == 200
++
++    for row in rows:
++        shared = set(history_for_row(row, P6_VARIANT))
++        assert int(row["test_item_id"]) not in shared, row["case_id"]
++
++    # The canonical variant legitimately includes the validation interaction.  The only way
++    # the test target can then appear in the model history is the repeated-interaction case
++    # (validation target == test target), which the protocol records and re-admits.
++    canonical_hits = [
++        row
++        for row in rows
++        if int(row["test_item_id"]) in set(history_for_row(row, CANONICAL_VARIANT))
++    ]
++    for row in canonical_hits:
++        assert int(row["test_item_id"]) == int(row["validation_item_id"]), row["case_id"]
++
++
++def test_case_identity_checksum_is_deterministic_and_frozen() -> None:
++    dev = _load_split("dev")
++    holdout = _load_split("holdout")
++    first = scalar_identity_checksum(dev)
++    second = scalar_identity_checksum(dev)
++    assert first == second
++    assert len(first) == 64
++    assert first != scalar_identity_checksum(holdout)
++
++
++def test_determinism_check_scores_the_same_inputs_twice() -> None:
++    num_items = 10
++    scores = [0.0] * (num_items + 1)
++    scores[7] = 1.0
++    scorer = FakeScorer(scores, num_items)
++    rows = [
++        _row(num_items=num_items, history=(2, 3), validation=4, test=7, case_id="c0"),
++        _row(num_items=num_items, history=(4, 5), validation=6, test=7, case_id="c1"),
++    ]
++    result = determinism_check(
++        scorer=scorer, rows=rows, variant=P6_VARIANT, num_items=num_items, count=2
++    )
++    assert result["cases_checked"] == 2
++    assert result["deterministic"] is True
++    # Each case is scored twice, so four model calls happened.
++    assert len(scorer.model_histories) == 4
++
++
++def test_bootstrap_ci_collapses_for_constant_values() -> None:
++    interval = bootstrap_ci([0.5, 0.5, 0.5, 0.5], resamples=200, seed=1)
++    assert interval == {"mean": 0.5, "ci_low": 0.5, "ci_high": 0.5}
++
++
++def test_bootstrap_ci_is_seeded_and_bounded() -> None:
++    values = [0.0] * 156 + [1.0] * 4
++    first = bootstrap_ci(values, resamples=500, seed=20261107)
++    second = bootstrap_ci(values, resamples=500, seed=20261107)
++    assert first == second
++    assert 0.0 <= first["ci_low"] <= first["mean"] <= first["ci_high"] <= 1.0
++    assert abs(first["mean"] - 0.025) < 1e-12

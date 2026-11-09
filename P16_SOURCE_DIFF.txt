@@ -1,0 +1,86 @@
+P16 SOURCE DIFF
+================================================================================
+Milestone: two reusable shopping skills integrated with the existing Agent executor.
+No new runtime/service; no training; no retrieval rebuild; no Reserved Test; no commit.
+
+NEW SOURCE / TEST FILES
+skills/shopping-comparison/SKILL.md
+  bytes=3836 sha256=b10eaf88665c3b153d32f46f0d4cf8c2098baa9c920f1500369022ec43447170
+skills/preference-clarification/SKILL.md
+  bytes=3386 sha256=fb1b827c14bb0080fa7d7ea6e5d12077c7e0d98711f8eda132b7ec93719e7c86
+recommendation/skills/__init__.py
+  bytes=1549 sha256=132b520af1a066db48cfea3d9edc356198476f3a721da4f733b0a872c27a94ad
+recommendation/skills/registry.py
+  bytes=1505 sha256=bd1d0595ad999251ba95e9354195efb552599d1badc5302dbd4efde3c595a96e
+recommendation/skills/shopping.py
+  bytes=14860 sha256=8d9f8a5192cc1a1be09f8dd697636794d475a3894b1a1d042aafa41e824e63b5
+recommendation/skills/clarification.py
+  bytes=5546 sha256=8c96d40939ac13c89c4f52919154df2d615404f155425d5f351c5ee4a3e72847
+experiments/p16/__init__.py
+  bytes=40 sha256=20799b2ad9c3ae59cc0a8578e98d0194efdfbc79eae64a156cd0fd7f7cb03af7
+experiments/p16/run_e2e.py
+  bytes=15037 sha256=ab32bd2894a9f61a9c82dd08e6e54fc456abb0961870ac6a3fb36f9a47b23ae3
+experiments/p16/metrics.py
+  bytes=6124 sha256=a5312f404f98200f99c809ce11f94289b252f875c431845a04c8c2241f19d120
+tests/test_p16_skills.py
+  bytes=10096 sha256=745912853eb57c7467ded5f63bed47e5bd93a6ce1376b83a88d97e4f662b8748
+
+MODIFIED FILES
+experiments/p14c0/electronics_executor.py
+  bytes=20377 sha256=22f5668d0a4e1cd5cc5506782bae25b8db67da216dafe66f0fc35dd336efbdc5
+
+NEW REPORT
+P16_REPORT.md
+  bytes=10458 sha256=ff8f07743bab6fe1d60e43ec0d556cfe6d8dbb9ef2c3580225427c70f4e8e5cd
+
+E2E / METRICS ARTIFACTS (git-ignored)
+runs/p16/e2e_trajectories.json
+  bytes=200576 sha256=bb1a05fb0b42dac2942f55323e95dfac40d0a1cccbabad7f6f502d08d9481169
+runs/p16/e2e/cmp_2_no_history.json
+  bytes=31351 sha256=97f38a2291d7fb1123551bf3ba1def8a468b6632acb6cc2587aa865c2e7d5702
+runs/p16/e2e/cmp_3_history.json
+  bytes=62863 sha256=284e6af725236097db312f0044e759ab7953f26b129ca26d0e6644c56a8d7672
+runs/p16/e2e/cmp_negative_history.json
+  bytes=35687 sha256=b63e09ba814ea349b31fb59568ab68ccf0c9da19baf5d5336cb2e21b4bdf2fb3
+runs/p16/e2e/cmp_mouse_no_history.json
+  bytes=36068 sha256=51f954b65d94a7529b25722690ce6faf584f8b367cc1bda74f31f9f4e5407336
+runs/p16/e2e/cmp_invalid_id.json
+  bytes=1734 sha256=d38a9f709fb463a6a998de0f9817ade8d380188abe63251ff0f6779f1165497e
+runs/p16/e2e/cmp_namespace_mismatch.json
+  bytes=1744 sha256=595ab7cd464d04fb36aa963e16d1f8ee944461a9db29575ee3e4a5287a6d4c15
+runs/p16/e2e/clr_missing_need.json
+  bytes=5336 sha256=d0d87d39422e533c0de929ef6c9204bd79aa699c2e9d2c60be688f0089cc05d5
+runs/p16/e2e/clr_conflict.json
+  bytes=8538 sha256=6e1715b3fb8afa83244088f5e93d6e8ec4ce9136a9a7964c0df48b5e2057e81e
+runs/p16/e2e/clr_withdrawal.json
+  bytes=6160 sha256=64976163e124a6b26e83fc050d138d584d5ded52c08b283e32bdb0c47dbfad49
+runs/p16/e2e/clr_unanswered.json
+  bytes=2114 sha256=d4c6a952c725c6aad23dc5c9fb65134ce1445fb2b5e87516c11c01278d466f1b
+runs/p16/e2e/clr_duplicate_reply.json
+  bytes=3362 sha256=90970fe8fa696e1599a779226fc3d6e5d154da22ba10ff1be695672a2a23f5fd
+runs/p16/e2e/clr_cross_user.json
+  bytes=269 sha256=c5827c9d467531df9f770d070e40d34e6e17f9ceccabb17ba5eee230708fa19b
+runs/p16/summary.json
+  bytes=674 sha256=fbe3762d226980afbd376a664ed0c27a4d3c535869250f8b9e795a3bffe995b2
+runs/p16/metrics.json
+  bytes=1400 sha256=1ef4a755a3e7513a67f551cd10c2019eb9054fbb54c686fc9a21bebff37ba444
+runs/p16/per_case.jsonl
+  bytes=8962 sha256=f9b2eb69792c8cb9a77af933718519dc322f0fe19d2f3240dedb03b540a47f78
+runs/p16/decision.json
+  bytes=2551 sha256=9db7b25af60974825b08fe0c7458f75d50d0255eb7c2870f9c5265b5db581ffc
+
+SKILLS
+- shopping-comparison: 2-5 explicit real products; Product Info + P15 Evidence Bundle;
+  exact spans/UNKNOWN; P15 Claim Validation; deterministic comparison; no Qwen call.
+- preference-clarification: existing Gate ASK; real user reply via M9 process_turn;  idempotent turn id; retraction/audit; cross-user read rejected; no forced FINALIZE.
+- Minimal explicit registry; invocation via existing ElectronicsPlannerExecutor.invoke_skill.
+
+E2E
+- 12 cases: 6 comparison (4 valid, 2 invalid IDs/namespace) + 6 clarification.
+- 9 real products compared; 72 valid claims / 0 rejected; 54 UNKNOWN fields; 0 Qwen calls.
+- Clarification: conflict resolved, withdrawal removed, duplicate idempotent, unanswered blocked,
+  cross-user rejected; all replies labelled explicit test inputs.
+
+DECISION
+- SHOPPING_COMPARISON PASS; PREFERENCE_CLARIFICATION PASS; SKILL_RUNTIME_INTEGRATION PASS;
+  EVIDENCE_GROUNDING PASS (automated structural scope); LEGACY_REGRESSION PASS; P16 GO.

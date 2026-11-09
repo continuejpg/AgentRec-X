@@ -47,6 +47,8 @@ from recommendation.demo import (
     DECISION_MODE_LLM,
     DECISION_MODE_LLM_AGENT,
     DEFAULT_DECISION_MODE,
+    AgentChoiceRequest,
+    AgentChoiceResultView,
     AgentRecommendRequest,
     AgentRecommendResponse,
     AgentShoppingRequest,
@@ -73,6 +75,7 @@ from recommendation.demo import (
     build_chat_response,
 )
 from recommendation.demo.control_plane import CONTROL_PLANE_GRAPH
+from recommendation.demo.qwen_proposal import qwen_proposal_enabled
 from recommendation.demo.llm_policy import LLMPolicyError, provider_availability
 from recommendation.demo.tool_selection import (
     CODE_DIRECT_WITH_SOURCES,
@@ -303,6 +306,34 @@ def map_demo_exception(exc: BaseException) -> DemoHTTPError:
             return DemoHTTPError(
                 503, "memory_unavailable", "shopping requires the preference store"
             )
+        if exc.code == "m8_disabled":
+            return DemoHTTPError(
+                404,
+                "choice_collection_disabled",
+                "decision-choice collection is disabled on this deployment",
+            )
+        if exc.code == "m8_unknown_task":
+            return DemoHTTPError(
+                404, "m8_unknown_task", "no decision trajectory exists for this task"
+            )
+        if exc.code == "m8_identity_mismatch":
+            return DemoHTTPError(
+                422, "m8_identity_mismatch", "the choice identity does not match the session"
+            )
+        if exc.code == "m8_invalid_choice":
+            return DemoHTTPError(
+                422, "m8_invalid_choice", "the selected item was not presented in the final top-K"
+            )
+        if exc.code == "m8_choice_conflict":
+            return DemoHTTPError(
+                409,
+                "m8_choice_conflict",
+                "a different choice was already recorded for this task",
+            )
+        if exc.code == "m8_store_failed":
+            return DemoHTTPError(
+                503, "m8_store_failed", "the decision-choice store is unavailable"
+            )
         if exc.code == "invalid_clarification_option":
             return DemoHTTPError(
                 422,
@@ -493,6 +524,24 @@ def _mode_view(runtime: DemoRuntime, mode: str, *, label: str) -> DecisionModeVi
     )
 
 
+def _choice_view(record: Any) -> AgentChoiceResultView:
+    """Whitelist one persisted choice row; store-only fields never reach the API."""
+    return AgentChoiceResultView(
+        choice_id=str(record["choice_id"]),
+        session_id=str(record["session_id"]),
+        task_id=str(record["task_id"]),
+        trajectory_id=str(record["trajectory_id"]),
+        trajectory_digest=str(record["trajectory_digest"]),
+        selected_parent_asin=record.get("selected_parent_asin"),
+        no_suitable_item=bool(record.get("no_suitable_item", False)),
+        satisfaction=record.get("satisfaction"),
+        confidence=record.get("confidence"),
+        comment=record.get("comment"),
+        final_top_k=tuple(record.get("final_top_k") or ()),
+        duplicate=bool(record.get("duplicate", False)),
+    )
+
+
 def _profile_view(profile: Any) -> DemoProfileView:
     """Public view of a demo profile: identity and history shape, never the history."""
     return DemoProfileView(
@@ -526,6 +575,17 @@ def build_demo_router() -> APIRouter:
             max_sessions=runtime.sessions.max_sessions,
             detail=None if ready else _unready_detail(runtime),
         )
+
+    @router.get("/metrics")
+    def demo_metrics(request: Request) -> dict[str, Any]:
+        """Operational counters for Agent turns in this process.
+
+        This is a read-only JSON snapshot, not a quality metric.  It is intentionally
+        process-local; a deployment that needs multi-worker aggregation can scrape this
+        endpoint or bridge it to its telemetry backend.
+        """
+        runtime = _runtime(request)
+        return runtime.operational_metrics.snapshot().as_dict()
 
     @router.get("/decision-modes", response_model=DecisionModesResponse)
     def decision_modes(request: Request) -> DecisionModesResponse:
@@ -720,9 +780,15 @@ def build_demo_router() -> APIRouter:
         if not runtime.ready:
             raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
         try:
-            return runtime.agent_service().run(payload)
+            response = runtime.agent_service().run(payload)
         except Exception as exc:  # noqa: BLE001 - mapped, never leaked
             raise map_demo_exception(exc) from exc
+        runtime.operational_metrics.record(
+            response,
+            route="agent_recommend",
+            answered_clarification=payload.clarification_id is not None,
+        )
+        return response
 
     @router.post("/sessions/{session_id}/agent/shopping", response_model=AgentRecommendResponse)
     def agent_shopping(
@@ -757,15 +823,112 @@ def build_demo_router() -> APIRouter:
                     preference_discovery=payload.preference_discovery,
                     user_key=session.user_key,
                 )
-                return runtime.agent_service().run_shopping_turn(
+                proposal_operations = None
+                if qwen_proposal_enabled():
+                    # Explicit opt-in only.  A transport/model failure is a hard error;
+                    # there is deliberately no rule-proposal fallback here.
+                    from recommendation.demo.qwen_proposal import (
+                        QwenProposalClient,
+                        QwenProposalError,
+                    )
+
+                    try:
+                        proposer = QwenProposalClient.from_env()
+                        proposal_operations = proposer.propose(
+                            messages=list(session.trusted_user_history),
+                            current=payload.message,
+                        )
+                    except QwenProposalError as exc:
+                        raise DemoHTTPError(503, exc.code, exc.detail) from exc
+                response = runtime.agent_service().run_shopping_turn(
                     agent_payload,
                     session_id=session.user_key,
                     task_id=session.session_id,
+                    # M5.2: the server-owned turn allocation and the optional client
+                    # idempotency key select the decision-state event identity only; they
+                    # never change the recommendation path or the response schema.
+                    turn_id=allocation.turn_id,
+                    idempotency_key=payload.idempotency_key,
+                    proposal_operations=proposal_operations,
                 )
         except DemoHTTPError:
             raise
         except Exception as exc:  # noqa: BLE001 - mapped, never leaked
             raise map_demo_exception(exc) from exc
+        runtime.operational_metrics.record(
+            response,
+            route="agent_shopping",
+            answered_clarification=payload.clarification_id is not None,
+        )
+        return response
+
+    @router.post(
+        "/sessions/{session_id}/agent/choice",
+        response_model=AgentChoiceResultView,
+    )
+    def agent_choice(
+        session_id: str, payload: AgentChoiceRequest, request: Request
+    ) -> AgentChoiceResultView:
+        """Record one real demo user decision (M8.1 experiment endpoint).
+
+        The endpoint is disabled (404) unless the M8 decision-evaluation and M8.1
+        collection switches are enabled.  It validates the session and the recorded
+        trajectory's final top-K; the persisted row carries no target/correctness label.
+        A repeated identical submit returns the existing row with ``duplicate=True``; a
+        different choice for the same task is a 409 conflict.
+        """
+        runtime = _runtime(request)
+        if not runtime.ready:
+            raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
+        try:
+            session = runtime.sessions.get(session_id)
+            result = runtime.agent_service().record_decision_choice(
+                task_id=session.session_id,
+                user_key=session.user_key,
+                session_id=session.session_id,
+                selected_parent_asin=payload.selected_parent_asin,
+                no_suitable_item=payload.no_suitable_item,
+                satisfaction=payload.satisfaction,
+                confidence=payload.confidence,
+                comment=payload.comment,
+                idempotency_key=payload.idempotency_key,
+                interaction_source="demo_http",
+            )
+        except Exception as exc:  # noqa: BLE001 - mapped, never leaked
+            raise map_demo_exception(exc) from exc
+        collected = result.get("collected")
+        if not isinstance(collected, dict):
+            raise DemoHTTPError(
+                503,
+                "choice_collection_disabled",
+                "decision-choice collection is disabled on this deployment",
+            )
+        return _choice_view(collected)
+
+    @router.get(
+        "/sessions/{session_id}/agent/choices",
+        response_model=list[AgentChoiceResultView],
+    )
+    def agent_choices(session_id: str, request: Request) -> list[AgentChoiceResultView]:
+        """Read persisted real choices for one session (survives a process restart)."""
+        runtime = _runtime(request)
+        if not runtime.ready:
+            raise DemoHTTPError(503, "demo_unavailable", UNAVAILABLE_DETAIL)
+        from recommendation.demo.decision_choice_store import choice_collection_enabled
+
+        if not choice_collection_enabled():
+            raise DemoHTTPError(
+                404,
+                "choice_collection_disabled",
+                "decision-choice collection is disabled on this deployment",
+            )
+        try:
+            # Access boundary: a choice list belongs to one live session capability token.
+            runtime.sessions.get(session_id)
+            records = runtime.agent_service().decision_choice_history(session_id)
+        except Exception as exc:  # noqa: BLE001 - mapped, never leaked
+            raise map_demo_exception(exc) from exc
+        return [_choice_view(record) for record in records]
 
     @router.delete("/sessions/{session_id}", response_model=ResetResponse)
     def reset_session(session_id: str, request: Request) -> ResetResponse:
@@ -773,6 +936,7 @@ def build_demo_router() -> APIRouter:
         runtime = _runtime(request)
         try:
             session = runtime.sessions.delete(session_id)
+            runtime.forget_task(session.session_id)
         except Exception as exc:  # noqa: BLE001 - mapped, never leaked
             raise map_demo_exception(exc) from exc
         # Drop the compiled graphs bound to this namespace: they are unreachable now.

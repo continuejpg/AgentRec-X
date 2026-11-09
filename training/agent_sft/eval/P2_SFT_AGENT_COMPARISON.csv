@@ -1,0 +1,61 @@
+task_id,policy,status,legacy_pass,task_success_v2,product_role_satisfaction,preference_lifecycle_correct,hard_constraint_satisfaction,retrieval_adequacy,tool_action_validity,exact_identity_hit,final_ids,reason
+dev_01_goal_correction_withdraw,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B09CJN4XGM|B00A9A2HKM|B08XJQ9HPX|B09Y53NYDK,reference C run from P1C
+dev_01_goal_correction_withdraw,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_01_goal_correction_withdraw,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_02_accessory_then_restore,C,executed_reference,False,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B06WWQMRFY|B09CJN4XGM|B00A9A2HKM,reference C run from P1C
+dev_02_accessory_then_restore,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_02_accessory_then_restore,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_03_accessory_target,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B00NE7NZCG,reference C run from P1C
+dev_03_accessory_target,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_03_accessory_target,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_04_goal_change_to_filter,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B09Y53NYDK|B00QFXGSIY|B08ZYMXLMH,reference C run from P1C
+dev_04_goal_change_to_filter,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_04_goal_change_to_filter,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_05_budget_conflict,C,executed_reference,True,UNKNOWN,PASS,PASS,UNKNOWN,ADEQUATE,VALID,True,B0BX5QFWQN|B08ZYMXLMH|B0041HS4WO|B08WYP32VT|B07Y2YK51S,reference C run from P1C
+dev_05_budget_conflict,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_05_budget_conflict,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_06_cookware_material,C,executed_reference,False,FAIL,PASS,FAIL,PASS,ADEQUATE,VALID,False,B07CZ9Y7CR|B086948LMN|B07JFWYH1P|B08NTPL2XK|B018XJXYHA,reference C run from P1C
+dev_06_cookware_material,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_06_cookware_material,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_07_cookware_lightweight_pref,C,executed_reference,False,FAIL,PASS,FAIL,PASS,ADEQUATE,NOT_REQUIRED,False,B06WGLP747|B00F6K91YA|B0BKFGDBBM|B00S8NHNHE|B01G9CI58G,reference C run from P1C
+dev_07_cookware_lightweight_pref,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_07_cookware_lightweight_pref,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_08_filter_lightweight_withdraw,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B09Y53NYDK|B00QFXGSIY|B08XJQ9HPX|B084Z3DSF2,reference C run from P1C
+dev_08_filter_lightweight_withdraw,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_08_filter_lightweight_withdraw,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_09_ambiguous_to_cookware,C,executed_reference,False,PASS,PASS,PASS,PASS,ADEQUATE,NOT_REQUIRED,True,B004Z10XIO|B00XQF9RB4|B0BKFGDBBM|B00SLIWVGE|B013PQZYLK,reference C run from P1C
+dev_09_ambiguous_to_cookware,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_09_ambiguous_to_cookware,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_10_cross_turn_reference,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B08P5FVV7R|B0BKFGDBBM|B085RYZ82R|B01985FDA4|B00WDQIL7I,reference C run from P1C
+dev_10_cross_turn_reference,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_10_cross_turn_reference,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_11_filter_bottle_role,C,executed_reference,False,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B09CJN4XGM|B00A9A2HKM|B08XJQ9HPX|B09Y53NYDK,reference C run from P1C
+dev_11_filter_bottle_role,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_11_filter_bottle_role,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_12_goal_change_sleeping_to_lantern,C,executed_reference,False,UNKNOWN,UNKNOWN,PASS,PASS,SELECTION_OMITTED,VALID,False,,reference C run from P1C
+dev_12_goal_change_sleeping_to_lantern,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_12_goal_change_sleeping_to_lantern,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_13_goal_change_tablets_to_filter,C,executed_reference,False,FAIL,FAIL,PASS,PASS,SELECTION_OMITTED,VALID,False,B0007U017U|B0007VSLK8|B0002UCSEO,reference C run from P1C
+dev_13_goal_change_tablets_to_filter,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_13_goal_change_tablets_to_filter,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_14_gravity_filter_pref,C,executed_reference,False,FAIL,PASS,FAIL,PASS,ADEQUATE,VALID,True,B00RU3RBNE|B0BX5QFWQN|B08HWP19XK|B0B6Z7PTZ8|B0BCNXH99D,reference C run from P1C
+dev_14_gravity_filter_pref,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_14_gravity_filter_pref,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_15_filter_straw_pref,C,executed_reference,False,PASS,PASS,PASS,PASS,ADEQUATE,VALID,False,B0BC2MCSFJ|B0B7P4YS2G|B09Y53NYDK,reference C run from P1C
+dev_15_filter_straw_pref,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_15_filter_straw_pref,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_16_cookware_to_stove,C,executed_reference,False,PASS,PASS,PASS,PASS,ADEQUATE,VALID,False,B0B7R6DL1P|B08T5M5FZT,reference C run from P1C
+dev_16_cookware_to_stove,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_16_cookware_to_stove,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_17_filter_budget_pref,C,executed_reference,False,UNKNOWN,PASS,PASS,UNKNOWN,ADEQUATE,NOT_REQUIRED,True,B0BX5QFWQN|B08XJQ9HPX|B08ZYMXLMH|B09XVPFBFZ|B005SO8VAE,reference C run from P1C
+dev_17_filter_budget_pref,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_17_filter_budget_pref,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_18_filter_color_correction,C,executed_reference,False,FAIL,FAIL,PASS,PASS,SELECTION_OMITTED,VALID,False,B08XJQ9HPX|B008JX0QP4,reference C run from P1C
+dev_18_filter_color_correction,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_18_filter_color_correction,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_19_cookware_set_reference,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B00XQF9RB4|B013PQZYLK|B00SLIWVGE|B002V9XVDQ|B082KHK2XH,reference C run from P1C
+dev_19_cookware_set_reference,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_19_cookware_set_reference,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_20_broad_gear_to_filter,C,executed_reference,True,PASS,PASS,PASS,PASS,ADEQUATE,VALID,True,B09Y53NYDK|B00QFXGSIY,reference C run from P1C
+dev_20_broad_gear_to_filter,D0,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase
+dev_20_broad_gear_to_filter,D1,not_run,,,,,,,,,,proposal -> M5/R1/M6.1 execution bridge not implemented in this phase

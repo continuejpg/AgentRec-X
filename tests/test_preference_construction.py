@@ -16,6 +16,7 @@ from recommendation.demo.preference_construction import (  # noqa: E402
     build_preference_prompt,
     choose_preference_action,
     preference_from_option,
+    price_evidence_note,
     rank_with_task_preference,
     resolve_preference_option,
 )
@@ -60,6 +61,58 @@ def test_prompt_uses_real_price_difference_and_real_values() -> None:
     lower = next(option for option in prompt.options if option.action == "lower")
     assert "Lower price" in lower.label
     assert prompt.impact > 0
+
+
+def test_partial_price_comparison_uses_only_trusted_subset() -> None:
+    records = _records()
+    records["cand-blue"] = records["cand-blue"].model_copy(
+        update={"price_text": None}
+    )
+    decision = choose_preference_action(
+        ("cand-red", "cand-blue", "cand-black"),
+        records,
+        message="gear under a tight budget",
+        top_k=3,
+    )
+    prompt = decision.dimension
+    assert prompt is not None
+    assert prompt.attribute == "price"
+    assert prompt.products == ("cand-red", "cand-black")
+    assert prompt.values == {"cand-red": 25.0, "cand-black": 15.0}
+    assert prompt.coverage == 2 / 3
+    assert "2 of 3 candidates" in prompt.reason
+    assert "UNKNOWN" in prompt.reason
+    note = price_evidence_note(
+        "gear under a tight budget",
+        ("cand-red", "cand-blue", "cand-black"),
+        records,
+    )
+    assert note is not None
+    assert "2 of 3 shown candidates" in note
+    assert "UNKNOWN" in note
+
+
+def test_price_note_reports_gap_without_fabricating_a_comparison() -> None:
+    records = _records()
+    for identity in ("cand-red", "cand-blue"):
+        records[identity] = records[identity].model_copy(
+            update={"price_text": None}
+        )
+    decision = choose_preference_action(
+        ("cand-red", "cand-blue", "cand-black"),
+        records,
+        message="gear under a tight budget",
+        top_k=3,
+    )
+    assert decision.dimension is None
+    note = price_evidence_note(
+        "gear under a tight budget",
+        ("cand-red", "cand-blue", "cand-black"),
+        records,
+    )
+    assert note is not None
+    assert "1 of 3 shown candidates" in note
+    assert "no budget limit" in note.casefold()
 
 
 def test_prompt_skips_an_explicitly_blocked_attribute() -> None:

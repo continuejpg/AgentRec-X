@@ -1,0 +1,37 @@
+[
+  {
+    "sample_id": "p2sft_test_00073",
+    "scenario": "ambiguity",
+    "user_message": "Please help me choose a category; I have no idea yet.",
+    "gold": "{\"clarification\":{\"attribute\":\"product_type\",\"choices\":[\"water filter\",\"camping cookware\",\"lantern\",\"camping stove\"],\"question\":\"Which outdoor product category do you want?\"},\"operations\":[{\"attribute\":\"product_type\",\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"clarify\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "p2sft_test_00084",
+    "scenario": "ambiguity",
+    "user_message": "Please help me choose a category; I have no idea yet.",
+    "gold": "{\"clarification\":{\"attribute\":\"product_type\",\"choices\":[\"water filter\",\"camping cookware\",\"lantern\",\"camping stove\"],\"question\":\"Which outdoor product category do you want?\"},\"operations\":[{\"attribute\":\"product_type\",\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"clarify\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "p2sft_test_00106",
+    "scenario": "ambiguity",
+    "user_message": "Please help me choose a category; I have no idea yet.",
+    "gold": "{\"clarification\":{\"attribute\":\"product_type\",\"choices\":[\"water filter\",\"camping cookware\",\"lantern\",\"camping stove\"],\"question\":\"Which outdoor product category do you want?\"},\"operations\":[{\"attribute\":\"product_type\",\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"clarify\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "p2sft_test_00128",
+    "scenario": "ambiguity",
+    "user_message": "Please help me choose a category; I have no idea yet.",
+    "gold": "{\"clarification\":{\"attribute\":\"product_type\",\"choices\":[\"water filter\",\"camping cookware\",\"lantern\",\"camping stove\"],\"question\":\"Which outdoor product category do you want?\"},\"operations\":[{\"attribute\":\"product_type\",\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"clarify\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "p2sft_test_00172",
+    "scenario": "ambiguity",
+    "user_message": "Please help me choose a category; I have no idea yet.",
+    "gold": "{\"clarification\":{\"attribute\":\"product_type\",\"choices\":[\"water filter\",\"camping cookware\",\"lantern\",\"camping stove\"],\"question\":\"Which outdoor product category do you want?\"},\"operations\":[{\"attribute\":\"product_type\",\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"clarify\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":null,\"direction\":null,\"evidence\":\"Please help me choose a category; I have no idea yet.\",\"op\":\"noop\",\"reason\":\"declined_preference\",\"scope\":null,\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  }
+]

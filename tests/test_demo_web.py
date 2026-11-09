@@ -222,8 +222,19 @@ def test_js_renders_the_api_order_without_reordering() -> None:
 def test_js_does_not_label_the_score_as_confidence_or_probability() -> None:
     source = js_code()
     assert "ranking score, not a probability" in source
-    for mislabel in ("confidence", "probability score", "rating", "preference score"):
+    for mislabel in ("probability score", "preference score", "rating"):
         assert mislabel not in source.lower().replace("not a probability", "")
+    # M8.2 adds an optional *choice confidence* feedback field.  It must never be
+    # presented as a model-score confidence; every occurrence stays in choice feedback.
+    confidence_lines = [line for line in source.lower().splitlines() if "confidence" in line]
+    assert confidence_lines
+    for line in confidence_lines:
+        assert (
+            "choice" in line
+            or "body.confidence" in line
+            or "record." in line
+            or "not a probability" in line
+        ), line
 
 
 def test_js_states_the_unknown_semantics_conservatively() -> None:

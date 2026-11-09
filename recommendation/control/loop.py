@@ -226,6 +226,9 @@ class _LoopEngine:
         candidate_plane: Any = None,
         eligibility_evaluator: Any = None,
         evidence_executor: Any = None,
+        memory_user_message: str | None = None,
+        persist_memory: bool = True,
+        source_policy: str = "balanced",
     ) -> None:
         self.policy = policy
         self.capability = capability
@@ -245,6 +248,10 @@ class _LoopEngine:
         )
         if turn_id:
             self.state["turn_id"] = turn_id
+        if memory_user_message:
+            self.state["memory_user_message"] = memory_user_message
+        if not persist_memory:
+            self.state["skip_memory_persist"] = True
 
         self.control = ControlState(run_id=run_id, turn_id=turn_id, limits=limits)
         self.trajectory = TrajectoryRecorder(run_id=run_id, turn_id=turn_id)
@@ -263,6 +270,7 @@ class _LoopEngine:
         self.verification: VerificationResult | None = None
         self.observation: RecommendationObservation | None = None
         self.completion: VerificationResult | None = None
+        self.source_policy = source_policy
         self.last_action_id = f"init:{run_id}"
         self.last_proposal_rejected = False
         #: Diagnostics reported by the policy for the current step (empty for a deterministic
@@ -1041,13 +1049,18 @@ class _LoopEngine:
             return None
         if len(rankings) == 1:
             return next(iter(rankings.values()))
-        from .candidate_ledger import reciprocal_rank_fusion
+        from .candidate_ledger import weighted_reciprocal_rank_fusion
 
-        rankings_list = [
-            [str(item.parent_asin) for item in envelope.recommendations]
-            for envelope in rankings.values()
+        rankings_by_source = {
+            str(source): [str(item.parent_asin) for item in envelope.recommendations]
+            for source, envelope in rankings.items()
+        }
+        order = [
+            identity
+            for identity, _ in weighted_reciprocal_rank_fusion(
+                rankings_by_source, source_policy=self.source_policy
+            )
         ]
-        order = [identity for identity, _ in reciprocal_rank_fusion(rankings_list)]
         # First source to propose an identity owns its rendering record (rank, item id, score);
         # the identity itself is one product, which is the ledger's own de-duplication rule.
         items: dict[str, ToolRecommendation] = {}
@@ -1873,6 +1886,9 @@ class LoopController:
         candidate_plane: Any = None,
         eligibility_evaluator: Any = None,
         evidence_executor: Any = None,
+        memory_user_message: str | None = None,
+        persist_memory: bool = True,
+        source_policy: str = "balanced",
     ) -> None:
         if not callable(getattr(policy, "choose", None)):
             raise PolicyActionError("policy must provide a callable choose(context) method")
@@ -1908,6 +1924,11 @@ class LoopController:
         self._candidate_plane = candidate_plane
         self._eligibility = eligibility_evaluator
         self._evidence = evidence_executor
+        self._memory_user_message = memory_user_message
+        self._persist_memory = bool(persist_memory)
+        from .candidate_ledger import normalize_source_policy
+
+        self._source_policy = normalize_source_policy(source_policy)
 
     # -- metadata ---------------------------------------------------------- #
 
@@ -2043,6 +2064,9 @@ class LoopController:
             ),
             eligibility_evaluator=self._eligibility,
             evidence_executor=self._evidence,
+            memory_user_message=self._memory_user_message,
+            persist_memory=self._persist_memory,
+            source_policy=self._source_policy,
         )
 
     def _run(

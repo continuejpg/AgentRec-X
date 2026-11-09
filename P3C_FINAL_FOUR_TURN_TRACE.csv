@@ -1,0 +1,5 @@
+﻿turn,message,m5_persisted_active_price_max,m5_state_hard_count,constraint_trace_merged,constraint_trace_final_constraints,r1_diagnostics_constraints,eligibility_used,r1_action,final_ids,first_error_node,status
+1,under $30,30,1,"[]","[price_max=30]","[price_max=30]","evaluated: eligible=10 ineligible=1 unresolved=4",RETRIEVE,"B00CBR1UI6|B08XJQ9HPX|B09Y53NYDK","merge_constraint_pairs current_turn_kinds skipped authorized 30",PASS_AFTER_DEFENSIVE_INJECTION
+2,make it under $50,50,1,"[]","[price_max=50]","[price_max=30] stale","evaluated: eligible=6 ineligible=0 unresolved=4",RETRIEVE,"","constraint_trace.final_constraints=50; R1 diagnostics stale; downstream final promotion empties list",PARTIAL_PRICE_FIXED_FINAL_EMPTY
+3,remove budget requirement,None,0,"[]","[]","[]","not evaluated: no active hard constraint",RETRIEVE,"B08XJQ9HPX|B09Y53NYDK|B00CBR1UI6","hard constraint removed; no price filter",PASS_STATE_RETRACTION_WITHIN_STUB
+4,show more options,None,0,"[]","[]","[]","not evaluated: no active hard constraint",RETRIEVE,"B08XJQ9HPX|B09Y53NYDK|B00CBR1UI6","price did not revive",PASS_STATE_RETRACTION_WITHIN_STUB

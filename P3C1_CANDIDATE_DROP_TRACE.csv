@@ -1,0 +1,4 @@
+profile,scenario,query_terms,grounded_candidate_pool,final_ids,drop_stage,evidence
+DEFAULT,accessory_to_main,,B0BX5QFWQN|B0BJH866HJ|B09LW2KHPM|B016HM7QRE|B091VYKC96,,UNKNOWN_BETWEEN_GROUNDED_AND_FINAL,"grounded pool count=5, after.R1=None, final count=0"
+RULE_APPLIED,accessory_to_main,complete water filter I need a complete water filter.,B0BPXGTP31|B0BCJZ6S8D|B09RQN416B|B08SCC7GY2|B00FQT3JCQ|B0073HNR2Q|B0BMM22CHG|B0BQMCLPW9|B00XH8YN5K|B015RJPHGU,,UNKNOWN_BETWEEN_GROUNDED_AND_FINAL,"grounded pool count=10, after.R1=RETRIEVE, final count=0"
+LLM_APPLIED,accessory_to_main,I only need a replacement mouthpiece. Actually show,B0BPXGTP31|B006K4XWAK|B0BCJZ6S8D|B09RQN416B|B012U52C8A|B08SCC7GY2|B00FQT3JCQ|B0073HNR2Q|B0BMM22CHG|B0BQMCLPW9,,UNKNOWN_BETWEEN_GROUNDED_AND_FINAL,"grounded pool count=10, after.R1=RETRIEVE, final count=0"

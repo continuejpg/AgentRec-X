@@ -1,0 +1,49 @@
+{
+  "stage": "P4B-planner-lora-sft-v0",
+  "schema_version": "agentrecx.planner_sft.v0",
+  "contract_version": "agentrecx.planner_action.v1",
+  "model_name_or_path": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "model_info": {
+    "class": "Qwen3_5ForCausalLM",
+    "model_type": "qwen3_5_text",
+    "model_family_expected": "Qwen3.5",
+    "model_id_expected": "Qwen/Qwen3.5-9B",
+    "class_expected": "Qwen3_5ForCausalLM",
+    "parameter_count": 8953803264,
+    "dtype": "torch.bfloat16",
+    "model_type_recognized": true
+  },
+  "adapter_dir": "training/planner_sft/output/qwen3_5_9b_planner_lora_v0/adapter",
+  "preflight": {
+    "train_samples": 267,
+    "val_samples": 53,
+    "max_total_tokens": 1526,
+    "prompt_tokens_min": 447,
+    "completion_tokens_min": 35,
+    "masked_prompt_tokens": 233435,
+    "chat_template_prefix": "{%- set image_count = namespace(value=0) %}\n{%- set video_count = namespace(value=0) %}\n{%- macro render_content(content, do_vision_count, is_system_content=false) %}\n    {%- if content is string %}\n        {{- content }}\n    {%- elif content is iterable and content is not mapping %}\n        {%- for"
+  },
+  "lora_trainable_parameters": 43278336,
+  "train_result": {
+    "train_runtime": 516.039,
+    "train_samples_per_second": 1.035,
+    "train_steps_per_second": 0.066,
+    "total_flos": 2.865662125940736e+16,
+    "train_loss": 0.2634827536012916,
+    "epoch": 2.0
+  },
+  "eval_metrics": {
+    "eval_loss": 0.000985757214948535,
+    "eval_runtime": 10.2618,
+    "eval_samples_per_second": 5.165,
+    "eval_steps_per_second": 2.631,
+    "epoch": 2.0
+  },
+  "steps_per_epoch": 16,
+  "total_steps": 32,
+  "python": "3.11.18 (main, Oct 26 2026, 18:19:35) [GCC 14.3.0]",
+  "platform": "Linux-5.15.0-78-generic-x86_64-with-glibc2.35",
+  "torch": "2.11.0+cu128",
+  "cuda_available": true,
+  "device_name": "NVIDIA RTX 6000D"
+}

@@ -1,0 +1,61 @@
+P7-D follow-up target preservation source diff (curated)
+========================================================
+
+File: recommendation/demo/agent_service.py
+
+A. In _execute_plan(), immediately after the R1 plan decision and before the query
+   is handed to retrieval:
+
++        # A normal follow-up such as "show me the best ones" has no product-type words.
++        # Re-retrieval (for example because M5 constraints were re-projected) must not
++        # replace the task's still-effective type with that generic follow-up.  Preserve
++        # only the current effective target type; old query terms are deliberately not
++        # reused, so withdrawn preferences and old budget wording cannot come back.
++        # An explicit goal/role switch sets role_target_changed and keeps the new wording.
++        if (
++            r1_plan_action == "RETRIEVE"
++            and not role_target_changed
++            and not r1_goal_correction
++        ):
++            r1_run_terms = _with_effective_target_type(
++                r1_run_terms, self._role_target_for(payload.user_key)
++            )
+
+B. New module-level helper:
+
++def _with_effective_target_type(
++    terms: Sequence[str], target: Any
++) -> tuple[str, ...]:
++    """Keep the still-effective product type when a follow-up omits it.
++
++    Only the current ``role_target.type`` is added.  Previous query terms/preferences
++    are never reused, so withdrawn preferences and old budget wording cannot return.
++    """
++    target_type = getattr(target, "type", None)
++    if not target_type:
++        return tuple(terms)
++    type_words = str(target_type).strip().replace("_", " ")
++    current_query = " ".join(str(term) for term in terms).casefold()
++    if type_words and type_words.casefold() not in current_query:
++        return (type_words, *terms)
++    return tuple(terms)
+
+File: tests/test_p7_d_followup_target_anchor.py (new, one targeted regression)
+
++from recommendation.demo.agent_service import _with_effective_target_type
++from recommendation.demo.product_role import ProductTarget, TargetRole
++
++def test_follow_up_without_type_keeps_effective_type() -> None:
++    target = ProductTarget("cookware", TargetRole.MAIN)
++    terms = ("Those", "look", "fine", "if", "you", "have", "eligible", "options;")
++    actual = _with_effective_target_type(terms, target)
++    assert actual[0] == "cookware"
++    assert actual[1:] == terms
++    unchanged = ("cookware", *terms)
++    assert _with_effective_target_type(unchanged, target) == unchanged
+
+No changes to:
+- BM25 / SASRec / Two-Tower / RRF parameters;
+- Role gate / Eligibility / Validator;
+- Memory / Retriever / Reranker / Agent Actions;
+- Serving V1 / Gold / Evaluator.

@@ -1,0 +1,150 @@
+{
+  "model_name_or_path": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "model_info": {
+    "class": "Qwen3_5ForCausalLM",
+    "model_type": "qwen3_5_text",
+    "model_family_expected": "Qwen3.5",
+    "model_id_expected": "Qwen/Qwen3.5-9B",
+    "class_expected": "Qwen3_5ForCausalLM",
+    "parameter_count": 8953803264,
+    "dtype": "torch.bfloat16",
+    "model_type_recognized": true
+  },
+  "lora_trainable_parameters": 43278336,
+  "schema_version": "agentrecx.preference_operation.v1",
+  "adapter_dir": "training/agent_sft/output/qwen3_5_9b_lora/adapter",
+  "seed": 20261105,
+  "config": {
+    "model_name_or_path": "Qwen/Qwen3.5-9B",
+    "train_file": "training/agent_sft/data/train.jsonl",
+    "val_file": "training/agent_sft/data/val.jsonl",
+    "output_dir": "training/agent_sft/output/qwen3_5_9b_lora",
+    "max_seq_length": 2048,
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "lora_target_modules": "all-linear",
+    "learning_rate": 0.0001,
+    "num_train_epochs": 2,
+    "per_device_train_batch_size": 2,
+    "per_device_eval_batch_size": 2,
+    "gradient_accumulation_steps": 8,
+    "effective_batch_size": 16,
+    "bf16": true,
+    "fp16": false,
+    "gradient_checkpointing": true,
+    "logging_steps": 10,
+    "eval_steps": 50,
+    "save_steps": 50,
+    "save_total_limit": 2,
+    "lr_scheduler_type": "cosine",
+    "warmup_ratio": 0.03,
+    "seed": 20261105,
+    "trust_remote_code": true,
+    "non_thinking": true,
+    "completion_only_loss": true
+  },
+  "data_manifest": {
+    "generator_version": "p2sft.data.v1",
+    "schema_version": "agentrecx.preference_operation.v1",
+    "seed": 20261105,
+    "counts": {
+      "train": 2400,
+      "val": 240,
+      "test": 200
+    },
+    "sha256": {
+      "train": "fa3b1c828bdc9d8cbaca51e7eddd656fb495fbf15bc4cb3fe6751fa08bc8df97",
+      "val": "c8317ad3d9d8822096bf557559407d82f10af18fcaa3738751b413758f95dd05",
+      "test": "e85f85767508d0a2533134e031dd78e46553c93360b3866566532bd6b6807b02"
+    },
+    "context_source": "real_sports_outdoors_catalogue",
+    "context_count": 60,
+    "split_rule": "disjoint template banks; test templates never appear in train/val",
+    "template_ids": {
+      "train": [
+        "train_accessory_a",
+        "train_amb_a",
+        "train_goal_a",
+        "train_goal_b",
+        "train_material_a",
+        "train_noop_a",
+        "train_noop_b",
+        "train_pretract_a",
+        "train_pretract_b",
+        "train_price_a",
+        "train_price_b",
+        "train_price_c",
+        "train_ref_a",
+        "train_role_a",
+        "train_unsupported_a",
+        "train_weight_a",
+        "train_weight_b"
+      ],
+      "val": [
+        "val_accessory_a",
+        "val_amb_a",
+        "val_goal_a",
+        "val_material_a",
+        "val_noop_a",
+        "val_pretract_a",
+        "val_price_a",
+        "val_ref_a",
+        "val_role_a",
+        "val_unsupported_a",
+        "val_weight_a"
+      ],
+      "test": [
+        "test_accessory_a",
+        "test_amb_a",
+        "test_goal_a",
+        "test_material_a",
+        "test_noop_a",
+        "test_pretract_a",
+        "test_price_a",
+        "test_ref_a",
+        "test_role_a",
+        "test_unsupported_a",
+        "test_weight_a"
+      ]
+    },
+    "leakage_checks": {
+      "test_train_template_overlap": [],
+      "test_val_template_overlap": [],
+      "train_val_template_overlap": [],
+      "test_train_exact_message_overlap": 0
+    },
+    "label_policy": "independent semantic configuration + schema validator; no runtime C output used",
+    "contains_product_identity": false
+  },
+  "preflight": {
+    "checked_samples": 8,
+    "prompt_tokens_max": 424,
+    "total_tokens_max": 477,
+    "masked_prompt_tokens": 3249,
+    "completion_loss_tokens": 423,
+    "chat_template": "{%- set image_count = namespace(value=0) %}\n{%- set video_count = namespace(value=0) %}\n{%- macro render_content(content, do_vision_count, is_system_content=false) %}\n    {%- if content is string %}\n "
+  },
+  "train_result": {
+    "train_runtime": 3307.2413,
+    "train_samples_per_second": 1.451,
+    "train_steps_per_second": 0.091,
+    "total_flos": 1.067297691303936e+17,
+    "train_loss": 0.014560484768492947,
+    "epoch": 2.0
+  },
+  "eval_metrics": {
+    "eval_loss": 0.1361950933933258,
+    "eval_runtime": 20.9486,
+    "eval_samples_per_second": 11.457,
+    "eval_steps_per_second": 5.728,
+    "epoch": 2.0
+  },
+  "python": "3.11.18 (main, Oct 26 2026, 18:19:35) [GCC 14.3.0]",
+  "platform": "Linux-5.15.0-78-generic-x86_64-with-glibc2.35",
+  "torch": "2.11.0+cu128",
+  "cuda_available": true,
+  "cuda_device_count": 1,
+  "device_name": "NVIDIA RTX 6000D",
+  "note": "training loss is diagnostic only; use parser eval + end-to-end D0/D1 for effectiveness"
+}

@@ -86,6 +86,13 @@ class ReasonCode(str, Enum):
     NUMERIC_WITHIN_LIMIT = "numeric_within_limit"
     NUMERIC_EXCEEDS_LIMIT = "numeric_exceeds_limit"
     NUMERIC_BELOW_MINIMUM = "numeric_below_minimum"
+    #: Explicit numeric direction (``minimize``/``maximize``) was grounded from a trusted
+    #: catalogue value and compared only with same-category candidates.
+    NUMERIC_PREFERRED_DIRECTION = "numeric_preferred_direction"
+    NUMERIC_WORSE_DIRECTION = "numeric_worse_direction"
+    #: A category-aware numeric comparison is impossible: no trusted category, no second
+    #: grounded value in the same category, or the attribute is missing. Neutral only.
+    NUMERIC_NOT_COMPARABLE = "numeric_not_comparable"
     #: The candidate has no metadata record at all.
     METADATA_MISSING = "metadata_missing"
     #: The field exists but the value cannot be read as a comparable number.

@@ -1,0 +1,68 @@
+{
+  "rule": {
+    "valid_json": 100,
+    "exact": 0.08,
+    "macro_all": 0.1921207150667998,
+    "macro_supported": 0.25616095342239975,
+    "supported": [
+      "update_goal",
+      "add_preference",
+      "retract_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "errors": {
+      "wrong_operation_type": 68,
+      "evidence_or_multi_operation": 8,
+      "wrong_scope": 16
+    }
+  },
+  "base": {
+    "valid_json": 26,
+    "exact": 0.08,
+    "macro_all": 0.23880702449329902,
+    "macro_supported": 0.31840936599106534,
+    "supported": [
+      "update_goal",
+      "add_preference",
+      "retract_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "errors": {
+      "evidence_or_multi_operation": 2,
+      "wrong_value": 9,
+      "wrong_operation_type": 1,
+      "wrong_attribute": 6
+    }
+  },
+  "sft": {
+    "valid_json": 93,
+    "exact": 0.66,
+    "macro_all": 0.6352920653907496,
+    "macro_supported": 0.8470560871876661,
+    "supported": [
+      "update_goal",
+      "add_preference",
+      "retract_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "errors": {
+      "wrong_operation_type": 23,
+      "wrong_value": 4
+    }
+  }
+}

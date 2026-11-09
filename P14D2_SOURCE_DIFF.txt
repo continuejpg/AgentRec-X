@@ -1,0 +1,63 @@
+P14-D2 SOURCE DIFF
+================================================================================
+Milestone: identity-aligned Electronics BGE dense retrieval repair and fixed-pool history ablation.
+No training/fine-tuning; no V0/Gate/Planner/Memory/label changes; old P8 index not reused.
+
+NEW SOURCE / TEST FILES
+experiments/p14d2/__init__.py
+  bytes=49 sha256=d116858c0fdd6645794b931a622415adf929a9d391b3a2c0327acbfa41ab50db
+experiments/p14d2/natural_retrieval.py
+  bytes=7960 sha256=c1e9d6fc5ba215eacaa6599627d404c3ef0fab0eb0cd239bb007395c6fa6e523
+experiments/p14d2/evaluate.py
+  bytes=6729 sha256=9318ee0a38f4cef6fa89bb627d903071ab31fd07b6e5d0ff76a11b3b9c0e9da6
+tests/test_p14d2_dense.py
+  bytes=5125 sha256=5219fc0e24937fbeae8407bbdbdb24083f4cf1b92cb147270c2b97b8d4829b2b
+
+NEW REPORT
+P14D2_REPORT.md
+  bytes=7791 sha256=0c8508e2d9632077296d1804883ce5bfa4cde2d1ba6fbb0898d3658d05873836
+
+DENSE INDEX / RUN ARTIFACTS (git-ignored)
+runs/p14d2/catalogue_docs.jsonl
+  bytes=40421061 sha256=79f21144f84e18f1d94895d911c4de4559f7cbe14da4ec516dde81f8bf8d2189
+runs/p14d2/queries.jsonl
+  bytes=56266 sha256=9de566fe6bc36c0784821e16f04458e3d469b958fbfb3be0eeb00f6997450660
+runs/p14d2/bge_index.npz
+  bytes=213173605 sha256=fce84987083452abd84b7fdbf09b1d55e35305e7c4983b03343034dca3f7a69d
+runs/p14d2/query_vectors.npz
+  bytes=729503 sha256=15c77eb0080d34639efe122ec3ac1837ae3fe7e139f777e79472ede6dafe1dd3
+runs/p14d2/bge_retrieval.json
+  bytes=1513989 sha256=10c5b5bb201791044861c831c55544d8050fd3ae5d4b68affb3cfe5de9a29cbd
+runs/p14d2/natural_retrieval.json
+  bytes=2124767 sha256=a49657ca3f26ff86c15623ee49d604f8d13e80683281a154cd19c206ff0fc455
+runs/p14d2/pools/improved_natural.jsonl
+  bytes=2322926 sha256=eda0ea8be9cc1ae5bb66653088d85a956e6fd90ee2621758b64e6e452be9e558
+runs/p14d2/scores_history_ablation.json
+  bytes=249459 sha256=4a1f0e937a4584f3c97e11496c5e6e9e34b1707823bcb3ba5eb4beb63f3014f7
+runs/p14d2/comparison.json
+  bytes=147238 sha256=4ef2c4fdc4821233b2918ddcf6f5c02dd891a412747c23af116a17d3fc6adfe1
+runs/p14d2/per_task.jsonl
+  bytes=90100 sha256=fe5360e3ddc87d5cc3a4ab19b890b7b8fce8214d9370e59b202ae4987f590854
+runs/p14d2/dense_index_manifest.json
+  bytes=2291 sha256=7542ff8dbaf01fd1862fc0f68019289f71dedfa314903b70f4f35095063e33c2
+runs/p14d2/model_manifest.json
+  bytes=2381 sha256=f5c5833a53ab4f867d5718a46be1977e4152a47f5a6538046f0ef21c5c998743
+runs/p14d2/decision.json
+  bytes=414 sha256=c75a97a5fb048b9519c9ea34cc30f8a478cff86863e18da9653c172a84547a37
+
+IDENTITY / RETRIEVAL
+- New BGE index: 76,263 vectors x 768; identity set exactly equals ElectronicsCatalogue accepted item_ids;
+  0 missing/extra/duplicate; normalized CLS vectors; model BAAI/bge-base-en-v1.5 revision a5beb...
+- Old P8 index: 156,746 identities, 0 intersection with P13-R catalogue, sample Books titles; not reused.
+- Original BM25 Recall@20/100 10/20; BGE 27/66; Hybrid RRF k=60 22/47.
+- Rewritten BM25 18/30; BGE 20/56; Hybrid 17/48; original/rewritten kept separate.
+- Target not in catalogue 1; role-filter would drop 6 targets; no target injection in natural retrieval.
+
+HISTORY ABLATION ON BGE TOP-20 (target reach 27/135)
+- Query Only 13; Real History 15; Shuffled History 16 Hit@1; MRR 0.125 / 0.139 / 0.139.
+- Real history is not better than shuffled control; no unique history increment.
+
+DECISION
+- DENSE_RETRIEVAL_REPAIR PASS; HYBRID_RETRIEVAL FAIL; HISTORY_INCREMENT FAIL; P14-D2 GO (retrieval repair only);
+  CONTINUE_REAL_HISTORY_RANKER=false.
+- No training/SFT, no V0/Gate/Planner/Memory edits, public Test and original Reserved Test untouched; no commit.

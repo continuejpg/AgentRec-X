@@ -1,0 +1,2 @@
+provider,model,adapter,samples,schema_valid_rate,operation_exact_match,operation_macro_f1,operation_micro_f1,slot_accuracy,retraction_accuracy,unsupported_proposal_rate,failure_or_abstention_rate,p50_latency_ms,p95_latency_ms,retraction_samples
+base,/root/autodl-tmp/models/Qwen3.5-9B-ms,,100,0.26,0.08,0.23880702449329902,0.36,0.24305555555555555,0.8,0.74,0.74,2211.1156610772014,3675.054159807041,15

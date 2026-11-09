@@ -1,0 +1,118 @@
+[
+  {
+    "model": "base",
+    "scenario": "ask_novel",
+    "status": "completed",
+    "actions": [
+      "ASK"
+    ],
+    "terminal": "ASK",
+    "final_count": 0,
+    "invalid_rerank": 0,
+    "hard_constraint_count": null,
+    "action_errors": 0
+  },
+  {
+    "model": "base",
+    "scenario": "retrieve_clear",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 2,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  },
+  {
+    "model": "base",
+    "scenario": "avoid_invalid_rerank",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 1,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  },
+  {
+    "model": "base",
+    "scenario": "effective_rerank",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 2,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  },
+  {
+    "model": "sft_v0",
+    "scenario": "ask_novel",
+    "status": "completed",
+    "actions": [
+      "ASK"
+    ],
+    "terminal": "ASK",
+    "final_count": 0,
+    "invalid_rerank": 0,
+    "hard_constraint_count": null,
+    "action_errors": 0
+  },
+  {
+    "model": "sft_v0",
+    "scenario": "retrieve_clear",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 5,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  },
+  {
+    "model": "sft_v0",
+    "scenario": "avoid_invalid_rerank",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 5,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  },
+  {
+    "model": "sft_v0",
+    "scenario": "effective_rerank",
+    "status": "completed",
+    "actions": [
+      "RETRIEVE",
+      "RERANK",
+      "FINALIZE"
+    ],
+    "terminal": "FINALIZE",
+    "final_count": 5,
+    "invalid_rerank": 1,
+    "hard_constraint_count": 1,
+    "action_errors": 0
+  }
+]

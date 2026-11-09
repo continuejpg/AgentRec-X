@@ -10,6 +10,7 @@ from recommendation.demo.shopping_intent import (
     build_reason,
     build_unresolved_question,
     derive_intent,
+    promote_explicit_type_matches,
     query_terms,
 )
 from recommendation.memory.extraction import RuleBasedPreferenceExtractor
@@ -52,11 +53,61 @@ def test_an_explicit_correction_replaces_the_old_value() -> None:
     assert old == []
 
 
+def test_same_scope_price_corrections_keep_only_the_latest_hard_value() -> None:
+    """30 -> 10 -> 50 must not keep old ceilings in the effective intent."""
+    snapshot = _snapshot(
+        _entry("price_max", "30", text="I need a water filter under 30 dollars."),
+        _entry("price_max", "10", text="Can you find one under 10 dollars?"),
+    )
+    intent = _intent(snapshot, "Actually make the budget under 50 dollars.")
+    assert [(e.kind, e.value) for e in intent.hard] == [("price_max", "50")]
+    assert "30" not in {e.value for e in intent.hard + intent.soft}
+    assert "10" not in {e.value for e in intent.hard + intent.soft}
+    assert intent.hard[0].source_text == "Actually make the budget under 50 dollars."
+
+
+def test_superseded_price_clause_is_removed_from_r1_query_terms() -> None:
+    from recommendation.demo.agent_service import _sanitize_price_query_terms
+
+    assert _sanitize_price_query_terms(
+        ("water filter under 30 dollars", "Show", "more", "options.")
+    ) == ("water filter", "Show", "more", "options.")
+
+
+def test_role_target_change_detector_is_general_and_preserves_withdrawal_fallback() -> None:
+    from types import SimpleNamespace
+    from recommendation.demo.agent_service import DemoAgentService
+
+    service = SimpleNamespace(
+        _role_current_targets={},
+        _role_main_targets={},
+    )
+    update = DemoAgentService._update_role_target
+    assert update(service, "task", "I need a complete water filter") is True
+    assert update(service, "task", "I need a replacement mouthpiece for a water filter") is True
+    # A pure withdrawal of the temporary accessory falls back to the last main target.
+    assert update(service, "task", "forget the mouthpiece requirement") is True
+    assert service._role_current_targets["task"].type == "water_filter"
+    assert service._role_current_targets["task"].role.value == "main"
+
+
 def test_a_withdrawal_removes_the_entry_from_intent_and_query() -> None:
     snapshot = _snapshot(_entry("brand", "Acme", text="the brand Acme"))
     intent = _intent(snapshot, "forget the brand")
     assert intent.hard == () and intent.soft == ()
     assert "acme" not in {term.casefold() for term in query_terms(intent, "forget the brand")}
+
+
+def test_a_withdrawal_can_name_the_leading_phrase_of_a_remembered_long_value() -> None:
+    snapshot = _snapshot(
+        _entry(
+            "feature",
+            "replacement mouthpiece for a water filter",
+            text="actually I want a replacement mouthpiece for a water filter",
+        )
+    )
+    intent = _intent(snapshot, "forget the replacement mouthpiece requirement")
+    assert intent.hard == () and intent.soft == ()
 
 
 def test_a_price_floor_above_the_ceiling_is_an_explicit_conflict() -> None:
@@ -149,3 +200,136 @@ def test_an_explicit_constraint_is_hard_even_for_a_free_form_kind() -> None:
     assert intent.hard_constraints() == (
         {"kind": "free_form_constraint", "value": "extra-large"},
     )
+
+
+def test_explicit_product_type_promotes_only_trusted_type_matches() -> None:
+    def item(asin: str, sources: tuple[str, ...]) -> SimpleNamespace:
+        return SimpleNamespace(parent_asin=asin, sources=sources, rank=1)
+
+    def record(*categories: str, title: str = "") -> SimpleNamespace:
+        return SimpleNamespace(categories=categories, title=title)
+
+    records = {
+        "water-1": record("Sports & Outdoors", "Camping & Hiking", "Water Filters"),
+        "water-2": record("Sports & Outdoors", "Camping & Hiking", "Water Filters"),
+        "pad": record("Sports & Outdoors", "Camping & Hiking", "Sleeping Pads"),
+    }
+    candidates = (
+        item("pad", ("history",)),
+        item("water-1", ("catalog_search",)),
+        item("unknown", ()),
+        item("water-2", ("catalog_search",)),
+    )
+    promoted = promote_explicit_type_matches(
+        "lightweight water filter", candidates, records
+    )
+    # Type matches first, UNKNOWN stays neutral, the trusted different type is removed.
+    assert [item.parent_asin for item in promoted] == [
+        "water-1",
+        "water-2",
+        "unknown",
+    ]
+    # A broad request has no category/term consensus and keeps the original order.
+    broad = promote_explicit_type_matches("hiking gear for a weekend trip", candidates, records)
+    assert [item.parent_asin for item in broad] == [
+        "pad",
+        "water-1",
+        "unknown",
+        "water-2",
+    ]
+
+
+def test_main_product_queryexcludes_trusted_replacement_part() -> None:
+    def item(asin: str, sources: tuple[str, ...]) -> SimpleNamespace:
+        return SimpleNamespace(parent_asin=asin, sources=sources, rank=1)
+
+    def record(title: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            categories=("Sports & Outdoors", "Hydration & Filtration", "Water Filters"),
+            title=title,
+        )
+
+    records = {
+        "filter-main": record("LifeStraw Personal Water Filter"),
+        "filter-part": record("LifeStraw Replacement Mouthpiece for Water Filter"),
+        "filtered-bottle": record("Clear2GO Water Bottle with Filter"),
+    }
+    candidates = (
+        item("filter-main", ("catalog_search",)),
+        item("filtered-bottle", ("catalog_search",)),
+        item("filter-part", ("catalog_search",)),
+    )
+    main = promote_explicit_type_matches("complete water filter", candidates, records)
+    assert [entry.parent_asin for entry in main] == ["filter-main"]
+
+    parts = promote_explicit_type_matches(
+        "replacement mouthpiece for water filter", candidates, records
+    )
+    assert {entry.parent_asin for entry in parts} == {"filter-part"}
+
+    compatible = {
+        "filter-main": record("LifeStraw Water Filter"),
+        "filter-compatible": record("Compatible with LifeStraw Water Filter"),
+    }
+    compatible_candidates = (
+        item("filter-main", ("catalog_search",)),
+        item("filter-compatible", ("catalog_search",)),
+    )
+    kept = promote_explicit_type_matches(
+        "water filter", compatible_candidates, compatible
+    )
+    # "compatible with" alone is too ambiguous to declare the item a replacement part.
+    assert {entry.parent_asin for entry in kept} == {"filter-main", "filter-compatible"}
+
+
+def test_explicit_type_removes_trusted_unrelated_history_across_split_leaves() -> None:
+    def item(asin: str, sources: tuple[str, ...]) -> SimpleNamespace:
+        return SimpleNamespace(parent_asin=asin, sources=sources, rank=1)
+
+    def record(title: str, leaf: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            categories=("Sports & Outdoors", "Camping & Hiking", leaf),
+            title=title,
+        )
+
+    records = {
+        "purifier": record("General Ecology Water Filter", "Water Purifiers"),
+        "canteen": record("Collapsible Water Filter Canteen", "Sports Water Bottles"),
+        "pad": record("Sleeping Pad for Camping", "Self-Inflating Sleeping Mats"),
+        "lantern": record("LED Camping Lantern", "Electric Lanterns"),
+    }
+    candidates = (
+        item("purifier", ("catalog_search",)),
+        item("pad", ()),
+        item("canteen", ("catalog_search",)),
+        item("lantern", ()),
+    )
+    promoted = promote_explicit_type_matches(
+        "I need a complete water filter", candidates, records
+    )
+    assert {entry.parent_asin for entry in promoted} == {"purifier", "canteen"}
+
+
+def test_bottle_bite_valve_is_not_presented_as_a_water_filter_replacement() -> None:
+    def item(asin: str) -> SimpleNamespace:
+        return SimpleNamespace(parent_asin=asin, sources=("catalog_search",), rank=1)
+
+    def record(title: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            categories=("Sports & Outdoors", "Hydration & Filtration", "Water Filters"),
+            title=title,
+        )
+
+    records = {
+        "filter-part": record(
+            "Survivor Filter Replacement Mouthpiece Fits Water Filter Straw"
+        ),
+        "bottle-part": record(
+            "AIEVE Water Bottle Mouthpiece Replacement Compatible with Brita Water Filter Bottle"
+        ),
+    }
+    candidates = (item("filter-part"), item("bottle-part"))
+    promoted = promote_explicit_type_matches(
+        "replacement mouthpiece for a water filter", candidates, records
+    )
+    assert [entry.parent_asin for entry in promoted] == ["filter-part"]

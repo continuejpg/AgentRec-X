@@ -1,0 +1,2 @@
+provider,model,adapter,samples,schema_valid_rate,operation_exact_match,operation_macro_f1,operation_micro_f1,slot_accuracy,retraction_accuracy,unsupported_proposal_rate,failure_or_abstention_rate,p50_latency_ms,p95_latency_ms,retraction_samples
+sft,/root/autodl-tmp/models/Qwen3.5-9B-ms,training/agent_sft/output/qwen3_5_9b_lora/adapter,100,0.93,0.66,0.6352920653907496,0.8465116279069768,0.5347222222222222,1.0,0.07,0.07,3043.5153720900416,4410.334926191717,15

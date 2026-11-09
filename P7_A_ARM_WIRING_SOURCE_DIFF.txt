@@ -1,0 +1,441 @@
+diff --git a/recommendation/demo/agent_service.py b/recommendation/demo/agent_service.py
+--- a/recommendation/demo/agent_service.py
++++ b/recommendation/demo/agent_service.py
+@@ -2057,8 +2057,24 @@
+         main_target = self._role_main_targets.get(task_key)
+         if main_target is not None:
+             self._role_main_targets[str(user_key)] = main_target
+ 
++    def prime_task_role_target(
++        self, *, task_key: str, user_key: str | None, message: str
++    ) -> bool:
++        """Seed this user turn's explicit role target before a Planner episode.
++
++        The controlled runner applies one user turn's state exactly once.  A Planner
++        executor then performs SELECT/RETRIEVE/RERANK steps using its own query text;
++        seeding the role target from the **real user message** before the episode keeps
++        the role state independent of any rewritten retrieval query.  No TargetRole rule
++        is changed: this calls the same accepted ``_update_role_target`` + session mirror.
++        Returns whether the effective target changed.
++        """
++        changed = self._update_role_target(str(task_key), message)
++        self._mirror_role_target_to_user_key(str(task_key), user_key)
++        return changed
++
+     def _role_target_for(self, user_key: str | None) -> Any | None:
+         return self._role_current_targets.get(str(user_key or "")) if user_key else None
+ 
+     def role_diagnostics(self, task_id: str) -> dict[str, Any] | None:
+diff --git a/recommendation/demo/planner_service_executor.py b/recommendation/demo/planner_service_executor.py
+--- a/recommendation/demo/planner_service_executor.py
++++ b/recommendation/demo/planner_service_executor.py
+@@ -7,9 +7,9 @@
+ """
+ 
+ from __future__ import annotations
+ 
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from typing import Any
+ 
+ from recommendation.demo.agent_schemas import AgentRecommendRequest
+ from recommendation.demo.planner_contract import (
+@@ -29,8 +29,15 @@
+     _candidates: tuple[Any, ...] = ()
+     _turn: int = 0
+     _last_query: str = ""
+     _presented_count: int = 0
++    #: Read-only wiring fields for the P7-A controlled runner.  They are populated from
++    #: the canonical per-user-turn effective state so multi-step RETRIEVE/RERANK reads
++    #: the same state, and from the real Agent response for actual tool-call accounting.
++    effective_role_target: dict[str, Any] | None = None
++    effective_state: dict[str, Any] = field(default_factory=dict)
++    last_response: Any = field(default=None, repr=False)
++    tool_calls_used: int = 0
+ 
+     def _candidate_evidence(self, candidate_ids: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+         metadata = getattr(self.service, "_metadata", None)
+         records = getattr(metadata, "records", {}) if metadata is not None else {}
+@@ -93,13 +100,21 @@
+                 "hard_constraint_count": diagnostics.get("hard_constraint_count"),
+                 "constraint_kinds": diagnostics.get("constraint_kinds", ()),
+                 "ranker_feature_count": diagnostics.get("ranker_feature_count"),
+                 "state_digest": diagnostics.get("state_digest"),
++                # P7-A: canonical per-user-turn state supplied by the controlled runner.
++                # It is the same objective state every arm receives; no Gold identity.
++                "effective_state": dict(self.effective_state),
+             },
+             candidate_evidence=self._candidate_evidence(candidate_ids),
+             last_retrieve_query=self._last_query or self.payload.message,
+             retrieval_feedback=self._retrieval_feedback(),
+-            role_target=role.get("target") or candidate.get("role_target") or {},
++            role_target=dict(
++                self.effective_role_target
++                or role.get("target")
++                or candidate.get("role_target")
++                or {}
++            ),
+             eligibility={
+                 "evaluated": candidate.get("hard_constraint_evaluated"),
+                 "eligible": candidate.get("hard_constraint_eligible_count"),
+                 "ineligible": candidate.get("hard_constraint_ineligible_count"),
+@@ -130,8 +145,12 @@
+                 session_id=self.session_id,
+                 task_id=self.task_id,
+                 turn_id=f"{self.turn_prefix}:{self._turn:03d}",
+             )
++            self.last_response = response
++            observation = getattr(response, "observation", None)
++            if observation is not None and hasattr(observation, "tool_calls_used"):
++                self.tool_calls_used += int(observation.tool_calls_used)
+             self._candidates = tuple(response.recommendations)
+             ids = tuple(str(item.parent_asin) for item in self._candidates)
+             self._presented_count = len(ids)
+             terminal = response.terminal.termination_reason in {"awaiting_user", "failed"}
+diff --git a/experiments/p6_benchmark/run_dynamic_dev_p64.py b/experiments/p6_benchmark/run_dynamic_dev_p64.py
+--- a/experiments/p6_benchmark/run_dynamic_dev_p64.py
++++ b/experiments/p6_benchmark/run_dynamic_dev_p64.py
+@@ -336,14 +336,176 @@
+         "final_memory_lighter_active": _lighter_active(final_memory) if final_memory is not None else None,
+     }
+ 
+ 
++def _planner_turn(
++    *,
++    service: Any,
++    proposer: Any,
++    payload: Any,
++    session_id: str,
++    task_id: str,
++    turn_prefix: str,
++    message: str,
++    state: Mapping[str, Any],
++    max_steps: int = 6,
++) -> dict[str, Any]:
++    """Run one user turn through the existing HTTP Planner Proposer + executor.
++
++    The per-user-turn M5 state operations have already been applied by the caller; this
++    function performs only the Planner episode (RETRIEVE/RERANK/FINALIZE/ASK).  It does
++    not re-apply state operations between steps.  The canonical state is exposed to the
++    Planner observation (role target + effective state) and hard constraints travel in the
++    trusted request payload.
++    """
++    from recommendation.demo.planner_contract import PlannerObservation, run_planner
++    from recommendation.demo.planner_service_executor import ServicePlannerExecutor
++
++    # Seed the deterministic role target from the real user message before the episode,
++    # so a rewritten RETRIEVE query cannot change which product role this turn is about.
++    service.prime_task_role_target(
++        task_key=task_id, user_key=session_id, message=message
++    )
++    role_target = {
++        "type": state.get("goal_type"),
++        "role": state.get("role", "main"),
++    }
++    executor = ServicePlannerExecutor(
++        service=service,
++        payload=payload,
++        session_id=session_id,
++        task_id=task_id,
++        turn_prefix=turn_prefix,
++        effective_role_target=role_target,
++        effective_state=dict(state),
++    )
++    initial = PlannerObservation(
++        step=0,
++        query=message,
++        candidate_ids=(),
++        terminal=False,
++        needs_user_input=False,
++        m5_state={"effective_state": dict(state)},
++        role_target=role_target,
++        remaining_steps=max_steps,
++    )
++    run = run_planner(
++        planner=proposer,
++        executor=executor,
++        initial_observation=initial,
++        max_steps=max_steps,
++    )
++    response = executor.last_response
++    body = response.model_dump() if response is not None else None
++    final_ids = list(run.final_ids) if run.termination == "FINALIZE" else []
++    if body is None:
++        body = {
++            "recommendations": [],
++            "message": "",
++            "terminal": {
++                "status": "waiting_for_user" if run.termination == "ASK" else run.termination,
++                "termination_reason": run.termination,
++                "succeeded": False,
++            },
++            "eligibility": {},
++            "observation": {"tool_calls_used": executor.tool_calls_used},
++        }
++    else:
++        body = dict(body)
++        by_id = {
++            str(item.get("parent_asin")): item
++            for item in body.get("recommendations", ()) or ()
++        }
++        if final_ids:
++            ordered = [by_id[identity] for identity in final_ids if identity in by_id]
++            body["recommendations"] = ordered
++            if len(ordered) != len(final_ids):
++                body["planner_identity_mismatch"] = {
++                    "final_ids": final_ids,
++                    "response_ids": list(by_id),
++                }
++        else:
++            body["recommendations"] = []
++            if run.termination == "ASK":
++                body["terminal"] = {
++                    "status": "waiting_for_user",
++                    "termination_reason": "awaiting_user",
++                    "succeeded": False,
++                }
++            elif run.termination == "max_steps":
++                body["terminal"] = {
++                    "status": "max_steps",
++                    "termination_reason": "max_steps",
++                    "succeeded": False,
++                }
++    return {
++        "body": body,
++        "planner_run": run.as_dict(),
++        "action_sequence": [step.action for step in run.steps],
++        "planner_final_ids": final_ids,
++        "tool_calls_used": int(executor.tool_calls_used),
++        "last_response_terminal": (
++            response.terminal.model_dump()
++            if response is not None and getattr(response, "terminal", None) is not None
++            else None
++        ),
++    }
++
++
+ def main(argv: Sequence[str] | None = None) -> int:
+-    parser = argparse.ArgumentParser(description="P6.4 controlled dynamic-DEV runner")
++    parser = argparse.ArgumentParser(description="P6.4/P7-A controlled dynamic-DEV runner")
+     parser.add_argument("--tasks", type=Path, default=TASKS)
+     parser.add_argument("--only", default="", help="comma-separated task_id/template_id selection")
+     parser.add_argument("--out", type=Path, default=None)
++    parser.add_argument(
++        "--arm",
++        choices=("rule", "base", "sft"),
++        default="rule",
++        help="rule = direct DemoAgentService; base/sft = existing HTTP Planner Proposer + ServicePlannerExecutor",
++    )
++    parser.add_argument("--planner-url", default=None, help="Planner HTTP base URL (proposer appends /plan)")
++    parser.add_argument("--planner-model", default=None, help="optional model field sent to the planner server")
++    parser.add_argument("--planner-timeout", type=float, default=120.0)
++    parser.add_argument(
++        "--check-wiring",
++        action="store_true",
++        help="validate arm/proposer configuration only; build no runtime and issue no HTTP call",
++    )
+     args = parser.parse_args(argv)
++
++    if args.arm in ("base", "sft") and not args.planner_url:
++        parser.error(f"--arm {args.arm} requires --planner-url")
++    if args.check_wiring:
++        from recommendation.demo.planner_contract import run_planner, validate_action
++        from recommendation.demo.planner_http_proposer import HttpPlannerProposer
++        from recommendation.demo.planner_service_executor import ServicePlannerExecutor
++
++        proposer = (
++            HttpPlannerProposer(
++                args.planner_url,
++                model=args.planner_model,
++                timeout=args.planner_timeout,
++            )
++            if args.arm in ("base", "sft")
++            else None
++        )
++        print(
++            json.dumps(
++                {
++                    "arm": args.arm,
++                    "proposer": type(proposer).__name__ if proposer is not None else None,
++                    "proposer_url": getattr(proposer, "url", None),
++                    "executor": ServicePlannerExecutor.__name__,
++                    "contract_runner": run_planner.__name__,
++                    "validator": validate_action.__name__,
++                    "network_request_issued": False,
++                    "runtime_built": False,
++                },
++                indent=2,
++            )
++        )
++        return 0
++
+     only = [part.strip() for part in args.only.split(",") if part.strip()]
+     tasks = load_tasks(args.tasks, only)
+     history = tuple(tasks[0]["initial_history"])
+     if any(tuple(task["initial_history"]) != history for task in tasks):
+@@ -351,9 +513,9 @@
+     if any(task.get("evaluation_protocol") != "planner_only_controlled_evaluation" for task in tasks):
+         raise ValueError("P6.4 task file is not marked planner_only_controlled_evaluation")
+ 
+     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+-    out = _unique_dir(args.out or (OUT_ROOT / f"dev_{timestamp}"))
++    out = _unique_dir(args.out or (OUT_ROOT / f"{args.arm}_{timestamp}"))
+     out.mkdir(parents=True, exist_ok=False)
+     os.environ["AGENTRECX_STATE_MODE"] = STATE_MODE
+     os.environ["AGENTRECX_STATE_DB"] = str(out / "decision_state.sqlite3")
+     os.environ["AGENTRECX_MEMORY_DB"] = str(out / "preference_memory.sqlite3")
+@@ -365,9 +527,21 @@
+     from recommendation.api.app import ServiceSettings, build_engine
+     from recommendation.demo.agent_schemas import AgentConstraintItem, AgentRecommendRequest
+     from recommendation.demo.profiles import DemoProfile
+     from recommendation.demo.runtime import build_demo_runtime
++    from recommendation.demo.planner_contract import PlannerObservation, run_planner
++    from recommendation.demo.planner_service_executor import ServicePlannerExecutor
+     from experiments.p6_benchmark.metrics import dynamic_metrics
++
++    planner_proposer = None
++    if args.arm in ("base", "sft"):
++        from recommendation.demo.planner_http_proposer import HttpPlannerProposer
++
++        planner_proposer = HttpPlannerProposer(
++            args.planner_url,
++            model=args.planner_model,
++            timeout=args.planner_timeout,
++        )
+ 
+     started = time.perf_counter()
+     settings = ServiceSettings.from_env()
+     engine, error = build_engine(settings)
+@@ -391,8 +565,10 @@
+     )
+     service = runtime.agent_service()
+     if service.policy_name != "deterministic":
+         raise SystemExit(f"expected deterministic Rule Agent, got {service.policy_name!r}")
++    if int(service.tool_budget) != 4:
++        raise SystemExit(f"expected per-turn tool budget 4, got {service.tool_budget!r}")
+     records = runtime.metadata.records
+ 
+     turns_rows: list[dict[str, Any]] = []
+     task_rows: list[dict[str, Any]] = []
+@@ -428,24 +604,39 @@
+                         constraints=constraints,
+                         user_key=current.user_key,
+                     )
+                     began = time.perf_counter()
+-                    response = service.run_shopping_turn(
+-                        payload,
+-                        session_id=current.user_key,
+-                        task_id=current.session_id,
+-                        turn_id=allocation.turn_id,
+-                    )
++                    planner_info: dict[str, Any] | None = None
++                    if args.arm == "rule":
++                        response = service.run_shopping_turn(
++                            payload,
++                            session_id=current.user_key,
++                            task_id=current.session_id,
++                            turn_id=allocation.turn_id,
++                        )
++                        body = response.model_dump()
++                    else:
++                        planner_info = _planner_turn(
++                            service=service,
++                            proposer=planner_proposer,
++                            payload=payload,
++                            session_id=current.user_key,
++                            task_id=current.session_id,
++                            turn_prefix=f"p7a-{task['task_id']}-{index}",
++                            message=turn["message"],
++                            state=state,
++                        )
++                        body = planner_info["body"]
+                     seconds = round(time.perf_counter() - began, 3)
+-                body = response.model_dump()
+                 final_body = body
+                 diagnostics = service.state_diagnostics(current.session_id)
+                 trace = service.constraint_trace(current.session_id)
+                 role_diag = service.role_diagnostics(current.user_key)
+                 memory = runtime.memory_service.get_active_preferences(current.user_key)
+                 record = {
+                     "task_id": task["task_id"],
+                     "turn": index,
++                    "arm": args.arm,
+                     "message": turn["message"],
+                     "expected_effective_state": state,
+                     "state_operations": turn.get("state_operations", []),
+                     "request_constraints": [item.model_dump() for item in constraints],
+@@ -461,8 +652,18 @@
+                     "role_diagnostics": role_diag,
+                     "candidate_filter": service.candidate_filter_diagnostics(current.user_key),
+                     "lighter_active": _lighter_active(memory),
+                 }
++                if planner_info is not None:
++                    record.update(
++                        {
++                            "action_sequence": planner_info["action_sequence"],
++                            "planner_run": planner_info["planner_run"],
++                            "planner_final_ids": planner_info["planner_final_ids"],
++                            "last_response_terminal": planner_info["last_response_terminal"],
++                            "observation": {"tool_calls_used": planner_info["tool_calls_used"]},
++                        }
++                    )
+                 turns_rows.append(record)
+                 turn_records.append(record)
+             except Exception as exc:  # noqa: BLE001 - a real execution failure is data
+                 execution_error = f"{type(exc).__name__}: {exc}"
+@@ -501,13 +702,20 @@
+         task_rows.append(
+             {
+                 "task_id": task["task_id"],
+                 "template_id": task["template_id"],
++                "arm": args.arm,
+                 "evaluation_protocol": task["evaluation_protocol"],
+                 "initial_history": list(history),
+                 "initial_m5": task["initial_m5"],
+                 "turns": task["turns"],
+                 "checks": task["checks"],
++                "final_action_sequence": (
++                    turn_records[-1].get("action_sequence") if turn_records else []
++                ),
++                "final_planner_run": (
++                    turn_records[-1].get("planner_run") if turn_records else None
++                ),
+                 "final_expected_state": final_expected,
+                 "final_response": final_body,
+                 "final_diagnostics": service.state_diagnostics(session.session_id),
+                 "final_role_diagnostics": role_diag,
+@@ -530,11 +738,12 @@
+         runtime.sessions.delete(session.session_id)
+ 
+     metrics = dynamic_metrics(metric_rows)
+     summary = {
+-        "schema_version": "agentrecx.p6_4.dynamic_dev_run.v0",
++        "schema_version": "agentrecx.p7a.dynamic_dev_run.v0",
+         "created_utc": _utc_now(),
+         "git_head": _git_head(),
++        "arm": args.arm,
+         "evaluation_protocol": "planner_only_controlled_evaluation",
+         "tasks_file": str(args.tasks.relative_to(REPO)) if args.tasks.is_relative_to(REPO) else str(args.tasks),
+         "tasks_sha256": __import__("hashlib").sha256(args.tasks.read_bytes()).hexdigest(),
+         "configuration": {
+@@ -542,11 +751,19 @@
+             "initial_history": list(history),
+             "state_mode": STATE_MODE,
+             "serving_fusion": SERVING_FUSION,
+             "k": K,
++            "max_steps": 6,
++            "per_turn_max_tool_calls": 4,
+             "sources": list(SOURCES),
+             "policy": service.policy_name,
+-            "shared_state_rule": "runner applies the task's state_operations to the canonical M5 state before every turn and passes hard constraints through the trusted request field; role/soft extraction is the deterministic trusted service, not a Planner score",
++            "arm": args.arm,
++            "planner_url": args.planner_url,
++            "planner_model": args.planner_model,
++            "planner_proposer": (
++                type(planner_proposer).__name__ if planner_proposer is not None else None
++            ),
++            "shared_state_rule": "runner applies the task's state_operations to the canonical M5 state once per user turn and passes hard constraints through the trusted request field; a Planner episode's RETRIEVE/RERANK steps do not re-apply state operations; role/soft extraction is the deterministic trusted service, not a Planner score",
+         },
+         "serving": {
+             "active_engine": engine_meta.get("active_engine"),
+             "fusion_sources": engine_meta.get("fusion_sources"),

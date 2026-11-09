@@ -1,0 +1,1135 @@
+[
+  {
+    "task_id": "dev_01_goal_correction_withdraw",
+    "split": "dev",
+    "scenario": "goal_correction_withdraw",
+    "history": [
+      "B09CJN4XGM",
+      "B08SLRGK9S",
+      "B0BX5QFWQN"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a complete water filter."
+      },
+      {
+        "user_input": "Actually I only need a replacement mouthpiece for a water filter."
+      },
+      {
+        "user_input": "Forget the replacement mouthpiece requirement."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "mouthpiece",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B00NE7NZCG",
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_02_accessory_then_restore",
+    "split": "dev",
+    "scenario": "accessory_then_restore",
+    "history": [
+      "B0BX5QFWQN",
+      "B0B1J3LS6B",
+      "B09CJN4XGM"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a complete water filter."
+      },
+      {
+        "user_input": "Show me a replacement filter cartridge instead."
+      },
+      {
+        "user_input": "Actually show me complete water filters again."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "cartridge",
+        "mouthpiece",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B0B8H48DDF",
+        "B00NE7NZCG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_03_accessory_target",
+    "split": "dev",
+    "scenario": "accessory_target",
+    "history": [
+      "B09CJN4XGM",
+      "B08SLRGK9S",
+      "B0BX5QFWQN"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a water filter."
+      },
+      {
+        "user_input": "I want a replacement mouthpiece for a water filter."
+      },
+      {
+        "user_input": "Show me more replacement parts for that filter."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B00NE7NZCG"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "mouthpiece"
+      ],
+      "must_exclude_title_terms": [
+        "complete",
+        "bottle",
+        "sleeping pad"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B",
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_04_goal_change_to_filter",
+    "split": "dev",
+    "scenario": "goal_change_to_filter",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I",
+      "B06WP1W3TQ"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I am looking for camping cookware."
+      },
+      {
+        "user_input": "Actually I need a water filter instead."
+      },
+      {
+        "user_input": "Forget the cookware request; keep the water filter."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "cookware",
+        "stove",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B0BJH866HJ",
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_05_budget_conflict",
+    "split": "dev",
+    "scenario": "budget_conflict",
+    "history": [
+      "B09CJN4XGM",
+      "B08SLRGK9S"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a water filter under 30 dollars."
+      },
+      {
+        "user_input": "Can you find one under 10 dollars?"
+      },
+      {
+        "user_input": "Actually make the budget under 50 dollars."
+      },
+      {
+        "user_input": "Show more options."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG",
+        "B0BJH866HJ"
+      ],
+      "active_preference_attributes": [
+        "price_max"
+      ],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_06_cookware_material",
+    "split": "dev",
+    "scenario": "cookware_material",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I",
+      "B06WP1W3TQ"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need camping cookware."
+      },
+      {
+        "user_input": "I prefer titanium cookware."
+      },
+      {
+        "user_input": "Forget the titanium preference; show cookware again."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "cookware"
+      ],
+      "must_exclude_title_terms": [
+        "water filter",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B",
+        "B0BJH866HJ"
+      ],
+      "active_preference_attributes": [
+        "material"
+      ],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_07_cookware_lightweight_pref",
+    "split": "dev",
+    "scenario": "cookware_lightweight_pref",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I",
+      "B06WP1W3TQ"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need lightweight camping cookware."
+      },
+      {
+        "user_input": "I prefer the lighter option."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "cookware"
+      ],
+      "must_exclude_title_terms": [
+        "water filter",
+        "stove",
+        "sleeping pad"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "active_preference_attributes": [
+        "weight"
+      ],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_08_filter_lightweight_withdraw",
+    "split": "dev",
+    "scenario": "filter_lightweight_withdraw",
+    "history": [
+      "B09CJN4XGM",
+      "B0BX5QFWQN",
+      "B08SLRGK9S"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need a water filter for hiking."
+      },
+      {
+        "user_input": "I prefer the lighter option."
+      },
+      {
+        "user_input": "No additional preference."
+      },
+      {
+        "user_input": "Forget the weight preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "mouthpiece",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_09_ambiguous_to_cookware",
+    "split": "dev",
+    "scenario": "ambiguous_to_cookware",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I do not know which camping gear I need."
+      },
+      {
+        "user_input": "I mainly need camping cookware."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "cookware"
+      ],
+      "must_exclude_title_terms": [
+        "water filter",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_10_cross_turn_reference",
+    "split": "dev",
+    "scenario": "cross_turn_reference",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I",
+      "B06WP1W3TQ"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "Show me camping cookware."
+      },
+      {
+        "user_input": "Show me the second option in more detail."
+      },
+      {
+        "user_input": "Show more options like that."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "cookware"
+      ],
+      "must_exclude_title_terms": [
+        "water filter",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_11_filter_bottle_role",
+    "split": "dev",
+    "scenario": "filter_bottle_role",
+    "history": [
+      "B09CJN4XGM",
+      "B0BX5QFWQN"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a water filter."
+      },
+      {
+        "user_input": "Show me a water bottle with a filter."
+      },
+      {
+        "user_input": "Actually I need a complete water filter, not a drinking bottle."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "bottle",
+        "mouthpiece",
+        "sleeping pad"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG",
+        "B00NE7NZCG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_12_goal_change_sleeping_to_lantern",
+    "split": "dev",
+    "scenario": "goal_change_sleeping_to_lantern",
+    "history": [
+      "B0BJH866HJ",
+      "B0B1J3LS6B"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a sleeping pad for camping."
+      },
+      {
+        "user_input": "Actually I need a camping lantern instead."
+      },
+      {
+        "user_input": "Forget the sleeping pad request."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09LW2KHPM",
+        "B0C3C7WSK9"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "lantern"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "water filter",
+        "cookware"
+      ],
+      "must_exclude_ids": [
+        "B0BJH866HJ",
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_13_goal_change_tablets_to_filter",
+    "split": "dev",
+    "scenario": "goal_change_tablets_to_filter",
+    "history": [
+      "B0B6Z7PTZ8",
+      "B00QFXGSIY"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I want water purification tablets."
+      },
+      {
+        "user_input": "Actually I need a water filter instead."
+      },
+      {
+        "user_input": "Forget the purification tablets."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "tablet",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_14_gravity_filter_pref",
+    "split": "dev",
+    "scenario": "gravity_filter_pref",
+    "history": [
+      "B0B6Z7PTZ8",
+      "B00QFXGSIY"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need a gravity water filter."
+      },
+      {
+        "user_input": "I prefer the lighter option."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [
+        "weight"
+      ],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_15_filter_straw_pref",
+    "split": "dev",
+    "scenario": "filter_straw_pref",
+    "history": [
+      "B07D2L6LPQ",
+      "B08XMCYGMR"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need a water filter straw for hiking."
+      },
+      {
+        "user_input": "I prefer the lighter option."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "filter straw",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_16_cookware_to_stove",
+    "split": "dev",
+    "scenario": "cookware_to_stove",
+    "history": [
+      "B01985FDA4",
+      "B00WDQIL7I"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need camping cookware."
+      },
+      {
+        "user_input": "Actually I need a camping stove instead."
+      },
+      {
+        "user_input": "Forget the cookware request."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "stove"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "water filter",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B",
+        "B0BJH866HJ"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_17_filter_budget_pref",
+    "split": "dev",
+    "scenario": "filter_budget_pref",
+    "history": [
+      "B09CJN4XGM",
+      "B08SLRGK9S"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need a water filter under 50 dollars."
+      },
+      {
+        "user_input": "I prefer the cheaper option."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [
+        "price_max"
+      ],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_18_filter_color_correction",
+    "split": "dev",
+    "scenario": "filter_color_correction",
+    "history": [
+      "B09CJN4XGM",
+      "B0BX5QFWQN"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a blue water filter."
+      },
+      {
+        "user_input": "Actually any color is fine; show water filters."
+      },
+      {
+        "user_input": "Show more options."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern",
+        "bottle"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_19_cookware_set_reference",
+    "split": "dev",
+    "scenario": "cookware_set_reference",
+    "history": [
+      "B06WP1W3TQ",
+      "B00XQF9RB4"
+    ],
+    "preference_discovery": false,
+    "turns": [
+      {
+        "user_input": "I need a camping cookware set."
+      },
+      {
+        "user_input": "Show more options like the second one."
+      },
+      {
+        "user_input": "Show me another cookware set."
+      },
+      {
+        "user_input": "Forget the set requirement, just cookware."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B01985FDA4",
+        "B00WDQIL7I",
+        "B06WP1W3TQ",
+        "B00XQF9RB4",
+        "B00SMLPU7C",
+        "B01CQJVE2A",
+        "B07F6CXC6X"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "cookware"
+      ],
+      "must_exclude_title_terms": [
+        "water filter",
+        "sleeping pad",
+        "lantern"
+      ],
+      "must_exclude_ids": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B",
+        "B0BJH866HJ"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  },
+  {
+    "task_id": "dev_20_broad_gear_to_filter",
+    "split": "dev",
+    "scenario": "broad_gear_to_filter",
+    "history": [
+      "B09CJN4XGM",
+      "B0BX5QFWQN"
+    ],
+    "preference_discovery": true,
+    "turns": [
+      {
+        "user_input": "I need camping gear."
+      },
+      {
+        "user_input": "I mainly need a water filter."
+      },
+      {
+        "user_input": "I prefer lighter weight."
+      },
+      {
+        "user_input": "No additional preference."
+      }
+    ],
+    "expected": {
+      "final_any": [
+        "B09CJN4XGM",
+        "B0BX5QFWQN",
+        "B08SLRGK9S",
+        "B0B1J3LS6B",
+        "B0B6Z7PTZ8",
+        "B00QFXGSIY",
+        "B07D2L6LPQ",
+        "B08XMCYGMR",
+        "B07G3HMB1B"
+      ],
+      "final_min": 1,
+      "required_title_terms_any": [
+        "water filter",
+        "water filtration",
+        "water purifier"
+      ],
+      "must_exclude_title_terms": [
+        "sleeping pad",
+        "lantern",
+        "cookware"
+      ],
+      "must_exclude_ids": [
+        "B005LB19MQ",
+        "B00265MBSG"
+      ],
+      "active_preference_attributes": [],
+      "actions_any": [
+        "RERANK",
+        "RETRIEVE"
+      ]
+    }
+  }
+]

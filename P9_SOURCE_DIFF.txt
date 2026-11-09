@@ -1,0 +1,38 @@
+P9 source/experiment diff (curated)
+====================================
+
+New experiment code only; no Serving V1 / Agent / Gold / evaluator change.
+
++ experiments/p9_candidate_depth_eval.py
+  - loads the real Serving V1 FusionInferenceEngine;
+  - uses the fixed P8-D 300 Dev cases and cached Hybrid Catalog Top-50;
+  - evaluates actual History source at Top-50 / legal Top-100;
+  - computes SASRec/Two-Tower accepted full score matrices and ranks 50/100/200
+    (200 is explicitly an offline probe, not a serving budget);
+  - records target reachability, newly reachable targets, component contribution,
+    lost-by-fusion cases, final Top-10 RRF metrics, and timing;
+  - supports resumable start/limit chunks.
+
++ experiments/p9_combine.py
+  - joins the two resumable evaluation chunks into the full 300-case artifact;
+  - recomputes aggregate reachability, component union, final Top-10 metrics.
+
+New artifacts:
++ runs/p9/candidate_depth/summary.json
++ runs/p9/candidate_depth/per_case.jsonl
++ runs/p9/candidate_depth/per_case.first210.jsonl
++ runs/p9/candidate_depth/per_case.last80.jsonl
++ P9_REPORT.md
++ P9_SOURCE_DIFF.txt
+
+Unchanged:
+- recommendation/inference/fusion.py
+- recommendation/inference/sasrec.py
+- recommendation/inference/twotower.py
+- recommendation/tools/*
+- recommendation/control/*
+- Serving V1 defaults, source head depth=100, MAX_K=100
+- BGE index/model, Gold/Evaluator, M5, Role Gate, Eligibility
+- P8-D cases/cache
+
+No training, no SFT-v1, no Holdout, no commit/push/deploy.

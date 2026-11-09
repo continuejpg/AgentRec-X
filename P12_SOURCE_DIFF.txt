@@ -1,0 +1,43 @@
+P12 source/data diff (curated)
+================================
+
+Modified:
+- recommendation/control/catalog_search.py
+  + opt-in hybrid_bm25_head; default None preserves original hybrid behavior;
+  + status exposes the opt-in depth; no Serving V1 default change.
+
+New:
+- experiments/p12_match_reviews.py
+  + streams official review archive; exact user_id + parent_asin + timestamp_ms;
+  + timestamp normalization, rating diagnostic, ambiguity report;
+  + train-history-only keys; no target/Holdout.
+- experiments/p12_audit_evidence.py
+  + maps review text to P11 history refs;
+  + rule-based candidate classification; level_a_candidate_unreviewed only;
+  + enriched task copy, original P11 tasks preserved.
+- experiments/p12_diagnose.py
+  + BM25/BGE/hybrid/history coverage; cache consistency; bounded-pool vs catalog validity.
+- experiments/p12_hybrid_diagnosis.py
+  + original hybrid vs bounded-BM25-head opt-in, BM25, BGE; no retrieval Gold.
+- tests/test_p12_evidence.py
+  + timestamp units; train-only keys; no future targets; opt-in hybrid default.
+
+New artifacts:
++ data/p12/review_keys.jsonl
++ data/p11_benchmark/tasks_p12_evidence.jsonl (original preserved)
++ runs/p12/reviews/reviews_matched.jsonl
++ runs/p12/reviews/match_report.json
++ runs/p12/reviews/ambiguous.json
++ runs/p12/evidence/summary.json
++ runs/p12/evidence/claims.jsonl
++ runs/p12/diagnosis/diagnosis.json
++ runs/p12/hybrid/summary.json
++ runs/p12/hybrid/per_task.jsonl
++ P12_REPORT.md
++ P12_SOURCE_DIFF.txt
+
+Unchanged: SASRec/Two-Tower/BGE checkpoints and parameters, default Serving V1,
+Planner Contract, M5 semantics, Role Gate, Eligibility, Gold/Evaluator, frozen Holdout,
+P11 original tasks/schema/manifest.
+
+No training/fine-tuning, no SFT-v1, no Holdout, no commit/push/deploy.

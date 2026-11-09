@@ -1,0 +1,74 @@
+P8-C source-policy source diff (curated)
+=========================================
+
+recommendation/control/candidate_ledger.py
++ SOURCE_POLICIES = ("balanced", "intent_focus", "history_focus")
++ SOURCE_POLICY_WEIGHTS:
++   balanced:      history=1.0, catalog_search=1.0
++   intent_focus:  history=1.0, catalog_search=2.0
++   history_focus: history=2.0, catalog_search=1.0
++ normalize_source_policy(value, default="balanced")  # unknown rejected
++ source_policy_weights(policy)
++ weighted_reciprocal_rank_fusion(rankings_by_source,
++                                 source_policy=..., k=RRF_K)
++   score(d) = sum_s weight[s] / (60 + rank_s(d)); tie-break identity
+- CandidateLedger() defaults to balanced; ranked_entries/fusion_scores use
+  weighted RRF. balanced is byte-for-byte identical to the old unweighted RRF.
+
+recommendation/control/loop.py
++ _LoopEngine / LoopController accept source_policy
++ _fuse_presentable builds rankings_by_source and calls the shared
+  weighted_reciprocal_rank_fusion with the controller's source_policy
++ single-source runs remain unchanged; no change to Serving V1 internals
+
+recommendation/demo/agent_service.py
++ run_shopping_turn(..., source_policy="balanced")
++ run(...), _execute_plan(...), _compose_controller(...), _build_controller(...)
++ CandidateLedger(source_policy=source_policy)
++ LoopController(..., source_policy=source_policy)
++ unknown policy raises DemoAgentError("unsupported_source_policy")
++ service validates policy before composing/running
+
+recommendation/demo/planner_contract.py
++ PlannerObservation.source_policy
++ PlannerObservation.source_feedback
++ RETRIEVE optional arguments.source_policy
++ unknown/invalid source_policy -> PlannerContractError("invalid_source_policy")
+
+recommendation/demo/planner_service_executor.py
++ ServicePlannerExecutor.source_policy (default balanced)
++ RETRIEVE reads arguments.source_policy, normalizes, passes to
+  service.run_shopping_turn(..., source_policy=...)
++ tool observation records source_policy/source_feedback
++ source feedback built only from the actual response:
+  source counts, overlap, fused IDs, contributions, role/eligibility,
+  M5 preference/hard-constraint/soft preference summary
++ history candidates without ledger provenance are counted separately and
+  explicitly labelled
+
+recommendation/demo/planner_http_proposer.py
++ sends source_policy/source_feedback to /plan
+
+training/agent_sft/planner_prompt.py
++ documents optional RETRIEVE source_policy values
++ planner observation includes source_policy/source_feedback
+
+experiments/p6_benchmark/run_dynamic_dev_p64.py
++ --source-policy balanced|intent_focus|history_focus
++ Rule and Planner retrieval receive the controlled policy; summary records it
+
+tests/test_p8c_source_policy.py (new)
++ balanced equals accepted unweighted RRF
++ weights change/deduplicate fusion
++ ledger policy ordering
++ valid/invalid planner contract fields
+
+experiments/p8c_policy_eval.py (new)
++ real-history candidate cache builder and same-function policy replay
++ explicit next-item proxy labelling; target never used to build query
+
+No changes to:
+- Serving V1 internals (SASRec / Two-Tower / history fusion)
+- Role gate, Eligibility, M5 state, CandidateLedger grounding
+- BM25/BGE index/model parameters
+- Gold/Evaluator, frozen Holdout

@@ -64,6 +64,20 @@ from .evaluator import (
     build_cohort_from_artifacts,
     cohort_summary,
 )
+from .experiment import (
+    ExperimentBundle,
+    ExperimentCaseResult,
+    ExperimentError,
+    ExperimentManifest,
+    ExperimentSummary,
+    PairedDelta,
+    PopularityIndex,
+    build_bundle,
+    hash_file,
+    hash_json,
+    paired_bootstrap_delta,
+    summarize_cases,
+)
 from .metrics import (
     DEFAULT_K_VALUES,
     METRIC_NAMES,
@@ -142,6 +156,19 @@ __all__ = [
     "build_cohort",
     "build_cohort_from_artifacts",
     "cohort_summary",
+    # experiment evidence harness
+    "ExperimentBundle",
+    "ExperimentCaseResult",
+    "ExperimentError",
+    "ExperimentManifest",
+    "ExperimentSummary",
+    "PairedDelta",
+    "PopularityIndex",
+    "build_bundle",
+    "hash_file",
+    "hash_json",
+    "paired_bootstrap_delta",
+    "summarize_cases",
 ]
 
 __version__ = "0.1.0"

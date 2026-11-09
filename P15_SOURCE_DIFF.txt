@@ -1,0 +1,86 @@
+P15 SOURCE DIFF
+================================================================================
+Milestone: evidence-grounded Shopping RAG integrated into the existing FINALIZE path.
+No model training, no retrieval index rebuild, no new Agent runtime/Memory/Search backend, no Reserved Test.
+
+NEW SOURCE / TEST FILES
+recommendation/control/rag_evidence.py
+  bytes=21201 sha256=c664d4fae51096b73a1cf4f2f4dd83c7c51aa057bf4a9b244d7b960c1f4b760e
+experiments/p15/__init__.py
+  bytes=61 sha256=55c8a4fc9ad0e6244b756339607afcda2dea77e03d0844d442563fa1a8df3650
+experiments/p15/explainer.py
+  bytes=7024 sha256=bcf42ec3df211fd2b9c6b56a7ee62fafc86ee20080bbeb8b229fa2a86b92e580
+experiments/p15/run_e2e.py
+  bytes=6364 sha256=86b6fe6cd2c5a1829716760b1bdfa5df1e67af932a2934d6f9f7b102162c77f4
+experiments/p15/metrics.py
+  bytes=10192 sha256=b7015d3aae937f2011a21bb64a93b70420d73d65e18438ba3e2b9b0ee6860d28
+tests/test_p15_rag.py
+  bytes=10802 sha256=af47d51498c55b01afccb3e5e0ef9d1549ec5ca435e12c6c8832a4ea12d2360e
+
+MODIFIED FILES
+experiments/p14c0/electronics_executor.py
+  bytes=19537 sha256=01e340728f69b5f42fc9d80ffd5ea022e98954ea4d8aa6326e4b18c106242241
+training/agent_sft/model_server.py
+  bytes=5791 sha256=4206d97e15c3e3aa1726af438d3b865a45c9f67a8490dfef34f632dbc6d1279a
+
+NEW REPORT
+P15_REPORT.md
+  bytes=11643 sha256=9207b6267b2c78c22fa11f0e5bb042d7f490f59cd913708f6f378e69154db805
+
+EVIDENCE / E2E / METRICS ARTIFACTS (git-ignored)
+runs/p15/schema/evidence_bundle.schema.json
+  bytes=3098 sha256=3042f7fd340f3cd1aa3ee890e70f565a6987354a4a4dd012fd86834fbbc5894e
+runs/p15/schema/claim_validation.schema.json
+  bytes=897 sha256=2876f675e9587bcf0fd6e6d611fd473818138f13ccba576dea83f81227dbbbba
+runs/p15/e2e_trajectories.json
+  bytes=601388 sha256=a10c90785457a58a6ff1859c644ce1b8afed168775c4347454014750cc11bfd9
+runs/p15/e2e/p14e2_lite_0042.json
+  bytes=12191 sha256=56f31aef54d7a72fef2f48139e5303c30767a21d77e09b36540fe87aad719839
+runs/p15/e2e/p14e2_lite_0043.json
+  bytes=45806 sha256=7c53f8d5591d99ab1a7f724571a5d341c35c5bf7ea759e5ac73f472da7bf5b5b
+runs/p15/e2e/p14e2_lite_0044.json
+  bytes=53385 sha256=6c122c4b06ada26dcdcac745e9d3e3e064fe8225033aaf78f864d304cd5890ea
+runs/p15/e2e/p14e2_lite_0045.json
+  bytes=67383 sha256=a9ff523389adb0f794c00e3726c56c1415930b78fe6174b9c8782fec131e21f8
+runs/p15/e2e/p14e2_lite_0046.json
+  bytes=57339 sha256=bb7aa1ead0407bf6b142a016dc257dac7bf17b4b367f386aa27f40d14a417867
+runs/p15/e2e/p14e2_lite_0049.json
+  bytes=51954 sha256=b9f42952a2293e0cc16948c88409ca74104fe346c6b16dab3b611e522e9f205b
+runs/p15/e2e/p14e2_lite_0050.json
+  bytes=55599 sha256=16589fff616dcdf2d733786eebd6e7fd0cb56dbab7e7cb406e8947fd532212ec
+runs/p15/e2e/p14e2_lite_0053.json
+  bytes=68487 sha256=9a3eac05efc10574366121a00dd0c54d4e86e4f2a20dca08f3e93def03845d79
+runs/p15/e2e/p14e2_lite_0054.json
+  bytes=61482 sha256=447ca59d4097a350aadd9ac88df97176411a5d8e9fcaeafe0fafd6b582ffc58b
+runs/p15/e2e/p14e2_lite_0055.json
+  bytes=52198 sha256=d940db17faa689cfd3460162eba4f3257a677848beffc301c6ca7a3825907a39
+runs/p15/e2e/p14e2_lite_0056.json
+  bytes=17085 sha256=a37cdc580592bf4818e0fbca8bc87c0badb07b6d574d3395a4c19bb47f34ad31
+runs/p15/e2e/p14e2_lite_0057.json
+  bytes=14796 sha256=c7d8c5d94500549588cb55eb14b6bcbd1ced60345b964956575ec9e697029809
+runs/p15/e2e/p14e2_lite_0060.json
+  bytes=29047 sha256=afd67dbf7a527be399248a4a3e2578e7416d9d46da2bbeb80fd6be99696b93fc
+runs/p15/metrics.json
+  bytes=2093 sha256=61867b75e97ed051a4a9aad7617f1907071adfb3062a26c45db7fb072e373c8c
+runs/p15/per_task.jsonl
+  bytes=14551 sha256=836d2d654410d8dd84e61b2b4e29f542bd07240f12f3a896c0793dc434a5d1b3
+runs/p15/decision.json
+  bytes=2488 sha256=ef494bf64346d9bb9139eac67d1a4b10e1b6c4054d154fb0cf3fa4968f90801f
+
+RAG INTEGRATION
+- Evidence Bundle uses real catalogue raw fields + exact spans; product and preference evidence separated.
+- M9 active/inactive provenance is preserved; inactive/removed preferences are never active evidence.
+- Optional RAG hook runs only after the existing Decision Gate allows FINALIZE; default None preserves old behavior.
+- Real Qwen3.5-9B Base /explain generated the explanations; no adapter/retraining.
+- Claim validation is automated structural/lexical validation; semantic truth is NOT verified.
+
+E2E RESULTS
+- 13 tasks: 9 FINALIZE, 2 ASK, 2 no-verified; all search mode bge_dense; 0 nonfinal forced recommendations.
+- 9/9 finalizable tasks have Evidence Bundle + Qwen raw output + validated final answer.
+- 30 valid claims / 4 rejected claims; 15 valid product facts, 12 valid preference links, 3 valid UNKNOWN claims.
+- 0 missing evidence refs, 0 inactive-preference misuse, 0 product/memory confusion, 0 UNKNOWN promoted to known.
+- Qwen explanation latency mean 11.6 s (8.1-13.6 s); output max 428 tokens.
+
+DECISION
+- EVIDENCE_RETRIEVAL PASS; CLAIM_GROUNDING LIMITED; MEMORY_PROVENANCE PASS;
+  FINAL_ANSWER_INTEGRATION PASS; LEGACY_REGRESSION PASS; P15 LIMITED.

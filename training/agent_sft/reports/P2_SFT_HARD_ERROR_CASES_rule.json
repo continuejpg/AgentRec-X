@@ -1,0 +1,72 @@
+[
+  {
+    "sample_id": "hard_0000",
+    "scenario": "multi_condition",
+    "user_message": "Actually cap it at $40, use titanium, and favor the lighter one.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"titanium\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lighter\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"Actually cap it at $40, use titanium, and favor the lighter one.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0001",
+    "scenario": "multi_condition",
+    "user_message": "Change the ceiling to $40; I want titanium and lower weight.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"titanium\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lower weight\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"ceiling to $40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0002",
+    "scenario": "multi_condition",
+    "user_message": "Set the max to $40, please use titanium, lighter is better.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"titanium\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lighter\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"Set the max to $40, please use titanium, lighter is better.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0003",
+    "scenario": "multi_condition",
+    "user_message": "Budget $40 max, titanium material, and the least heavy option.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"titanium\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"titanium\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"least heavy option\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"Budget $40\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":40}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0004",
+    "scenario": "multi_condition",
+    "user_message": "Actually cap it at $70, use aluminum, and favor the lighter one.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"aluminum\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"aluminum\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lighter\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"Actually cap it at $70, use aluminum, and favor the lighter one.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0005",
+    "scenario": "multi_condition",
+    "user_message": "Change the ceiling to $70; I want aluminum and lower weight.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"aluminum\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"aluminum\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lower weight\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"ceiling to $70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0006",
+    "scenario": "multi_condition",
+    "user_message": "Set the max to $70, please use aluminum, lighter is better.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"aluminum\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"aluminum\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lighter\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"Set the max to $70, please use aluminum, lighter is better.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0007",
+    "scenario": "multi_condition",
+    "user_message": "Budget $70 max, aluminum material, and the least heavy option.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"aluminum\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"aluminum\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"least heavy option\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"Budget $70\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":70}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0008",
+    "scenario": "multi_condition",
+    "user_message": "Actually cap it at $25, use steel, and favor the lighter one.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$25\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":25},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"steel\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"steel\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lighter\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"Actually cap it at $25, use steel, and favor the lighter one.\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  },
+  {
+    "sample_id": "hard_0009",
+    "scenario": "multi_condition",
+    "user_message": "Change the ceiling to $25; I want steel and lower weight.",
+    "gold": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"$25\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":25},{\"attribute\":\"material\",\"direction\":\"exact\",\"evidence\":\"steel\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":\"steel\"},{\"attribute\":\"weight\",\"direction\":\"minimize\",\"evidence\":\"lower weight\",\"op\":\"add_preference\",\"scope\":\"task\",\"value\":null}],\"schema_version\":\"agentrecx.preference_operation.v1\"}",
+    "prediction_raw": "{\"clarification\":null,\"operations\":[{\"attribute\":\"price_max\",\"direction\":null,\"evidence\":\"ceiling to $25\",\"op\":\"update_constraint\",\"scope\":\"task\",\"value\":25}],\"schema_version\":\"agentrecx.preference_operation.v1\"}"
+  }
+]

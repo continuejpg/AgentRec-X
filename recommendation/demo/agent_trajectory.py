@@ -341,6 +341,10 @@ def build_recommendations_view(
     titles: Mapping[str, str] | None = None,
     ranking: Any | None = None,
     limit: int | None = None,
+    itemcf_order: Sequence[str] | None = None,
+    role_target: Any | None = None,
+    role_records: Mapping[str, Any] | None = None,
+    role_selection_out: list[Any] | None = None,
 ) -> tuple[AgentRecommendationView, ...]:
     """Project the ranked recommendation list, attaching each item's source provenance.
 
@@ -368,12 +372,31 @@ def build_recommendations_view(
     items = presentable_candidates(state)
     if not items:
         return ()
+    # Optional experimental base rerank: the signal only supplies an ordering over
+    # exactly the presentable identities and is ignored if it would add/remove one.
+    if itemcf_order is not None:
+        wanted = tuple(str(identity) for identity in itemcf_order)
+        if len(wanted) == len(items) and set(wanted) == {str(item.parent_asin) for item in items}:
+            by_identity = {str(item.parent_asin): item for item in items}
+            items = tuple(by_identity[identity] for identity in wanted)
     resolution = _ledger_sources(ledger)
     ranked = None if ranking is None else ranking.by_identity()
     if ranked is not None:
         # The ranking was computed over exactly this set, so re-read it in its own order rather
         # than trusting the caller's list to agree with it.
         items = tuple(sorted(items, key=lambda item: ranked[str(item.parent_asin)].reranked_rank))
+    if role_target is not None and role_records is not None:
+        # Grounded role eligibility is applied to the whole presentable set before k is
+        # taken, so a correct candidate below the fused cutoff can still be presented while
+        # a confident MISMATCH is never used as K-filler.
+        from .product_role import select_grounded_recommendations
+
+        selection = select_grounded_recommendations(
+            "", items, role_records, target=role_target
+        )
+        items = tuple(selection.candidates)
+        if role_selection_out is not None:
+            role_selection_out.append(selection)
     if limit is not None:
         items = items[: max(int(limit), 0)]
     views: list[AgentRecommendationView] = []

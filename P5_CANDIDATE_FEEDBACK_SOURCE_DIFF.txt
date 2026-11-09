@@ -1,0 +1,187 @@
+--- /dev/null
++++ recommendation/demo/planner_service_executor.py
+@@ -0,0 +1,184 @@
++"""CPU executor for the P3D planner contract.
++
++The executor reuses DemoAgentService.run_shopping_turn for RETRIEVE, the service's
++existing M5/M6.1 private path for RERANK, and returns the service's already validated
++recommendations for FINALIZE.  It never creates candidates, bypasses role checks or
++bypasses price constraints.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any
++
++from recommendation.demo.agent_schemas import AgentRecommendRequest
++from recommendation.demo.planner_contract import (
++    ActionProposal,
++    PlannerAction,
++    PlannerObservation,
++)
++
++
++@dataclass
++class ServicePlannerExecutor:
++    service: Any
++    payload: AgentRecommendRequest
++    session_id: str
++    task_id: str
++    turn_prefix: str = "p3d"
++    _candidates: tuple[Any, ...] = ()
++    _turn: int = 0
++    _last_query: str = ""
++    _presented_count: int = 0
++
++    def _candidate_evidence(self, candidate_ids: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
++        metadata = getattr(self.service, "_metadata", None)
++        records = getattr(metadata, "records", {}) if metadata is not None else {}
++        evidence = []
++        for parent_asin in candidate_ids:
++            record = records.get(parent_asin)
++            if record is None:
++                evidence.append({"parent_asin": parent_asin})
++                continue
++            details = record.details_dict() if hasattr(record, "details_dict") else {}
++            weight = next((str(value) for key, value in details.items() if "weight" in key.casefold()), "")
++            evidence.append({
++                "parent_asin": parent_asin,
++                "title": str(getattr(record, "title", "") or ""),
++                "price": str(getattr(record, "price_text", "") or ""),
++                "weight": weight,
++            })
++        return tuple(evidence)
++
++    def _retrieval_feedback(self) -> dict[str, Any]:
++        candidate = self.service.candidate_filter_diagnostics(self.session_id) or {}
++        role = self.service.role_diagnostics(str(self.payload.user_key or self.session_id)) or {}
++        return {
++            "raw_recall_count": candidate.get("raw_recall_count"),
++            "rrf_candidate_count": candidate.get("rrf_candidate_count"),
++            "grounded_candidate_count": candidate.get("grounded_candidate_count"),
++            "role_target": role.get("target") or candidate.get("role_target") or {},
++            "role_match_count": candidate.get("role_match_count"),
++            "role_mismatch_count": candidate.get("role_mismatch_count"),
++            "role_unknown_count": candidate.get("role_unknown_count"),
++            "role_rejection_reasons": candidate.get("role_rejection_reasons", ()),
++            "hard_constraint_evaluated": candidate.get("hard_constraint_evaluated"),
++            "hard_constraint_eligible_count": candidate.get("hard_constraint_eligible_count"),
++            "hard_constraint_ineligible_count": candidate.get("hard_constraint_ineligible_count"),
++            "hard_constraint_unresolved_count": candidate.get("hard_constraint_unresolved_count"),
++            # candidate_filter_diagnostics is captured before the final explicit-type
++            # promotion in run_shopping_turn.  Name that stage explicitly; do not call
++            # it the final presented count.
++            "post_role_eligibility_candidate_count": candidate.get("final_candidate_count"),
++            "presented_candidate_count": self._presented_count,
++        }
++
++    def _observation(self, *, candidate_ids: tuple[str, ...], note: str = "", reranked: bool = False, terminal: bool = False, needs_user_input: bool = False) -> PlannerObservation:
++        diagnostics = self.service.state_diagnostics(self.task_id) or {}
++        candidate = self.service.candidate_filter_diagnostics(self.session_id) or {}
++        role = self.service.role_diagnostics(str(self.payload.user_key or self.session_id)) or {}
++        return PlannerObservation(
++            step=diagnostics.get("turn_count", self._turn),
++            query=self.payload.message,
++            candidate_ids=candidate_ids,
++            state_version=str(diagnostics.get("state_digest") or diagnostics.get("state_version") or ""),
++            needs_user_input=needs_user_input,
++            reranked=reranked,
++            terminal=terminal,
++            note=note,
++            m5_state={
++                "mode": diagnostics.get("mode"),
++                "event_count": diagnostics.get("event_count"),
++                "preference_count": diagnostics.get("preference_count"),
++                "hard_constraint_count": diagnostics.get("hard_constraint_count"),
++                "constraint_kinds": diagnostics.get("constraint_kinds", ()),
++                "ranker_feature_count": diagnostics.get("ranker_feature_count"),
++                "state_digest": diagnostics.get("state_digest"),
++            },
++            candidate_evidence=self._candidate_evidence(candidate_ids),
++            last_retrieve_query=self._last_query or self.payload.message,
++            retrieval_feedback=self._retrieval_feedback(),
++            role_target=role.get("target") or candidate.get("role_target") or {},
++            eligibility={
++                "evaluated": candidate.get("hard_constraint_evaluated"),
++                "eligible": candidate.get("hard_constraint_eligible_count"),
++                "ineligible": candidate.get("hard_constraint_ineligible_count"),
++                "unresolved": candidate.get("hard_constraint_unresolved_count"),
++                "active_constraints": candidate.get("active_constraints", ()),
++                "active_price_max": candidate.get("active_price_max"),
++            },
++        )
++
++    def execute(self, proposal: ActionProposal, observation: PlannerObservation) -> tuple[PlannerObservation, dict[str, Any], bool]:
++        if proposal.action is PlannerAction.ASK:
++            return (
++                self._observation(
++                    candidate_ids=observation.candidate_ids,
++                    needs_user_input=True,
++                    terminal=True,
++                    note="awaiting user",
++                ),
++                {"tool": "ask", "question": proposal.arguments.get("question", "")},
++                True,
++            )
++        if proposal.action is PlannerAction.RETRIEVE:
++            self._turn += 1
++            query = str(proposal.arguments.get("query") or self.payload.message)
++            self._last_query = query
++            response = self.service.run_shopping_turn(
++                self.payload.model_copy(update={"message": query}),
++                session_id=self.session_id,
++                task_id=self.task_id,
++                turn_id=f"{self.turn_prefix}:{self._turn:03d}",
++            )
++            self._candidates = tuple(response.recommendations)
++            ids = tuple(str(item.parent_asin) for item in self._candidates)
++            self._presented_count = len(ids)
++            terminal = response.terminal.termination_reason in {"awaiting_user", "failed"}
++            feedback = self._retrieval_feedback()
++            return (
++                self._observation(
++                    candidate_ids=ids,
++                    note=f"route={response.route}; status={response.terminal.status}",
++                    terminal=terminal,
++                    needs_user_input=response.terminal.termination_reason == "awaiting_user",
++                ),
++                {
++                    "tool": "run_shopping_turn",
++                    "query": query,
++                    "route": response.route,
++                    "candidate_count": len(ids),
++                    "terminal": response.terminal.termination_reason,
++                    "state_version": str((self.service.state_diagnostics(self.task_id) or {}).get("state_digest") or ""),
++                    "retrieval_feedback": feedback,
++                },
++                terminal,
++            )
++        if proposal.action is PlannerAction.RERANK:
++            ranking, _combined, _soft, diagnostics = self.service._m5_soft_rerank(
++                self.session_id,
++                self._candidates,
++                existing=(),
++            )
++            if ranking is not None:
++                ordered = ranking.by_identity()
++                self._candidates = tuple(
++                    sorted(self._candidates, key=lambda item: ordered[str(item.parent_asin)].reranked_rank)
++                )
++            return (
++                self._observation(
++                    candidate_ids=tuple(str(item.parent_asin) for item in self._candidates),
++                    reranked=True,
++                    note="existing M6.1 soft rerank",
++                ),
++                {"tool": "m6_1_soft_rerank", "applied": ranking is not None, "diagnostics": diagnostics},
++                False,
++            )
++        if proposal.action is PlannerAction.FINALIZE:
++            ids = tuple(str(item.parent_asin) for item in self._candidates)
++            return (
++                self._observation(candidate_ids=ids, terminal=True, reranked=True, note="finalized"),
++                {"tool": "finalize", "candidate_count": len(ids)},
++                True,
++            )
++        raise ValueError(f"unsupported planner action {proposal.action!r}")

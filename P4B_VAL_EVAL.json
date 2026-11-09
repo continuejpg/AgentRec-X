@@ -1,0 +1,22 @@
+{
+  "samples": 53,
+  "action_exact": 53,
+  "action_accuracy": 1.0,
+  "schema_valid": 53,
+  "schema_validity": 1.0,
+  "per_target_action": {
+    "RETRIEVE": {
+      "RETRIEVE": 16
+    },
+    "ASK": {
+      "ASK": 8
+    },
+    "RERANK": {
+      "RERANK": 15
+    },
+    "FINALIZE": {
+      "FINALIZE": 14
+    }
+  },
+  "errors": []
+}

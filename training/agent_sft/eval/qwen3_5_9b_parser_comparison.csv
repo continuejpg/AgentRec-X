@@ -1,0 +1,4 @@
+provider,schema_valid_rate,operation_exact_match,operation_macro_f1,slot_accuracy,retraction_accuracy,unsupported_proposal_rate,failure_or_abstention_rate,p50_latency_ms,p95_latency_ms
+rule,1.0,0.82,0.75,1.0,1.0,0.0,0.0,2.565013710409403e-05,3.2805011142045255e-05
+base,0.33,0.095,0.25418060200668896,0.12,1.0,0.67,0.67,2095.8595806732774,3045.95087999478
+sft,0.97,0.945,0.703170731707317,0.945,1.0,0.03,0.03,2972.9106687009335,4955.069262860338

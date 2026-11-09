@@ -1,0 +1,9 @@
+task_id,split,human_relevance_0_1_2,human_role_ok,notes,reviewer,reviewed_at
+frozen_01_frozen_filter_correction,frozen,,,,,
+frozen_02_frozen_cookware_to_filter,frozen,,,,,
+frozen_03_frozen_filter_accessory,frozen,,,,,
+frozen_04_frozen_pad_to_lantern,frozen,,,,,
+frozen_05_frozen_budget_conflict,frozen,,,,,
+frozen_06_frozen_filter_pref,frozen,,,,,
+frozen_07_frozen_ambiguous_cookware,frozen,,,,,
+frozen_08_frozen_bottle_to_filter,frozen,,,,,

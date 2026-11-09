@@ -1,0 +1,14 @@
+{
+  "set_goal": 1.0,
+  "update_goal": 1.0,
+  "add_preference": 1.0,
+  "update_preference": 0.0,
+  "retract_preference": 0.0,
+  "set_constraint": 0.0,
+  "update_constraint": 1.0,
+  "retract_constraint": 1.0,
+  "resolve_reference": 1.0,
+  "clarify": 0.56,
+  "noop": 0.878048780487805,
+  "abstain": 1.0
+}

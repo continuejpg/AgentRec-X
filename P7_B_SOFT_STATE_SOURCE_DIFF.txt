@@ -1,0 +1,123 @@
+P7-B Soft-State source changes (curated; key additions only)
+================================================================
+
+The first CPU check found two separate state-write paths:
+  1. M5 extraction in _execute_plan used payload.message (the Planner query);
+  2. the Agent graph's M9 persistence stage used state["user_message"], also the
+     Planner query, so a rewritten query could still write long-term preferences.
+Both are closed below.  The Planner query remains free and is still used for retrieval.
+
+1) recommendation/demo/agent_service.py
+
+A. run() / run_shopping_turn() / _execute_plan() accept retrieval-only flags:
+
++        planner_retrieval: bool = False,
++        apply_user_state: bool = True,
++        state_message: str | None = None,
+
+B. run_shopping_turn() does not derive the role target from a Planner query:
+
++        if planner_retrieval:
++            role_target_changed = False
++            self._mirror_role_target_to_user_key(task_key, payload.user_key)
++        else:
+             role_target_changed = self._update_role_target(task_key, payload.message)
+             self._mirror_role_target_to_user_key(task_key, payload.user_key)
+
+C. _execute_plan() extracts M5 facts from the real user turn only on the first
+   Planner RETRIEVE; later RETRIEVE/RERANK steps get an empty extraction:
+
++        if apply_user_state:
++            extraction = self._memory_service.extractor.extract(
++                state_message or payload.message
++            )
++            self._update_task_price_constraints(task_key, extraction)
++        else:
++            from recommendation.memory.schemas import PreferenceExtraction
++            extraction = PreferenceExtraction()
+
+D. M5 integration / task preference writes / R1 anchor writes are first-step-only:
+
++        if apply_user_state:
+             constraints, effective_intent, state_projection, state_constraints_changed = (
+                 self._integrate_state_turn(...)
+             )
++        else:
++            constraints = trusted_constraints
++            effective_intent = intent
++            state_projection = None
++            state_constraints_changed = False
+
++        if apply_user_state and dynamic_retrieval_enabled(): ...
++        if apply_user_state and dynamic_retrieval_enabled() ...: ...
++            if apply_user_state: self._commit_clarify_turn(...)
+
+E. M9 graph seam: the controller receives the canonical user text once, and later
+   Planner steps suppress persistence:
+
++            memory_user_message=(
++                state_message if planner_retrieval and apply_user_state else None
++            ),
++            persist_memory=not (planner_retrieval and not apply_user_state),
+
+2) recommendation/agent/pipeline.py
+
++    if state.get("skip_memory_persist"):
++        return {}
++    user_message = state.get("memory_user_message") or state.get("user_message")
+
+3) recommendation/agent/state.py
+
+     user_message: str
+     trusted_user_history: TrustedHistory
+     turn_id: str
++    memory_user_message: str
++    skip_memory_persist: bool
+
+4) recommendation/control/loop.py
+
+  _LoopEngine / LoopController / new_engine accept:
++        memory_user_message: str | None = None,
++        persist_memory: bool = True,
+
+  State is seeded with:
++        if memory_user_message:
++            self.state["memory_user_message"] = memory_user_message
++        if not persist_memory:
++            self.state["skip_memory_persist"] = True
+
+5) recommendation/demo/planner_service_executor.py
+
++    state_message: str = ""
++    _state_applied: bool = field(default=False, repr=False)
+
+             response = self.service.run_shopping_turn(
+                 ...
++                planner_retrieval=True,
++                apply_user_state=not self._state_applied,
++                state_message=self.state_message or None,
+             )
++            self._state_applied = True
+             self.last_response = response
+
+6) experiments/p6_benchmark/run_dynamic_dev_p64.py
+
+         executor = ServicePlannerExecutor(
+             ...
+             effective_state=dict(state),
++            state_message=message,
+         )
+
+  Also fixed the execution-error diagnostic path so a failed task records a stable
+  evaluation instead of crashing while building catalogue evidence:
+-                "catalogue_evidence": catalogue_evidence(records, None, None),
++                "catalogue_evidence": {"error": "not evaluated because execution failed"},
+
+7) tests/test_p7_b_soft_state.py (new targeted regression)
+
+- retracted preference cannot be re-activated by a Planner RETRIEVE query;
+- repeated RETRIEVE is equally inert;
+- first Planner RETRIEVE persists the real user turn's preference to M9;
+- a later rewritten query does not mutate M9 without a new user turn.
+
+Result: 14 passed (soft-state 2 + planner contract 11 + role target 1).

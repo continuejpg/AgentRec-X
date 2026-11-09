@@ -1,0 +1,17 @@
+{
+  "provider": "base",
+  "model": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "adapter": null,
+  "samples": 200,
+  "schema_valid_rate": 0.33,
+  "operation_exact_match": 0.095,
+  "operation_macro_f1": 0.25418060200668896,
+  "operation_micro_f1": 0.48120300751879697,
+  "slot_accuracy": 0.12,
+  "retraction_accuracy": 1.0,
+  "unsupported_proposal_rate": 0.67,
+  "failure_or_abstention_rate": 0.67,
+  "p50_latency_ms": 2095.8595806732774,
+  "p95_latency_ms": 3045.95087999478,
+  "retraction_samples": 19
+}

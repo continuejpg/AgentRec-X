@@ -1,0 +1,362 @@
+{
+  "rule": {
+    "samples": 200,
+    "valid_json": 200,
+    "exact_match": 0.82,
+    "macro_f1_all_12": 0.75,
+    "macro_f1_supported": 1.0,
+    "supported_operation_types": [
+      "set_goal",
+      "update_goal",
+      "add_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "error_categories": {
+      "wrong_scope": 36
+    },
+    "per_operation": {
+      "set_goal": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "update_goal": {
+        "gold": 36,
+        "pred": 36,
+        "tp": 36,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "add_preference": {
+        "gold": 36,
+        "pred": 36,
+        "tp": 36,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "update_preference": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "retract_preference": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "set_constraint": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "update_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "retract_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "resolve_reference": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "clarify": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "noop": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "abstain": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    }
+  },
+  "base": {
+    "samples": 200,
+    "valid_json": 66,
+    "exact_match": 0.095,
+    "macro_f1_all_12": 0.25418060200668896,
+    "macro_f1_supported": 0.3389074693422519,
+    "supported_operation_types": [
+      "set_goal",
+      "update_goal",
+      "add_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "error_categories": {
+      "wrong_value": 19,
+      "wrong_direction": 16,
+      "wrong_attribute": 10,
+      "wrong_operation_type": 2
+    },
+    "per_operation": {
+      "set_goal": {
+        "gold": 18,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "update_goal": {
+        "gold": 36,
+        "pred": 10,
+        "tp": 10,
+        "precision": 1.0,
+        "recall": 0.2777777777777778,
+        "f1": 0.4347826086956522
+      },
+      "add_preference": {
+        "gold": 36,
+        "pred": 16,
+        "tp": 16,
+        "precision": 1.0,
+        "recall": 0.4444444444444444,
+        "f1": 0.6153846153846153
+      },
+      "update_preference": {
+        "gold": 0,
+        "pred": 2,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "retract_preference": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "set_constraint": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "update_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "retract_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "resolve_reference": {
+        "gold": 18,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "clarify": {
+        "gold": 18,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "noop": {
+        "gold": 18,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "abstain": {
+        "gold": 18,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    }
+  },
+  "sft": {
+    "samples": 200,
+    "valid_json": 194,
+    "exact_match": 0.945,
+    "macro_f1_all_12": 0.703170731707317,
+    "macro_f1_supported": 0.937560975609756,
+    "supported_operation_types": [
+      "set_goal",
+      "update_goal",
+      "add_preference",
+      "update_constraint",
+      "retract_constraint",
+      "resolve_reference",
+      "clarify",
+      "noop",
+      "abstain"
+    ],
+    "error_categories": {
+      "wrong_operation_type": 5
+    },
+    "per_operation": {
+      "set_goal": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "update_goal": {
+        "gold": 36,
+        "pred": 36,
+        "tp": 36,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "add_preference": {
+        "gold": 36,
+        "pred": 36,
+        "tp": 36,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "update_preference": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "retract_preference": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "set_constraint": {
+        "gold": 0,
+        "pred": 0,
+        "tp": 0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "update_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "retract_constraint": {
+        "gold": 19,
+        "pred": 19,
+        "tp": 19,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "resolve_reference": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "clarify": {
+        "gold": 18,
+        "pred": 7,
+        "tp": 7,
+        "precision": 1.0,
+        "recall": 0.3888888888888889,
+        "f1": 0.56
+      },
+      "noop": {
+        "gold": 18,
+        "pred": 23,
+        "tp": 18,
+        "precision": 0.782608695652174,
+        "recall": 1.0,
+        "f1": 0.878048780487805
+      },
+      "abstain": {
+        "gold": 18,
+        "pred": 18,
+        "tp": 18,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      }
+    }
+  }
+}

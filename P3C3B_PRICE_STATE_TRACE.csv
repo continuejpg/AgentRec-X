@@ -1,0 +1,3 @@
+﻿round,source,proposal_operations,m5_events,hard_constraint_count,effective_price_max,r1_constraints,eligibility_state,final_ids,status
+1,STUB_NOT_QWEN,"update_constraint price_max=30",6,1,30,"[price_max=30]",evaluated:eligible=10,ineligible=1,unresolved=4,"B00CBR1UI6|B08XJQ9HPX|B09Y53NYDK",PASS
+2,STUB_NOT_QWEN,"update_constraint price_max=50",5,1,50 expected but not confirmed,"[price_max=30] stale",evaluated but R1 stale 30,"",UNRESOLVED

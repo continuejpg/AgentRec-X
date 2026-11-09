@@ -331,14 +331,18 @@ def test_trace_schema_marks_source_and_grounding_optional() -> None:
 
 def test_browser_panel_is_named_recommendation_trace() -> None:
     web = Path(__file__).resolve().parents[1] / "recommendation/web"
-    html_js = (web / "app.js").read_text() + (web / "index.html").read_text()
+    html_js = (web / "app.js").read_text(encoding="utf-8") + (
+        web / "index.html"
+    ).read_text(encoding="utf-8")
     assert "Recommendation Trace" in html_js
-    assert "renderTrace" in (web / "app.js").read_text()
+    assert "renderTrace" in (web / "app.js").read_text(encoding="utf-8")
     assert "Agent Trace" not in html_js
 
 
 def test_browser_panel_omits_source_and_grounding_when_absent() -> None:
-    js = (Path(__file__).resolve().parents[1] / "recommendation/web/app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "recommendation/web/app.js").read_text(
+        encoding="utf-8"
+    )
     start = js.index("function renderTrace(")
     end = js.index("function renderPreferences(")
     trace_renderer = js[start:end]

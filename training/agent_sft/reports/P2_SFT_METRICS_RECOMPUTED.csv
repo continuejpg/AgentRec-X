@@ -1,0 +1,4 @@
+dataset,provider,valid_json,exact_match,macro_f1_all_12,macro_f1_supported_9,supported_types,metric_version,note
+test,rule,200,0.82,0.75,1.0,set_goal|update_goal|add_preference|update_constraint|retract_constraint|resolve_reference|clarify|noop|abstain,P2-RECOMP-1,original metrics preserved; macro over 9 supported ops
+test,base,66,0.095,0.25418060200668896,0.3389074693422519,set_goal|update_goal|add_preference|update_constraint|retract_constraint|resolve_reference|clarify|noop|abstain,P2-RECOMP-1,original metrics preserved; macro over 9 supported ops
+test,sft,194,0.945,0.703170731707317,0.937560975609756,set_goal|update_goal|add_preference|update_constraint|retract_constraint|resolve_reference|clarify|noop|abstain,P2-RECOMP-1,original metrics preserved; macro over 9 supported ops

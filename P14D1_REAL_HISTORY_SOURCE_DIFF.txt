@@ -1,0 +1,74 @@
+P14-D1 REAL-HISTORY SOURCE DIFF
+================================================================================
+Milestone: real MemRerank/Amazon-C4 Electronics Dev alignment and history reranking evaluation.
+No training/fine-tuning; no Memory/Scorer V0/Gate/Planner changes; old P14-E/E2/Eval100 data unchanged.
+
+NEW SOURCE / TEST FILES
+experiments/p14d1/__init__.py
+  bytes=50 sha256=07072937a4a29d19b5a782dd7699161946bf9e8baf2408f984f85053a818ed51
+experiments/p14d1/load_align.py
+  bytes=7708 sha256=f5d8dd79435738d240bb78b73cf974edf354374abe7ebe7f1074bf0eda32b60d
+experiments/p14d1/build_pools.py
+  bytes=8153 sha256=8f4f525f15e06181f1b6734f069c37c1372039d6d138fd5aa882566b1ea27220
+experiments/p14d1/evaluate.py
+  bytes=16785 sha256=b47a653badf6180420447ef9e9f83e59047a635890dd33eb61a41c8ddd58b3f8
+tests/test_p14d1_real_history.py
+  bytes=7315 sha256=9184073803cffc431a03c32f236d87d97aa54514c0a6fe410bbc320b4a0ddf3b
+
+NEW REPORT
+P14D1_REAL_HISTORY_REPORT.md
+  bytes=11312 sha256=5e8633681fb8d87a7ced8f91a39d15f4df89f02ea78aa5fa41a77d2f777662f8
+
+DATA (exposed MemRerank Electronics Dev; independent catalogue reused)
+data/p14d1/alignment_manifest.json
+  bytes=1358 sha256=a25f3c67dee490802cc550289986a9a82fe92df0b3742f5213529c528a5134b4
+data/p14d1/download_manifest.json
+  bytes=1294 sha256=f0f92aa42e6c617aa2cb5f3eda31af0a46d7b3cd4cfddb58d15b572bef9f0fcc
+data/p14d1/dev_tasks.jsonl
+  bytes=2595806 sha256=b721ef48c96a36c7bf48cf965852ac2fbc70b0ab50fcfc9a98ecd7170bb721a0
+data/p14d1/dev_targets.jsonl
+  bytes=102247 sha256=4388368b69976a6d64dff8beb986c57578d58e89d008ab71bbb11814e1706e61
+data/p14d1/raw/dev.jsonl
+  bytes=571545 sha256=3708c318e8afdf311cfd68926c3244af427b907b76d25348c61d4f02cebf23dd
+data/p14d1/raw/train.jsonl
+  bytes=3010772 sha256=56e5ad13a57e3fc3c8fc2d418c98d8c7131ae793dfeaf657a99ec73337c9b33a
+data/p14d1/raw/amazon_c4_user_query_dict_o3-mini_rewritten_v2.json
+  bytes=7883710 sha256=d2e96594873b0305342e2b338d809d73ec7dc8455680430a9065e9c5509e584e
+data/p14d1/raw/README.md
+  bytes=8819 sha256=eadfb7d54799194fc4a10c22d471d9bc6189175e570c7f47ac90a0b05daa9bcb
+
+RUN ARTIFACTS (git-ignored)
+runs/p14d1/candidate_manifest.json
+  bytes=36363 sha256=e1a25c42436603d2e451c2dc13ae1eb8e1d9dae52ec947328fdbc9cfced2ea8d
+runs/p14d1/pools/natural.jsonl
+  bytes=2413654 sha256=d7c4a242893248fc5bcbdd5ad695a2d189bda9e9c7677e7ecbaaaf03da6001d7
+runs/p14d1/pools/target5.jsonl
+  bytes=690708 sha256=478bec6eecd290cfee061134748143565df2b0858b194a1956204b9d5f88575b
+runs/p14d1/scores_natural.json
+  bytes=284649 sha256=4c9abd360361860b042ae62961ae59aff16b01b5040a6ba87afa93f00a18ba64
+runs/p14d1/scores_target5.json
+  bytes=75282 sha256=a419e15631394087ebc96ef9d416d959a2dffd36303cda324d71b7f4c81b50ba
+runs/p14d1/comparison.json
+  bytes=453216 sha256=a9625a67ac539cd151a36247183bcb151b85604b9d66a8239ef9f828651414bf
+runs/p14d1/per_task.jsonl
+  bytes=334084 sha256=89b56772724174b82d8599b21c8152bb567dea886dd2a753e93e47c9b04b5dd9
+runs/p14d1/blind_review.json
+  bytes=126650 sha256=9e4fdecba9644da01196bb3ed6b06645d2107331b048ac3e2d6a9a013674db11
+runs/p14d1/model_manifest.json
+  bytes=1692 sha256=79d29e292711aedc275ffa0d4d07141cf2913f9677cc2f1bcf6b84a73a58f450
+
+ALIGNMENT / LIMITS
+- 135/135 released Dev rows matched P13-R by user_id/qid/pos_product; generated original/rewritten query mapping 135/135.
+- target parent_asin in independent catalogue 134/135; target in BM25 top-20 10/135, top-100 20/135.
+- history: 14,945 items, 5,847 verified; only 126 items (0.84%) have catalogue text; 50/135 tasks have any history metadata.
+- zero target-in-history, zero history timestamp >= target, zero chronological violations; target timestamp provenance is P13-R/Amazon-C4, not independently recomputed.
+
+RESULTS
+- Natural top-20: Qwen3 Query Only Hit@1 6/135; Qwen3+History 8/135; conditional on 10 reachable targets: 6/10 vs 8/10.
+- Target-included 1-in-5 (n=134): Query Only 108, History 101; MRR 0.891 vs 0.861; history gave no gain.
+- V0 weak history proxy: target5 7/134, natural 1/135; not credible as V0 real-history capability.
+- Rewritten query Query Only target5 94/134 vs original 108/134; not mixed with original.
+
+NO FABRICATED METRICS
+- 7 target-unreachable natural samples are not called retrieval successes; target-included protocol is explicitly conditional.
+- 25 blind review cases are pending; no human_verified claim. Public Test and original Reserved Test were not run.

@@ -1,0 +1,525 @@
+{
+ "schema": "agentrecx.p14a.data_manifest.v1",
+ "generated_at_local": "2026-11-08T17:51:31+0800",
+ "repo_head": "4dec6d2081902f1e89265a06ea4ded595087dd43",
+ "notice": "Large data/index/trajectory artifacts are intentionally NOT committed (data/ and runs/ are git-ignored); this manifest records their paths, sizes and hashes so they are reproducible and auditable.",
+ "dataset": {
+  "benchmark": "Shopping Companion (yuzhan2205/Shopping-companion)",
+  "source_repository": "https://github.com/Jarvis33yu/Shopping-Companion",
+  "split_used": "train",
+  "test_split_used": false,
+  "source_parquet": {
+   "path": "C:\\Users\\zxt\\AppData\\Local\\Temp\\p14a_scratch\\train.parquet",
+   "resolved_path": "C:\\Users\\zxt\\AppData\\Local\\Temp\\p14a_scratch\\train.parquet",
+   "bytes": 5943374,
+   "sha256": "bc87aad3685da0176df4777d05942c8aa05d4dd4ac3230d6dc96a78f33214377",
+   "rows": 1600
+  },
+  "converted": {
+   "train_tasks": {
+    "path": "data/p14a/dataset/train_tasks.jsonl",
+    "rows": 800,
+    "bytes": 4332995,
+    "sha256": "8caeee244870ab389e3ccb9395258e2b835d573f286f0bef08bba617d11ed074",
+    "schema": "agentrecx.p14a.shopping_task.v1",
+    "visibility": "agent"
+   },
+   "train_eval": {
+    "path": "data/p14a/dataset/train_eval.jsonl",
+    "rows": 800,
+    "bytes": 11702561,
+    "sha256": "ee4a9e0bd144f25e2330d4070b0281878358d81e745cc5c419b90d9f501815f6",
+    "schema": "agentrecx.p14a.eval.v1",
+    "visibility": "evaluator-only",
+    "eval_text_contains_oracle_marker": true
+   }
+  },
+  "row_counts": {
+   "source_rows": 1600,
+   "tasks": 800,
+   "stage_1_instances": 800,
+   "stage_2_instances": 800,
+   "agent_visible_rows": 800,
+   "evaluator_only_rows": 800
+  },
+  "pairing": null,
+  "oracle_isolation": {
+   "oracle_memory_blocks_removed": {
+    "stage_2_message_count_before": 4,
+    "stage_2_message_count_after": 3,
+    "stage_2_removed_message_role": "user",
+    "oracle_blocks_removed": 800,
+    "oracle_chars_removed": {
+     "total": 3098889,
+     "min": 1264,
+     "max": 7862,
+     "mean": 3873.611
+    },
+    "agent_visible_file": {
+     "top_level_keys_exact": true,
+     "forbidden_keys_found": [],
+     "forbidden_substrings": {
+      "The most relevant user dialogue memories are as follows:": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      },
+      "ground_truth": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      },
+      "reward_model": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      },
+      "product_id": {
+       "inside_official_system_prompts": 3200,
+       "outside_official_system_prompts": 0
+      },
+      "oracle_memory_block": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      },
+      "stage_2_original_prompt_sha256": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      },
+      "answer_session_ids": {
+       "inside_official_system_prompts": 0,
+       "outside_official_system_prompts": 0
+      }
+     },
+     "official_system_prompts": {
+      "usage": "each row carries the stage_1 prompt once and the stage_2 prompt once",
+      "stage_1": {
+       "chars": 1554,
+       "sha256": "a26b6e2c70181635f71296d3bb4ec5d3429276ce59b95caa15e98b96916a947c",
+       "rows_using_exact_prompt": 800
+      },
+      "stage_2": {
+       "chars": 2108,
+       "sha256": "61b32df1b775b60a0a4f1a400a262ea11477e9439d4fd313129c6b65e5ec4632",
+       "rows_using_exact_prompt": 800,
+       "literal_product_id_occurrences_in_prompt": 4
+      }
+     },
+     "official_system_prompt_note": "Both system prompts are the official release text, byte-identical. The stage_2 system prompt documents the answer format and therefore contains the literal token 'product_id' (4 occurrences); all forbidden-substring occurrences are confined to these two official prompt strings and are counted here. The prompts are NOT scrubbed because that would change the official task instructions.",
+     "ground_truth_identity_scan": {
+      "unique_product_ids_checked": 1449,
+      "unique_product_names_checked": 1449,
+      "product_ids_in_agent_file": 0,
+      "product_names_in_agent_file": 0
+     },
+     "oracle_text_fingerprints_checked": 800,
+     "oracle_text_fingerprints_in_agent_file": 0,
+     "dialogue_session_markers_in_agent_file": {
+      "[Date: ": 0,
+      "\\nuser: ": 0,
+      "\\nassistant: ": 0
+     },
+     "evaluator_only_markers_in_agent_file": {
+      "oracle_memory_block_sha256": 0,
+      "stage_2_original_prompt_sha256": 0,
+      "\"ground_truth\"": 0,
+      "\"reward_model\"": 0
+     },
+     "path": "data\\p14a\\dataset\\train_tasks.jsonl",
+     "rows": 800,
+     "sha256": "8caeee244870ab389e3ccb9395258e2b835d573f286f0bef08bba617d11ed074"
+    },
+    "evaluator_only_file": {
+     "rows": 800,
+     "rows_with_oracle_memory_block": 800,
+     "rows_with_ground_truth_object": 800,
+     "oracle_memory_block_sha256_matches": 800,
+     "unique_oracle_memory_blocks": 800,
+     "stage_2_original_prompt_is_reversible": 800,
+     "eval_text_contains_oracle_marker": true,
+     "path": "data\\p14a\\dataset\\train_eval.jsonl",
+     "sha256": "ee4a9e0bd144f25e2330d4070b0281878358d81e745cc5c419b90d9f501815f6"
+    },
+    "assertion": {
+     "passed": true,
+     "description": "After writing, the converter re-opened train_tasks.jsonl and raised unless: exact top-level keys; no forbidden JSON key; no forbidden substring outside the two official system prompts; no ground-truth product id/name; no oracle-memory dialogue fingerprint; no dialogue-session marker; no evaluator-only field name. train_eval.jsonl was re-opened and its oracle sha256, ground_truth and prompt-reversibility were re-verified."
+    }
+   },
+   "converter_assertion": "converter re-reads train_tasks.jsonl and fails on leaks"
+  },
+  "agent_visible_path": "data/p14a/dataset/train_tasks.jsonl",
+  "evaluator_only_path": "data/p14a/dataset/train_eval.jsonl",
+  "manifest_path": "data/p14a/dataset/manifest.json"
+ },
+ "catalogue": {
+  "source_file": {
+   "dataset_id": "yuzhan2205/Shopping-companion",
+   "revision": "main",
+   "hf_mirror": "https://hf-mirror.com",
+   "url": "https://hf-mirror.com/datasets/yuzhan2205/Shopping-companion/resolve/main/data/products.jsonl",
+   "file_path": "data/products.jsonl",
+   "total_size_bytes": 20030340587,
+   "etag": "\"8d597f78d1d67407c976aa5e367269cf88271821009d7226d0f515757887c596\"",
+   "accept_ranges": "bytes",
+   "probe_method": "HEAD",
+   "http_status": 200
+  },
+  "selection_method": "contiguous byte prefix; LIMITED catalogue, NOT the full 1,298,797-product catalogue",
+  "limitation": "LIMITED catalogue: this artifact holds only a contiguous byte prefix of the official dataset file. It is NOT the full 1,298,797-product catalogue and must not be described as such.",
+  "prefix": {
+   "requested_max_bytes": 1288490188,
+   "effective_target_bytes": 1288490188,
+   "final_bytes": 1288490188,
+   "fraction_of_source_file": 0.064327,
+   "complete_lines_bytes": 1288469941,
+   "trailing_partial_bytes_dropped": 20247,
+   "sha256": "86804471783eb56948e42e3e0366e7bb2d2c2bf4d488255900ef5fb4589b526d",
+   "path": "data\\p14a\\catalogue\\products_prefix.jsonl",
+   "raw_artifact_kept": true
+  },
+  "download": {
+   "chunk_size_bytes": 8388608,
+   "workers": 10,
+   "chunks_requested": 154,
+   "chunks_completed": 154,
+   "resumed_from_byte": 0,
+   "downloaded_bytes": 1288490188,
+   "download_seconds": 86.593,
+   "aggregate_mibps": 14.191,
+   "early_stopped": false,
+   "early_stop_reason": null,
+   "throughput_mibps_samples": [
+    16.596,
+    14.579,
+    14.956,
+    15.402,
+    15.513,
+    15.089,
+    15.119,
+    14.929,
+    14.871,
+    14.463,
+    14.771,
+    14.838,
+    14.884,
+    14.341,
+    14.543,
+    14.191
+   ],
+   "reused_existing_prefix": false
+  },
+  "coverage": null,
+  "products": null,
+  "docs": null,
+  "manifest_path": "data/p14a/catalogue/manifest.json",
+  "docs_path": "data/p14a/catalogue/docs.jsonl",
+  "raw_prefix_path": "data/p14a/catalogue/products_prefix.jsonl",
+  "loading_paths": {
+   "catalogue_loader": "recommendation.shopping_companion.catalogue.ShoppingCompanionCatalogue.load",
+   "search_tool": "recommendation.shopping_companion.search.ShoppingCompanionSearchTool",
+   "product_info_tool": "recommendation.shopping_companion.product_info.ShoppingCompanionProductInfoTool"
+  }
+ },
+ "index": {
+  "type": "BM25 (existing recommendation.control.catalog_search.CatalogSearchSource)",
+  "inverted_index_location": "in-process, rebuilt lazily per process (no on-disk index artifact)",
+  "indexed_fields": [
+   "title",
+   "store",
+   "main_category",
+   "categories",
+   "features",
+   "description"
+  ],
+  "indexed_products": 81637,
+  "full_catalogue_products": 1298797,
+  "coverage_fraction_of_full_catalogue": 0.062856,
+  "load_seconds": 8.201,
+  "build_seconds": 3.982,
+  "query_latency_ms": {
+   "mean": 40.067,
+   "median": 32.574,
+   "max": 115.679,
+   "all": [
+    30.336,
+    25.967,
+    34.726,
+    26.986,
+    30.423,
+    34.913,
+    37.417,
+    27.739,
+    36.488,
+    115.679
+   ]
+  },
+  "query_hit_count_mean": 10.0,
+  "probe_path": "runs/p14a/logs/search_probe.json",
+  "resources": {
+   "peak_rss_mb": 1523.2,
+   "python": "3.10.12",
+   "platform": "linux"
+  },
+  "probe_environment": "WSL Ubuntu-22.04, CPU-only (no GPU used)"
+ },
+ "memory": {
+  "source": "M5 event state + M9 preference memory adapters (reused, no second store)",
+  "released_history_corpus": "NOT RELEASED by the dataset",
+  "normal_mode_status": "history_unavailable",
+  "oracle_memory_location": "data/p14a/dataset/train_eval.jsonl (evaluator-only)",
+  "oracle_diagnostic_runtime_wired": false,
+  "reason": "the released benchmark ships train/test parquet + products.jsonl only; the official memory service needs data/shopping_companion_s_cleaned.jsonl (haystack sessions) which is not part of the release"
+ },
+ "e2e_runs": [
+  {
+   "task_id": "0014b39c4159d54fd5eafcd6c2bd6699_1",
+   "question_type": "single_product",
+   "question": "Current Date: 2025/08/30 (Sat)\ncollar",
+   "mode": "real_limited_catalogue",
+   "terminal": {
+    "status": "awaiting_clarification",
+    "succeeded": false,
+    "termination": "ASK",
+    "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed"
+   },
+   "tool_calls": 2,
+   "ledger_entries": 0,
+   "recommendations": 0,
+   "timing_seconds": 0.0003,
+   "trajectory_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1.jsonl",
+   "trajectory_sha256": "92fb80b856cb2b11dc96abc67d20a7e13de47614fc6424ac8d93e1d4121287ba",
+   "evaluation_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1.eval.json",
+   "evaluation": {
+    "target_in_search_hits": false,
+    "target_in_recommendation": false,
+    "target_rank_in_search": null,
+    "recommendation_top1": null,
+    "verified_eligible_count": null,
+    "ineligible_count": null
+   },
+   "run_resource_logs": [
+    {
+     "path": "runs/p14a/logs/e2e_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "0:56.06",
+     "max_rss_mb": 1546.4
+    },
+    {
+     "path": "runs/p14a/logs/e2e_default_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "1:13.64",
+     "max_rss_mb": 939.0
+    },
+    {
+     "path": "runs/p14a/logs/e2e_diagnostic_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "1:13.49",
+     "max_rss_mb": 1546.5
+    }
+   ],
+   "labeled_limitations": [
+    "stage_1 ended awaiting user clarification (missing history/answer); stage_2 was not executed as the task result"
+   ],
+   "awaiting_clarification": true,
+   "stage_2_executed": false,
+   "stage_2_diagnostic_only": false
+  },
+  {
+   "task_id": "0014b39c4159d54fd5eafcd6c2bd6699_1",
+   "question_type": "single_product",
+   "question": "Current Date: 2025/08/30 (Sat)\ncollar",
+   "mode": "real_limited_catalogue",
+   "terminal": {
+    "status": "awaiting_clarification",
+    "succeeded": false,
+    "termination": "FINALIZE",
+    "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed; stage_2 ran only as a labelled diagnostic continuation"
+   },
+   "tool_calls": 4,
+   "ledger_entries": 10,
+   "recommendations": 1,
+   "timing_seconds": 4.1364,
+   "trajectory_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1_diagnostic_stage2.jsonl",
+   "trajectory_sha256": "3cc038edd066ca971ca7e2fc267a9d069f30ce33e0d3b1bd27e320d23a77f7e2",
+   "evaluation_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1_diagnostic_stage2.eval.json",
+   "evaluation": {
+    "target_in_search_hits": false,
+    "target_in_recommendation": false,
+    "target_rank_in_search": null,
+    "recommendation_top1": "5120560630",
+    "verified_eligible_count": 10,
+    "ineligible_count": 0
+   },
+   "run_resource_logs": [
+    {
+     "path": "runs/p14a/logs/e2e_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "0:56.06",
+     "max_rss_mb": 1546.4
+    },
+    {
+     "path": "runs/p14a/logs/e2e_default_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "1:13.64",
+     "max_rss_mb": 939.0
+    },
+    {
+     "path": "runs/p14a/logs/e2e_diagnostic_0014b39c4159d54fd5eafcd6c2bd6699_1.time.log",
+     "wall_clock": "1:13.49",
+     "max_rss_mb": 1546.5
+    }
+   ],
+   "labeled_limitations": [
+    "stage_1 ended awaiting user clarification (missing history/answer); stage_2 was not executed as the task result",
+    "stage_2 executed only as an explicitly-labelled diagnostic continuation without a user answer; this run is not a completed task"
+   ],
+   "awaiting_clarification": true,
+   "stage_2_executed": true,
+   "stage_2_diagnostic_only": true
+  },
+  {
+   "task_id": "0014b39c4159d54fd5eafcd6c2bd6699_2",
+   "question_type": "add_on_deals",
+   "question": "Current Date: 2025/08/30 (Sat)\nProduct bundle includes: drill, nail gun, and lawn mower. Voucher: applies to products from the same shop, valid when total price exceeds $10, 10% discount capped at $10. Budget: $18",
+   "mode": "real_limited_catalogue",
+   "terminal": {
+    "status": "awaiting_clarification",
+    "succeeded": false,
+    "termination": "ASK",
+    "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed"
+   },
+   "tool_calls": 2,
+   "ledger_entries": 0,
+   "recommendations": 0,
+   "timing_seconds": 0.0004,
+   "trajectory_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_2.jsonl",
+   "trajectory_sha256": "5c3c771b18a9b46f24a23bf2412a04b004100fbd60a7f395029a3215bac08806",
+   "evaluation_path": "runs/p14a/trajectories/real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_2.eval.json",
+   "evaluation": {
+    "target_in_search_hits": false,
+    "target_in_recommendation": false,
+    "target_rank_in_search": null,
+    "recommendation_top1": null,
+    "verified_eligible_count": null,
+    "ineligible_count": null
+   },
+   "run_resource_logs": [
+    {
+     "path": "runs/p14a/logs/e2e_0014b39c4159d54fd5eafcd6c2bd6699_2.time.log",
+     "wall_clock": "1:03.63",
+     "max_rss_mb": 1549.3
+    },
+    {
+     "path": "runs/p14a/logs/e2e_default_0014b39c4159d54fd5eafcd6c2bd6699_2.time.log",
+     "wall_clock": "1:07.91",
+     "max_rss_mb": 939.1
+    }
+   ],
+   "labeled_limitations": [
+    "add_on_deals structural smoke only: bundle construction and voucher optimization are not implemented in P14-A",
+    "stage_1 ended awaiting user clarification (missing history/answer); stage_2 was not executed as the task result"
+   ],
+   "awaiting_clarification": true,
+   "stage_2_executed": false,
+   "stage_2_diagnostic_only": false
+  }
+ ],
+ "isolation_check": {
+  "path": "runs/p14a/logs/isolation_check.json",
+  "dataset": {
+   "tasks": 800,
+   "eval_rows": 800,
+   "ids_equal": true,
+   "unique_task_ids": 800,
+   "question_types": {
+    "single_product": 400,
+    "add_on_deals": 400
+   },
+   "target_id_count": 1449,
+   "target_id_hits_in_agent_visible_payload": 0,
+   "oracle_marker_hits_in_agent_file": 0,
+   "ground_truth_key_hits_in_agent_file": 0,
+   "oracle_dialogue_fingerprint_matches_in_agent_file": 0,
+   "oracle_blocks_present_in_eval_file": 800,
+   "stage_visible_per_task": {
+    "count_1": 800
+   },
+   "agent_visible_hits_expected_zero": true
+  },
+  "trajectories": [
+   {
+    "file": "real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1.jsonl",
+    "oracle_marker_hits": 0,
+    "ground_truth_key_hits": 0,
+    "target_id_hits": 0,
+    "mode": "real_limited_catalogue",
+    "terminal": {
+     "status": "awaiting_clarification",
+     "succeeded": false,
+     "termination": "ASK",
+     "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed"
+    }
+   },
+   {
+    "file": "real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_1_diagnostic_stage2.jsonl",
+    "oracle_marker_hits": 0,
+    "ground_truth_key_hits": 0,
+    "target_id_hits": 0,
+    "mode": "real_limited_catalogue",
+    "terminal": {
+     "status": "awaiting_clarification",
+     "succeeded": false,
+     "termination": "FINALIZE",
+     "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed; stage_2 ran only as a labelled diagnostic continuation"
+    }
+   },
+   {
+    "file": "real_limited_catalogue_0014b39c4159d54fd5eafcd6c2bd6699_2.jsonl",
+    "oracle_marker_hits": 0,
+    "ground_truth_key_hits": 0,
+    "target_id_hits": 0,
+    "mode": "real_limited_catalogue",
+    "terminal": {
+     "status": "awaiting_clarification",
+     "succeeded": false,
+     "termination": "ASK",
+     "reason": "stage_1 requires a user answer (preference history unavailable in the released benchmark); no user answer was available, so the task is awaiting clarification rather than completed"
+    }
+   }
+  ]
+ },
+ "blocker_verification_round": {
+  "report": "P14A_BLOCKER_VERIFICATION.md",
+  "verdicts": {
+   "MEMORY_DATA": "NOT_PUBLICLY_FOUND",
+   "FULL_CATALOGUE": "FEASIBLE",
+   "AGENT_TRAJECTORY": "FIXED"
+  },
+  "evidence": [
+   "runs/p14a/logs/longmemeval_provenance_check.json",
+   "runs/p14a/logs/catalogue_coverage.json",
+   "runs/p14a/logs/isolation_check.json"
+  ],
+  "public_base_histories": {
+   "dataset": "xiaowu0162/longmemeval-cleaned",
+   "license": "mit",
+   "file": "longmemeval_s_cleaned.json",
+   "bytes": 277383467,
+   "sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+   "records": 500,
+   "note": "public base only; the released benchmark's merged history corpus and LLM-generated preference dialogues are not released"
+  },
+  "fixes": [
+   "single-product FINALIZE now presents exactly 1 product (BridgeConfig.final_count=1)",
+   "stage_1 ASK -> task terminal awaiting_clarification; stage_2 not executed by default",
+   "explicit --diagnostic-stage2-without-preferences labels stage_2 as diagnostic and never counts it as success"
+  ]
+ },
+ "environment": {
+  "host": "Windows 11 (workspace D:\\IT\\CODE\\PROJECTION\\agentrec\\X) + WSL2 Ubuntu-22.04",
+  "python": "3.10.12 (repository .venv)",
+  "cpu_only": true,
+  "gpu_used": false,
+  "autodl_used": false,
+  "full_catalogue_indexing": "not attempted in P14-A"
+ },
+ "reproduce": {
+  "prepare_dataset": "PYTHONPATH=<pyarrow-libs> python experiments/p14a_prepare_dataset.py --parquet <train.parquet> --out-dir data/p14a/dataset",
+  "build_catalogue": "python experiments/p14a_build_catalogue.py --fresh --max-bytes 1288490188 --workers 10 --chunk-size 8388608",
+  "run_task": "cd repo && PYTHONPATH=. .venv/bin/python experiments/p14a_run_task.py --task-id <task_id> --mode real_limited_catalogue",
+  "probe": "cd repo && PYTHONPATH=. .venv/bin/python experiments/p14a_probe_search.py",
+  "tests": "cd repo && OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests/test_p14a_*.py -q --no-header -p no:cacheprovider"
+ }
+}

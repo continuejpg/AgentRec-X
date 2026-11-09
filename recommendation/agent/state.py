@@ -160,6 +160,10 @@ class AgentGraphState(TypedDict, total=False):
     #: Optional application-supplied identifier of this user turn, used for
     #: idempotent preference-memory writes.  It is not model output.
     turn_id: str
+    #: Planner-retrieval seam: the real user text that may be persisted to M9.
+    memory_user_message: str
+    #: Planner-retrieval seam: suppress M9 writes for rewritten RETRIEVE queries.
+    skip_memory_persist: bool
 
     # -- written by the decision node ------------------------------------- #
     decision: AgentDecision

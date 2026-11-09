@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agentrecx.preference_operation.v1",
+  "title": "AgentRec-X Shopping Preference Operation Proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operations"],
+  "properties": {
+    "schema_version": {"const": "agentrecx.preference_operation.v1"},
+    "operations": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/operation"}
+    },
+    "clarification": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attribute", "question", "choices"],
+          "properties": {
+            "attribute": {"type": "string", "enum": ["product_type", "role", "price", "weight", "color", "material", "brand", "feature"]},
+            "question": {"type": "string", "minLength": 1, "maxLength": 240},
+            "choices": {"type": "array", "minItems": 2, "maxItems": 5, "items": {"type": "string", "minLength": 1, "maxLength": 120}}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op", "attribute", "value", "direction", "scope", "evidence"],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "set_goal",
+            "update_goal",
+            "add_preference",
+            "update_preference",
+            "retract_preference",
+            "set_constraint",
+            "update_constraint",
+            "retract_constraint",
+            "resolve_reference",
+            "clarify",
+            "noop",
+            "abstain"
+          ]
+        },
+        "attribute": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["product_type", "role", "price_max", "price_min", "weight", "color", "material", "brand", "feature"]}
+          ]
+        },
+        "value": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "maxLength": 120},
+            {"type": "number"}
+          ]
+        },
+        "direction": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["minimize", "maximize", "exact"]}
+          ]
+        },
+        "scope": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["task", "long_term"]}
+          ]
+        },
+        "evidence": {"type": "string", "minLength": 1, "maxLength": 240},
+        "reference": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["previous_candidate_1", "previous_candidate_2", "previous_candidate_3", "previous_candidate_4", "previous_candidate_5", "previous_state"]}
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "enum": ["no_change", "declined_preference", "ambiguous_goal", "unsupported_request", "cross_turn_reference"]}
+          ]
+        }
+      }
+    }
+  }
+}

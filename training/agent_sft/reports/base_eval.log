@@ -1,0 +1,22 @@
+Loading weights:   0%|          | 0/427 [00:00<?, ?it/s]Loading weights:   0%|          | 1/427 [00:00<03:53,  1.82it/s]Loading weights:   0%|          | 2/427 [00:00<03:18,  2.15it/s]Loading weights:   3%|▎         | 14/427 [00:01<00:20, 19.81it/s]Loading weights:   6%|▋         | 27/427 [00:01<00:10, 37.80it/s]Loading weights:   9%|▊         | 37/427 [00:01<00:07, 49.86it/s]Loading weights:  11%|█         | 46/427 [00:01<00:07, 49.08it/s]Loading weights:  13%|█▎        | 54/427 [00:01<00:06, 54.06it/s]Loading weights:  16%|█▌        | 67/427 [00:01<00:05, 66.68it/s]Loading weights:  19%|█▊        | 80/427 [00:01<00:04, 75.49it/s]Loading weights:  21%|██        | 90/427 [00:01<00:04, 78.81it/s]Loading weights:  23%|██▎       | 99/427 [00:02<00:04, 68.58it/s]Loading weights:  25%|██▌       | 107/427 [00:02<00:04, 68.47it/s]Loading weights:  28%|██▊       | 120/427 [00:02<00:03, 77.98it/s]Loading weights:  31%|███       | 133/427 [00:02<00:03, 77.79it/s]Loading weights:  34%|███▍      | 147/427 [00:02<00:03, 86.92it/s]Loading weights:  37%|███▋      | 156/427 [00:02<00:03, 72.84it/s]Loading weights:  40%|████      | 172/427 [00:03<00:03, 84.44it/s]Loading weights:  43%|████▎     | 182/427 [00:03<00:02, 85.60it/s]Loading weights:  45%|████▍     | 191/427 [00:03<00:02, 81.32it/s]Loading weights:  47%|████▋     | 201/427 [00:03<00:02, 81.51it/s]Loading weights:  49%|████▉     | 210/427 [00:03<00:02, 74.18it/s]Loading weights:  53%|█████▎    | 225/427 [00:03<00:02, 85.39it/s]Loading weights:  55%|█████▌    | 236/427 [00:03<00:02, 89.55it/s]Loading weights:  58%|█████▊    | 246/427 [00:03<00:02, 87.64it/s]Loading weights:  60%|█████▉    | 255/427 [00:04<00:02, 73.91it/s]Loading weights:  62%|██████▏   | 263/427 [00:04<00:02, 72.71it/s]Loading weights:  65%|██████▌   | 278/427 [00:04<00:01, 78.31it/s]Loading weights:  68%|██████▊   | 292/427 [00:04<00:01, 87.52it/s]Loading weights:  70%|███████   | 301/427 [00:04<00:01, 85.90it/s]Loading weights:  73%|███████▎  | 310/427 [00:04<00:01, 82.05it/s]Loading weights:  75%|███████▍  | 319/427 [00:04<00:01, 74.34it/s]Loading weights:  78%|███████▊  | 332/427 [00:04<00:01, 80.39it/s]Loading weights:  81%|████████  | 344/427 [00:05<00:00, 84.35it/s]Loading weights:  83%|████████▎ | 355/427 [00:05<00:00, 90.47it/s]Loading weights:  85%|████████▌ | 365/427 [00:05<00:00, 65.01it/s]Loading weights:  90%|████████▉ | 384/427 [00:05<00:00, 75.61it/s]Loading weights:  93%|█████████▎| 399/427 [00:05<00:00, 85.62it/s]Loading weights:  96%|█████████▋| 412/427 [00:06<00:00, 78.90it/s]Loading weights:  99%|█████████▊| 421/427 [00:06<00:00, 74.26it/s]Loading weights: 100%|██████████| 427/427 [00:06<00:00, 68.83it/s]
+[transformers] `causal_conv1d_fn` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `chunk_gated_delta_rule` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+[transformers] `causal_conv1d_update` is falling back to its reference PyTorch implementation because `causal_conv1d` is not installed. This is correct but much slower; install `causal_conv1d` for the optimized kernel.
+[transformers] `fused_recurrent_gated_delta_rule` is falling back to its reference PyTorch implementation because `flash-linear-attention` is not installed. This is correct but much slower; install `flash-linear-attention` for the optimized kernel.
+{
+  "provider": "base",
+  "model": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "adapter": null,
+  "samples": 200,
+  "schema_valid_rate": 0.33,
+  "operation_exact_match": 0.095,
+  "operation_macro_f1": 0.25418060200668896,
+  "operation_micro_f1": 0.48120300751879697,
+  "slot_accuracy": 0.12,
+  "retraction_accuracy": 1.0,
+  "unsupported_proposal_rate": 0.67,
+  "failure_or_abstention_rate": 0.67,
+  "p50_latency_ms": 2.0958595806732774,
+  "p95_latency_ms": 3.0459508799947796,
+  "retraction_samples": 19
+}

@@ -14,6 +14,7 @@ estimate.  The values it exposes are copied from the catalogue or are explicitly
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 from urllib.parse import quote
@@ -38,6 +39,7 @@ __all__ = [
     "build_preference_prompt",
     "choose_preference_action",
     "preference_from_option",
+    "price_evidence_note",
     "rank_with_task_preference",
     "rank_with_task_preferences",
     "resolve_preference_option",
@@ -64,9 +66,74 @@ _CONTEXT_TERMS: dict[str, tuple[str, ...]] = {
         "camping", "backpacking", "carry",
     ),
     "color": ("color", "colour", "red", "blue", "black", "green", "style"),
-    "material": ("material", "leather", "cotton", "fabric", "waterproof", "durable"),
+    "material": ("material", "leather", "cotton", "fabric", "waterproof"),
     "brand": ("brand", "manufacturer", "make"),
 }
+
+#: Explicit user-need words.  These are stronger than the generic context terms above:
+#: when one is present, the question must use that dimension if it is trustworthy, and
+#: must not silently fall back to an unrelated, easier-to-compare dimension.
+_NEED_ATTRIBUTE_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "weight",
+        (
+            "lightweight",
+            "light weight",
+            "lighter",
+            "light",
+            "portable",
+            "less heavy",
+            "heaviness",
+        ),
+    ),
+    (
+        "price",
+        (
+            "price",
+            "budget",
+            "cheap",
+            "cheaper",
+            "cost",
+            "afford",
+            "dollar",
+            "under a budget",
+            "tight budget",
+        ),
+    ),
+    (
+        "color",
+        ("color", "colour", "red", "blue", "black", "green"),
+    ),
+    (
+        "material",
+        ("material", "leather", "cotton", "fabric", "waterproof", "mesh", "nylon"),
+    ),
+    (
+        "brand",
+        ("brand", "manufacturer", "make"),
+    ),
+)
+
+#: Durability is not an accepted preference attribute.  It is only usable when a
+#: trusted attribute actually provides durability evidence; otherwise the policy skips
+#: rather than pretending that a generic material difference answers it.
+_DURABILITY_TERMS = re.compile(
+    r"\b(?:durab\w*|sturdy|rugged|tough|wear[- ]?resistant|reinforced)\b",
+    re.IGNORECASE,
+)
+
+
+def _explicit_need_attributes(message: str) -> tuple[str, ...]:
+    text = " ".join(str(message or "").casefold().split())
+    attributes: list[str] = []
+    for attribute, terms in _NEED_ATTRIBUTE_TERMS:
+        if any(term in text for term in terms):
+            attributes.append(attribute)
+    return tuple(attributes)
+
+
+def _requests_durability(message: str) -> bool:
+    return bool(_DURABILITY_TERMS.search(str(message or "")))
 
 _NUMERIC_DIRECTIONS = {
     "price": ("lower", "higher"),
@@ -342,8 +409,16 @@ def _task_preference(attribute: str, action: str, value: Any, option_id: str, la
     )
 
 
-def _options_for_row(attribute: str, row: Any, values: Mapping[str, Any]) -> tuple[PreferenceOption, ...]:
-    kind = str(row.comparison.get("kind") or "") if row.comparison else ""
+def _options_for_row(
+    attribute: str,
+    row: Any,
+    values: Mapping[str, Any],
+    *,
+    comparison_kind: str | None = None,
+) -> tuple[PreferenceOption, ...]:
+    kind = comparison_kind or (
+        str(row.comparison.get("kind") or "") if row.comparison else ""
+    )
     options: list[PreferenceOption] = []
     if kind == "numeric":
         directions = _NUMERIC_DIRECTIONS.get(attribute, ("lower", "higher"))
@@ -405,17 +480,39 @@ def _decide_dimension(
     top_k: int,
     round_no: int,
 ) -> PreferencePrompt | None:
-    if row.status != "comparable" or row.comparison is None:
+    partial_price = attribute == "price" and row.status == "partial"
+    if row.status != "comparable" and not partial_price:
         return None
-    values = dict(row.comparison.get("values") or {})
-    if len(values) < 2 or any(identity not in values for identity in identities):
+    if partial_price:
+        values = {
+            identity: fact.value
+            for identity, fact in row.facts.items()
+            if identity in identities
+            and fact.status == "value"
+            and fact.value_type == "number"
+        }
+        comparison_kind = "numeric"
+    else:
+        if row.comparison is None:
+            return None
+        values = dict(row.comparison.get("values") or {})
+        comparison_kind = "numeric" if str(row.comparison.get("kind") or "") == "numeric" else "categorical"
+    compared = tuple(identity for identity in identities if identity in values)
+    if len(compared) < 2:
         return None
-    kind = str(row.comparison.get("kind") or "")
-    comparison_kind = "numeric" if kind == "numeric" else "categorical"
-    difference = _difference_score(attribute, list(values.values()))
+    if len(values) < 2:
+        return None
+    if not partial_price and any(identity not in values for identity in identities):
+        return None
+    difference = _difference_score(attribute, [values[identity] for identity in compared])
     if difference <= 0:
         return None
-    options = _options_for_row(attribute, row, values)
+    options = _options_for_row(
+        attribute,
+        row,
+        {identity: values[identity] for identity in compared},
+        comparison_kind=comparison_kind,
+    )
     preference_options = [option for option in options if option.action in {"lower", "higher", "value"}]
     counterfactual: dict[str, tuple[str, ...]] = {}
     impact = 0.0
@@ -433,7 +530,17 @@ def _decide_dimension(
         return None
 
     relevance = _relevance(message, attribute)
-    coverage = min(1.0, len(values) / len(identities))
+    coverage = min(1.0, len(compared) / len(identities))
+    reason = _reason_for(
+        attribute,
+        comparison_kind,
+        {identity: values[identity] for identity in compared},
+    )
+    if len(compared) < len(identities):
+        reason += (
+            f" Price is recorded for {len(compared)} of {len(identities)} candidates; "
+            "the remaining candidates stay UNKNOWN and are not compared by price."
+        )
     # Interaction cost is one bounded question; it is not hidden in a learned score.
     interaction = "SHOW_CONTRAST"
     explanation = None
@@ -445,15 +552,15 @@ def _decide_dimension(
             "Your previous task choice is already applied; this remaining difference "
             "can still change the current top results."
         )
-    elif len(identities) == 2 and relevance >= 2:
+    elif len(compared) == 2 and relevance >= 2:
         interaction = "ASK_DIRECT"
     utility = (relevance * coverage * difference * impact) / 1.0
     return PreferencePrompt(
         attribute=attribute,
         label=_ATTRIBUTE_LABELS[attribute],
-        reason=_reason_for(attribute, kind, values),
-        products=identities,
-        values=values,
+        reason=reason,
+        products=compared,
+        values={identity: values[identity] for identity in compared},
         comparison_kind=comparison_kind,
         options=options,
         interaction=interaction,
@@ -534,6 +641,30 @@ def choose_preference_action(
             None,
             "no reliable attribute difference changes the current top-K",
         )
+    needs = _explicit_need_attributes(message)
+    if _requests_durability(message) and not needs:
+        return PreferenceDecision(
+            "SKIP",
+            None,
+            "durability was requested but no trusted durability attribute is available",
+        )
+    if needs:
+        preferred = [
+            prompt for prompt in dimensions if prompt.attribute in needs
+        ]
+        if preferred:
+            dimensions = preferred
+        elif set(needs) & blocked:
+            # The stated need is already represented by a hard/known/current preference
+            # (or explicitly revoked).  Asking about another eligible dimension is safe;
+            # silently claiming the budget dimension is not.
+            pass
+        else:
+            return PreferenceDecision(
+                "SKIP",
+                None,
+                "no trustworthy dimension is available for the stated need",
+            )
     chosen = max(
         dimensions,
         key=lambda prompt: (
@@ -544,6 +675,41 @@ def choose_preference_action(
         ),
     )
     return PreferenceDecision(chosen.interaction, chosen, chosen.reason, second_round=round_no > 1)
+
+
+def price_evidence_note(
+    message: str,
+    candidate_ids: Sequence[str],
+    records: Mapping[str, Any],
+) -> str | None:
+    """A short user-facing explanation when a budget need cannot be compared.
+
+    The note is emitted only when the user explicitly mentioned price/budget and the
+    trusted catalogue does not cover every presented candidate.  It never estimates a
+    missing price and never turns the vague request into a price bound.
+    """
+    if "price" not in _explicit_need_attributes(message):
+        return None
+    identities = _normalise_ids(candidate_ids)
+    if len(identities) < 2:
+        return None
+    known = [
+        identity
+        for identity in identities
+        if _fact_value(records, identity, "price")[1]
+    ]
+    if len(known) >= len(identities):
+        return None
+    if not known:
+        return (
+            "No shown candidate has a trustworthy catalogue price, so no price "
+            "comparison was made and no budget limit was applied."
+        )
+    return (
+        f"Price is recorded for {len(known)} of {len(identities)} shown candidates; "
+        "the remaining candidates are kept as UNKNOWN, were not compared by price, "
+        "and no budget limit was applied."
+    )
 
 
 def build_preference_prompt(

@@ -1,0 +1,928 @@
+P14-0 / P14_PREP_SOURCE_DIFF
+==============================================================================
+generated_at      : 2026-11-08T16:42:39+0800
+repo_root         : D:\IT\CODE\PROJECTION\agentrec\X
+git HEAD          : 4dec6d2081902f1e89265a06ea4ded595087dd43   (nothing committed, nothing pushed)
+before snapshot   : 2026-11-08T15:32:58+0800  files=1021 bytes=391691558
+after  snapshot   : 2026-11-08T16:42:39+0800  files=959 bytes=347678431
+
+SCOPE NOTE
+------------------------------------------------------------------------------
+This file is generated from two filesystem snapshots (path + size + sha256) of every
+non-ignored working-tree file outside data/, runs/ and models/, plus the explicit
+inventory of deleted cache/temp targets.  It lists exactly what P14-0 changed; files
+that were already dirty before P14-0 started are listed separately as PRESERVED.
+
+1. SUMMARY
+------------------------------------------------------------------------------
+source inventory files   :   1021 ->    959  (-62)
+source inventory bytes   : 391691558 -> 347678431  (-44013127)
+deleted paths (inventory):     76  = 60 archived + 16 cache/temp + 0 other
+archived files (all)     :     60  (43 git-tracked experiment scripts + 17 untracked root scratch files)
+deleted cache/temp files :   6087 files in 706 targets, 190090044 bytes
+added source files       :     14
+content-changed files    :      1
+tracked modified now     :     29  (28 pre-existing preserved + 1 new)
+tracked deleted now      :     43
+
+2. CONTENT-CHANGED TRACKED FILES (full diff)
+------------------------------------------------------------------------------
+--- .gitignore  (1334 -> 1572 bytes)
+diff --git a/.gitignore b/.gitignore
+index 58329f0..d91ce91 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,6 +4,10 @@ __pycache__/
+ .pytest_cache/
+ .venv/
+ venv/
++# Environment variants (ranker / backend / embedding venvs) are machine-local
++# rebuildable environments and must never be committed.  `.venv/` above covers the
++# canonical one; this keeps the sibling variants equally invisible.
++.venv-*/
+ 
+ # IDE
+ .vscode/
+
+3. TRACKED FILES MODIFIED BEFORE P14-0 AND DELIBERATELY PRESERVED
+------------------------------------------------------------------------------
+These 28 files were already modified in the working tree when P14-0 started (P5-P13-R
+user work in progress).  P14-0 did NOT edit, revert or overwrite them; they appear in
+`git status` exactly as before.
+  M docs/README.md
+  M recommendation/agent/pipeline.py
+  M recommendation/agent/state.py
+  M recommendation/api/demo_routes.py
+  M recommendation/control/candidate_ledger.py
+  M recommendation/control/candidate_plane.py
+  M recommendation/control/catalog_search.py
+  M recommendation/control/loop.py
+  M recommendation/demo/__init__.py
+  M recommendation/demo/agent_schemas.py
+  M recommendation/demo/agent_service.py
+  M recommendation/demo/agent_trajectory.py
+  M recommendation/demo/preference_construction.py
+  M recommendation/demo/runtime.py
+  M recommendation/demo/sessions.py
+  M recommendation/demo/shopping_intent.py
+  M recommendation/evaluation/__init__.py
+  M recommendation/models/__init__.py
+  M recommendation/models/sasrec.py
+  M recommendation/preference_matching/schemas.py
+  M recommendation/web/app.js
+  M recommendation/web/index.html
+  M recommendation/web/styles.css
+  M tests/demo_fixture.py
+  M tests/test_demo_recommendation_trace.py
+  M tests/test_demo_web.py
+  M tests/test_p4_shopping_intent.py
+  M tests/test_preference_construction.py
+
+4. DELETED TRACKED SOURCE FILES = ARCHIVED (recoverable, sha256 in manifest + git HEAD)
+------------------------------------------------------------------------------
+[v2_pipeline_gates]  phase: S2/S4/S6 (V2 E-04 gates, Gate C-1/C-2, TIGER canonical pre-steps)
+  archive: archive/legacy_experiments/v2_pipeline_gates.tar.gz  sha256=14ee1b1387a9cd58377d266d9f355f20e7ecc5c9bd339b4ecd8c126e3812846f
+  reason : Historical V2 gate/acceptance runners and TIGER step24/25 + t03lite one-off scripts. Superseded by frozen reports and by the P14-0 research boundary; not imported by current code or tests.
+    D experiments/e04a_provider_smoke.py  sha256=e6e1fa8fe3ada9b12f23d98c8b2d80a7b897aff50c506c3b8babe019538986b1 size=25023
+    D experiments/e04b_gate_b1_sasrec.py  sha256=8c401ebb2b94450362f9ea18aa972bd6575f69db96c828e69a2638e0c250d594 size=11544
+    D experiments/e04b_gate_b2_twotower.py  sha256=145230f74421aab5376556a7e2c45a76e7c4e8609f5eb1f2452756292383b1c7 size=14812
+    D experiments/e04b_gate_b3_tiger.py  sha256=c06ddf67afb26fb4098ce23726c6b0be3ff0e6f4e13b953365d25330df8c1be6 size=13210
+    D experiments/e04b_gate_b3_final_diag.py  sha256=95a38f09db8be2505ffb1e32794077fb1a967a9b7e47ec3202e7b8ae7f56a68d size=9407
+    D experiments/gate_c12_backend_acceptance.py  sha256=febf55668c0ee285d779bc7a69da67a995d173751572a6c7c597623b4ce084ed size=11990
+    D experiments/gate_c12_service_validation.py  sha256=eac65239837a1fcd1c60eaa1a9a6ef3f6e498fd49eff010f87083284d3d2441f size=17380
+    D experiments/audit_tiger_sid.py  sha256=1f02d3d75f30a3fda9fb30d7f13edd8841c3c4a963b0613727b296ffccc1ab5b size=17068
+    D experiments/gate_d_tiger_training.py  sha256=91e966b203e9bc412b3b45b8688b419af12cc9b564de6872afbf7ea719ff8bbb size=17012
+    D experiments/smoke_tiger_step24.py  sha256=0425a4e80d2d6d3292e33c27b0030be9b330319ecdf8f42b3f2ffd5def0dece1 size=15053
+    D experiments/smoke_tiger_step25.py  sha256=45c845dc956fba421cdd42373b03b7a71cd87672d66d5a809771f35819dd704d size=28874
+    D experiments/t03lite_tiger_increment.py  sha256=4d49730170d4415c993df2d65765d592c0e7b7036b66209ddbc799532a0a196b size=20613
+    D experiments/t03lite_tiger_increment_verify.py  sha256=2bc5ba3580e5385153e75ba4bb87d9c5c242db7126a0fe2576ab6a8676bf9efa size=17442
+    D experiments/b1_fusion_paired_evidence.py  sha256=b9cc8d3d8bd4cd8170c2eba53310b4a5570c4b3f315ebef78c531b5b25e3ae19 size=33136
+  restore: tar -xzf archive/legacy_experiments/v2_pipeline_gates.tar.gz -C .
+
+[tiger_canonical_step26_28]  phase: S4 TIGER canonical remediation (Step 2.6 / 2.7 / 2.8)
+  archive: archive/legacy_experiments/tiger_canonical_step26_28.tar.gz  sha256=10750556452d39b51c965e9b906eeb8b1c43206e8a9da2e215cc9db83420894e
+  reason : Canonical TIGER benchmark/report runners that produced the frozen docs/reports artifacts. Preserved as recoverable archive; no current code path imports them (step27_tiger_engines.py stays in place because tests import it).
+    D experiments/step26_final_report.py  sha256=ae143a6748aa9e0ba56857ce8c4a6dadf05eb3979e9e00bb77c2774d662c5b60 size=21249
+    D experiments/step26_gates.py  sha256=136a453d68d00001790960c62b8199b6d4228e7e8e5904c5d228548bdec28edc size=19649
+    D experiments/step26_h7_certificate.py  sha256=9180e80ae1e6ac3df819ec45c1d298626ca893c8672d9439b216341c219afc04 size=7900
+    D experiments/step26_report.py  sha256=6c35d5d7d38633455c7dc955174510b71a5f2592978cc2db3d3cfc961ee638fc size=19549
+    D experiments/step26_tiger_benchmark.py  sha256=8eecd3da91b57c3c49d3d9e7bee849ba9a96d01b05e13fbb22c3939a1c2c67f8 size=5916
+    D experiments/step26_tiger_hits.py  sha256=e053158da26c099cff8f6328afca2cdbfd3b3b94cefec7faea92ae37599578d3 size=6409
+    D experiments/step27_qualification.py  sha256=fdb66f1a62b2c50c705d64cc3a3fb3f0c143921e8c7711bc56748ab8ca2e4668 size=21214
+    D experiments/step28_fusion_experiment.py  sha256=be2553fceb8bce5914df06d4113d8136335820ac315c9c96284fe1ccc19d277a size=12313
+    D experiments/step28b_depth_sensitivity.py  sha256=aeb3b1a5931440d296932150fbe4147bb2e0843299f05f13cd83ec13c28ab5b9 size=11729
+    D experiments/tiger_retrieval_arm.py  sha256=4d81078ca72ab9b4973ff8f96b410633be8e382c7bf6ce0dc63f58d4e254716f size=13952
+  restore: tar -xzf archive/legacy_experiments/tiger_canonical_step26_28.tar.gz -C .
+
+[learned_ranker_v1]  phase: S7 / R-LR (LightGBM LambdaRank V1)
+  archive: archive/legacy_experiments/learned_ranker_v1.tar.gz  sha256=462cf0826ffa2bc1815c459b642647e237fc56659c11c83c4071b1e6de0777f1
+  reason : Learned-ranker exploration scripts. The serving code, tests and frozen reports stay; the training/materialization/parity scripts are historical and are not imported by current code or tests.
+    D experiments/r_lr01_materialize.py  sha256=806a3da859b3a901126dc12c7f1be8d6f15df93b285c656a7459a1bb4dfa606f size=10657
+    D experiments/r_lr02_train.py  sha256=66593e9516fc207b055af1d34638f99c64ccf06ee56fdf2ba694fd454816f7bf size=7955
+    D experiments/r_lr02b_train.py  sha256=842bb049623c12e44d0cc589470734d97245c0d6738d8f9debf328880830d9a7 size=10802
+    D experiments/r_lr05_baseline_rootcause.py  sha256=4e71608f49d948d06d4d415fb4ac2126ae8ac4f21bab3f4878b81188ed9e9771 size=4155
+    D experiments/r_lr05_feature_parity.py  sha256=26902c948ee94b39c696292fe020b3d454400fd698fb84da8666b3227de8fd3e size=6287
+    D experiments/r_lr05_independent_eval.py  sha256=7804aa1dae59c928a4cf31b9f3d669045e41216b94e0e1d1a4a43d2078767006 size=23031
+  restore: tar -xzf archive/legacy_experiments/learned_ranker_v1.tar.gz -C .
+
+[p2b_agent_diagnostics]  phase: P2B/P2C (agent source-limit ablation diagnostics)
+  archive: archive/legacy_experiments/p2b_agent_diagnostics.tar.gz  sha256=3d941cf84b13813661c6f088773c34665073d76cc61bfa4fa0454877bcb17c0a
+  reason : Historical P2B diagnostics/audits. The P2B metric/proxy-query test targets stay in place (tests import them); the three standalone runners, credential audit and latency probe are archived.
+    D experiments/p2b4_source_diagnosis.py  sha256=c4c25c2c39782901fe7355762d205c22dce2ed7370b5f2b93e34e9d854cf6192 size=8380
+    D experiments/p2b4_three_source_comparison.py  sha256=8b7b9d7807a8a1089d46ebf6093d7b87fc2ad10225f577908d704874e2ad5fbf size=23261
+    D experiments/p2b6_query_scale_validation.py  sha256=653aa6e90890a2833a4d74423f29cae4d7df8a122c68fcdda986f297f5de989e size=17031
+    D experiments/credential_audit.py  sha256=7d786e67491dd3945e8a63d9c802ba3d03fd83ed1175f0fbeb34f5558e8e1aa5 size=7671
+    D experiments/serving_fusion_latency.py  sha256=94eac43f339fad8a163ef2a85669dfaf62da9ab2dd7e104d6780b590f96d4fe5 size=5001
+    D experiments/agent_evaluation_smoke.py  sha256=d3271ae63c97eb9c381583184009d8a166e97b58b94b0e4cf80fdf2d3b6bb9a9 size=12504
+  restore: tar -xzf archive/legacy_experiments/p2b_agent_diagnostics.tar.gz -C .
+
+[m4_frozen_materialization]  phase: S5 M4 (frozen execution / materialization tooling)
+  archive: archive/legacy_experiments/m4_frozen_materialization.tar.gz  sha256=ce35283f8f198da8cdaf49d766af57c2b8774965396d40358be8be71016fcc95
+  reason : M4 materialization helpers whose frozen outputs already live in runs/m4_evidence and docs/M4_*; no current code or test imports them after the keep-closure check.
+    D experiments/m4_build_similar_index.py  sha256=4c15a073605a6f41d49e6c6e0905d63d47abe5168fe032420d2f2d275fa3c913 size=4291
+    D experiments/m4_execution_manifest.py  sha256=1bb9f33a9a693e7b7d7d5a5cbe9b05d0f6c001d1540fd767813fbb78cfa3842f size=19755
+    D experiments/m4_materialize_heads.py  sha256=053278d0be482c1482a479e188b24d40c0002c1746c324b68b287253dc6e829b size=26449
+    D experiments/m4_provider_probe.py  sha256=66c2af14377f5a4e2d992cb25c3d034015c917367f900bcd2f94b1198369333e size=8061
+    D experiments/m4_similar_neighbours.py  sha256=da60c8fe2b00ae2d028b185959ac3b65b91a502bacc8f73bdd4e76dcb5a4a0a7 size=5884
+    D experiments/m4_twotower_batch.py  sha256=1b0ba202ccaec426d510df6b11e7902508a698bbaf21127f3e50c6673e38b5f7 size=7726
+    D experiments/m4_twotower_batch_bench.py  sha256=55dbc9c24758bfe64c5b0f711319e157256b7924058c74fe276e3a3c87cd1c62 size=12491
+  restore: tar -xzf archive/legacy_experiments/m4_frozen_materialization.tar.gz -C .
+
+[root_scratch_p7p8]  phase: P7/P8 local runs (transient scratch artifacts)
+  archive: archive/legacy_experiments/root_scratch_p7p8.tar.gz  sha256=8e2f94237fd6ebeb84c9c7848979a4ecd42d1d24b6a72171bd9288fca428ca72
+  reason : Runtime stdout logs written to the repo root by P7/P8 planner comparisons, plus two one-off debug scripts. None is referenced by any report, doc, test or config; kept only as a recoverable archive.
+    D p7b_base_budget_retry.log  sha256=9c7bbb860eae7a33f3c4fcdaa1ee2992a7cc644ba6dbab00d4f4be5f01482e9d size=886
+    D p7b_base_full.log  sha256=a0340f63b2b5102b0dad5ca94dd702c7f5b7ae7a6628c1c1050866b31a8ea6a9 size=2282
+    D p7b_base_full2.log  sha256=8ade412cf293e6447ee8dbbe779715ad60901459165455e3adc121e155b7b61f size=1442
+    D p7b_base_full_fixed.log  sha256=356c559780b70253300461bc288a32e62cd24874c57844d83edfce6082f38a33 size=1384
+    D p7b_base_mini.log  sha256=dad1598f312011f02baf55b24d344c641de43fed27ceb20324fa8d709855c1ff size=886
+    D p7b_base_pref_check.log  sha256=8ff5a60f585695ac7c6c4aaf54a83567a23c4878b798f9ba8108948422c0f664 size=896
+    D p7b_sft_full.log  sha256=3b423f9022f5abe60dc1695649a920462807cdef4b03e7ca3b8108af0316d83a size=1504
+    D p7b_sft_full_fixed.log  sha256=055834e84791729cba1c9b15519d21c7f35174ae8d96d5b77bd38a5e2a714463 size=1504
+    D p7b_sft_mini.log  sha256=1aff29f875c2ffd0b8c17f419f553b61679cb57c58e50f3715d51f6c4ef6e8d3 size=884
+    D p7b_sft_pref_check.log  sha256=8de765e47fc4607a40be1eac041ebb11c2935444860ff649795d9427c51685e7 size=900
+    D p7d_rule_final.log  sha256=51520e27a31cc810f2a311f7b6834182ad1f4a6612a1a107d7a0579716c1fd61 size=1012
+    D p7e_base.log  sha256=8bbe4b219f35249e2c4cdd2207924f074761241d50e7fbae83a132a9d047691d size=1412
+    D p7e_rule.log  sha256=e42de125c237ce8a7bcc69e9cc6e6c4c41018f8276f9a16fc036e71225ce5b08 size=1482
+    D p7e_sft.log  sha256=2a90524b0ab7be97720d3ee2a496ad039dc4eb7ba9739883f7f44285c92f8429 size=1480
+    D p8a_run.log  sha256=eb5398f75a78d3abe374093cc057a88775e2ddee3278dfd8e6c5828fa8dacabc size=9424
+    D inspect_p6_case.py  sha256=a0b9b3f9cccbb0dccd8ff5874eb47870235b2d71765a4d30381731b0f6307a99 size=292
+    D verify_p8d.py  sha256=821dcdec37c16f38908adf1b8fc8e6c67d54577a6bf5b23881d6b02b3d3b6f46 size=984
+  restore: tar -xzf archive/legacy_experiments/root_scratch_p7p8.tar.gz -C .
+
+5. DELETED CACHE / TEMP TARGETS (regenerable, no source value)
+------------------------------------------------------------------------------
+Enumerated before deletion; every entry below was confirmed to have no repository
+reference.  Individual __pycache__ trees are listed with their own file counts.
+  D pip-build-tracker-_zpyq3xx  files=0 bytes=0
+  D pip-ephem-wheel-cache-jrlhvvfb  files=0 bytes=0
+  D pip-install-jdrztqve  files=0 bytes=0
+  D pip-unpack-05i0e8bc  files=0 bytes=0
+  D pip-unpack-3t8naoek  files=1 bytes=310654
+  D pip-unpack-5dgymx6l  files=1 bytes=857021
+  D pip-unpack-7frzhhpe  files=1 bytes=6189177
+  D pip-unpack-7tbzidmc  files=1 bytes=96901
+  D pip-unpack-9z92qygb  files=1 bytes=15808905
+  D pip-unpack-_afu_5o6  files=1 bytes=134521
+  D pip-unpack-_lltkhgu  files=1 bytes=84291
+  D pip-unpack-bz0lk8wj  files=1 bytes=91687
+  D pip-unpack-dxzbocqq  files=1 bytes=5302
+  D pip-unpack-ec2qynls  files=1 bytes=355540
+  D pip-unpack-fle7b9_o  files=1 bytes=2872101
+  D pip-unpack-hd2h29jf  files=1 bytes=123253
+  D pip-unpack-k3__yszg  files=1 bytes=9979
+  D pip-unpack-kvk6ta84  files=1 bytes=14765
+  D pip-unpack-li9imnlp  files=1 bytes=9755
+  D pip-unpack-me46kmtu  files=1 bytes=12844921
+  D pip-unpack-qhyxgclc  files=1 bytes=3911559
+  D pip-unpack-rs2eje8s  files=1 bytes=19017
+  D pip-unpack-sk2oa53x  files=1 bytes=45571
+  D pip-unpack-u3es1r5b  files=1 bytes=69583
+  D pip-unpack-ueg76yuy  files=1 bytes=280629
+  D pip-unpack-wrafxhgr  files=1 bytes=126163
+  D pip-unpack-xm4zmdu4  files=1 bytes=37515
+  D pip-unpack-zpa2h5kj  files=1 bytes=760709
+  D .pytest_cache  files=6 bytes=336531
+  D .venv-bge  files=15 bytes=43710976
+  F run.json  files=1 bytes=3717
+  D backends/tiger_public/src/tiger_public/__pycache__  files=13 bytes=245919
+  D backends/tiger_public/tests/__pycache__  files=8 bytes=183394
+  D benchmarks/agent/__pycache__  files=9 bytes=72933
+  D benchmarks/__pycache__  files=1 bytes=194
+  D experiments/external_benchmarks/coshop/__pycache__  files=6 bytes=122746
+  D experiments/external_benchmarks/__pycache__  files=2 bytes=1639
+  D experiments/p13/__pycache__  files=6 bytes=45830
+  D experiments/p13r/__pycache__  files=4 bytes=28012
+  D experiments/p6_benchmark/__pycache__  files=7 bytes=85013
+  D experiments/__pycache__  files=126 bytes=1673713
+  D recommendation/agent/__pycache__  files=6 bytes=76172
+  D recommendation/api/__pycache__  files=7 bytes=149384
+  D recommendation/backends/__pycache__  files=3 bytes=82130
+  D recommendation/baselines/__pycache__  files=4 bytes=36128
+  D recommendation/catalog/__pycache__  files=6 bytes=86433
+  D recommendation/control/__pycache__  files=35 bytes=617289
+  D recommendation/datasets/__pycache__  files=6 bytes=45826
+  D recommendation/demo/__pycache__  files=55 bytes=1210238
+  D recommendation/evaluation/agent/__pycache__  files=7 bytes=90404
+  D recommendation/evaluation/__pycache__  files=8 bytes=145003
+  D recommendation/inference/__pycache__  files=13 bytes=176480
+  D recommendation/memory/__pycache__  files=11 bytes=191027
+  D recommendation/models/__pycache__  files=5 bytes=51581
+  D recommendation/preference_matching/__pycache__  files=6 bytes=68693
+  D recommendation/rag/__pycache__  files=6 bytes=40793
+  D recommendation/ranking/__pycache__  files=14 bytes=264343
+  D recommendation/reranking/__pycache__  files=5 bytes=78309
+  D recommendation/semantic_id/__pycache__  files=6 bytes=58361
+  D recommendation/state/__pycache__  files=22 bytes=418433
+  D recommendation/tools/__pycache__  files=7 bytes=37087
+  D recommendation/training/__pycache__  files=6 bytes=59278
+  D recommendation/__pycache__  files=8 bytes=93646
+  D runs/m2/__pycache__  files=1 bytes=15219
+  D runs/p8_bge/py_deps/cloudpickle/__pycache__  files=3 bytes=39206
+  D runs/p8_bge/py_deps/filelock/_soft_rw/__pycache__  files=5 bytes=71632
+  D runs/p8_bge/py_deps/filelock/__pycache__  files=18 bytes=276095
+  D runs/p8_bge/py_deps/huggingface_hub/cli/__pycache__  files=13 bytes=90093
+  D runs/p8_bge/py_deps/huggingface_hub/commands/__pycache__  files=15 bytes=78549
+  D runs/p8_bge/py_deps/huggingface_hub/inference/_generated/types/__pycache__  files=34 bytes=74433
+  D runs/p8_bge/py_deps/huggingface_hub/inference/_generated/__pycache__  files=2 bytes=138009
+  D runs/p8_bge/py_deps/huggingface_hub/inference/_mcp/__pycache__  files=8 bytes=33364
+  D runs/p8_bge/py_deps/huggingface_hub/inference/_providers/__pycache__  files=22 bytes=75938
+  D runs/p8_bge/py_deps/huggingface_hub/inference/__pycache__  files=3 bytes=143190
+  D runs/p8_bge/py_deps/huggingface_hub/serialization/__pycache__  files=5 bytes=60302
+  D runs/p8_bge/py_deps/huggingface_hub/utils/__pycache__  files=30 bytes=167591
+  D runs/p8_bge/py_deps/huggingface_hub/__pycache__  files=29 bytes=928424
+  D runs/p8_bge/py_deps/jinja2/__pycache__  files=25 bytes=432435
+  D runs/p8_bge/py_deps/joblib/externals/loky/backend/__pycache__  files=15 bytes=76446
+  D runs/p8_bge/py_deps/joblib/externals/loky/__pycache__  files=6 bytes=49599
+  D runs/p8_bge/py_deps/joblib/externals/__pycache__  files=1 bytes=190
+  D runs/p8_bge/py_deps/joblib/test/data/__pycache__  files=2 bytes=2962
+  D runs/p8_bge/py_deps/joblib/test/__pycache__  files=25 bytes=266266
+  D runs/p8_bge/py_deps/joblib/__pycache__  files=22 bytes=264540
+  D runs/p8_bge/py_deps/networkx/algorithms/approximation/tests/__pycache__  files=14 bytes=77050
+  D runs/p8_bge/py_deps/networkx/algorithms/approximation/__pycache__  files=14 bytes=117227
+  D runs/p8_bge/py_deps/networkx/algorithms/assortativity/tests/__pycache__  files=7 bytes=29025
+  D runs/p8_bge/py_deps/networkx/algorithms/assortativity/__pycache__  files=6 bytes=30043
+  D runs/p8_bge/py_deps/networkx/algorithms/bipartite/tests/__pycache__  files=13 bytes=72561
+  D runs/p8_bge/py_deps/networkx/algorithms/bipartite/__pycache__  files=13 bytes=111490
+  D runs/p8_bge/py_deps/networkx/algorithms/centrality/tests/__pycache__  files=21 bytes=134145
+  D runs/p8_bge/py_deps/networkx/algorithms/centrality/__pycache__  files=22 bytes=159017
+  D runs/p8_bge/py_deps/networkx/algorithms/coloring/tests/__pycache__  files=2 bytes=18119
+  D runs/p8_bge/py_deps/networkx/algorithms/coloring/__pycache__  files=3 bytes=27430
+  D runs/p8_bge/py_deps/networkx/algorithms/community/tests/__pycache__  files=12 bytes=51714
+  D runs/p8_bge/py_deps/networkx/algorithms/community/__pycache__  files=12 bytes=83371
+  D runs/p8_bge/py_deps/networkx/algorithms/components/tests/__pycache__  files=7 bytes=28582
+  D runs/p8_bge/py_deps/networkx/algorithms/components/__pycache__  files=7 bytes=36011
+  D runs/p8_bge/py_deps/networkx/algorithms/connectivity/tests/__pycache__  files=9 bytes=72402
+  D runs/p8_bge/py_deps/networkx/algorithms/connectivity/__pycache__  files=10 bytes=138551
+  D runs/p8_bge/py_deps/networkx/algorithms/flow/tests/__pycache__  files=6 bytes=48313
+  D runs/p8_bge/py_deps/networkx/algorithms/flow/__pycache__  files=12 bytes=123277
+  D runs/p8_bge/py_deps/networkx/algorithms/isomorphism/tests/__pycache__  files=10 bytes=123804
+  D runs/p8_bge/py_deps/networkx/algorithms/isomorphism/__pycache__  files=9 bytes=134089
+  D runs/p8_bge/py_deps/networkx/algorithms/link_analysis/tests/__pycache__  files=3 bytes=10801
+  D runs/p8_bge/py_deps/networkx/algorithms/link_analysis/__pycache__  files=3 bytes=26395
+  D runs/p8_bge/py_deps/networkx/algorithms/minors/tests/__pycache__  files=1 bytes=13363
+  D runs/p8_bge/py_deps/networkx/algorithms/minors/__pycache__  files=2 bytes=21109
+  D runs/p8_bge/py_deps/networkx/algorithms/operators/tests/__pycache__  files=5 bytes=31077
+  D runs/p8_bge/py_deps/networkx/algorithms/operators/__pycache__  files=5 bytes=42615
+  D runs/p8_bge/py_deps/networkx/algorithms/shortest_paths/tests/__pycache__  files=7 bytes=70248
+  D runs/p8_bge/py_deps/networkx/algorithms/shortest_paths/__pycache__  files=6 bytes=124990
+  D runs/p8_bge/py_deps/networkx/algorithms/tests/__pycache__  files=57 bytes=484435
+  D runs/p8_bge/py_deps/networkx/algorithms/traversal/tests/__pycache__  files=6 bytes=29227
+  D runs/p8_bge/py_deps/networkx/algorithms/traversal/__pycache__  files=6 bytes=48114
+  D runs/p8_bge/py_deps/networkx/algorithms/tree/tests/__pycache__  files=7 bytes=57005
+  D runs/p8_bge/py_deps/networkx/algorithms/tree/__pycache__  files=7 bytes=88508
+  D runs/p8_bge/py_deps/networkx/algorithms/__pycache__  files=56 bytes=683235
+  D runs/p8_bge/py_deps/networkx/classes/tests/__pycache__  files=16 bytes=221823
+  D runs/p8_bge/py_deps/networkx/classes/__pycache__  files=10 bytes=317606
+  D runs/p8_bge/py_deps/networkx/drawing/tests/__pycache__  files=6 bytes=71369
+  D runs/p8_bge/py_deps/networkx/drawing/__pycache__  files=6 bytes=138813
+  D runs/p8_bge/py_deps/networkx/generators/tests/__pycache__  files=29 bytes=168588
+  D runs/p8_bge/py_deps/networkx/generators/__pycache__  files=30 bytes=382838
+  D runs/p8_bge/py_deps/networkx/linalg/tests/__pycache__  files=8 bytes=36717
+  D runs/p8_bge/py_deps/networkx/linalg/__pycache__  files=8 bytes=72115
+  D runs/p8_bge/py_deps/networkx/readwrite/json_graph/tests/__pycache__  files=5 bytes=14306
+  D runs/p8_bge/py_deps/networkx/readwrite/json_graph/__pycache__  files=5 bytes=23823
+  D runs/p8_bge/py_deps/networkx/readwrite/tests/__pycache__  files=12 bytes=192428
+  D runs/p8_bge/py_deps/networkx/readwrite/__pycache__  files=13 bytes=164509
+  D runs/p8_bge/py_deps/networkx/tests/__pycache__  files=10 bytes=78379
+  D runs/p8_bge/py_deps/networkx/utils/tests/__pycache__  files=11 bytes=59444
+  D runs/p8_bge/py_deps/networkx/utils/__pycache__  files=10 bytes=173536
+  D runs/p8_bge/py_deps/networkx/__pycache__  files=7 bytes=82497
+  D runs/p8_bge/py_deps/packaging/licenses/__pycache__  files=2 bytes=47709
+  D runs/p8_bge/py_deps/packaging/__pycache__  files=20 bytes=311459
+  D runs/p8_bge/py_deps/PIL/__pycache__  files=97 bytes=909434
+  D runs/p8_bge/py_deps/regex/tests/__pycache__  files=1 bytes=145006
+  D runs/p8_bge/py_deps/regex/__pycache__  files=3 bytes=138959
+  D runs/p8_bge/py_deps/requests/__pycache__  files=19 bytes=179277
+  D runs/p8_bge/py_deps/safetensors/__pycache__  files=7 bytes=44756
+  D runs/p8_bge/py_deps/sentence_transformers/cross_encoder/evaluation/__pycache__  files=7 bytes=20398
+  D runs/p8_bge/py_deps/sentence_transformers/cross_encoder/__pycache__  files=2 bytes=20494
+  D runs/p8_bge/py_deps/sentence_transformers/datasets/__pycache__  files=6 bytes=15908
+  D runs/p8_bge/py_deps/sentence_transformers/evaluation/__pycache__  files=14 bytes=65651
+  D runs/p8_bge/py_deps/sentence_transformers/losses/__pycache__  files=25 bytes=154604
+  D runs/p8_bge/py_deps/sentence_transformers/models/tokenizer/__pycache__  files=4 bytes=10959
+  D runs/p8_bge/py_deps/sentence_transformers/models/__pycache__  files=15 bytes=50999
+  D runs/p8_bge/py_deps/sentence_transformers/readers/__pycache__  files=7 bytes=10849
+  D runs/p8_bge/py_deps/sentence_transformers/__pycache__  files=6 bytes=88388
+  D runs/p8_bge/py_deps/sklearn/cluster/tests/__pycache__  files=14 bytes=144824
+  D runs/p8_bge/py_deps/sklearn/cluster/_hdbscan/tests/__pycache__  files=2 bytes=2509
+  D runs/p8_bge/py_deps/sklearn/cluster/_hdbscan/__pycache__  files=2 bytes=30933
+  D runs/p8_bge/py_deps/sklearn/cluster/__pycache__  files=12 bytes=275366
+  D runs/p8_bge/py_deps/sklearn/compose/tests/__pycache__  files=3 bytes=79872
+  D runs/p8_bge/py_deps/sklearn/compose/__pycache__  files=3 bytes=67292
+  D runs/p8_bge/py_deps/sklearn/covariance/tests/__pycache__  files=5 bytes=22917
+  D runs/p8_bge/py_deps/sklearn/covariance/__pycache__  files=6 bytes=103150
+  D runs/p8_bge/py_deps/sklearn/cross_decomposition/tests/__pycache__  files=2 bytes=17706
+  D runs/p8_bge/py_deps/sklearn/cross_decomposition/__pycache__  files=2 bytes=29790
+  D runs/p8_bge/py_deps/sklearn/datasets/data/__pycache__  files=1 bytes=195
+  D runs/p8_bge/py_deps/sklearn/datasets/descr/__pycache__  files=1 bytes=196
+  D runs/p8_bge/py_deps/sklearn/datasets/images/__pycache__  files=1 bytes=197
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_1/__pycache__  files=1 bytes=213
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_1119/__pycache__  files=1 bytes=216
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_1590/__pycache__  files=1 bytes=216
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_2/__pycache__  files=1 bytes=213
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_292/__pycache__  files=1 bytes=215
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_3/__pycache__  files=1 bytes=213
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_40589/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_40675/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_40945/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_40966/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_42074/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_42585/__pycache__  files=1 bytes=217
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_561/__pycache__  files=1 bytes=215
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_61/__pycache__  files=1 bytes=214
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/id_62/__pycache__  files=1 bytes=214
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/openml/__pycache__  files=1 bytes=208
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/data/__pycache__  files=1 bytes=201
+  D runs/p8_bge/py_deps/sklearn/datasets/tests/__pycache__  files=14 bytes=117381
+  D runs/p8_bge/py_deps/sklearn/datasets/__pycache__  files=14 bytes=262744
+  D runs/p8_bge/py_deps/sklearn/decomposition/tests/__pycache__  files=11 bytes=142096
+  D runs/p8_bge/py_deps/sklearn/decomposition/__pycache__  files=12 bytes=281758
+  D runs/p8_bge/py_deps/sklearn/ensemble/tests/__pycache__  files=10 bytes=186202
+  D runs/p8_bge/py_deps/sklearn/ensemble/_hist_gradient_boosting/tests/__pycache__  files=11 bytes=111862
+  D runs/p8_bge/py_deps/sklearn/ensemble/_hist_gradient_boosting/__pycache__  files=6 bytes=109039
+  D runs/p8_bge/py_deps/sklearn/ensemble/__pycache__  files=9 bytes=343214
+  D runs/p8_bge/py_deps/sklearn/experimental/tests/__pycache__  files=4 bytes=4209
+  D runs/p8_bge/py_deps/sklearn/experimental/__pycache__  files=4 bytes=3342
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/common/__pycache__  files=6 bytes=53707
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/cupy/__pycache__  files=6 bytes=16386
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/dask/array/__pycache__  files=5 bytes=23621
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/dask/__pycache__  files=1 bytes=213
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/numpy/__pycache__  files=6 bytes=18996
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/torch/__pycache__  files=6 bytes=36716
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_compat/__pycache__  files=2 bytes=3153
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_extra/_lib/_utils/__pycache__  files=4 bytes=8774
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_extra/_lib/__pycache__  files=6 bytes=57934
+  D runs/p8_bge/py_deps/sklearn/externals/array_api_extra/__pycache__  files=3 bytes=18307
+  D runs/p8_bge/py_deps/sklearn/externals/_packaging/__pycache__  files=3 bytes=16492
+  D runs/p8_bge/py_deps/sklearn/externals/_scipy/sparse/csgraph/__pycache__  files=2 bytes=17001
+  D runs/p8_bge/py_deps/sklearn/externals/_scipy/sparse/__pycache__  files=1 bytes=205
+  D runs/p8_bge/py_deps/sklearn/externals/_scipy/__pycache__  files=1 bytes=198
+  D runs/p8_bge/py_deps/sklearn/externals/__pycache__  files=4 bytes=34115
+  D runs/p8_bge/py_deps/sklearn/feature_extraction/tests/__pycache__  files=5 bytes=64052
+  D runs/p8_bge/py_deps/sklearn/feature_extraction/__pycache__  files=6 bytes=111914
+  D runs/p8_bge/py_deps/sklearn/feature_selection/tests/__pycache__  files=9 bytes=88398
+  D runs/p8_bge/py_deps/sklearn/feature_selection/__pycache__  files=8 bytes=128862
+  D runs/p8_bge/py_deps/sklearn/frozen/tests/__pycache__  files=2 bytes=7352
+  D runs/p8_bge/py_deps/sklearn/frozen/__pycache__  files=2 bytes=5851
+  D runs/p8_bge/py_deps/sklearn/gaussian_process/tests/__pycache__  files=5 bytes=45201
+  D runs/p8_bge/py_deps/sklearn/gaussian_process/__pycache__  files=4 bytes=123539
+  D runs/p8_bge/py_deps/sklearn/impute/tests/__pycache__  files=5 bytes=70581
+  D runs/p8_bge/py_deps/sklearn/impute/__pycache__  files=4 bytes=75343
+  D runs/p8_bge/py_deps/sklearn/inspection/tests/__pycache__  files=4 bytes=41069
+  D runs/p8_bge/py_deps/sklearn/inspection/_plot/tests/__pycache__  files=3 bytes=45265
+  D runs/p8_bge/py_deps/sklearn/inspection/_plot/__pycache__  files=3 bytes=64804
+  D runs/p8_bge/py_deps/sklearn/inspection/__pycache__  files=4 bytes=39288
+  D runs/p8_bge/py_deps/sklearn/linear_model/tests/__pycache__  files=19 bytes=345977
+  D runs/p8_bge/py_deps/sklearn/linear_model/_glm/tests/__pycache__  files=2 bytes=25565
+  D runs/p8_bge/py_deps/sklearn/linear_model/_glm/__pycache__  files=3 bytes=41446
+  D runs/p8_bge/py_deps/sklearn/linear_model/__pycache__  files=17 bytes=566835
+  D runs/p8_bge/py_deps/sklearn/manifold/tests/__pycache__  files=6 bytes=60005
+  D runs/p8_bge/py_deps/sklearn/manifold/__pycache__  files=6 bytes=114227
+  D runs/p8_bge/py_deps/sklearn/metrics/cluster/tests/__pycache__  files=5 bytes=32511
+  D runs/p8_bge/py_deps/sklearn/metrics/cluster/__pycache__  files=4 bytes=58825
+  D runs/p8_bge/py_deps/sklearn/metrics/tests/__pycache__  files=9 bytes=314245
+  D runs/p8_bge/py_deps/sklearn/metrics/_pairwise_distances_reduction/__pycache__  files=2 bytes=26178
+  D runs/p8_bge/py_deps/sklearn/metrics/_plot/tests/__pycache__  files=7 bytes=56715
+  D runs/p8_bge/py_deps/sklearn/metrics/_plot/__pycache__  files=6 bytes=82945
+  D runs/p8_bge/py_deps/sklearn/metrics/__pycache__  files=7 bytes=347892
+  D runs/p8_bge/py_deps/sklearn/mixture/tests/__pycache__  files=4 bytes=43758
+  D runs/p8_bge/py_deps/sklearn/mixture/__pycache__  files=4 bytes=73053
+  D runs/p8_bge/py_deps/sklearn/model_selection/tests/__pycache__  files=8 bytes=243879
+  D runs/p8_bge/py_deps/sklearn/model_selection/__pycache__  files=7 bytes=334762
+  D runs/p8_bge/py_deps/sklearn/neighbors/tests/__pycache__  files=12 bytes=126868
+  D runs/p8_bge/py_deps/sklearn/neighbors/__pycache__  files=10 bytes=163428
+  D runs/p8_bge/py_deps/sklearn/neural_network/tests/__pycache__  files=5 bytes=39793
+  D runs/p8_bge/py_deps/sklearn/neural_network/__pycache__  files=5 bytes=83891
+  D runs/p8_bge/py_deps/sklearn/preprocessing/tests/__pycache__  files=9 bytes=223268
+  D runs/p8_bge/py_deps/sklearn/preprocessing/__pycache__  files=8 bytes=264368
+  D runs/p8_bge/py_deps/sklearn/semi_supervised/tests/__pycache__  files=3 bytes=18138
+  D runs/p8_bge/py_deps/sklearn/semi_supervised/__pycache__  files=3 bytes=36839
+  D runs/p8_bge/py_deps/sklearn/svm/tests/__pycache__  files=4 bytes=51446
+  D runs/p8_bge/py_deps/sklearn/svm/__pycache__  files=4 bytes=96332
+  D runs/p8_bge/py_deps/sklearn/tests/__pycache__  files=27 bytes=414456
+  D runs/p8_bge/py_deps/sklearn/tree/tests/__pycache__  files=5 bytes=95200
+  D runs/p8_bge/py_deps/sklearn/tree/__pycache__  files=4 bytes=98345
+  D runs/p8_bge/py_deps/sklearn/utils/tests/__pycache__  files=43 bytes=436171
+  D runs/p8_bge/py_deps/sklearn/utils/_repr_html/tests/__pycache__  files=3 bytes=21592
+  D runs/p8_bge/py_deps/sklearn/utils/_repr_html/__pycache__  files=4 bytes=23177
+  D runs/p8_bge/py_deps/sklearn/utils/_test_common/__pycache__  files=2 bytes=20698
+  D runs/p8_bge/py_deps/sklearn/utils/__pycache__  files=40 bytes=623884
+  D runs/p8_bge/py_deps/sklearn/_build_utils/__pycache__  files=3 bytes=2499
+  D runs/p8_bge/py_deps/sklearn/_loss/tests/__pycache__  files=3 bytes=30687
+  D runs/p8_bge/py_deps/sklearn/_loss/__pycache__  files=3 bytes=43473
+  D runs/p8_bge/py_deps/sklearn/__check_build/__pycache__  files=1 bytes=1732
+  D runs/p8_bge/py_deps/sklearn/__pycache__  files=19 bytes=464184
+  D runs/p8_bge/py_deps/sympy/algebras/tests/__pycache__  files=2 bytes=16505
+  D runs/p8_bge/py_deps/sympy/algebras/__pycache__  files=2 bytes=47440
+  D runs/p8_bge/py_deps/sympy/assumptions/handlers/__pycache__  files=7 bytes=66542
+  D runs/p8_bge/py_deps/sympy/assumptions/predicates/__pycache__  files=7 bytes=41068
+  D runs/p8_bge/py_deps/sympy/assumptions/relation/__pycache__  files=3 bytes=14676
+  D runs/p8_bge/py_deps/sympy/assumptions/tests/__pycache__  files=10 bytes=130475
+  D runs/p8_bge/py_deps/sympy/assumptions/__pycache__  files=11 bytes=111849
+  D runs/p8_bge/py_deps/sympy/benchmarks/__pycache__  files=4 bytes=18167
+  D runs/p8_bge/py_deps/sympy/calculus/tests/__pycache__  files=6 bytes=48355
+  D runs/p8_bge/py_deps/sympy/calculus/__pycache__  files=6 bytes=78556
+  D runs/p8_bge/py_deps/sympy/categories/tests/__pycache__  files=3 bytes=22719
+  D runs/p8_bge/py_deps/sympy/categories/__pycache__  files=3 bytes=94945
+  D runs/p8_bge/py_deps/sympy/codegen/tests/__pycache__  files=16 bytes=75257
+  D runs/p8_bge/py_deps/sympy/codegen/__pycache__  files=17 bytes=147121
+  D runs/p8_bge/py_deps/sympy/combinatorics/tests/__pycache__  files=23 bytes=168984
+  D runs/p8_bge/py_deps/sympy/combinatorics/__pycache__  files=24 bytes=615618
+  D runs/p8_bge/py_deps/sympy/concrete/tests/__pycache__  files=6 bytes=112496
+  D runs/p8_bge/py_deps/sympy/concrete/__pycache__  files=8 bytes=123485
+  D runs/p8_bge/py_deps/sympy/core/benchmarks/__pycache__  files=7 bytes=7590
+  D runs/p8_bge/py_deps/sympy/core/tests/__pycache__  files=41 bytes=893159
+  D runs/p8_bge/py_deps/sympy/core/__pycache__  files=38 bytes=924303
+  D runs/p8_bge/py_deps/sympy/crypto/tests/__pycache__  files=2 bytes=21120
+  D runs/p8_bge/py_deps/sympy/crypto/__pycache__  files=2 bytes=95792
+  D runs/p8_bge/py_deps/sympy/diffgeom/tests/__pycache__  files=5 bytes=22873
+  D runs/p8_bge/py_deps/sympy/diffgeom/__pycache__  files=3 bytes=80787
+  D runs/p8_bge/py_deps/sympy/discrete/tests/__pycache__  files=4 bytes=26735
+  D runs/p8_bge/py_deps/sympy/discrete/__pycache__  files=4 bytes=33295
+  D runs/p8_bge/py_deps/sympy/external/tests/__pycache__  files=9 bytes=48507
+  D runs/p8_bge/py_deps/sympy/external/__pycache__  files=5 bytes=34342
+  D runs/p8_bge/py_deps/sympy/functions/combinatorial/tests/__pycache__  files=3 bytes=73076
+  D runs/p8_bge/py_deps/sympy/functions/combinatorial/__pycache__  files=3 bytes=125470
+  D runs/p8_bge/py_deps/sympy/functions/elementary/benchmarks/__pycache__  files=2 bytes=747
+  D runs/p8_bge/py_deps/sympy/functions/elementary/tests/__pycache__  files=9 bytes=302013
+  D runs/p8_bge/py_deps/sympy/functions/elementary/__pycache__  files=9 bytes=327939
+  D runs/p8_bge/py_deps/sympy/functions/special/benchmarks/__pycache__  files=2 bytes=705
+  D runs/p8_bge/py_deps/sympy/functions/special/tests/__pycache__  files=15 bytes=176590
+  D runs/p8_bge/py_deps/sympy/functions/special/__pycache__  files=15 bytes=384986
+  D runs/p8_bge/py_deps/sympy/functions/__pycache__  files=1 bytes=5839
+  D runs/p8_bge/py_deps/sympy/geometry/tests/__pycache__  files=11 bytes=127785
+  D runs/p8_bge/py_deps/sympy/geometry/__pycache__  files=11 bytes=329954
+  D runs/p8_bge/py_deps/sympy/holonomic/tests/__pycache__  files=3 bytes=33816
+  D runs/p8_bge/py_deps/sympy/holonomic/__pycache__  files=5 bytes=86995
+  D runs/p8_bge/py_deps/sympy/integrals/benchmarks/__pycache__  files=3 bytes=1836
+  D runs/p8_bge/py_deps/sympy/integrals/tests/__pycache__  files=18 bytes=351995
+  D runs/p8_bge/py_deps/sympy/integrals/__pycache__  files=17 bytes=521747
+  D runs/p8_bge/py_deps/sympy/interactive/tests/__pycache__  files=3 bytes=7568
+  D runs/p8_bge/py_deps/sympy/interactive/__pycache__  files=4 bytes=31527
+  D runs/p8_bge/py_deps/sympy/liealgebras/tests/__pycache__  files=13 bytes=14414
+  D runs/p8_bge/py_deps/sympy/liealgebras/__pycache__  files=13 bytes=60118
+  D runs/p8_bge/py_deps/sympy/logic/algorithms/__pycache__  files=7 bytes=62933
+  D runs/p8_bge/py_deps/sympy/logic/tests/__pycache__  files=5 bytes=84312
+  D runs/p8_bge/py_deps/sympy/logic/utilities/__pycache__  files=2 bytes=1794
+  D runs/p8_bge/py_deps/sympy/logic/__pycache__  files=3 bytes=112576
+  D runs/p8_bge/py_deps/sympy/matrices/benchmarks/__pycache__  files=2 bytes=1106
+  D runs/p8_bge/py_deps/sympy/matrices/expressions/tests/__pycache__  files=26 bytes=151901
+  D runs/p8_bge/py_deps/sympy/matrices/expressions/__pycache__  files=25 bytes=200354
+  D runs/p8_bge/py_deps/sympy/matrices/tests/__pycache__  files=18 bytes=475545
+  D runs/p8_bge/py_deps/sympy/matrices/__pycache__  files=21 bytes=558009
+  D runs/p8_bge/py_deps/sympy/multipledispatch/tests/__pycache__  files=4 bytes=20420
+  D runs/p8_bge/py_deps/sympy/multipledispatch/__pycache__  files=5 bytes=24170
+  D runs/p8_bge/py_deps/sympy/ntheory/tests/__pycache__  files=16 bytes=96330
+  D runs/p8_bge/py_deps/sympy/ntheory/__pycache__  files=15 bytes=253067
+  D runs/p8_bge/py_deps/sympy/parsing/autolev/test-examples/pydy-example-repo/__pycache__  files=4 bytes=6869
+  D runs/p8_bge/py_deps/sympy/parsing/autolev/test-examples/__pycache__  files=12 bytes=19488
+  D runs/p8_bge/py_deps/sympy/parsing/autolev/_antlr/__pycache__  files=4 bytes=129022
+  D runs/p8_bge/py_deps/sympy/parsing/autolev/__pycache__  files=4 bytes=58216
+  D runs/p8_bge/py_deps/sympy/parsing/c/__pycache__  files=2 bytes=26111
+  D runs/p8_bge/py_deps/sympy/parsing/fortran/__pycache__  files=2 bytes=9063
+  D runs/p8_bge/py_deps/sympy/parsing/latex/lark/__pycache__  files=3 bytes=26514
+  D runs/p8_bge/py_deps/sympy/parsing/latex/_antlr/__pycache__  files=3 bytes=153927
+  D runs/p8_bge/py_deps/sympy/parsing/latex/__pycache__  files=4 bytes=23029
+  D runs/p8_bge/py_deps/sympy/parsing/tests/__pycache__  files=14 bytes=142641
+  D runs/p8_bge/py_deps/sympy/parsing/__pycache__  files=6 bytes=74840
+  D runs/p8_bge/py_deps/sympy/physics/biomechanics/tests/__pycache__  files=5 bytes=90542
+  D runs/p8_bge/py_deps/sympy/physics/biomechanics/__pycache__  files=5 bytes=136422
+  D runs/p8_bge/py_deps/sympy/physics/continuum_mechanics/tests/__pycache__  files=5 bytes=40582
+  D runs/p8_bge/py_deps/sympy/physics/continuum_mechanics/__pycache__  files=5 bytes=209726
+  D runs/p8_bge/py_deps/sympy/physics/control/tests/__pycache__  files=3 bytes=95985
+  D runs/p8_bge/py_deps/sympy/physics/control/__pycache__  files=3 bytes=212462
+  D runs/p8_bge/py_deps/sympy/physics/hep/tests/__pycache__  files=2 bytes=13409
+  D runs/p8_bge/py_deps/sympy/physics/hep/__pycache__  files=2 bytes=14252
+  D runs/p8_bge/py_deps/sympy/physics/mechanics/tests/__pycache__  files=25 bytes=253537
+  D runs/p8_bge/py_deps/sympy/physics/mechanics/__pycache__  files=19 bytes=381407
+  D runs/p8_bge/py_deps/sympy/physics/optics/tests/__pycache__  files=6 bytes=20498
+  D runs/p8_bge/py_deps/sympy/physics/optics/__pycache__  files=6 bytes=81051
+  D runs/p8_bge/py_deps/sympy/physics/quantum/tests/__pycache__  files=38 bytes=385962
+  D runs/p8_bge/py_deps/sympy/physics/quantum/__pycache__  files=38 bytes=488988
+  D runs/p8_bge/py_deps/sympy/physics/tests/__pycache__  files=9 bytes=62956
+  D runs/p8_bge/py_deps/sympy/physics/units/definitions/__pycache__  files=3 bytes=16955
+  D runs/p8_bge/py_deps/sympy/physics/units/systems/__pycache__  files=7 bytes=19795
+  D runs/p8_bge/py_deps/sympy/physics/units/tests/__pycache__  files=8 bytes=43817
+  D runs/p8_bge/py_deps/sympy/physics/units/__pycache__  files=6 bytes=62759
+  D runs/p8_bge/py_deps/sympy/physics/vector/tests/__pycache__  files=9 bytes=97704
+  D runs/p8_bge/py_deps/sympy/physics/vector/__pycache__  files=8 bytes=147778
+  D runs/p8_bge/py_deps/sympy/physics/__pycache__  files=9 bytes=148709
+  D runs/p8_bge/py_deps/sympy/plotting/backends/matplotlibbackend/__pycache__  files=2 bytes=8897
+  D runs/p8_bge/py_deps/sympy/plotting/backends/textbackend/__pycache__  files=2 bytes=1633
+  D runs/p8_bge/py_deps/sympy/plotting/backends/__pycache__  files=2 bytes=15124
+  D runs/p8_bge/py_deps/sympy/plotting/intervalmath/tests/__pycache__  files=4 bytes=19555
+  D runs/p8_bge/py_deps/sympy/plotting/intervalmath/__pycache__  files=4 bytes=22704
+  D runs/p8_bge/py_deps/sympy/plotting/pygletplot/tests/__pycache__  files=2 bytes=3418
+  D runs/p8_bge/py_deps/sympy/plotting/pygletplot/__pycache__  files=17 bytes=100732
+  D runs/p8_bge/py_deps/sympy/plotting/tests/__pycache__  files=7 bytes=105687
+  D runs/p8_bge/py_deps/sympy/plotting/__pycache__  files=8 bytes=158763
+  D runs/p8_bge/py_deps/sympy/polys/agca/tests/__pycache__  files=5 bytes=34257
+  D runs/p8_bge/py_deps/sympy/polys/agca/__pycache__  files=5 bytes=102655
+  D runs/p8_bge/py_deps/sympy/polys/benchmarks/__pycache__  files=4 bytes=338727
+  D runs/p8_bge/py_deps/sympy/polys/domains/tests/__pycache__  files=4 bytes=52770
+  D runs/p8_bge/py_deps/sympy/polys/domains/__pycache__  files=32 bytes=237465
+  D runs/p8_bge/py_deps/sympy/polys/matrices/tests/__pycache__  files=15 bytes=203577
+  D runs/p8_bge/py_deps/sympy/polys/matrices/__pycache__  files=15 bytes=299166
+  D runs/p8_bge/py_deps/sympy/polys/numberfields/tests/__pycache__  files=9 bytes=87893
+  D runs/p8_bge/py_deps/sympy/polys/numberfields/__pycache__  files=11 bytes=256538
+  D runs/p8_bge/py_deps/sympy/polys/tests/__pycache__  files=40 bytes=723007
+  D runs/p8_bge/py_deps/sympy/polys/__pycache__  files=43 bytes=1415205
+  D runs/p8_bge/py_deps/sympy/printing/pretty/tests/__pycache__  files=2 bytes=154986
+  D runs/p8_bge/py_deps/sympy/printing/pretty/__pycache__  files=4 bytes=121988
+  D runs/p8_bge/py_deps/sympy/printing/tests/__pycache__  files=36 bytes=666867
+  D runs/p8_bge/py_deps/sympy/printing/__pycache__  files=36 bytes=695821
+  D runs/p8_bge/py_deps/sympy/sandbox/tests/__pycache__  files=2 bytes=1513
+  D runs/p8_bge/py_deps/sympy/sandbox/__pycache__  files=2 bytes=2954
+  D runs/p8_bge/py_deps/sympy/series/benchmarks/__pycache__  files=3 bytes=1359
+  D runs/p8_bge/py_deps/sympy/series/tests/__pycache__  files=16 bytes=220816
+  D runs/p8_bge/py_deps/sympy/series/__pycache__  files=15 bytes=182793
+  D runs/p8_bge/py_deps/sympy/sets/handlers/__pycache__  files=9 bytes=36522
+  D runs/p8_bge/py_deps/sympy/sets/tests/__pycache__  files=8 bytes=144914
+  D runs/p8_bge/py_deps/sympy/sets/__pycache__  files=8 bytes=153240
+  D runs/p8_bge/py_deps/sympy/simplify/tests/__pycache__  files=16 bytes=221359
+  D runs/p8_bge/py_deps/sympy/simplify/__pycache__  files=17 bytes=364590
+  D runs/p8_bge/py_deps/sympy/solvers/benchmarks/__pycache__  files=2 bytes=936
+  D runs/p8_bge/py_deps/sympy/solvers/diophantine/tests/__pycache__  files=2 bytes=47425
+  D runs/p8_bge/py_deps/sympy/solvers/diophantine/__pycache__  files=2 bytes=107344
+  D runs/p8_bge/py_deps/sympy/solvers/ode/tests/__pycache__  files=7 bytes=278788
+  D runs/p8_bge/py_deps/sympy/solvers/ode/__pycache__  files=9 bytes=382496
+  D runs/p8_bge/py_deps/sympy/solvers/tests/__pycache__  files=11 bytes=332100
+  D runs/p8_bge/py_deps/sympy/solvers/__pycache__  files=11 bytes=378385
+  D runs/p8_bge/py_deps/sympy/stats/sampling/tests/__pycache__  files=4 bytes=12950
+  D runs/p8_bge/py_deps/sympy/stats/sampling/__pycache__  files=4 bytes=13326
+  D runs/p8_bge/py_deps/sympy/stats/tests/__pycache__  files=14 bytes=207820
+  D runs/p8_bge/py_deps/sympy/stats/__pycache__  files=20 bytes=524945
+  D runs/p8_bge/py_deps/sympy/strategies/branch/tests/__pycache__  files=4 bytes=7682
+  D runs/p8_bge/py_deps/sympy/strategies/branch/__pycache__  files=4 bytes=6377
+  D runs/p8_bge/py_deps/sympy/strategies/tests/__pycache__  files=6 bytes=16589
+  D runs/p8_bge/py_deps/sympy/strategies/__pycache__  files=7 bytes=21301
+  D runs/p8_bge/py_deps/sympy/tensor/array/expressions/tests/__pycache__  files=9 bytes=62619
+  D runs/p8_bge/py_deps/sympy/tensor/array/expressions/__pycache__  files=12 bytes=152774
+  D runs/p8_bge/py_deps/sympy/tensor/array/tests/__pycache__  files=8 bytes=56482
+  D runs/p8_bge/py_deps/sympy/tensor/array/__pycache__  files=8 bytes=82274
+  D runs/p8_bge/py_deps/sympy/tensor/tests/__pycache__  files=8 bytes=110643
+  D runs/p8_bge/py_deps/sympy/tensor/__pycache__  files=6 bytes=212163
+  D runs/p8_bge/py_deps/sympy/testing/tests/__pycache__  files=7 bytes=38390
+  D runs/p8_bge/py_deps/sympy/testing/__pycache__  files=8 bytes=99180
+  D runs/p8_bge/py_deps/sympy/unify/tests/__pycache__  files=4 bytes=13984
+  D runs/p8_bge/py_deps/sympy/unify/__pycache__  files=4 bytes=16908
+  D runs/p8_bge/py_deps/sympy/utilities/mathml/data/__pycache__  files=1 bytes=201
+  D runs/p8_bge/py_deps/sympy/utilities/mathml/__pycache__  files=1 bytes=3421
+  D runs/p8_bge/py_deps/sympy/utilities/tests/__pycache__  files=20 bytes=371391
+  D runs/p8_bge/py_deps/sympy/utilities/_compilation/tests/__pycache__  files=2 bytes=3385
+  D runs/p8_bge/py_deps/sympy/utilities/_compilation/__pycache__  files=5 bytes=35798
+  D runs/p8_bge/py_deps/sympy/utilities/__pycache__  files=19 bytes=331845
+  D runs/p8_bge/py_deps/sympy/vector/tests/__pycache__  files=11 bytes=75361
+  D runs/p8_bge/py_deps/sympy/vector/__pycache__  files=15 bytes=148233
+  D runs/p8_bge/py_deps/sympy/__pycache__  files=6 bytes=36108
+  D runs/p8_bge/py_deps/tokenizers/decoders/__pycache__  files=1 bytes=419
+  D runs/p8_bge/py_deps/tokenizers/implementations/__pycache__  files=7 bytes=37249
+  D runs/p8_bge/py_deps/tokenizers/models/__pycache__  files=1 bytes=305
+  D runs/p8_bge/py_deps/tokenizers/normalizers/__pycache__  files=1 bytes=810
+  D runs/p8_bge/py_deps/tokenizers/pre_tokenizers/__pycache__  files=1 bytes=491
+  D runs/p8_bge/py_deps/tokenizers/processors/__pycache__  files=1 bytes=369
+  D runs/p8_bge/py_deps/tokenizers/tools/__pycache__  files=2 bytes=11913
+  D runs/p8_bge/py_deps/tokenizers/trainers/__pycache__  files=1 bytes=339
+  D runs/p8_bge/py_deps/tokenizers/__pycache__  files=1 bytes=1800
+  D runs/p8_bge/py_deps/tqdm/contrib/__pycache__  files=9 bytes=36632
+  D runs/p8_bge/py_deps/tqdm/__pycache__  files=22 bytes=111657
+  D runs/p8_bge/py_deps/transformers/benchmark/__pycache__  files=7 bytes=60128
+  D runs/p8_bge/py_deps/transformers/commands/__pycache__  files=13 bytes=111573
+  D runs/p8_bge/py_deps/transformers/data/datasets/__pycache__  files=4 bytes=24835
+  D runs/p8_bge/py_deps/transformers/data/metrics/__pycache__  files=2 bytes=18612
+  D runs/p8_bge/py_deps/transformers/data/processors/__pycache__  files=5 bytes=53229
+  D runs/p8_bge/py_deps/transformers/data/__pycache__  files=2 bytes=47697
+  D runs/p8_bge/py_deps/transformers/generation/__pycache__  files=13 bytes=545644
+  D runs/p8_bge/py_deps/transformers/integrations/__pycache__  files=8 bytes=117913
+  D runs/p8_bge/py_deps/transformers/models/albert/__pycache__  files=8 bytes=153383
+  D runs/p8_bge/py_deps/transformers/models/align/__pycache__  files=5 bytes=84306
+  D runs/p8_bge/py_deps/transformers/models/altclip/__pycache__  files=4 bytes=73288
+  D runs/p8_bge/py_deps/transformers/models/audio_spectrogram_transformer/__pycache__  files=5 bytes=41568
+  D runs/p8_bge/py_deps/transformers/models/auto/__pycache__  files=10 bytes=212809
+  D runs/p8_bge/py_deps/transformers/models/autoformer/__pycache__  files=3 bytes=89132
+  D runs/p8_bge/py_deps/transformers/models/bark/__pycache__  files=6 bytes=97816
+  D runs/p8_bge/py_deps/transformers/models/bart/__pycache__  files=8 bytes=224571
+  D runs/p8_bge/py_deps/transformers/models/barthez/__pycache__  files=3 bytes=20374
+  D runs/p8_bge/py_deps/transformers/models/bartpho/__pycache__  files=2 bytes=13241
+  D runs/p8_bge/py_deps/transformers/models/beit/__pycache__  files=7 bytes=114970
+  D runs/p8_bge/py_deps/transformers/models/bert/__pycache__  files=12 bytes=229368
+  D runs/p8_bge/py_deps/transformers/models/bertweet/__pycache__  files=2 bytes=21617
+  D runs/p8_bge/py_deps/transformers/models/bert_generation/__pycache__  files=4 bytes=45740
+  D runs/p8_bge/py_deps/transformers/models/bert_japanese/__pycache__  files=2 bytes=31291
+  D runs/p8_bge/py_deps/transformers/models/bigbird_pegasus/__pycache__  files=4 bytes=105968
+  D runs/p8_bge/py_deps/transformers/models/big_bird/__pycache__  files=7 bytes=179423
+  D runs/p8_bge/py_deps/transformers/models/biogpt/__pycache__  files=5 bytes=53574
+  D runs/p8_bge/py_deps/transformers/models/bit/__pycache__  files=5 bytes=48042
+  D runs/p8_bge/py_deps/transformers/models/blenderbot/__pycache__  files=8 bytes=190194
+  D runs/p8_bge/py_deps/transformers/models/blenderbot_small/__pycache__  files=7 bytes=172340
+  D runs/p8_bge/py_deps/transformers/models/blip/__pycache__  files=9 bytes=202351
+  D runs/p8_bge/py_deps/transformers/models/blip_2/__pycache__  files=5 bytes=82386
+  D runs/p8_bge/py_deps/transformers/models/bloom/__pycache__  files=6 bytes=80341
+  D runs/p8_bge/py_deps/transformers/models/bridgetower/__pycache__  files=5 bytes=99661
+  D runs/p8_bge/py_deps/transformers/models/bros/__pycache__  files=5 bytes=50660
+  D runs/p8_bge/py_deps/transformers/models/byt5/__pycache__  files=3 bytes=11124
+  D runs/p8_bge/py_deps/transformers/models/camembert/__pycache__  files=6 bytes=125097
+  D runs/p8_bge/py_deps/transformers/models/canine/__pycache__  files=5 bytes=61987
+  D runs/p8_bge/py_deps/transformers/models/chinese_clip/__pycache__  files=7 bytes=92002
+  D runs/p8_bge/py_deps/transformers/models/clap/__pycache__  files=6 bytes=108517
+  D runs/p8_bge/py_deps/transformers/models/clip/__pycache__  files=11 bytes=194487
+  D runs/p8_bge/py_deps/transformers/models/clipseg/__pycache__  files=5 bytes=75095
+  D runs/p8_bge/py_deps/transformers/models/clvp/__pycache__  files=8 bytes=121126
+  D runs/p8_bge/py_deps/transformers/models/codegen/__pycache__  files=5 bytes=55596
+  D runs/p8_bge/py_deps/transformers/models/code_llama/__pycache__  files=3 bytes=35878
+  D runs/p8_bge/py_deps/transformers/models/conditional_detr/__pycache__  files=6 bytes=176268
+  D runs/p8_bge/py_deps/transformers/models/convbert/__pycache__  files=7 bytes=116697
+  D runs/p8_bge/py_deps/transformers/models/convnext/__pycache__  files=7 bytes=68750
+  D runs/p8_bge/py_deps/transformers/models/convnextv2/__pycache__  files=5 bytes=56455
+  D runs/p8_bge/py_deps/transformers/models/cpm/__pycache__  files=3 bytes=23327
+  D runs/p8_bge/py_deps/transformers/models/cpmant/__pycache__  files=4 bytes=44859
+  D runs/p8_bge/py_deps/transformers/models/ctrl/__pycache__  files=5 bytes=69120
+  D runs/p8_bge/py_deps/transformers/models/cvt/__pycache__  files=5 bytes=73199
+  D runs/p8_bge/py_deps/transformers/models/data2vec/__pycache__  files=11 bytes=231252
+  D runs/p8_bge/py_deps/transformers/models/deberta/__pycache__  files=6 bytes=131796
+  D runs/p8_bge/py_deps/transformers/models/deberta_v2/__pycache__  files=6 bytes=142072
+  D runs/p8_bge/py_deps/transformers/models/decision_transformer/__pycache__  files=3 bytes=32972
+  D runs/p8_bge/py_deps/transformers/models/deformable_detr/__pycache__  files=7 bytes=163430
+  D runs/p8_bge/py_deps/transformers/models/deit/__pycache__  files=7 bytes=92617
+  D runs/p8_bge/py_deps/transformers/models/deprecated/bort/__pycache__  files=2 bytes=6759
+  D runs/p8_bge/py_deps/transformers/models/deprecated/mctct/__pycache__  files=5 bytes=47550
+  D runs/p8_bge/py_deps/transformers/models/deprecated/mmbt/__pycache__  files=3 bytes=16891
+  D runs/p8_bge/py_deps/transformers/models/deprecated/open_llama/__pycache__  files=3 bytes=38998
+  D runs/p8_bge/py_deps/transformers/models/deprecated/retribert/__pycache__  files=5 bytes=38509
+  D runs/p8_bge/py_deps/transformers/models/deprecated/tapex/__pycache__  files=2 bytes=42498
+  D runs/p8_bge/py_deps/transformers/models/deprecated/trajectory_transformer/__pycache__  files=4 bytes=28374
+  D runs/p8_bge/py_deps/transformers/models/deprecated/transfo_xl/__pycache__  files=8 bytes=121866
+  D runs/p8_bge/py_deps/transformers/models/deprecated/van/__pycache__  files=4 bytes=31737
+  D runs/p8_bge/py_deps/transformers/models/deprecated/__pycache__  files=1 bytes=204
+  D runs/p8_bge/py_deps/transformers/models/depth_anything/__pycache__  files=4 bytes=30977
+  D runs/p8_bge/py_deps/transformers/models/deta/__pycache__  files=6 bytes=174872
+  D runs/p8_bge/py_deps/transformers/models/detr/__pycache__  files=7 bytes=185699
+  D runs/p8_bge/py_deps/transformers/models/dialogpt/__pycache__  files=2 bytes=1307
+  D runs/p8_bge/py_deps/transformers/models/dinat/__pycache__  files=3 bytes=40156
+  D runs/p8_bge/py_deps/transformers/models/dinov2/__pycache__  files=4 bytes=44147
+  D runs/p8_bge/py_deps/transformers/models/distilbert/__pycache__  files=7 bytes=135770
+  D runs/p8_bge/py_deps/transformers/models/dit/__pycache__  files=2 bytes=6644
+  D runs/p8_bge/py_deps/transformers/models/donut/__pycache__  files=7 bytes=67952
+  D runs/p8_bge/py_deps/transformers/models/dpr/__pycache__  files=7 bytes=94630
+  D runs/p8_bge/py_deps/transformers/models/dpt/__pycache__  files=10 bytes=121927
+  D runs/p8_bge/py_deps/transformers/models/efficientformer/__pycache__  files=6 bytes=92619
+  D runs/p8_bge/py_deps/transformers/models/efficientnet/__pycache__  files=5 bytes=52099
+  D runs/p8_bge/py_deps/transformers/models/electra/__pycache__  files=8 bytes=181117
+  D runs/p8_bge/py_deps/transformers/models/encodec/__pycache__  files=5 bytes=54107
+  D runs/p8_bge/py_deps/transformers/models/encoder_decoder/__pycache__  files=5 bytes=87583
+  D runs/p8_bge/py_deps/transformers/models/ernie/__pycache__  files=3 bytes=62289
+  D runs/p8_bge/py_deps/transformers/models/ernie_m/__pycache__  files=4 bytes=50869
+  D runs/p8_bge/py_deps/transformers/models/esm/openfold_utils/__pycache__  files=9 bytes=101315
+  D runs/p8_bge/py_deps/transformers/models/esm/__pycache__  files=7 bytes=175211
+  D runs/p8_bge/py_deps/transformers/models/falcon/__pycache__  files=4 bytes=55651
+  D runs/p8_bge/py_deps/transformers/models/fastspeech2_conformer/__pycache__  files=7 bytes=98918
+  D runs/p8_bge/py_deps/transformers/models/flaubert/__pycache__  files=5 bytes=108204
+  D runs/p8_bge/py_deps/transformers/models/flava/__pycache__  files=8 bytes=132968
+  D runs/p8_bge/py_deps/transformers/models/fnet/__pycache__  files=6 bytes=66862
+  D runs/p8_bge/py_deps/transformers/models/focalnet/__pycache__  files=4 bytes=47968
+  D runs/p8_bge/py_deps/transformers/models/fsmt/__pycache__  files=5 bytes=71736
+  D runs/p8_bge/py_deps/transformers/models/funnel/__pycache__  files=7 bytes=141891
+  D runs/p8_bge/py_deps/transformers/models/fuyu/__pycache__  files=6 bytes=73853
+  D runs/p8_bge/py_deps/transformers/models/gemma/__pycache__  files=7 bytes=91919
+  D runs/p8_bge/py_deps/transformers/models/git/__pycache__  files=5 bytes=79492
+  D runs/p8_bge/py_deps/transformers/models/glpn/__pycache__  files=6 bytes=45696
+  D runs/p8_bge/py_deps/transformers/models/gpt2/__pycache__  files=9 bytes=151254
+  D runs/p8_bge/py_deps/transformers/models/gptj/__pycache__  files=5 bytes=96669
+  D runs/p8_bge/py_deps/transformers/models/gptsan_japanese/__pycache__  files=5 bytes=77981
+  D runs/p8_bge/py_deps/transformers/models/gpt_bigcode/__pycache__  files=3 bytes=44601
+  D runs/p8_bge/py_deps/transformers/models/gpt_neo/__pycache__  files=5 bytes=71191
+  D runs/p8_bge/py_deps/transformers/models/gpt_neox/__pycache__  files=4 bytes=55508
+  D runs/p8_bge/py_deps/transformers/models/gpt_neox_japanese/__pycache__  files=4 bytes=45250
+  D runs/p8_bge/py_deps/transformers/models/gpt_sw3/__pycache__  files=3 bytes=19204
+  D runs/p8_bge/py_deps/transformers/models/graphormer/__pycache__  files=4 bytes=40407
+  D runs/p8_bge/py_deps/transformers/models/groupvit/__pycache__  files=5 bytes=134482
+  D runs/p8_bge/py_deps/transformers/models/herbert/__pycache__  files=3 bytes=25967
+  D runs/p8_bge/py_deps/transformers/models/hubert/__pycache__  files=7 bytes=116994
+  D runs/p8_bge/py_deps/transformers/models/ibert/__pycache__  files=4 bytes=65986
+  D runs/p8_bge/py_deps/transformers/models/idefics/__pycache__  files=7 bytes=106171
+  D runs/p8_bge/py_deps/transformers/models/imagegpt/__pycache__  files=6 bytes=58906
+  D runs/p8_bge/py_deps/transformers/models/informer/__pycache__  files=3 bytes=80981
+  D runs/p8_bge/py_deps/transformers/models/instructblip/__pycache__  files=5 bytes=77615
+  D runs/p8_bge/py_deps/transformers/models/jukebox/__pycache__  files=5 bytes=127897
+  D runs/p8_bge/py_deps/transformers/models/kosmos2/__pycache__  files=5 bytes=100155
+  D runs/p8_bge/py_deps/transformers/models/layoutlm/__pycache__  files=6 bytes=127503
+  D runs/p8_bge/py_deps/transformers/models/layoutlmv2/__pycache__  files=8 bytes=143431
+  D runs/p8_bge/py_deps/transformers/models/layoutlmv3/__pycache__  files=9 bytes=201510
+  D runs/p8_bge/py_deps/transformers/models/layoutxlm/__pycache__  files=4 bytes=74681
+  D runs/p8_bge/py_deps/transformers/models/led/__pycache__  files=6 bytes=203455
+  D runs/p8_bge/py_deps/transformers/models/levit/__pycache__  files=6 bytes=47452
+  D runs/p8_bge/py_deps/transformers/models/lilt/__pycache__  files=3 bytes=41564
+  D runs/p8_bge/py_deps/transformers/models/llama/__pycache__  files=7 bytes=116448
+  D runs/p8_bge/py_deps/transformers/models/llava/__pycache__  files=5 bytes=36404
+  D runs/p8_bge/py_deps/transformers/models/longformer/__pycache__  files=7 bytes=203213
+  D runs/p8_bge/py_deps/transformers/models/longt5/__pycache__  files=5 bytes=132088
+  D runs/p8_bge/py_deps/transformers/models/luke/__pycache__  files=5 bytes=139731
+  D runs/p8_bge/py_deps/transformers/models/lxmert/__pycache__  files=7 bytes=133055
+  D runs/p8_bge/py_deps/transformers/models/m2m_100/__pycache__  files=5 bytes=71842
+  D runs/p8_bge/py_deps/transformers/models/marian/__pycache__  files=8 bytes=225869
+  D runs/p8_bge/py_deps/transformers/models/markuplm/__pycache__  files=7 bytes=125917
+  D runs/p8_bge/py_deps/transformers/models/mask2former/__pycache__  files=5 bytes=166727
+  D runs/p8_bge/py_deps/transformers/models/maskformer/__pycache__  files=10 bytes=204621
+  D runs/p8_bge/py_deps/transformers/models/mbart/__pycache__  files=8 bytes=205719
+  D runs/p8_bge/py_deps/transformers/models/mbart50/__pycache__  files=3 bytes=25867
+  D runs/p8_bge/py_deps/transformers/models/mega/__pycache__  files=4 bytes=89786
+  D runs/p8_bge/py_deps/transformers/models/megatron_bert/__pycache__  files=4 bytes=67401
+  D runs/p8_bge/py_deps/transformers/models/megatron_gpt2/__pycache__  files=3 bytes=28078
+  D runs/p8_bge/py_deps/transformers/models/mgp_str/__pycache__  files=5 bytes=37265
+  D runs/p8_bge/py_deps/transformers/models/mistral/__pycache__  files=5 bytes=76742
+  D runs/p8_bge/py_deps/transformers/models/mixtral/__pycache__  files=4 bytes=58068
+  D runs/p8_bge/py_deps/transformers/models/mluke/__pycache__  files=3 bytes=57396
+  D runs/p8_bge/py_deps/transformers/models/mobilebert/__pycache__  files=7 bytes=140487
+  D runs/p8_bge/py_deps/transformers/models/mobilenet_v1/__pycache__  files=6 bytes=37126
+  D runs/p8_bge/py_deps/transformers/models/mobilenet_v2/__pycache__  files=6 bytes=50999
+  D runs/p8_bge/py_deps/transformers/models/mobilevit/__pycache__  files=7 bytes=103524
+  D runs/p8_bge/py_deps/transformers/models/mobilevitv2/__pycache__  files=4 bytes=43033
+  D runs/p8_bge/py_deps/transformers/models/mpnet/__pycache__  files=6 bytes=102662
+  D runs/p8_bge/py_deps/transformers/models/mpt/__pycache__  files=3 bytes=38747
+  D runs/p8_bge/py_deps/transformers/models/mra/__pycache__  files=4 bytes=50547
+  D runs/p8_bge/py_deps/transformers/models/mt5/__pycache__  files=5 bytes=81541
+  D runs/p8_bge/py_deps/transformers/models/musicgen/__pycache__  files=5 bytes=94256
+  D runs/p8_bge/py_deps/transformers/models/mvp/__pycache__  files=5 bytes=98653
+  D runs/p8_bge/py_deps/transformers/models/nat/__pycache__  files=3 bytes=39443
+  D runs/p8_bge/py_deps/transformers/models/nezha/__pycache__  files=3 bytes=55258
+  D runs/p8_bge/py_deps/transformers/models/nllb/__pycache__  files=3 bytes=33822
+  D runs/p8_bge/py_deps/transformers/models/nllb_moe/__pycache__  files=4 bytes=71568
+  D runs/p8_bge/py_deps/transformers/models/nougat/__pycache__  files=5 bytes=49991
+  D runs/p8_bge/py_deps/transformers/models/nystromformer/__pycache__  files=4 bytes=42011
+  D runs/p8_bge/py_deps/transformers/models/oneformer/__pycache__  files=6 bytes=199463
+  D runs/p8_bge/py_deps/transformers/models/openai/__pycache__  files=7 bytes=85337
+  D runs/p8_bge/py_deps/transformers/models/opt/__pycache__  files=6 bytes=111667
+  D runs/p8_bge/py_deps/transformers/models/owlv2/__pycache__  files=6 bytes=116228
+  D runs/p8_bge/py_deps/transformers/models/owlvit/__pycache__  files=7 bytes=115177
+  D runs/p8_bge/py_deps/transformers/models/patchtsmixer/__pycache__  files=3 bytes=74438
+  D runs/p8_bge/py_deps/transformers/models/patchtst/__pycache__  files=3 bytes=76748
+  D runs/p8_bge/py_deps/transformers/models/pegasus/__pycache__  files=8 bytes=183084
+  D runs/p8_bge/py_deps/transformers/models/pegasus_x/__pycache__  files=3 bytes=57960
+  D runs/p8_bge/py_deps/transformers/models/perceiver/__pycache__  files=7 bytes=151913
+  D runs/p8_bge/py_deps/transformers/models/persimmon/__pycache__  files=4 bytes=42606
+  D runs/p8_bge/py_deps/transformers/models/phi/__pycache__  files=4 bytes=53605
+  D runs/p8_bge/py_deps/transformers/models/phobert/__pycache__  files=2 bytes=12692
+  D runs/p8_bge/py_deps/transformers/models/pix2struct/__pycache__  files=6 bytes=93456
+  D runs/p8_bge/py_deps/transformers/models/plbart/__pycache__  files=5 bytes=85806
+  D runs/p8_bge/py_deps/transformers/models/poolformer/__pycache__  files=6 bytes=42043
+  D runs/p8_bge/py_deps/transformers/models/pop2piano/__pycache__  files=7 bytes=94998
+  D runs/p8_bge/py_deps/transformers/models/prophetnet/__pycache__  files=5 bytes=108273
+  D runs/p8_bge/py_deps/transformers/models/pvt/__pycache__  files=5 bytes=46105
+  D runs/p8_bge/py_deps/transformers/models/qdqbert/__pycache__  files=3 bytes=55204
+  D runs/p8_bge/py_deps/transformers/models/qwen2/__pycache__  files=5 bytes=62168
+  D runs/p8_bge/py_deps/transformers/models/rag/__pycache__  files=6 bytes=166741
+  D runs/p8_bge/py_deps/transformers/models/realm/__pycache__  files=6 bytes=103372
+  D runs/p8_bge/py_deps/transformers/models/reformer/__pycache__  files=6 bytes=96188
+  D runs/p8_bge/py_deps/transformers/models/regnet/__pycache__  files=7 bytes=85887
+  D runs/p8_bge/py_deps/transformers/models/rembert/__pycache__  files=7 bytes=123824
+  D runs/p8_bge/py_deps/transformers/models/resnet/__pycache__  files=6 bytes=70992
+  D runs/p8_bge/py_deps/transformers/models/roberta/__pycache__  files=8 bytes=173379
+  D runs/p8_bge/py_deps/transformers/models/roberta_prelayernorm/__pycache__  files=6 bytes=146461
+  D runs/p8_bge/py_deps/transformers/models/roc_bert/__pycache__  files=4 bytes=98779
+  D runs/p8_bge/py_deps/transformers/models/roformer/__pycache__  files=9 bytes=159219
+  D runs/p8_bge/py_deps/transformers/models/rwkv/__pycache__  files=4 bytes=38550
+  D runs/p8_bge/py_deps/transformers/models/sam/__pycache__  files=7 bytes=178867
+  D runs/p8_bge/py_deps/transformers/models/seamless_m4t/__pycache__  files=8 bytes=212373
+  D runs/p8_bge/py_deps/transformers/models/seamless_m4t_v2/__pycache__  files=4 bytes=171346
+  D runs/p8_bge/py_deps/transformers/models/segformer/__pycache__  files=7 bytes=97437
+  D runs/p8_bge/py_deps/transformers/models/sew/__pycache__  files=4 bytes=55282
+  D runs/p8_bge/py_deps/transformers/models/sew_d/__pycache__  files=4 bytes=73772
+  D runs/p8_bge/py_deps/transformers/models/siglip/__pycache__  files=7 bytes=98350
+  D runs/p8_bge/py_deps/transformers/models/speecht5/__pycache__  files=9 bytes=179704
+  D runs/p8_bge/py_deps/transformers/models/speech_encoder_decoder/__pycache__  files=6 bytes=79611
+  D runs/p8_bge/py_deps/transformers/models/speech_to_text/__pycache__  files=8 bytes=135818
+  D runs/p8_bge/py_deps/transformers/models/speech_to_text_2/__pycache__  files=5 bytes=50255
+  D runs/p8_bge/py_deps/transformers/models/splinter/__pycache__  files=5 bytes=66757
+  D runs/p8_bge/py_deps/transformers/models/squeezebert/__pycache__  files=5 bytes=66974
+  D runs/p8_bge/py_deps/transformers/models/stablelm/__pycache__  files=3 bytes=45956
+  D runs/p8_bge/py_deps/transformers/models/swiftformer/__pycache__  files=4 bytes=30282
+  D runs/p8_bge/py_deps/transformers/models/swin/__pycache__  files=6 bytes=116856
+  D runs/p8_bge/py_deps/transformers/models/swin2sr/__pycache__  files=5 bytes=59726
+  D runs/p8_bge/py_deps/transformers/models/swinv2/__pycache__  files=4 bytes=58572
+  D runs/p8_bge/py_deps/transformers/models/switch_transformers/__pycache__  files=5 bytes=75509
+  D runs/p8_bge/py_deps/transformers/models/t5/__pycache__  files=10 bytes=210763
+  D runs/p8_bge/py_deps/transformers/models/table_transformer/__pycache__  files=5 bytes=106390
+  D runs/p8_bge/py_deps/transformers/models/tapas/__pycache__  files=6 bytes=252038
+  D runs/p8_bge/py_deps/transformers/models/timesformer/__pycache__  files=4 bytes=39491
+  D runs/p8_bge/py_deps/transformers/models/time_series_transformer/__pycache__  files=3 bytes=76256
+  D runs/p8_bge/py_deps/transformers/models/timm_backbone/__pycache__  files=3 bytes=8203
+  D runs/p8_bge/py_deps/transformers/models/trocr/__pycache__  files=5 bytes=50674
+  D runs/p8_bge/py_deps/transformers/models/tvlt/__pycache__  files=6 bytes=76373
+  D runs/p8_bge/py_deps/transformers/models/tvp/__pycache__  files=5 bytes=62059
+  D runs/p8_bge/py_deps/transformers/models/umt5/__pycache__  files=4 bytes=68870
+  D runs/p8_bge/py_deps/transformers/models/unispeech/__pycache__  files=4 bytes=69583
+  D runs/p8_bge/py_deps/transformers/models/unispeech_sat/__pycache__  files=5 bytes=80655
+  D runs/p8_bge/py_deps/transformers/models/univnet/__pycache__  files=5 bytes=51822
+  D runs/p8_bge/py_deps/transformers/models/upernet/__pycache__  files=5 bytes=38862
+  D runs/p8_bge/py_deps/transformers/models/videomae/__pycache__  files=6 bytes=65693
+  D runs/p8_bge/py_deps/transformers/models/vilt/__pycache__  files=7 bytes=87545
+  D runs/p8_bge/py_deps/transformers/models/vipllava/__pycache__  files=4 bytes=29481
+  D runs/p8_bge/py_deps/transformers/models/vision_encoder_decoder/__pycache__  files=5 bytes=90863
+  D runs/p8_bge/py_deps/transformers/models/vision_text_dual_encoder/__pycache__  files=6 bytes=75759
+  D runs/p8_bge/py_deps/transformers/models/visual_bert/__pycache__  files=4 bytes=58095
+  D runs/p8_bge/py_deps/transformers/models/vit/__pycache__  files=9 bytes=107486
+  D runs/p8_bge/py_deps/transformers/models/vitdet/__pycache__  files=3 bytes=34430
+  D runs/p8_bge/py_deps/transformers/models/vitmatte/__pycache__  files=5 bytes=34609
+  D runs/p8_bge/py_deps/transformers/models/vits/__pycache__  files=5 bytes=82420
+  D runs/p8_bge/py_deps/transformers/models/vit_hybrid/__pycache__  files=5 bytes=52233
+  D runs/p8_bge/py_deps/transformers/models/vit_mae/__pycache__  files=5 bytes=85197
+  D runs/p8_bge/py_deps/transformers/models/vit_msn/__pycache__  files=4 bytes=33870
+  D runs/p8_bge/py_deps/transformers/models/vivit/__pycache__  files=5 bytes=52835
+  D runs/p8_bge/py_deps/transformers/models/wav2vec2/__pycache__  files=10 bytes=249149
+  D runs/p8_bge/py_deps/transformers/models/wav2vec2_bert/__pycache__  files=5 bytes=72985
+  D runs/p8_bge/py_deps/transformers/models/wav2vec2_conformer/__pycache__  files=4 bytes=86944
+  D runs/p8_bge/py_deps/transformers/models/wav2vec2_phoneme/__pycache__  files=2 bytes=21351
+  D runs/p8_bge/py_deps/transformers/models/wav2vec2_with_lm/__pycache__  files=2 bytes=24744
+  D runs/p8_bge/py_deps/transformers/models/wavlm/__pycache__  files=5 bytes=73925
+  D runs/p8_bge/py_deps/transformers/models/whisper/__pycache__  files=12 bytes=349792
+  D runs/p8_bge/py_deps/transformers/models/xglm/__pycache__  files=8 bytes=105515
+  D runs/p8_bge/py_deps/transformers/models/xlm/__pycache__  files=6 bytes=119361
+  D runs/p8_bge/py_deps/transformers/models/xlm_prophetnet/__pycache__  files=4 bytes=100324
+  D runs/p8_bge/py_deps/transformers/models/xlm_roberta/__pycache__  files=7 bytes=163878
+  D runs/p8_bge/py_deps/transformers/models/xlm_roberta_xl/__pycache__  files=4 bytes=56898
+  D runs/p8_bge/py_deps/transformers/models/xlnet/__pycache__  files=7 bytes=152777
+  D runs/p8_bge/py_deps/transformers/models/xmod/__pycache__  files=4 bytes=63448
+  D runs/p8_bge/py_deps/transformers/models/x_clip/__pycache__  files=5 bytes=84171
+  D runs/p8_bge/py_deps/transformers/models/yolos/__pycache__  files=6 bytes=111540
+  D runs/p8_bge/py_deps/transformers/models/yoso/__pycache__  files=4 bytes=45805
+  D runs/p8_bge/py_deps/transformers/models/__pycache__  files=1 bytes=4788
+  D runs/p8_bge/py_deps/transformers/onnx/__pycache__  files=6 bytes=63143
+  D runs/p8_bge/py_deps/transformers/pipelines/__pycache__  files=31 bytes=367219
+  D runs/p8_bge/py_deps/transformers/quantizers/__pycache__  files=9 bytes=45830
+  D runs/p8_bge/py_deps/transformers/sagemaker/__pycache__  files=3 bytes=4800
+  D runs/p8_bge/py_deps/transformers/tools/__pycache__  files=17 bytes=115578
+  D runs/p8_bge/py_deps/transformers/utils/__pycache__  files=31 bytes=817515
+  D runs/p8_bge/py_deps/transformers/__pycache__  files=57 bytes=1809126
+  D runs/p8_bge/py_deps/yaml/__pycache__  files=17 bytes=139316
+  D runs/step26/__pycache__  files=1 bytes=45648
+  D scripts/__pycache__  files=2 bytes=39246
+  D tests/__pycache__  files=721 bytes=21944784
+  D training/agent_sft/__pycache__  files=22 bytes=140217
+  D __pycache__  files=4 bytes=3324
+
+6. ADDED FILES (P14-0 deliverables and the contract seed)
+------------------------------------------------------------------------------
+  A P14_PREP_ARCHIVE_MANIFEST.json  size=15318 (P14-0 deliverable)
+  A P14_PREP_REPORT.md  size=34635 (P14-0 deliverable)
+  A P14_PREP_SOURCE_DIFF.txt  size=75247 (P14-0 deliverable)
+  A archive/legacy_experiments/README.md  size=3757 (archive)
+  A archive/legacy_experiments/learned_ranker_v1.tar.gz  size=17249 (archive)
+  A archive/legacy_experiments/m4_frozen_materialization.tar.gz  size=24709 (archive)
+  A archive/legacy_experiments/p2b_agent_diagnostics.tar.gz  size=19699 (archive)
+  A archive/legacy_experiments/root_scratch_p7p8.tar.gz  size=3849 (archive)
+  A archive/legacy_experiments/tiger_canonical_step26_28.tar.gz  size=40076 (archive)
+  A archive/legacy_experiments/v2_pipeline_gates.tar.gz  size=62764 (archive)
+  A docs/P14_PREP_INTERFACE.md  size=34337 (P14-0 deliverable)
+  A recommendation/contracts/__init__.py  size=937 (P14-0 contract seed code)
+  A recommendation/contracts/namespaces.py  size=7111 (P14-0 contract seed code)
+  A tests/test_contracts_namespaces.py  size=4130 (regression tests for the contract seed)
+  A P14_PREP_SOURCE_DIFF.txt  (this file, written after the snapshot)
+
+7. EXPLICIT NON-CHANGES (verified by snapshot hash equality)
+------------------------------------------------------------------------------
+  recommendation/  present= 203 hash_changed=0 deleted=0
+  tests/           present= 200 hash_changed=0 deleted=0
+  experiments/     present= 104 hash_changed=0 deleted=43
+  benchmarks/      present=  39 hash_changed=0 deleted=0
+  training/        present= 107 hash_changed=0 deleted=0
+  scripts/         present=  10 hash_changed=0 deleted=0
+  config/          present=   1 hash_changed=0 deleted=0
+  docs/            present= 129 hash_changed=0 deleted=0
+  backends/        present=  15 hash_changed=0 deleted=0
+  data/ runs/ models/          not inventoried (git-ignored artifacts); preserved by policy:
+                               no file below these trees was moved, deleted or rewritten by P14-0
+                               except regenerable __pycache__ trees removed from runs/ and tests/.
+  .venv/ .venv-ranker/         untouched dependency environments (not inventoried)
+  backends/tiger_public/.venv  untouched backend environment (not inventoried)
+
+8. FROZEN-AREA STATEMENT
+------------------------------------------------------------------------------
+No file under recommendation/ was deleted or content-changed; only the new
+recommendation/contracts/ package was added.  No test was deleted; one test module was
+added.  Planner contract, M5 memory, CandidateLedger, Role Gate, Eligibility, Source
+Policy and Serving V1 code are unchanged.  No data/, runs/, models/ artifact changed.
+The 43 archived experiment scripts were not imported by the test suite or by current
+code (closure-checked); they remain recoverable byte-identically from the tarballs and
+from git HEAD.
+

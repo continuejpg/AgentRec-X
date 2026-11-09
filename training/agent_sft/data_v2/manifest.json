@@ -1,0 +1,23 @@
+{
+  "version": "p2sft.data.v1.2",
+  "base_version": "p2sft.data.v1.1",
+  "seed": 20261106,
+  "counts": {
+    "train": 2880,
+    "val": 360,
+    "new_train": 480,
+    "new_val": 120,
+    "mixed_original_train": 2400
+  },
+  "new_data_sha256": "fcc0417c6fcf0bf2d2b50feec31cf7cb2f4fbf8691192d10365cfa5e950079b3",
+  "sha256": {
+    "train": "e91911a5a61ef01cc1f805c01ec2a3a30cc113b570ef582efe6def40d57f197e",
+    "val": "ed480c23ddd922ee06dc55526d996be6bbb9189b6c01219fb2eecd885630f1f1"
+  },
+  "context_source": "real_sports_outdoors_catalogue",
+  "label_policy": "independent semantic configuration + schema validator + evidence substring",
+  "human_review_status": "not_required_rule_checked",
+  "prohibited_sources_used": false,
+  "notes": "600 new rows from 6 independently authored template families, mixed with 2400 v1.1 train rows; 120 new val mixed with 240 v1.1 val; no test/hard-test rows used.",
+  "schema_version": "agentrecx.preference_operation.v1"
+}

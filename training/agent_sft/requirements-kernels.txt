@@ -1,0 +1,5 @@
+# Optional fast-path kernels for Qwen3.5 Gated DeltaNet on supported NVIDIA GPUs.
+# On A100 the PyTorch fallback is acceptable for initial LoRA SFT; install these only
+# after the G0 preflight proves the base environment is healthy and version-compatible.
+# causal-conv1d>=1.5.0
+# fla-core

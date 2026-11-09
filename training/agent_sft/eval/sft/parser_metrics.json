@@ -1,0 +1,17 @@
+{
+  "provider": "sft",
+  "model": "/root/autodl-tmp/models/Qwen3.5-9B-ms",
+  "adapter": "training/agent_sft/output/qwen3_5_9b_lora/adapter",
+  "samples": 200,
+  "schema_valid_rate": 0.97,
+  "operation_exact_match": 0.945,
+  "operation_macro_f1": 0.703170731707317,
+  "operation_micro_f1": 0.9593908629441624,
+  "slot_accuracy": 0.945,
+  "retraction_accuracy": 1.0,
+  "unsupported_proposal_rate": 0.03,
+  "failure_or_abstention_rate": 0.03,
+  "p50_latency_ms": 2972.9106687009335,
+  "p95_latency_ms": 4955.069262860338,
+  "retraction_samples": 19
+}

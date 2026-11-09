@@ -1,0 +1,62 @@
+P8-B source diff (curated)
+==========================
+
+Deleted / replaced:
+- deleted `tests/test_dense_catalog.py` (old hashed/fake-dense acceptance tests)
+- replaced `recommendation/inference/dense_catalog.py` entirely with BGE-base-only v3 index
+  (removed hashed TF-IDF fallback and BGE-small assumptions)
+- retained/refactored the uncommitted hybrid logic in
+  `recommendation/control/catalog_search.py`; added explicit modes and source labels
+- updated `docs/DEMO_ACCEPTANCE.md` BGE artifact requirements to BGE-base 768 / v3
+
+New:
+- `experiments/build_bge_index.py` (real catalogue -> BGE-base NPZ builder + sidecar)
+
+Key changes:
+
+recommendation/inference/dense_catalog.py
++ INDEX_FORMAT = "agentrecx.dense_catalog.v3"
++ BGE_MODEL_ID = "BAAI/bge-base-en-v1.5"
++ BGE_EMBEDDING_DIM = 768
++ BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
++ TEXT_BUILD_VERSION = "agentrecx.catalog_text.v1"
++ TEXT_MAX_CHARS = 2048
++ MAX_SEQ_LENGTH = 512
+- hashed TF-IDF fallback and BGE-small 384 path removed
+
++ DenseCatalogIndex.build(records, model_path=..., model_revision=...,
++                         mapping_sha=..., device="cuda", batch_size=128)
++ DenseCatalogIndex.load(path, model_path=None, catalogue_records=..., mapping_sha=...)
++ DenseCatalogIndex.validate_catalogue(records, mapping_sha=...)
++ normalized float32 vectors, finite/norm checks, unique identities
++ metadata: model/revision/dim/normalization/similarity/text_build/catalogue fingerprint/
++           identity fingerprint/mapping fingerprint/item count/text config/built_at/format
++ query encoding uses the official BGE query instruction; documents do not
++ load fails if the local BGE model is missing; no fallback
+
+recommendation/control/catalog_search.py
++ CATALOG_SEARCH_MODES = ("bm25", "bge", "hybrid")
++ CATALOG_SEARCH_SCORE_KINDS = {
++     "bm25": "bm25",
++     "bge": "bge_dense",
++     "hybrid": "hybrid_bm25_bge",
++ }
+  CatalogSearchSource(catalog, ..., mode="bm25", dense_index=None)
++ mode="bge": dense-only results, matched_fields ("bge_dense",)
++ mode="hybrid": BM25 + dense reciprocal-rank fusion, fields ("bm25","bge_dense")
++ unknown/stale dense ASINs are filtered by current catalogue records
++ CatalogSearchResult.score_kind / as_dict carry the actual source label
++ bm25-only remains default and loads no dense model/index
+
+recommendation/demo/agent_service.py
++ AGENTRECX_CATALOG_SEARCH_MODE=bm25|bge|hybrid
++ AGENTRECX_DENSE_INDEX=<bge_base_dense.npz>
++ AGENTRECX_BGE_MODEL_PATH=<local BGE-base snapshot>
++ explicit mode resolution; bge/hybrid require a real index and fail loudly
++ load validates index against current catalogue and mapping fingerprint
++ default remains BM25; no silent fallback
++ legacy AGENTRECX_DENSE_RETRIEVAL=on maps to hybrid only when no explicit mode
+
+docs/DEMO_ACCEPTANCE.md
++ BGE v3: 156,746 x 768 BGE-base-en-v1.5 vectors + revision/fingerprints
++ bm25|bge|hybrid mode switches

@@ -1,0 +1,95 @@
+P14-E SOURCE DIFF
+================================================================================
+Milestone: P14-E Shopping Preference Benchmark Pilot
+Scope: additive only. No existing recommendation/agent/memory/serving code was modified.
+
+TRACKED FILES MODIFIED: none
+PRE-EXISTING MODIFIED FILES (unchanged by P14-E): 29 (P5-P14-D worktree state; not touched in this round)
+
+--------------------------------------------------------------------------------
+NEW SOURCE / TEST FILES
+experiments/p14e/__init__.py
+  bytes=51 sha256=c6dcfc6ff17249f6ee40569471be284e79d6a4697c2a4dfb31ddcf38a7e293a5
+experiments/p14e/catalogue.py
+  bytes=14226 sha256=566018d9b05e6373e6f4d59afb539377dad6cd1e18dc02f1e48dfe12bd5d0fcc
+experiments/p14e/labeling.py
+  bytes=10433 sha256=82869a9be3f1c590a17556aae327f109b748dd0e7bd2cb119f6bca5473e8adca
+experiments/p14e/build_pilot.py
+  bytes=34925 sha256=80c0f27dc9ff0df733db2cb38611e67bba046fa5837e8c422397a89c39a9cfb6
+experiments/p14e/validate.py
+  bytes=15856 sha256=63400e0147251e0b8880c909d044e30a0349753d6ce847a9ab42e080421294e3
+experiments/p14e/smoke.py
+  bytes=19468 sha256=87b36be91cf06a107555664caf2f798ba2efcc57b8e91875b8532bc3931bf0af
+tests/test_p14e_benchmark.py
+  bytes=7505 sha256=317305d793f46d9f0dd5d4d487f82b95dcd8ee041bd3ac9ea52c025ec6315843
+
+--------------------------------------------------------------------------------
+NEW REPORTS
+P14E_BENCHMARK_SPEC.md
+  bytes=10737 sha256=74f2692d505a6b945e91f92a5433661db033db3c4ab26fb9ffa90dbf11d3c9a8
+P14E_REPORT.md
+  bytes=11875 sha256=8ef0fbe519ce3a8d25a2758d8e77e9e3293cc373fd4bd4ee27eb2f04da9fd4d0
+
+--------------------------------------------------------------------------------
+NEW DATA ARTIFACTS (git-ignored; agent-visible and evaluator-only are physically separate files)
+data/p14e/benchmark/agent_tasks.jsonl
+  bytes=58811 sha256=06b15501c7f5586c9b5e137e14f96c4fb2e74f71c70ac7b856242775f92d7315
+data/p14e/benchmark/evaluator_only.jsonl
+  bytes=290217 sha256=f286ba1f0dbc774e1f276906c2c699817c6fa73c8787329f8d445a7dc333a878
+data/p14e/benchmark/history_events.jsonl
+  bytes=87373 sha256=40ccd36661b658c8ae9f1b52bf9ab970e705e72cf6f6bde8be4fc0033a9c4da8
+data/p14e/benchmark/personas.jsonl
+  bytes=17912 sha256=fafbe1d8314f77bae1b63c027a7972f2a37f099190d9695203fa712d3b91c35b
+data/p14e/benchmark/manifest.json
+  bytes=2778 sha256=68b25a2960d2486bd9dc242d0e09731ca1545bd361190c211c6f0ebf6e350019
+data/p14e/benchmark/review_checklist.json
+  bytes=2986 sha256=1548a82ca9482b73b7c32e0b7b5e85cd71414869468c44def16615f639ea2ad6
+data/p14e/benchmark/schema_v0.1.json
+  bytes=5305 sha256=daff93fbd260b84698b07d18cb6744149c3450d253f42b9f4536339b2b5a54ad
+
+--------------------------------------------------------------------------------
+RUN EVIDENCE
+runs/p14e/validation/summary.json
+  bytes=14482 sha256=5e630279f865da2f956d10d545a50b347aeb3c806913199fab45ec90965bfa54
+runs/p14e/smoke/summary.json
+  bytes=10016 sha256=a1c2609f21d37ca6fb4fe3e57e374fed89ed9231e545e8256ee80d08b5008235
+runs/p14e/smoke/trajectories/p14e_pilot_0001.json
+  bytes=11249 sha256=aacb29b9a05ad22e3dcd8e20f4ca49de86238539eda0a2c12970fe7ac2ea5aea
+runs/p14e/smoke/trajectories/p14e_pilot_0013.json
+  bytes=11984 sha256=10a1dde33166446f808414b3a697b0f0b9f2045aeb7945445e6db59e95c887d2
+runs/p14e/smoke/trajectories/p14e_pilot_0014.json
+  bytes=11872 sha256=50143f620e3d901f559a3bd3a2a2a29bbbbe4861354e737849e63bd6499a148d
+runs/p14e/smoke/trajectories/p14e_pilot_0023.json
+  bytes=11305 sha256=54d4c134ed441e2306455c827c9f174e9517b62160f18bdafdd8aefa779a3be2
+runs/p14e/smoke/trajectories/p14e_pilot_0026.json
+  bytes=11417 sha256=eb8d5b0c0db854bbbe208eb73827ef03dc8592fd4ce4109514cef8e5893d2db8
+runs/p14e/smoke/trajectories/p14e_pilot_0029.json
+  bytes=10995 sha256=749947a4ec8f1d1717ef537faf206e2085dfe55cee0e634e9e78ddf79471755d
+runs/p14e/smoke/trajectories/p14e_pilot_0031.json
+  bytes=10009 sha256=3181820af14d923b517ad7b9a7405b75da58e6aa145389f924911e1121bf556e
+runs/p14e/smoke/trajectories/p14e_pilot_0036.json
+  bytes=12691 sha256=31fdd670f4ba8a23f1eda6acfa8fa798c4148eba276bce6535bb361653f1acef
+runs/p14e/smoke/trajectories/p14e_pilot_0039.json
+  bytes=10315 sha256=5f2d731b199ceff622caf2285a13539982bfd1b9b27cb3af49d05738a4b22c56
+
+--------------------------------------------------------------------------------
+HARD CONSTRAINTS OBSERVED
+- no model training / no new preference scorer / no ranker
+- no Qwen inference or SFT-v1 / RL
+- no formal P14-C four-group Agent Benchmark
+- no full Shopping Companion 1.29M catalogue index
+- no P15 RAG / P16 Skills / P17 MCP work
+- no old Sports Serving V1 modifications
+- no P5-P14-D historical asset deletion
+- no full-repository pytest
+- no frozen / reserved test execution
+- no commit / push / deploy
+- no AutoDL start/stop/release
+- CPU-only data construction and smoke test
+
+--------------------------------------------------------------------------------
+NOTES
+- P14-A Shopping Companion modules are reused read-only via the M9/M5 memory class and CandidateLedger/GroundedReasoner/
+  CandidateEligibilityEvaluator; no P14-A file was modified in P14-E.
+- P13-R catalogue files are read-only; identity validation/quarantine is implemented in experiments/p14e/catalogue.py.
+- pilot_dev is NOT a frozen test split; see P14E_BENCHMARK_SPEC.md section 7 for the expansion split rules.

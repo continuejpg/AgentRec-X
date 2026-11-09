@@ -24,6 +24,8 @@ from .sasrec import (
     smoke_forward,
     valid_position_mask,
 )
+from .bge_sasrec import BGEEnhancedSASRec, build_bge_sasrec
+from .lightgcn import LightGCN, LightGCNConfig, LightGCNError
 
 __all__ = [
     "MODEL_NAME",
@@ -41,6 +43,11 @@ __all__ = [
     "set_torch_seed",
     "smoke_forward",
     "valid_position_mask",
+    "BGEEnhancedSASRec",
+    "build_bge_sasrec",
+    "LightGCN",
+    "LightGCNConfig",
+    "LightGCNError",
 ]
 
 __version__ = "0.1.0"

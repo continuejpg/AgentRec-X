@@ -1,0 +1,7 @@
+﻿phase,turn,parent_asin,item_id,price_value,currency,active_price_max,price_eligibility,evidence_source,exclusion_reason,role_status
+BEFORE,1,,,,30,hard_constraint_evaluated=false,R1 constraints empty,not evaluated,MATCH/UNKNOWN
+AFTER,1,B00CBR1UI6,38577,16.95,USD,30,MATCH,catalogue price_text,not excluded,MATCH
+AFTER,1,B08XJQ9HPX,123918,29.89,USD,30,MATCH,catalogue price_text,not excluded,MATCH
+AFTER,1,B09Y53NYDK,136697,19.99,USD,30,MATCH,catalogue price_text,not excluded,MATCH
+AFTER,1,B00LCWB5UY,48441,UNKNOWN,USD,30,UNKNOWN,catalogue price_text absent,price unresolved,UNKNOWN
+AFTER,2,,,,50,hard_constraint_evaluated=true but R1 constraints stale=30,proposal update not propagated,not fully evaluated,MATCH/UNKNOWN

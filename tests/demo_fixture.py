@@ -246,6 +246,7 @@ def build_harness(
     ttl_seconds: float | None = None,
     clock: Any = None,
     memory_db: Path | None = None,
+    checkpoint_db: Path | None = None,
     demo: bool = True,
     explanations: bool | None = None,
 ) -> DemoHarness:
@@ -267,6 +268,8 @@ def build_harness(
         kwargs["ttl_seconds"] = ttl_seconds
     if clock is not None:
         kwargs["clock"] = clock
+    if checkpoint_db is not None:
+        kwargs["checkpoint_db"] = checkpoint_db
     if explanations is not None:
         # The product-knowledge explanation capability is opt-in; a test that wants it says so.
         kwargs["explanations"] = explanations

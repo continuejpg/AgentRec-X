@@ -22,6 +22,7 @@ stays soft, which cannot exclude a product.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping, Sequence
@@ -42,6 +43,7 @@ __all__ = [
     "build_reason",
     "build_unresolved_question",
     "derive_intent",
+    "promote_explicit_type_matches",
     "query_terms",
 ]
 
@@ -92,6 +94,11 @@ class ActiveEntry:
     #: True for an application-supplied hard constraint: its strength is explicit, not
     #: inferred from wording, so an unclassifiable kind (e.g. free-form) stays hard.
     forced_hard: bool = False
+    #: Where this entry came from: ``user_stated`` (this turn's validated statement),
+    #: ``validated_existing`` (accepted memory from an earlier turn) or ``decision_state``
+    #: (an authorized M5 constraint merged by M5.2).  It is provenance for the effective
+    #: intent view, never a change to hardness.
+    origin: str = "validated_existing"
 
     def key(self) -> tuple[str, str, str]:
         return (self.kind, self.value.casefold(), self.polarity)
@@ -107,6 +114,10 @@ class IntentEntry:
     strength: Strength
     source_turn_id: str
     source_text: str
+    #: See :attr:`ActiveEntry.origin`; carried into the user-visible intent view so a
+    #: remembered or state-authorized constraint is never presented as a current-turn
+    #: user statement.
+    origin: str = "user_stated"
 
     def as_constraint(self) -> dict[str, str] | None:
         if self.strength is not Strength.HARD or self.kind not in _CONSTRAINT_KINDS:
@@ -206,7 +217,13 @@ def apply_extraction(
             for entry in entries
             if not (
                 (kind is None or entry.kind == kind)
-                and (value is None or entry.value.casefold() == str(value).casefold())
+                and (
+                    value is None
+                    or entry.value.casefold() == str(value).casefold()
+                    or _removal_value_prefix(
+                        str(value).casefold(), entry.value.casefold()
+                    )
+                )
             )
         ]
     for candidate in getattr(extraction, "preferences", ()) or ():
@@ -247,6 +264,7 @@ def apply_extraction(
                 polarity=polarity,
                 source_turn_id=turn_id,
                 source_text=str(getattr(candidate, "source_text", "") or ""),
+                origin="user_stated",
             )
         )
     return tuple(entries)
@@ -283,9 +301,26 @@ def derive_intent(
             polarity=getattr(entry.polarity, "value", entry.polarity),
             source_turn_id=str(getattr(entry, "source_turn_id", "") or ""),
             source_text=str(getattr(entry, "source_text", "") or ""),
+            origin="validated_existing",
         )
         for entry in getattr(snapshot, "active_entries", ()) or ()
     ]
+    # An explicit budget correction in this turn replaces the active budget for the same
+    # task-scoped kind.  Event history remains untouched; the current projection must not
+    # keep evaluating an older ceiling/floor once the user has stated a newer one.
+    current_price_kinds = {
+        str(getattr(getattr(preference, "kind", ""), "value", getattr(preference, "kind", "")))
+        for preference in (getattr(extraction, "preferences", ()) or ())
+        if str(getattr(getattr(preference, "kind", ""), "value", getattr(preference, "kind", "")))
+        in {"price_max", "price_min"}
+    }
+    current_price_kinds.update(
+        str(constraint.get("kind", "")).strip().lower()
+        for constraint in explicit_constraints
+        if str(constraint.get("kind", "")).strip().lower() in {"price_max", "price_min"}
+    )
+    if current_price_kinds:
+        active = [entry for entry in active if entry.kind not in current_price_kinds]
     entries = apply_extraction(active, extraction, turn_id=turn_id)
     for constraint in explicit_constraints:
         kind = str(constraint.get("kind", "")).strip().lower()
@@ -296,8 +331,12 @@ def derive_intent(
                     kind=kind,
                     value=value,
                     source_turn_id=turn_id,
-                    source_text="must satisfy the explicit request constraint",
+                    source_text=str(
+                        constraint.get("source_text")
+                        or "must satisfy the explicit request constraint"
+                    ),
                     forced_hard=True,
+                    origin="user_stated",
                 ),
             )
 
@@ -316,6 +355,7 @@ def derive_intent(
             strength=strength,
             source_turn_id=entry.source_turn_id,
             source_text=entry.source_text,
+            origin=entry.origin,
         )
         (hard_entries if strength is Strength.HARD else soft_entries).append(projected)
 
@@ -411,12 +451,305 @@ def query_terms(intent: ShoppingIntent, message: str, *, limit: int = 8) -> tupl
     return tuple(terms)
 
 
+def promote_explicit_type_matches(
+    message: str,
+    recommendations: Sequence[Any],
+    records: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    """Scope explicit product-type requests to trusted catalogue types.
+
+    The target type is grounded in the user's own type words plus trusted candidate
+    titles/categories; when those leaves are split, a catalogue-source leaf consensus is
+    still the fallback.  Broad requests (for example "hiking gear") have no product-type
+    consensus and are left untouched.  When at least two grounded same-type candidates
+    exist, trusted different-type candidates are removed from the requested scope;
+    candidates without trustworthy category evidence remain after the grounded matches.
+    Every retained identity keeps its real score, score kind and source provenance.
+    """
+    from recommendation.control import SearchCatalogArguments
+
+    def tokens(text: str) -> set[str]:
+        base = SearchCatalogArguments.from_text(text, limit=16)
+        return {
+            str(term).casefold().rstrip("s")
+            for term in getattr(base, "terms", ()) or ()
+            if str(term).strip()
+        }
+
+    generic = {
+        "gear", "equipment", "camping", "hiking", "outdoor", "sports", "trip",
+        "i", "need", "a", "an", "the", "for", "under", "with", "and", "or",
+        "show", "me", "want", "complete", "budget", "options", "color", "colors",
+        "please", "looking", "find",
+    }
+    modifiers = {
+        "lightweight", "portable", "best", "good", "small", "large", "cheap",
+        "compact", "durable", "premium", "ultralight", "new",
+    }
+    accessory_terms = {"replacement", "mouthpiece", "part", "parts", "spare", "accessory", "case"}
+
+    query_tokens = tokens(message)
+    product_tokens = (query_tokens - generic - modifiers)
+    query_accessory_tokens = query_tokens & accessory_terms
+    target_ids: set[str] = set()
+
+    # Role gating before type consensus: a mouthpiece query for a water filter must
+    # not fall back to every mouthpiece in the catalogue when no leaf consensus exists.
+    # Only trusted title evidence of a filter device qualifies; bottle bite valves and
+    # unrelated scuba/hydration mouthpieces stay UNKNOWN and are not presented.
+    if _asks_for_accessory(message) and _water_filter_query(message) and "bottle" not in query_tokens:
+        recommendations = tuple(
+            item
+            for item in recommendations
+            if _is_water_filter_accessory_candidate(
+                records.get(str(getattr(item, "parent_asin", "")))
+            )
+        )
+        if not recommendations:
+            return ()
+
+    def trusted_text(record: Any) -> str:
+        return " ".join(
+            part
+            for part in (
+                str(getattr(record, "title", "") or ""),
+                " ".join(str(value) for value in getattr(record, "categories", ()) or ()),
+                str(_leaf_category(record) or ""),
+            )
+            if part
+        )
+
+    if len(product_tokens) >= 2:
+        wants_accessory = _asks_for_accessory(message)
+        for item in recommendations:
+            identity = str(getattr(item, "parent_asin", ""))
+            record = records.get(identity)
+            if record is None:
+                continue
+            text_tokens = tokens(trusted_text(record))
+            if not product_tokens <= text_tokens:
+                continue
+            if wants_accessory:
+                # The user's accessory words must all be grounded in the title;
+                # "Extra Filters Replacement Set" is not a replacement mouthpiece.
+                required_accessory = query_accessory_tokens or accessory_terms
+                if not required_accessory <= text_tokens:
+                    continue
+            target_ids.add(identity)
+        if len(target_ids) < 2:
+            target_ids = set()
+
+    # Fallback: the accepted catalogue-source leaf consensus.  This covers a clear
+    # product type that the user names but whose title/category wording is split
+    # across leaves (for example camping cookware).
+    if not target_ids:
+        enriched: list[tuple[Any, str]] = []
+        for item in recommendations:
+            if "catalog_search" not in tuple(getattr(item, "sources", ()) or ()):
+                continue
+            record = records.get(str(getattr(item, "parent_asin", "")))
+            leaf = _leaf_category(record)
+            if leaf:
+                enriched.append((item, leaf))
+        if len(enriched) < 2:
+            return tuple(recommendations)
+        counts = Counter(leaf for _, leaf in enriched)
+        leaf, top_count = counts.most_common(1)[0]
+        if top_count < 2:
+            return tuple(recommendations)
+        leaf_tokens = tokens(leaf)
+        if not (query_tokens & leaf_tokens) - (generic | modifiers):
+            return tuple(recommendations)
+        target = leaf.casefold()
+        target_ids = {
+            str(getattr(item, "parent_asin", ""))
+            for item, item_leaf in enriched
+            if item_leaf.casefold() == target
+        }
+
+    def relevance(item: Any) -> int:
+        identity = str(getattr(item, "parent_asin", ""))
+        if identity in target_ids:
+            return 0
+        record = records.get(identity)
+        if _leaf_category(record) is None:
+            return 1  # UNKNOWN: neutral, kept only after grounded type matches
+        return 2
+
+    ordered = sorted(recommendations, key=relevance)
+    # A clear product-type request is a scope, not a ranking hint: once at least two
+    # grounded type matches exist, keep those and genuinely unknown candidates; do not
+    # present trusted products of a different type as if they satisfied the request.
+    grounded = [item for item in ordered if relevance(item) == 0]
+    if len(grounded) >= 2:
+        ordered = [item for item in ordered if relevance(item) in (0, 1)]
+    if _asks_for_accessory(message) and _water_filter_query(message):
+        # A generic bottle bite valve is not evidence of compatibility with a water
+        # purifier.  Keep it only when the title also names a filter device or the
+        # user asked for a bottle explicitly; otherwise it stays UNKNOWN and is not
+        # presented as a matching replacement part.
+        if "bottle" not in query_tokens:
+            ordered = [
+                item
+                for item in ordered
+                if not _is_bottle_accessory_without_filter_device(
+                    records.get(str(getattr(item, "parent_asin", "")))
+                )
+            ]
+    elif _water_filter_query(message) and "bottle" not in query_tokens:
+        # A "complete water filter" request is about a filtration device, not a
+        # filtered drinking bottle.  Keep bottles only when the user names a bottle.
+        ordered = [
+            item
+            for item in ordered
+            if not _is_bottle_product_without_filter_device(
+                records.get(str(getattr(item, "parent_asin", "")))
+            )
+        ]
+    # A replacement part is a different product role from the main appliance.  Only
+    # remove it when the user asked for the main product and the title gives trusted
+    # evidence that it is a part; an explicit parts query keeps the candidate.
+    if not _asks_for_accessory(message):
+        filtered = [
+            item
+            for item in ordered
+            if not _is_accessory_record(
+                records.get(str(getattr(item, "parent_asin", "")))
+            )
+        ]
+        if filtered:
+            ordered = filtered
+    result: list[Any] = []
+    for position, item in enumerate(ordered, start=1):
+        copy = getattr(item, "model_copy", None)
+        result.append(
+            copy(update={"rank": position}) if callable(copy) else item
+        )
+    return tuple(result)
+
+
 def _categories(record: Any) -> tuple[str, ...]:
     values = list(getattr(record, "categories", ()) or ())
     main = getattr(record, "main_category", None)
     if main:
         values.append(main)
     return tuple(str(value) for value in values)
+
+
+def _removal_value_prefix(selector: str, candidate: str) -> bool:
+    """Whole leading-phrase match for a value-only withdrawal selector."""
+    selector = " ".join(str(selector).split())
+    candidate = " ".join(str(candidate).split())
+    if not selector or not candidate.startswith(selector):
+        return False
+    if len(candidate) == len(selector):
+        return True
+    return candidate[len(selector)] in " \t,;:-"
+
+
+def _leaf_category(record: Any) -> str | None:
+    """The trusted source leaf, without appending the broad main category.
+
+    ``main_category`` is typically "Sports & Outdoors" for every candidate and cannot
+    distinguish a water filter from a sleeping pad, so it is only a fallback when the
+    source did not provide any ordered categories.
+    """
+    categories = tuple(
+        str(value).strip() for value in getattr(record, "categories", ()) or ()
+        if str(value).strip()
+    )
+    if categories:
+        return categories[-1]
+    main = getattr(record, "main_category", None)
+    return str(main).strip() if main and str(main).strip() else None
+
+
+_ACCESSORY_TITLE = re.compile(
+    r"\b(replacement\s+mouthpiece|mouthpiece|carrying\s+case|case\s+only|"
+    r"spare\s+part|accessory)\b",
+    re.IGNORECASE,
+)
+_ACCESSORY_REQUEST = re.compile(
+    r"\b(replacement|replace|mouthpiece|part|spare|accessory|accessories|case)\b",
+    re.IGNORECASE,
+)
+
+
+def _asks_for_accessory(message: str) -> bool:
+    return bool(_ACCESSORY_REQUEST.search(str(message or "")))
+
+
+def _is_accessory_record(record: Any) -> bool:
+    """True only when the trusted title explicitly describes a part/accessory."""
+    title = getattr(record, "title", None)
+    return bool(title and _ACCESSORY_TITLE.search(str(title)))
+
+
+def _water_filter_query(message: str) -> bool:
+    lowered = " ".join(str(message or "").casefold().split())
+    return ("water filter" in lowered or "water purifier" in lowered) and "water bottle" not in lowered
+
+
+def _is_bottle_accessory_without_filter_device(record: Any) -> bool:
+    """A bottle bite valve is not evidence of compatibility with a water purifier.
+
+    Only trusted title text is used.  A part whose title also names a dedicated filter
+    device (straw/purifier/pump/system) may legitimately be a filter replacement; a
+    generic water-bottle mouthpiece stays UNKNOWN and is not presented as compatible.
+    """
+    title = " ".join(str(getattr(record, "title", "") or "").casefold().split())
+    if not title:
+        return False
+    bottle_role = any(
+        term in title
+        for term in ("water bottle", "bite valve", "bottle mouthpiece", "sports bottle")
+    )
+    if not bottle_role:
+        return False
+    filter_device = any(
+        term in title
+        for term in (
+            "filter straw", "water purifier", "filtration system", "filter pump",
+            "water filter straw", "survival filter", "filter housing",
+        )
+    )
+    return not filter_device
+
+
+def _is_bottle_product_without_filter_device(record: Any) -> bool:
+    """True for a filtered drinking bottle offered against a main-filter request."""
+    title = " ".join(str(getattr(record, "title", "") or "").casefold().split())
+    if not title:
+        return False
+    if not any(term in title for term in ("water bottle", "bottle with filter", "filtered bottle")):
+        return False
+    return not any(
+        term in title
+        for term in (
+            "filter straw", "water purifier", "filtration system", "filter pump",
+            "water filter straw", "survival filter", "filter housing",
+        )
+    )
+
+
+def _is_water_filter_accessory_candidate(record: Any) -> bool:
+    """Trusted-title gate for an accessory explicitly requested for a water filter."""
+    if record is None:
+        return False
+    title = " ".join(str(getattr(record, "title", "") or "").casefold().split())
+    if not title or _is_bottle_accessory_without_filter_device(record):
+        return False
+    if not _ACCESSORY_REQUEST.search(title):
+        # A complete filter is not a replacement part merely because it is a water
+        # filter; the accessory role itself must be grounded in the title.
+        return False
+    return any(
+        term in title
+        for term in (
+            "water filter", "filter straw", "water purifier", "filtration system",
+            "filter pump", "filter housing",
+        )
+    )
 
 
 def _match_category(record: Any, value: str) -> bool:
