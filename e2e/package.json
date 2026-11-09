@@ -1,0 +1,14 @@
+{
+  "name": "agentrecx-web-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright E2E acceptance tests for the AgentRec-X local Web Demo (real BFF + real BGE + real M9; no mocks)",
+  "scripts": {
+    "test": "playwright test",
+    "report": "node generate-report.mjs",
+    "install-deps": "pnpm install"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0"
+  }
+}

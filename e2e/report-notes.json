@@ -1,0 +1,125 @@
+{
+  "title": "AgentRec-X Web Demo — E2E 验收报告",
+  "command": "powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1",
+  "required_screenshots": [
+    { "name": "desktop-search.png", "width": 1440, "height": 900, "scenario": "Scenario 1 — 搜索与推荐" },
+    { "name": "desktop-evidence.png", "width": 1440, "height": 900, "scenario": "Scenario 1 — Evidence 抽屉" },
+    { "name": "desktop-comparison.png", "width": 1440, "height": 900, "scenario": "Scenario 2 — 比较" },
+    { "name": "desktop-clarification-memory.png", "width": 1440, "height": 900, "scenario": "Scenario 3 — 澄清 + Memory" },
+    { "name": "mobile-search.png", "width": 390, "height": 844, "scenario": "Mobile — 真实搜索" },
+    { "name": "mobile-comparison-sheet.png", "width": 390, "height": 844, "scenario": "Mobile — 比较 Sheet" },
+    { "name": "replay-mode.png", "width": 1440, "height": 900, "scenario": "Modes — Qwen Replay 明确标注" }
+  ],
+  "optional_screenshots": [
+    { "name": "mobile-drawer.png", "width": 390, "height": 844, "scenario": "Mobile — Drawer" }
+  ],
+  "scenarios": [
+    {
+      "spec": "01-search-recommend.spec.ts",
+      "scenario": "Scenario 1 — 搜索与推荐（profile_0049，真实 BGE 检索 + P16 Gate + P15 Evidence）",
+      "query": "I need earbuds I can use while working out.（P18 Demo-1 真实工作训练查询）",
+      "reference": "runs/p18/demos/search_and_recommend.json",
+      "network": "GET /api/health（ready=true, catalogue_size=76263）、GET /api/demo/config（profiles/verified ids）、POST /api/chat/stream（SSE 200 text/event-stream）、自动触发的 POST /api/products/details（真实 P15 facts/evidence/raw_fields/source_record）",
+      "real_assertions": [
+        "真实商品卡片 ≥2 张，data-product-id 为真实 ASIN 形态且互不重复",
+        "卡片含真实 title/ASIN/namespace（amazon_electronics_c4）",
+        "每张卡显示固定 \"Price unavailable / UNKNOWN\"（price-unknown 数量 == 卡片数量）",
+        "至少一张卡 evidence_available=true（Evidence pill）",
+        "卡片出现 \"UNKNOWN · <attribute>\" 真实 UNKNOWN chip",
+        "Gate data-gate-action=ALLOW_FINALIZE（P18 Demo-1 真实结果），reason_code=evidence_sufficient，Selected 候选在卡片列表中",
+        "products payload 显示 mode=bge / score=bge_dense / catalogue 76,263",
+        "点击 View evidence 后 evidence-panel 出现真实 P15 evidence span：raw_field + span_start–span_end + span_text + source_record（catalog_meta.jsonl）+ UNKNOWN lists + semantic_truth_verified=false",
+        "Details tab 出现 Catalogue facts / Raw catalogue fields / Your active preferences（与商品事实分离）"
+      ],
+      "screenshots": ["desktop-search.png", "desktop-evidence.png"]
+    },
+    {
+      "spec": "02-comparison.spec.ts",
+      "scenario": "Scenario 2 — 两件已核验商品比较（B004K6R43G vs B00008VF63，真实 P16 compare_products）",
+      "query": "UI \"Verified demo pair\" 按钮（ids 来自真实 GET /api/demo/config）",
+      "reference": "runs/p18/demos/multi_product_comparison.json",
+      "network": "POST /api/products/compare（HTTP 200 + 真实 ComparisonPayload，与 DOM 逐项交叉验证）；非法 ref 的 POST 必须返回 400/422 真实 {code,message}",
+      "real_assertions": [
+        "POST /api/products/compare 返回 status=comparison_ready，products 恰为 B004K6R43G 与 B00008VF63",
+        "真实 dimensions / unknown_fields / claims_summary / conditional_recommendation / evidence_sources / final_answer 均来自真实 P16 payload",
+        "DOM comparison-view data-status=comparison_ready，渲染 Dimensions/Preference relations/Conflicts/UNKNOWN fields/Claims summary/Conditional recommendation/Evidence sources/P16 final answer",
+        "claims_summary 的 valid/rejected/unknown 数字与 HTTP JSON 一致",
+        "conditional recommendation 文本与 payload 逐字一致；final_answer 摘要出现在 DOM",
+        "非法 ref（B000000000 / NOT_A_REAL_PRODUCT_REF）返回真实 400/422 错误，绝不返回 comparison_ready 或伪造比较结果"
+      ],
+      "screenshots": ["desktop-comparison.png"]
+    },
+    {
+      "spec": "03-clarification-memory.spec.ts",
+      "scenario": "Scenario 3 — 澄清 + M9 Memory 写入 + 续推荐（profile_0057，写开启）",
+      "query": "\"I need some new headphones. Not sure what matters yet.\" → 回复 \"I prefer noise cancelling and wireless.\"",
+      "reference": "runs/p18/demos/clarification_and_memory.json",
+      "network": "POST /api/chat/stream（真实 P16 clarification）→ POST /api/clarification/reply（真实 MCP submit_clarification_reply + get_active_preferences）→ GET /api/preferences 交叉验证 M9 state",
+      "real_assertions": [
+        "clarification-card 出现真实问题文本（missing_key_need，What matters most for this purchase …）与 clarification_id（clar_*）",
+        "clarification 之前的真实 products payload gate=NEED_USER_CLARIFICATION（真实等待澄清，不 FINALIZE）",
+        "卡片显示 memory writes enabled；提交前无任何 memory-update / 伪造进度",
+        "POST /api/clarification/reply HTTP 200，memory_update.added=2（P18 已核验值），confirmation_source=web_ui_explicit_user_reply，already_processed=false",
+        "刷新后的 active preferences 含 wireless 与 noise cancelling（真实 M9 值）",
+        "continuation steps 含 submit_clarification_reply 与 get_active_preferences；续推荐 payload 非空",
+        "DOM memory-update 显示 Added=2 / written / web_ui_explicit_user_reply；preferences-refreshed 与侧栏 preferences-panel 显示 wireless + noise cancelling，active 条目 ≥2",
+        "GET /api/preferences 返回同样的真实 M9 active 状态",
+        "续推荐区 \"Continued recommendation after your reply\" 出现，且渲染真实商品卡（与 reply payload 的 item_ids 一致）"
+      ],
+      "screenshots": ["desktop-clarification-memory.png"]
+    },
+    {
+      "spec": "04-mobile.spec.ts",
+      "scenario": "Mobile 390×844 — 单栏 / Drawer / 底部固定 composer / 真实搜索与比较 Sheet",
+      "query": "I need earbuds I can use while working out.",
+      "network": "POST /api/chat/stream（真实搜索）、POST /api/products/compare（真实 P16 比较）",
+      "real_assertions": [
+        "390×844 下桌面 sidebar / panel-column 均不可见（单栏），app-shell 宽度=390，transcript 接近全宽",
+        "composer 位于底部区域且不属于滚动 transcript，搜索后位置不变（fixed bottom 行为）",
+        "左 Drawer 可通过 header 按钮打开：role=dialog、含 sidebar/Demo profile/Active preferences，宽度 ≤340，可关闭",
+        "移动端真实搜索返回 ≥2 张真实卡片，首卡宽 ≤300px，无横向页面溢出",
+        "右 Sheet 打开后宽度 ≤430px，Comparison tab 触发真实 compare，comparison-view 在 sheet 内渲染两个真实 id + claims summary + conditional recommendation"
+      ],
+      "screenshots": ["mobile-search.png", "mobile-comparison-sheet.png", "mobile-drawer.png"]
+    },
+    {
+      "spec": "05-modes.spec.ts",
+      "scenario": "Modes — CPU Live 默认真实；Qwen Replay 醒目 historical；Qwen Live 禁用",
+      "query": "UI 模式切换",
+      "network": "GET /api/health modes、GET /api/replay（live_call=false）",
+      "real_assertions": [
+        "CPU Live 是默认激活模式（aria-pressed=true）且后端 ready=true（真实实时模式）",
+        "Qwen Live button disabled，title 含真实 disabled_reason \"No live Qwen service detected (P18)\"",
+        "点击 Qwen Replay 后 GET /api/replay HTTP 200：replay=true、live_call=false、badge=\"Historical Replay — Not a Live Model Call\"、examples>0（真实 8 条保存轨迹）",
+        "模式切换真实生效：Qwen Replay 控制器 aria-pressed=true",
+        "replay-mode-notice 与 replay-panel 都醒目显示 \"Historical Replay — Not a Live Model Call\" / live_call=false / replay=true，并列出真实 Saved trajectories 与选中轨迹详情",
+        "Replay 模式下 composer 禁用并提示只读；切回 CPU Live 后恢复可输入"
+      ],
+      "screenshots": ["replay-mode.png"]
+    },
+    {
+      "spec": "06-real-errors.spec.ts",
+      "scenario": "真实失败可见性 — 真实 BFF 错误边界被如实返回，不伪造成功",
+      "query": "\"I need some new headphones. Not sure what matters yet.\"（profile_0049，实测该 fixture 会 ALLOW_FINALIZE）",
+      "network": "POST /api/chat/stream（真实只读 search/recommend）、POST /api/clarification/reply（无 pending handle → 真实 409）、POST /api/chat/stream 注入 confirmed_by_user（真实 422）、POST /api/products/compare 非法 ref（真实 4xx）",
+      "real_assertions": [
+        "profile_0049 在 /api/demo/config 中 memory_writes=false（真实只读 MCP server）",
+        "只读 profile 的真实 turn 正常返回商品与 ALLOW_FINALIZE，但 UI 不渲染任何 memory-update / preferences-refreshed（不伪造 memory 成功）",
+        "无 pending handle 的 POST /api/clarification/reply → 真实 HTTP 409 code=clarification_not_pending + 真实 message，且无 memory_update 成功 payload",
+        "浏览器注入 confirmed_by_user / user_id → 真实 HTTP 422（Pydantic extra=forbid），不产生任何 tool/products 成功 payload",
+        "非法商品 ref 的 POST /api/products/compare → 真实 4xx {code,message}，绝不返回 comparison_ready 或伪造比较结果"
+      ],
+      "screenshots": []
+    }
+  ],
+  "known_limitations": [
+    "真实产品 bug（2026-11-09 发现，阻塞过 05 验收）：/api/replay 的 8 条真实轨迹中 3 条只有 final_answer、没有 terminal 字段，web/components/ReplayPanel.tsx 无条件读取 example.terminal.status 导致切换到 Qwen Replay 时整页崩溃（Next 错误页）。已报告 Lead 修复；修复后 05 复跑通过。若以后再改 ReplayPanel/BFF 映射需保持该空值兼容。",
+    "真实并发 bug（非阻塞，正常串行 UI 不触发）：若一次 search_products 在首次懒加载 BGE encoder 期间被中止、随后同一 MCP server 又收到 search，会抛出 TypeError: can't convert meta device type tensor to numpy（experiments/p14c1/search_backend.py:68）。上一轮 E2E 中因早期活动等待过短提前关闭页面触发了它；修复 harness 后正常流程不触发。",
+    "发布版 UI 没有可自由输入 product_ref 的入口，且 profile_0049 fixture 自带 3 条 active preferences（实测 7 条模糊 query 全部真实 ALLOW_FINALIZE，从不 ASK），因此 writes-disabled 的 clarification 拒绝 UI 路径在当前 demo 中不可达；真实错误在 BFF HTTP 边界断言（clarification_not_pending 409 / identity injection 422 / invalid ref 4xx）。",
+    "trace 采用 \"retain-on-failure\"：全部通过时 runs/web_demo/traces/ 为空是预期设计；失败测试才会生成 trace.zip。最终验收截图是另行显式保存的，不受该策略影响。",
+    "Qwen Agent Mode 仅为 historical replay（live_call=false）；Qwen Live 不可用，本报告不做任何实时 Qwen 调用声明。",
+    "M9 memory 是 MCP 进程内 fixture：BFF/MCP 重启会重置。本脚本每次运行都会完整重启 Demo，因此 Scenario 3 的 added=2 基于 fresh 进程状态；若在同一个已写过的 BFF 进程上重复跑 Playwright，M9 会返回 skipped_duplicates / already_processed 而非 added=2。",
+    "实测性能：每个 MCP server 的首次 search 会懒加载 BGE encoder，冷查询实测范围 44–83 s（本次验收 0049 83.2 s、0057 57.0 s；此前同机多轮 0049 53.6 s / 0057 44.4 s），冷查询后热查询 0.19–2.1 s（含 details/比较等）。启动器报告的 startup_ms（28–47 s）不含该懒加载。冷查询时间计入真实 turn 耗时，逐条实测值见 summary.json 的 timings。",
+    "本报告只证明本地真实栈的 Web E2E 工程验收；不证明推荐质量、真实用户满意度或公网生产就绪（见 P18_FINAL_REPORT.md 的 quality 结论）。"
+  ]
+}

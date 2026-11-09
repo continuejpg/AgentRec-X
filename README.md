@@ -16,6 +16,93 @@ part is not an LLM wrapper, but the **boundaries** around retrieval, truth, stat
 
 ---
 
+## Web Shopping Assistant (P19, current local demo)
+
+A **real, user-facing shopping assistant** built on the existing AgentRec-X stack. It is not a
+mock chatbot or a static dashboard: the browser talks to a thin FastAPI BFF, which talks to the
+existing **P17 official MCP stdio server**, which calls the real Electronics catalogue, BGE
+retrieval, Rule Planner, Decision Gate, P15 evidence, P16 Skills and M9 preference memory.
+
+| Search + evidence | Comparison |
+|---|---|
+| ![Web Demo — real search results and UNKNOWN fields](docs/assets/web_demo/desktop-search.png) | ![Web Demo — P16 comparison](docs/assets/web_demo/desktop-comparison.png) |
+| Mobile (390×844) | Qwen Replay (historical only) |
+| ![Web Demo — mobile layout](docs/assets/web_demo/mobile-search.png) | ![Web Demo — Qwen Replay label](docs/assets/web_demo/replay-mode.png) |
+
+### Run it
+
+```powershell
+# prerequisites: WSL Ubuntu-22.04 .venv + Amazon-C4 Electronics/BGE assets, Node 24 + pnpm, Chrome
+# external asset paths and SHA-256: docs/ARCHIVE_MANIFEST.md
+powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
+```
+
+* front end: `http://127.0.0.1:3000` (also works via `localhost`)
+* BFF health: `http://127.0.0.1:8787/api/health`
+* stop: `powershell -ExecutionPolicy Bypass -File scripts/stop_web_demo.ps1`
+* end-to-end: `powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
+
+Cold start is real: two MCP servers load the catalogue + BGE (~35 s each; ~47 s to ready).
+The page renders first and shows real tool activity; the first BGE query per server pays encoder
+warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2.1 s.
+
+### Three real scenarios
+
+1. **Search & recommend with evidence** — send e.g. `I need wireless earbuds for working out.`
+   Real BGE search → existing Rule Planner + Decision Gate → 10 real catalogue cards → View
+   Details/Evidence (P15 raw field/span/span text/source record, UNKNOWN fields, automated
+   validation clearly labelled). Price is always `Price unavailable / UNKNOWN`; nothing is
+   invented.
+2. **Compare 2–5 products** — select the P18-verified pair `B004K6R43G` and `B00008VF63`, then
+   Compare. The P16 `comparison_ready` payload is rendered verbatim (dimensions, MATCH/UNKNOWN,
+   preference relations, claims count, evidence sources, conditional recommendation). Invalid refs
+   return a real HTTP 400, not a mocked comparison.
+3. **Clarify → persist memory → continue** — on **Demo B · Memory write** (`profile_0057`), a vague
+   request gets a real `NEED_USER_CLARIFICATION`. Type your own reply (e.g. `I prefer noise
+   cancelling and wireless.`); the BFF writes it through M9 with
+   `confirmation_source="web_ui_explicit_user_reply"`, the real update (`added=2`) and refreshed
+   active preferences appear in the panel, and the pending recommendation resumes.
+
+### CPU Live vs Qwen Replay
+
+* **CPU Live (default, live):** real local MCP/BGE/Rule Planner/Gate/P15/P16/M9; no GPU, no Qwen.
+* **Qwen Replay (historical only):** saved P18 trajectories from `runs/p18/qwen_replay.json`,
+  visibly labelled **Historical Replay — Not a Live Model Call**; read-only.
+* **Qwen Live:** disabled — no live Qwen service is connected.
+
+### Verified results and honest limits
+
+| Result | Value / status |
+|---|---|
+| Electronics catalogue | 76,263 accepted products |
+| BGE candidate reachability | Recall@100 **20/135 → 66/135** (P14-D2; retrieval layer, not final quality) |
+| P18 Reserved Test | recommendation Top-1 **11/12** — **simulated rule labels**, not real users |
+| Web E2E | **7/7 passed**, 64 real DOM+network checks, 8 screenshots (Playwright + system Chrome) |
+| MCP tools / P16 Skills | **7** tools (`search_products`, `get_product_info`, …) / **2** Skills |
+| Web Demo answer quality | **NOT ESTABLISHED** (no online A/B, clicks, conversion or satisfaction) |
+
+Limits that must travel with these numbers: the Reserved Test uses simulated rule labels; real
+long-term-history personalization gain is **not established**; Planner SFT did not beat Base;
+the Web CPU Live path uses the Rule Planner (no live Qwen); Qwen is Replay-only; semantic truth of
+generated explanations has **not** been human-reviewed; the local demo has no auth/TLS and is not
+production-ready. The catalogue snapshot has no trusted price/stock/rating/image, so the UI shows
+UNKNOWN and a neutral placeholder instead of inventing facts.
+
+### Stack, reuse and reports
+
+* **Frontend:** Next.js 16 / React 19 / TypeScript / Tailwind CSS 4 (`web/`); **BFF:** FastAPI over
+  the official P17 MCP client (`web_demo/`); **E2E:** Playwright with system Chrome (`e2e/`).
+* **Open-source reuse:** selected UI components adapted from `anthropics/commerce-agents`
+  (Apache-2.0; headers retained, see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)).
+* **Dependencies/resources:** [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) records Python/
+  Node versions, the external catalogue/BGE-model/index/memory-fixture SHA-256 values, and
+  reproduction steps.
+* **Detailed docs:** [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) ·
+  [`WEB_DEMO_REPORT.md`](WEB_DEMO_REPORT.md) · [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) ·
+  [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md).
+
+---
+
 ## What is in the repository
 
 ```text
@@ -31,6 +118,11 @@ Bounded shopping Agent             session-based product surface
   product research                  inspect / compare / dynamic research
   clarification + recovery          structured suspension and resume
   adaptive preferences              evidence → counterfactual → ask/skip (≤2 rounds)
+
+Web Shopping Assistant (P19)       real local consumer UI over the same core
+  Next.js 16 + FastAPI BFF          browser → HTTP/SSE → thin BFF
+  P17 MCP stdio (7 tools)           catalogue/BGE/Gate/P15/P16/M9
+  CPU Live · Qwen Replay            live local tools · saved trajectories only
 
 Offline lab                        evidence, not the serving path
   temporal leave-two-out            full-catalogue evaluation
@@ -200,6 +292,10 @@ error, never a silent fallback.
 ---
 
 ## Quick start
+
+> **Newest entry point:** the Web Shopping Assistant in the section above
+> (`scripts/run_web_demo.ps1`, front end on port **3000**). The commands below are the **legacy
+> serving demo** (FastAPI on port **8000**, `/demo/`), kept for the recommendation/Agent surface.
 
 ### Requirements
 
@@ -411,16 +507,24 @@ default Serving V1 result.
 
 ## Data, assets and dependencies
 
-* **Runtime artifacts:** accepted SASRec checkpoint and manifest, mappings, catalogue, sequences.
-  Paths and SHA-256 values are in [`config/demo_runtime_artifacts.json`](config/demo_runtime_artifacts.json);
-  the files themselves are not tracked.
+* **Runtime artifacts:** accepted SASRec checkpoint and manifest, mappings, catalogue, sequences
+  for the **legacy serving demo**. Paths and SHA-256 values are in
+  [`config/demo_runtime_artifacts.json`](config/demo_runtime_artifacts.json); the files themselves
+  are not tracked. The **P19 Web Shopping Assistant** uses a different Electronics asset set
+  (catalogue, P14-D2 BGE index, BGE model, P17 memory fixture) documented with sizes/SHA-256 and
+  rebuild/obtain steps in [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md).
 * **Processed data:** `data/` is ignored. Raw Amazon Reviews data is never mutated in place.
 * **Python:** 3.10.x; runtime dependencies in `requirements.txt`, CPU PyTorch in
-  `requirements-cpu.txt`, development tools in `requirements-dev.txt`.
-* **No database server:** the demo uses a local SQLite preference store.
-* **No external LLM by default:** deterministic mode is offline; provider mode is opt-in.
+  `requirements-cpu.txt`, development tools in `requirements-dev.txt`, P17 MCP in
+  `requirements-mcp.txt`; exact verified environment in `docs/archive_python_freeze.txt`.
+* **No database server:** the legacy serving demo uses a local SQLite preference store; the P19
+  Web Demo's M9 preference memory is a process-local fixture (`data/p14e2/benchmark/dev.agent.jsonl`)
+  that resets when the BFF restarts.
+* **No external LLM by default:** deterministic mode is offline; provider mode is opt-in and the
+  P19 demo's Qwen mode is historical Replay only.
 * **Licences and provenance:** external design sources and backend files are documented in
-  [`backends/tiger_public/PROVENANCE.md`](backends/tiger_public/PROVENANCE.md).
+  [`backends/tiger_public/PROVENANCE.md`](backends/tiger_public/PROVENANCE.md); the Web Demo's
+  upstream reuse is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Artifact recovery and storage:
 [`docs/ARTIFACT_STORAGE.md`](docs/ARTIFACT_STORAGE.md) ·
@@ -459,6 +563,40 @@ Artifact recovery and storage:
 | [`docs/V2_KNOWN_LIMITATIONS.md`](docs/V2_KNOWN_LIMITATIONS.md) | explicitly unproven areas |
 | [`docs/HISTORICAL_ARCHITECTURE.md`](docs/HISTORICAL_ARCHITECTURE.md) | superseded detailed architecture, retained for chronology |
 | [`docs/INTERVIEW_DEMO.md`](docs/INTERVIEW_DEMO.md) | a short demo narrative for interviews |
+| [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) | P19 Web Shopping Assistant: one-command run, three scenarios, troubleshooting |
+| [`WEB_DEMO_REPORT.md`](WEB_DEMO_REPORT.md) | P19 final report: the eleven acceptance questions, real MCP evidence, limits |
+| [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) | P19 BFF/SSE/view-model contract |
+| [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) | P19 external assets: paths, sizes, SHA-256, rebuild/obtain steps |
+| [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md) | local Git archive: commits, included/excluded content, reproducibility verdict |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | P19 upstream reuse, Apache-2.0 compliance and dependency licences |
 
 The repository does not claim to be a deployed commercial recommender. It is a bounded,
 reproducible engineering system with explicit evidence boundaries.
+
+---
+
+## P18 final integration (current)
+
+- Final deliverables: [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md), [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md), [`DEMO_GUIDE.md`](DEMO_GUIDE.md), [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md).
+- CPU MCP Mode: local stdio MCP server, BGE/BM25, Rule Planner/Gate, P15 evidence, P16 Skills. No GPU/Qwen required.
+- Qwen Agent Mode: existing Qwen3.5-9B Base Planner and P15 explanation require the external GPU/model service; P18 uses saved real trajectories as **Replay only**.
+- P18 demos: `.venv/bin/python -m experiments.p18.demos` (three real CPU MCP scenarios under `runs/p18/demos/`).
+- Quality status: engineering correctness is tested; semantic truth and real-user satisfaction remain **NOT ESTABLISHED**.
+
+## P19 Web Demo archive
+
+- **Local Git archive:** branch `archive/agentrecx-web-demo-v1`; commit IDs, included/excluded
+  files, tests and the reproducibility verdict are in
+  [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md) and
+  [`GIT_ARCHIVE_SOURCE_DIFF.txt`](GIT_ARCHIVE_SOURCE_DIFF.txt).
+- **Run:** `powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1` (front end
+  `http://127.0.0.1:3000`; stop with `scripts/stop_web_demo.ps1`; E2E with
+  `scripts/run_web_demo_e2e.ps1`).
+- **Reported Web E2E:** **7/7 passed**, 64 real DOM+network evidence checks, desktop + mobile
+  screenshots committed under `docs/assets/web_demo/`.
+- **External assets are not in Git:** catalogue, BGE index/model and P17 memory fixture are
+  documented with SHA-256 and obtain/rebuild steps in
+  [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md). Without them the real-data demo cannot
+  start; the archive states this explicitly.
+- **Boundary:** local demo only; no auth/TLS; Qwen is Replay-only; quality/online effectiveness is
+  **NOT ESTABLISHED**.

@@ -1,0 +1,51 @@
+{
+  "root": "D:\\IT\\CODE\\PROJECTION\\agentrec\\X\\web",
+  "repo_root": "D:\\IT\\CODE\\PROJECTION\\agentrec\\X",
+  "status": "pass",
+  "adapted_files": [
+    "web/app/base.css",
+    "web/app/globals.css",
+    "web/app/layout.tsx",
+    "web/components/ChatPanel.tsx",
+    "web/components/ComparisonView.tsx",
+    "web/components/Composer.tsx",
+    "web/components/MessageBubble.tsx",
+    "web/components/PreferencesList.tsx",
+    "web/components/ProductCard.tsx",
+    "web/components/ProductsBlock.tsx",
+    "web/components/Suggestions.tsx",
+    "web/components/ToolTimeline.tsx",
+    "web/components/icons.tsx",
+    "web/components/ui.tsx",
+    "web/lib/api.ts",
+    "web/lib/format.ts",
+    "web/lib/scroll.ts",
+    "web/next.config.ts",
+    "web/postcss.config.mjs"
+  ],
+  "new_modules": [
+    "web/app/page.tsx",
+    "web/components/ClarificationCard.tsx",
+    "web/components/ComparisonBar.tsx",
+    "web/components/DemoApp.tsx",
+    "web/components/EvidenceList.tsx",
+    "web/components/Header.tsx",
+    "web/components/ProductDetails.tsx",
+    "web/components/ProductImage.tsx",
+    "web/components/ReadinessBanner.tsx",
+    "web/components/ReplayPanel.tsx",
+    "web/components/RightPanel.tsx",
+    "web/components/Sidebar.tsx",
+    "web/lib/chat.ts",
+    "web/lib/types.ts",
+    "web/lib/useMediaQuery.ts"
+  ],
+  "header_problems": [],
+  "new_module_problems": [],
+  "notices_problems": [],
+  "license_problems": [],
+  "images_found": [
+    "D:/IT/CODE/PROJECTION/agentrec/X/web/public/favicon.svg"
+  ],
+  "image_violations": []
+}

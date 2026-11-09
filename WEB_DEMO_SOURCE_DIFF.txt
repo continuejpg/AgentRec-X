@@ -1,0 +1,309 @@
+AGENTREC-X WEB DEMO — SOURCE DIFF
+================================================================================
+Milestone: user-facing Web Shopping Assistant (Next.js 16 frontend + FastAPI BFF over
+the existing P17 MCP stdio server) with real search/recommend, evidence, comparison and
+clarification + M9 memory update. No model training, no BGE rebuild, no new Agent runtime,
+no public deployment, no commit/push.
+
+BASELINE (recorded before this milestone made any change)
+  captured_at: 2026-11-09T18:15:34.0669079+08:00
+  branch:      feat/agent-source-limit-ablation
+  HEAD:        4dec6d2081902f1e89265a06ea4ded595087dd43
+  pre-existing status entries: 408 (tracked M/D + untracked)
+  This milestone did not revert, stage or commit any pre-existing change.
+
+ADDED FILES / SOURCE (this milestone)
+THIRD_PARTY_NOTICES.md
+  bytes=16411 sha256=b0625adc107362e1d354e4008f8ad0d36c402e5d329f063497fd077f3f9c3cd9
+WEB_DEMO_GUIDE.md
+  bytes=12689 sha256=9f172067aa8f7abe9f8c68ee8283e4d0dfc44eab6020fef83a49c64ab3c6c2b4
+WEB_DEMO_REPORT.md
+  bytes=24112 sha256=4ad82d1f47c723924bdada5b5b810df60a935c9d5ca28822226a8ba108467d8a
+docs/WEB_DEMO_CONTRACT.md
+  bytes=21861 sha256=2a97c6de526f74e551b1d2faef411b521be327acc5b41d09309aac91dbb903dc
+e2e/.gitignore
+  bytes=35 sha256=2dfea13bd704639ee2f6d2ee9d7997f38779c9bec9e13579f51da24e71fe0a2c
+e2e/README.md
+  bytes=3839 sha256=60c5994eb976159d04090eb142300f1b3a66276d19b64e982d83efa87ec95174
+e2e/fixtures/demo.ts
+  bytes=8463 sha256=334a8ed489db1a876aec3a2979ce7f2c55ec435715284ef7bba47ba0efc7cd28
+e2e/fixtures/evidence.ts
+  bytes=5892 sha256=5d78b925cec30f514d2a179997ffb8397cd2eeee9adb4f284f3a8cf54ec9b0a5
+e2e/generate-report.mjs
+  bytes=18360 sha256=e000a9045150dfb08ec0d9b09bb48a69a117dbf54ed7008d63ba89e72a151e60
+e2e/global-setup.ts
+  bytes=2856 sha256=815a4683043df572f42d7d28490ba0c952ea5682c61a1aa78fab94bb53edd584
+e2e/package.json
+  bytes=392 sha256=2b96b0cd21418281b01db9c85f7deb1463b65ddd019ee6def62b88d0d4bac1d0
+e2e/playwright.config.ts
+  bytes=1456 sha256=b0a873d48da8c8a7b8d67c3748c6d055da9e3fd3a6d2b1554bb32a6b84e45ac6
+e2e/pnpm-lock.yaml
+  bytes=993 sha256=12d0fb089534f8af9016a4827fe4d686abef6d589e2c32639c1e876a9bbe646c
+e2e/report-notes.json
+  bytes=12233 sha256=ef9cc08870b77edff297a92da0a0aade03a8658b6909c03aeffc8515ddbcc6d1
+e2e/reporters/artifact-reporter.ts
+  bytes=4330 sha256=3995d0fde29a8c1752a86df131780a586c8fbd58c51ac2b8e71275a4dc5af0b2
+e2e/tests/01-search-recommend.spec.ts
+  bytes=12974 sha256=4f00f3f406a6c1474791070c1b53e8f24770fc65001aa82e9ac275c67c9df0f7
+e2e/tests/02-comparison.spec.ts
+  bytes=12086 sha256=7dd71f3a1d8941a5ba57cb0e3dcf00fca23c8d0cfabd6ca9b85530344394355b
+e2e/tests/03-clarification-memory.spec.ts
+  bytes=12291 sha256=54aa6a378f01f3995aa806f381e70631158efd8be5f902a3e2a389c8a7637689
+e2e/tests/04-mobile.spec.ts
+  bytes=10154 sha256=79d09c05c21cd4b1883fd1534d9c14a15ae2362a7666d35ecc97c95e02ea462f
+e2e/tests/05-modes.spec.ts
+  bytes=6890 sha256=b36207be9cafdcc85ea559a6d7b6f75a86be8f51573e7c47a8759ae95a68d97b
+e2e/tests/06-real-errors.spec.ts
+  bytes=7925 sha256=830e1096027abab7c0cb44444be6efeb23f1e3b227d46c6db8d98bcb999e9e48
+scripts/run_web_demo.ps1
+  bytes=8078 sha256=1e1c28c5a8ad60a68bb0f3dd190b7b99ec7060d4f7a344bdcefa86aa84c7aee2
+scripts/run_web_demo_bff.sh
+  bytes=2673 sha256=63764321f1879ea7626f4c7b6c51c9c746f57c4505f5896e383e469656e4d226
+scripts/run_web_demo_e2e.ps1
+  bytes=15895 sha256=57406f8eca9fef22bfb15a3df5055b68b89cdfd3f12bf0817c170d12fa4c1c3a
+scripts/stop_web_demo.ps1
+  bytes=1834 sha256=92507f5e3dea6dfa89d2c073f50e5b142835b4341106719a310ae3e4192c26cf
+scripts/web_demo_source_diff.py
+  bytes=8492 sha256=394da215d6572def611ed3340eb9e892fea698a448ded21e7f68091003aad402
+tests/test_web_demo_integration.py
+  bytes=14097 sha256=22a84497e9284436784da13ae94653c2c383e96950e88fd61c6f4985e084302e
+tests/test_web_demo_unit.py
+  bytes=49330 sha256=61d2e5e0d46c6d13772ecc23beb95056b29df5ff5b8ccbda3a0cacebd809d46d
+third_party/DEPENDENCY_MANIFEST.json
+  bytes=13029 sha256=99683b3db7332232fae9c1eefe4085e3feb17eed0e9d155f4f80a77db2f06df7
+third_party/README.md
+  bytes=2257 sha256=c7df00204eb4cfa5e39e8b3a8642af2bccf0de9f1f80e8b1aad21af9ecf01e3b
+third_party/UPSTREAM_REUSE_GUIDE.md
+  bytes=28189 sha256=cbdb2515ddb79a5b510515d671e20d8aa459863b02fe0eda2434e9502afc0ae8
+third_party/header-audit.json
+  bytes=1592 sha256=63cccec4559a1d16432492265cbd535cb961ba676818ae9e1d52f42ec7d62260
+third_party/licenses/README.md
+  bytes=4412 sha256=090f84924c7d7f6eace06dd66c70b9cc4120b063746cdf4f7e3583ef6381924e
+third_party/licenses/commerce-agents-Apache-2.0.txt
+  bytes=11560 sha256=3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5
+third_party/tools/check_copied_headers.py
+  bytes=12336 sha256=52c81fe77f3304cc8ef1952409ecdf63090c343ccfcc578671637462caf8bb4c
+third_party/tools/generate_dependency_manifest.py
+  bytes=15018 sha256=8a219d6ce062d3089bdb097c060ef96d9710113e64f8332ae1716a07a7e9c28f
+web/.gitignore
+  bytes=64 sha256=e877c0aaef53d02ef916306b124c59cf6f825d8ed46c040ac8322ac61fe88309
+web/README.md
+  bytes=6644 sha256=b083b2eee9a1cac1d889955332fe1d233d8302e58a5b82f7b2fd0bdbf843eb8d
+web/app/base.css
+  bytes=3789 sha256=30e95475e7f803be7ec67214f51194de998f6b08d0c6447bdfd5446f76073522
+web/app/globals.css
+  bytes=4043 sha256=f928a44755f04d0495b78c40cd66fdbe0eea47367a07a3dff580741f88092fa3
+web/app/layout.tsx
+  bytes=895 sha256=f87eaae67ca6b7ae784bf0393df8853d5ce7e4c88ab4545f6720787e6cdae3af
+web/app/page.tsx
+  bytes=380 sha256=b141aa011adaf305d662a1d0d7b3b63fe4eb1ebeab448dbe59f44ce2640c3410
+web/components/ChatPanel.tsx
+  bytes=24659 sha256=1b992f966e7fcfb9eb022d4e7d95e1ba1249c1da458c5429dacbaa29139edead
+web/components/ClarificationCard.tsx
+  bytes=14577 sha256=a4671fbed50a72998576d0499dfd594e74ad23a179e0eaae312d6fadd781c551
+web/components/ComparisonBar.tsx
+  bytes=2927 sha256=868b58c4c38537bc18ca18f5433e102247a0e3103dfd22b8c12cb18ac0ba1052
+web/components/ComparisonView.tsx
+  bytes=17045 sha256=8189864686ef2913dde1b47634c309b1489857f1bb891eb556c389e71be875cb
+web/components/Composer.tsx
+  bytes=4176 sha256=31a71782b8a4c5548954df918a63062a40e820398057751e75c9a034feaac7c7
+web/components/DemoApp.tsx
+  bytes=43223 sha256=e3378141ae1cbb0550199ed6d9ec7e5bc69365ef33b77610df20589d73ca44fd
+web/components/EvidenceList.tsx
+  bytes=6340 sha256=c135b10357dc159f88fbf067c0e6af28b9c3fc1ad1a85517d3c088fb95398a37
+web/components/Header.tsx
+  bytes=9665 sha256=270424710540d8644069ef837dc2781e2959d0027f3b94ba48d36698257ec22a
+web/components/MessageBubble.tsx
+  bytes=2274 sha256=484b89fc73c6f91ee88d9ae8651b750ceab0de47c7a81e76c473af1f852cf3a6
+web/components/PreferencesList.tsx
+  bytes=6944 sha256=dd0bac3a35d04261db39bf66466172bc37a05789d8583821a03ca97b910f62e2
+web/components/ProductCard.tsx
+  bytes=11062 sha256=1122337b142d254bd711ddc22451ada452ec732787470cb3f7caf3ffc907c04a
+web/components/ProductDetails.tsx
+  bytes=12122 sha256=b7b32e527b582abe9da689510e1c0ca25f915d5c69069818072a5b60852da621
+web/components/ProductImage.tsx
+  bytes=4158 sha256=2d00e17eb6ee4f4560dee454c65d39f2d0e7018383e9c6c1191a7b0f45cad337
+web/components/ProductsBlock.tsx
+  bytes=9432 sha256=c08bf74eca6a648289955d2e0598fa7f124e6c6d6d87349f66feb312486a46f7
+web/components/ReadinessBanner.tsx
+  bytes=9102 sha256=9a6f6fcb2afacb27392101319e810801d0e9cfb1619752bbf192ca59b118eff4
+web/components/ReplayPanel.tsx
+  bytes=11824 sha256=357e5ea84f4aab4584a8c6fcb9dc1d5c5e1643455f63efe7c22203e953bc1b4d
+web/components/RightPanel.tsx
+  bytes=12597 sha256=f353c19d65d65761f3ee4a4fda13dbacbb3b0301b313161e4f17a773a6e98073
+web/components/Sidebar.tsx
+  bytes=10527 sha256=ab647b7cca323db87381007c161bdbaac85390082a9df8918c5bc9dd067b5a8b
+web/components/Suggestions.tsx
+  bytes=969 sha256=05eb9e2a4d51fdd82910f4fbf32c07c0f843500959918a2e975e1566705ef0ab
+web/components/ToolTimeline.tsx
+  bytes=7072 sha256=484acfa95fa4a718b3a2759eaa67da582a3b3840745455cf79056961e1edf682
+web/components/icons.tsx
+  bytes=3551 sha256=d8a0bf4b093be278fff8bb8348a34fc898169d7a07f5f172408ec3d243006a22
+web/components/ui.tsx
+  bytes=8122 sha256=93e2204cb81c5030b7d3a92dc17f8ae9dab99dee06c7b7bd1cef2460e9be3cf2
+web/lib/api.ts
+  bytes=12112 sha256=2708d5b4114d748b9ae677d9ab8a17b94fdc24bb21e20f9fb8218e77090c2016
+web/lib/chat.ts
+  bytes=3196 sha256=0c02d6ba246bfc0f781e0b3ec28001855f2531d59d5febbe3c4285eaf0df4410
+web/lib/format.ts
+  bytes=6012 sha256=a32205a2016fc521ab71fb94d83d9561a395d198a1090eb45044d158324b4930
+web/lib/scroll.ts
+  bytes=2012 sha256=ee71c9bf5cdb39a765a21c7e3589690bff13377c000617d2645e65810298e651
+web/lib/types.ts
+  bytes=12177 sha256=fbfd6aec12544c5fb3ee12cd92eb8cd89d64192c79b359d29286af52bee5f3c5
+web/lib/useMediaQuery.ts
+  bytes=920 sha256=0bc2f0d6cc11bbb38f37c90517a81c6d71a9df93502cfdb5a27f5ce456530b47
+web/next-env.d.ts
+  bytes=303 sha256=b8b3a344484b959af5e4e3fc1a1609dac3cb9ece0cdeb6c145be29bc4c491000
+web/next.config.ts
+  bytes=795 sha256=eeebddad4c14d5676337d6c9addf92d593767b40b8b868f040dcfbc5da2d03b0
+web/package.json
+  bytes=639 sha256=4a8e4630fe2ccc2bf8c66606e8d98fe990ee878c499431cf77e8564a0014db62
+web/pnpm-lock.yaml
+  bytes=32393 sha256=0f9875b5ea00b333b525e6f54e17f83c12b4ed03094ec5faaec6959cc69d59b0
+web/postcss.config.mjs
+  bytes=254 sha256=06ccacd4ca86d43cd1e45612d31c6e9214a1d877211f29cabf612e6aebf05cec
+web/public/favicon.svg
+  bytes=343 sha256=6a25cc31cd8beacf58ecefc43c1c38a1d75b3f7f1733adcd58cbe6a4bf4ee5c1
+web/tsconfig.json
+  bytes=601 sha256=72b8f83d5cd6111816ceb7f26dc9140601dbc3d69e70f1bb474a801e2359f8f4
+web/tsconfig.tsbuildinfo
+  bytes=147899 sha256=5f50e7253c63d05879808131b43ecaae7127237c693c4853f55c63dd870a5ded
+web_demo/README.md
+  bytes=9703 sha256=7f9f00ff0a9a0da038dbc8fe00861a90a34d993e840eda614d96750be5388a25
+web_demo/__init__.py
+  bytes=351 sha256=302d16d478b2acbbb1a9fab13236f64246b484d4cd16425bbc62c3123c4ac133
+web_demo/__main__.py
+  bytes=940 sha256=1fa6eb6d1c0096c943007bc9c84f5a83a5d4f1fd7daed56d44747c50851acab0
+web_demo/app.py
+  bytes=16870 sha256=cfd85e45a90b8e99e632fd2b0cbc4a1f2bd3808e88655b6cf04f0f98776e6cfd
+web_demo/config.py
+  bytes=7161 sha256=15e63f9ae89b04b433ddd874c0dfd511919dbf2314ed815278493137961ba319
+web_demo/demo_flow.py
+  bytes=21931 sha256=0af3bf9dd1e9fb11d200499ed0d66e80ceff62559bd9fcf3ae5c79332cb1f1b9
+web_demo/mcp_manager.py
+  bytes=19023 sha256=d26435aa924d64c297b7492cca7d79288e57795ac87e1af84e2f5d07d185e596
+web_demo/sessions.py
+  bytes=5648 sha256=c59831a7c224391c0799b68eec24649014fe055da9ba0cc75d586eb0e7aa018d
+web_demo/viewmodels.py
+  bytes=25985 sha256=45881a4613958694b8ab1ee64d63dcccef6f103053e5988e662871e624abbf46
+
+MODIFIED EXISTING FILES (this milestone)
+recommendation/mcp/server.py
+  bytes=20328 sha256=d0a083af33d424c9c515cbf5abee66870fa958beb7ced524438922eb2087518f
+  unified diff:
+    --- recommendation/mcp/server.py (baseline)
+    +++ recommendation/mcp/server.py (web demo)
+    @@ -6,7 +6,9 @@
+     
+     Trusted local context: the MCP client cannot choose a user id.  The startup CLI binds one
+     authorized user key (and, in tests, an existing task fixture).  Memory writes are disabled
+    -by default and only enabled explicitly for a trusted local test client.
+    +by default and only enabled explicitly for a trusted local test client or the local Web Demo
+    +BFF (whose replies are labelled ``web_ui_explicit_user_reply``; neither channel is a
+    +production-authenticated online user).
+     """
+     
+     from __future__ import annotations
+    @@ -317,8 +319,9 @@
+         user_message: Annotated[str, Field(min_length=1, description="Actual user-authored reply text")],
+         turn_id: Annotated[str, Field(min_length=1, description="Stable idempotency id for this user reply")],
+         confirmed_by_user: Annotated[bool, Field(description="True only when the client obtained real user confirmation")] = False,
+    -    confirmation_source: Annotated[Literal["explicit_test_user_reply", "trusted_local_client"] | None,
+    -                                   Field(description="Explicit confirmation channel; tests use explicit_test_user_reply")] = None,
+    +    confirmation_source: Annotated[Literal["explicit_test_user_reply", "trusted_local_client", "web_ui_explicit_user_reply"] | None,
+    +                                   Field(description="Explicit confirmation channel; tests use explicit_test_user_reply, "
+    +                                                     "the local Web BFF uses web_ui_explicit_user_reply")] = None,
+     ) -> dict[str, Any]:
+         """Persist a real user reply through M9 after explicit local confirmation; never fabricate a reply."""
+         ctx = _context()
+    @@ -335,7 +338,9 @@
+                 raise ToolError("clarification_already_answered")
+             if not ctx.writes_enabled:
+                 raise ToolError("memory_writes_disabled: this server is read-only")
+    -        if not confirmed_by_user or confirmation_source != "explicit_test_user_reply":
+    +        if not confirmed_by_user or confirmation_source not in {
+    +            "explicit_test_user_reply", "web_ui_explicit_user_reply",
+    +        }:
+                 raise ToolError("user_confirmation_required: provide explicit local test-user confirmation; "
+                                 "model-generated text is not a user reply")
+         result = resume_with_user_reply(memory=ctx.memory, task=state.task, user_message=user_message,
+    @@ -351,7 +356,8 @@
+             "authorized_user_key": ctx.user_key,
+             "confirmation_source": confirmation_source,
+             "notes": ["reply was persisted through the existing M9 process_turn writer",
+    -                  "the reply is explicitly labelled as a local test input; it is not claimed to be real online user data"],
+    +                  "the reply is explicitly labelled as a local test input; it is not claimed to be real online user data",
+    +                  "confirmation_source distinguishes an explicit local test reply from an explicit local Web-UI user reply"],
+         })
+         return result
+     
+
+GENERATED DEMO ARTIFACTS (git-ignored / evidence)
+runs/web_demo/bff_smoke_20261109T104600Z.json
+  bytes=75122 sha256=ee57ce150bf6830e0341445b491e209d642647470e39ff9ee53ce9afeb2ed835
+runs/web_demo/e2e/REPORT.md
+  bytes=28101 sha256=37af6078fdebff75860efbf2fa4fbef41abb81238f9904a93c676190ba832df0
+runs/web_demo/e2e/cleanup.json
+  bytes=372 sha256=612cd18a7dea9e13758b000644ba441df602c2ce22ce1bebd6d4b9dcd8a43e60
+runs/web_demo/e2e/evidence.jsonl
+  bytes=40852 sha256=d0c137b4d08fca3ea7bd77e94e1cc774d396665175b9e6b83f2a0b754bbf8bed
+runs/web_demo/e2e/launch.json
+  bytes=1305 sha256=c5cecf9d7033a9b1dda299a1c1acf7388f4dd541d954dd121857069a85a6b22c
+runs/web_demo/e2e/payloads/1794224246817-health.json
+  bytes=1026 sha256=d37da4c7ab20bb18d6f57e5c00aaf0e6f68e947976b07a7d7ee73ca8deb0a05b
+runs/web_demo/e2e/payloads/1794224331001-details.json
+  bytes=1382 sha256=582b425527949d4d08a8407862e28eee641495e42b7ba67d47f9a85d47177e98
+runs/web_demo/e2e/payloads/1794224335151-comparison.json
+  bytes=3217 sha256=e22643b1e5ed0453b27ec2be7f1778f2f456b464dbb376eb9ae8bb50ba91600d
+runs/web_demo/e2e/payloads/1794224335571-invalid-ref-compare.json
+  bytes=420 sha256=7d9ec8bd87c7f9a46b220db8fa285ad8bd941c34e403f0c6bd203a749e89d963
+runs/web_demo/e2e/payloads/1794224335595-invalid-ref-details.json
+  bytes=379 sha256=e9593a9f78a1db7ea3b53a9cc21e423eb96747d6df442b31a041f0570c6b68d3
+runs/web_demo/e2e/payloads/1794224394824-clarification-reply.json
+  bytes=1600 sha256=6a2999f9256a90c04fb3048542af4f477d03b59de8ad2dc2abeb0e01bb58e431
+runs/web_demo/e2e/payloads/1794224399655-modes.json
+  bytes=376 sha256=84eb41fac57b8410b87b228a1a98add3794721f6f861296a0120f6d00252f96a
+runs/web_demo/e2e/payloads/1794224399779-replay.json
+  bytes=145 sha256=0b26fd6d8a945d2e77e91f0280ede1da9367773440f544690a6c648ad35c0b81
+runs/web_demo/e2e/payloads/1794224401901-not-pending-clarification.json
+  bytes=155 sha256=b2234308b2e702e4f113563dd696163c70cae220f42dfef05b7266906350850e
+runs/web_demo/e2e/payloads/1794224401907-identity-injection-rejected.json
+  bytes=370 sha256=9dabf248cde255fb5cbc28f5cc9c7cffbf631d86f6ab6326e805dbf6342d1e50
+runs/web_demo/e2e/payloads/1794224401916-invalid-compare-ref.json
+  bytes=420 sha256=7d9ec8bd87c7f9a46b220db8fa285ad8bd941c34e403f0c6bd203a749e89d963
+runs/web_demo/e2e/preflight.json
+  bytes=1959 sha256=76d9b4045a977aa08485aed433708e8d8f375799901d537a039ca884e7ab7c6a
+runs/web_demo/e2e/summary.json
+  bytes=15190 sha256=8e8252a62bc54abea3a29b8b63831485fe9dbbf69a512b7d87d2e0e0a037152c
+runs/web_demo/mcp_integration_transcript.json
+  bytes=8715 sha256=a10657b3334b6ae39cd863735a440675822a2cb16356d0cc1814d6f360db0eb2
+runs/web_demo/screenshots/desktop-clarification-memory.png
+  bytes=217226 sha256=22efdf7b7f8414daec015b049cb392824de0916e5f7561ea06b25ee3d977ba27
+runs/web_demo/screenshots/desktop-comparison.png
+  bytes=194782 sha256=9c4fd37815d989f5b610fd783f8848c3c62d6e0f7a970a6509426f1a9bd54320
+runs/web_demo/screenshots/desktop-evidence.png
+  bytes=293835 sha256=c5797b44bc55ff06378e809b6b0e38c06ea243bed277c562656ceb065578d984
+runs/web_demo/screenshots/desktop-search.png
+  bytes=252150 sha256=498c16f0c47b863f3a81880edd8621ee161a9a47fdb3f8b7d158b9dee1fe3773
+runs/web_demo/screenshots/mobile-comparison-sheet.png
+  bytes=63996 sha256=77a3452330c43cd8db7c5c7456508b16233a2d9fd7680f177045dfdb1fa2e0a1
+runs/web_demo/screenshots/mobile-drawer.png
+  bytes=63744 sha256=cb751a7b17e600cb0f25d39e43dff467ff7e7ef6e539c37d26d7c47bdcabdbf5
+runs/web_demo/screenshots/mobile-search.png
+  bytes=62960 sha256=589607d34f842f9e80984dc049082e0e6510569b9deec7a5bf614eb8009b0386
+runs/web_demo/screenshots/replay-mode.png
+  bytes=228290 sha256=336c933fc8de73568efd246bac00ec730a7f884ac5d3bd33d97d109d39f40386
+runs/web_demo/traces/.last-run.json
+  bytes=45 sha256=91d1c43004802cd49950d78eb11c8fa7d05da8ffffe219a8b13b2f561bc00903
+
+SCOPE NOTES
+- New Python package: web_demo/ (FastAPI BFF, MCP manager, sessions, view models, demo flow).
+- New frontend: web/ (Next.js 16 / React 19 / TypeScript / Tailwind 4).
+- Adapted upstream UI: third_party/ records licenses/reuse guide; THIRD_PARTY_NOTICES.md is authoritative.
+- Only existing file touched: recommendation/mcp/server.py, adding the additive
+  confirmation_source value "web_ui_explicit_user_reply" while keeping old values.
+- The pre-existing untracked files and the pre-existing modified files are NOT part of
+  this milestone and are not attributed here.
+
+END OF SOURCE DIFF
