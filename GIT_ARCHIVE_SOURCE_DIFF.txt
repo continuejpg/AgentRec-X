@@ -7,9 +7,10 @@ no push, no release. Large data/models/runs/adapters/secrets are excluded by des
 BRANCH: archive/agentrecx-web-demo-v1
 BASELINE HEAD: 4dec6d2081902f1e89265a06ea4ded595087dd43 (branch feat/agent-source-limit-ablation)
 ARCHIVE COMMITS (before this metadata commit):
+  7577746 docs(archive): add Git archive report, source diff and resource manifest
   ce23f7a feat(web-demo): add local Web Shopping Assistant (P19)
   8eca2c6 archive: snapshot P14-P18 research, agent and serving implementation
-COMMIT C (this file, GIT_ARCHIVE_REPORT.md, resource manifest and refreshed screenshots)
+COMMIT C/D (metadata commits; this file is in the final metadata commit)
   is the branch tip that contains this source diff; run `git rev-parse HEAD` after checkout.
 PRE-EXISTING WORKTREE STATUS AT BASELINE: 408 entries
   The archive did not revert, delete or rewrite those pre-existing changes.
@@ -29,7 +30,7 @@ SUMMARY (staged archive content relative to baseline, excluding this file)
   Training code/configs/reports: 95 files (0.78 MB present)
 
 == Archive metadata / documentation ==
-A	GIT_ARCHIVE_REPORT.md	bytes=12005	sha256=88f2467b616cf019eb02beeeb84e2e4a824694f57c84486d01432781ce2adfab
+A	GIT_ARCHIVE_REPORT.md	bytes=12172	sha256=43119562111c6f7cfc73da1e58b46c33d15e2e5d4b2acbd428dd465f07cd9226
 M	README.md	bytes=30575	sha256=d25859540d5bed1dc7022f5ed735bdf1f5cd6e29e9cec7d52a6e4ea2550d2eac
 A	THIRD_PARTY_NOTICES.md	bytes=16411	sha256=b0625adc107362e1d354e4008f8ad0d36c402e5d329f063497fd077f3f9c3cd9
 A	WEB_DEMO_GUIDE.md	bytes=12689	sha256=9f172067aa8f7abe9f8c68ee8283e4d0dfc44eab6020fef83a49c64ab3c6c2b4
@@ -61,7 +62,7 @@ A	archive/legacy_experiments/tiger_canonical_step26_28.tar.gz	bytes=40076	sha256
 A	archive/legacy_experiments/v2_pipeline_gates.tar.gz	bytes=62764	sha256=14ee1b1387a9cd58377d266d9f355f20e7ecc5c9bd339b4ecd8c126e3812846f
 
 == Operational scripts ==
-A	scripts/git_archive_source_diff.py	bytes=7117	sha256=225b3a85fe7be8c43fc219883dbdbf5f0b1d1136646c2e92a9f4b7adc6b114b3
+A	scripts/git_archive_source_diff.py	bytes=7101	sha256=effc4aa670bbc9406c5a831166b6a0884e6af3374b16fd7d9607bb97c5666414
 A	scripts/run_web_demo.ps1	bytes=8078	sha256=1e1c28c5a8ad60a68bb0f3dd190b7b99ec7060d4f7a344bdcefa86aa84c7aee2
 A	scripts/run_web_demo_bff.sh	bytes=2673	sha256=63764321f1879ea7626f4c7b6c51c9c746f57c4505f5896e383e469656e4d226
 A	scripts/run_web_demo_e2e.ps1	bytes=15895	sha256=57406f8eca9fef22bfb15a3df5055b68b89cdfd3f12bf0817c170d12fa4c1c3a

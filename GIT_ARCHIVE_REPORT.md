@@ -17,7 +17,7 @@
 | Archive branch | **`archive/agentrecx-web-demo-v1`** |
 | Archive commit A (P14–P18 snapshot) | **`8eca2c6a0946a6dc0f52c925c6ccaa5d7e42cc42`** |
 | Archive commit B (P19 Web Demo + README) | **`ce23f7ab00b6645c11bb8c72528e483baa80e510`** |
-| Archive commit C (this metadata) | branch tip; see `git log -1 --format=%H` on the archive branch |
+| Archive metadata commits | **C + D** (branch tip; see `git log -1 --format=%H` on the archive branch) |
 | Remote / push / release | **none** — local only; no remote was contacted |
 | Existing history | unchanged; archive commits are new descendants of `4dec6d2` |
 | Pre-existing worktree changes | **408 status entries** at baseline; none deleted or reset; they were committed in A |
@@ -33,7 +33,8 @@ kept locally for audit): `head.txt`, `branch.txt`, `git_status_before.txt`,
 |---|---|---:|---|
 | **A** `8eca2c6` | P14–P18 source, tests, reports, docs, benchmarks, training code/configs, legacy experiment archives, serving/agent changes already present in the worktree | **647** | +128,847 / −13,456 |
 | **B** `ce23f7a` | P19 Web Demo: `web/`, `web_demo/`, `e2e/`, `third_party/`, Web docs, committed screenshots, run scripts, README entry, `.gitignore` safety rules | **95** | +19,428 / −7 |
-| **C** (tip) | `GIT_ARCHIVE_REPORT.md`, `GIT_ARCHIVE_SOURCE_DIFF.txt`, `docs/ARCHIVE_MANIFEST.md`, `docs/archive_python_freeze.txt`, refreshed `docs/assets/web_demo/*.png` | **13** | small |
+| **C** | `GIT_ARCHIVE_REPORT.md`, `GIT_ARCHIVE_SOURCE_DIFF.txt`, `docs/ARCHIVE_MANIFEST.md`, `docs/archive_python_freeze.txt`, `scripts/git_archive_source_diff.py`, refreshed `docs/assets/web_demo/*.png` | **13** | small |
+| **D** (tip) | final metadata consistency commit: this report, the source-diff generator and the regenerated source diff | **3** | small |
 
 A is deliberately a *snapshot* of mixed pre-existing work: the worktree did not contain a reliable
 separation of each earlier milestone, and the brief explicitly permits one clearly-scoped local
@@ -132,7 +133,7 @@ documented parameters and verify identity/hash); the CPU BGE warm-up is tens of 
 
 ## 8. Residual / uncommitted state
 
-After commit C the intended state is: **no uncommitted source or documentation files**. Remaining
+After the metadata commits (C/D) the intended state is: **no uncommitted source or documentation files**. Remaining
 local-only content is intentionally ignored (see §4), including `data/`, `models/`, `runs/`
 assets, virtualenvs, node_modules and local logs. If `git status --short` is non-empty after
 checkout, it should only be those ignored paths (which `git status` does not print by default).
@@ -161,7 +162,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1
 
 | Item | Result |
 |---|---|
-| Local commit(s) | **YES** — A `8eca2c6`, B `ce23f7a`, C branch tip |
+| Local commit(s) | **YES** — A `8eca2c6`, B `ce23f7a`, C/D metadata branch tip |
 | Traceable archive | **YES** — baseline/parents, source diff, manifests and hashes recorded |
 | README Web entry + screenshots | **YES** (committed) |
 | Dependency/resource manifest | **YES** — `docs/ARCHIVE_MANIFEST.md` + freeze + locks |

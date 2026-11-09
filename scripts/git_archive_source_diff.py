@@ -31,7 +31,12 @@ BRANCH = "archive/agentrecx-web-demo-v1"
 
 def git(*args: str) -> str:
     return subprocess.run(
-        ["git", *args], cwd=REPO, text=True, capture_output=True, check=False
+        ["git", *args],
+        cwd=REPO,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
     ).stdout
 
 
@@ -117,7 +122,7 @@ def main() -> int:
     for commit in commits:
         lines.append(f"  {commit}")
     lines.append(
-        "COMMIT C (this file, GIT_ARCHIVE_REPORT.md, resource manifest and refreshed screenshots)\n"
+        "COMMIT C/D (metadata commits; this file is in the final metadata commit)\n"
         "  is the branch tip that contains this source diff; run `git rev-parse HEAD` after checkout."
     )
     lines.append(f"PRE-EXISTING WORKTREE STATUS AT BASELINE: {len(baseline_rows)} entries")
@@ -141,7 +146,7 @@ def main() -> int:
                 lines.append(f"{kind}\t{rel}\tbytes={size}\tsha256={sha256(REPO / rel)}")
         lines.append("")
 
-    readme_diff = git("diff", f"{BASE}..HEAD", "--", "README.md")
+    readme_diff = git("diff", f"{BASE}..HEAD", "--", "README.md") or ""
     if readme_diff.strip():
         lines.append("== README WEB ENTRY DIFF (committed in commit B) ==")
         lines.extend(readme_diff.rstrip().splitlines())
