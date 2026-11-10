@@ -68,12 +68,13 @@ This:
 4. waits for the **real** `/api/health` readiness and prints per-server startup, then opens
    <http://127.0.0.1:3000>.
 
-Cold start is real: each MCP server loads the catalogue + BGE and takes **~35–47 s** in this
-environment (E2E measured 35.6 s / 35.5 s per server, 46.7 s from launcher to `/api/health`
-ready); the page renders immediately and shows a real initialization banner. The **first BGE
-query per server** also pays encoder warm-up (measured **~57–83 s** in the final E2E run on this
-CPU host, load-dependent); subsequent searches are ~0.15–2.1 s. Tool activity and SSE keep-alives
-make this visible instead of a silent spinner.
+Cold start is real: each MCP server loads the catalogue + BGE before reporting Search Ready.
+In three measured Web cold starts, per-server startup was **~37–49 s** and launcher-to-`/api/health`
+ready was **~46–58 s**; the page renders immediately and shows a real initialization banner.
+The BGE encoder is warmed once inside startup (single-flight) and the BFF passes `--warmup` for BGE
+profiles. The **first user query after readiness** measured **0.54–0.56 s** (before this change the
+same first query paid **15.6–17.1 s** for encoder load); warm queries are ~0.28–0.30 s. Tool
+activity and SSE keep-alives make the real startup cost visible instead of a silent spinner.
 
 Both `http://127.0.0.1:3000` and `http://localhost:3000` work (`web/next.config.ts` allows both
 loopback dev origins; Next.js 16 otherwise blocks dev resources opened through the other spelling).

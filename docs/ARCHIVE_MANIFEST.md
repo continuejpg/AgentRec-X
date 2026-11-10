@@ -89,8 +89,9 @@ intentionally **not** in Git. The archive records their exact bytes via SHA-256.
    ```
    `run_web_demo.ps1` currently assumes the WSL distro name `Ubuntu-22.04`; adapt that one
    parameter if your distro name differs.
-6. **Verify**: `/api/health` reports two servers `ready` and catalogue 76,263; first BGE query is
-   slow (57–83 s in the verified environment), later queries are ~0.15–2.1 s; E2E expects
+6. **Verify**: `/api/health` reports two servers `ready` and catalogue 76,263. BGE profiles warm
+   the encoder during startup; in the measured CPU run the first user query after ready was
+   **0.54–0.56 s** (previously 15.6–17.1 s) and warm queries were ~0.28–0.30 s; E2E expects
    7/7 PASS (see `WEB_DEMO_REPORT.md`).
 
 ## 5. What is intentionally NOT in Git

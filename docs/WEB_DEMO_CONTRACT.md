@@ -41,8 +41,11 @@ Browser (Windows, Chrome/Edge)
               → existing AgentRec-X catalogue / BGE / planner / Gate / M9 / P15 / P16
 ```
 
-- MCP server cold start is ~35–45 s (catalogue + BGE). The page must render before readiness
-  and show a real initialization status. Do not start a server per request.
+- MCP server cold start includes the catalogue + BGE encoder/index and is **~37–49 s** on the
+  verified CPU host; launcher-to-`/api/health` ready measured **~46–58 s**. The page must render
+  before readiness and show a real initialization status. Do not start a server per request.
+  BGE profiles are warmed once before MCP readiness (`--warmup`); the first user query after ready
+  measured **0.54–0.56 s** versus **15.6–17.1 s** when the encoder was loaded on first use.
 - Default search mode is `bge`; `WEB_DEMO_SEARCH_MODE=bm25` is allowed for fast dev/tests only.
 - The BFF starts, health-checks and owns both MCP processes; it restarts them only through the
   explicit `/api/demo/restart` endpoint or process exit handling. Graceful shutdown closes clients.

@@ -42,9 +42,12 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
 * stop: `powershell -ExecutionPolicy Bypass -File scripts/stop_web_demo.ps1`
 * end-to-end: `powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
 
-Cold start is real: two MCP servers load the catalogue + BGE (~35 s each; ~47 s to ready).
-The page renders first and shows real tool activity; the first BGE query per server pays encoder
-warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2.1 s.
+Cold start is real: BFF/MCP loads the catalogue + BGE before reporting `Search Ready`; in the
+verified CPU run `/api/health` became ready after **~46–58 s** (three Web cold starts), and the
+MCP children used **~37–49 s** each. The encoder is warmed once inside startup, so the **first
+user BGE query after readiness is ~0.54–0.56 s** (before this fix it paid a measured **15.6–17.1 s**
+encoder load); subsequent queries are ~0.28–0.30 s. The page renders immediately and shows a real
+initialization banner; the startup cost is not hidden.
 
 ### Three real scenarios
 
