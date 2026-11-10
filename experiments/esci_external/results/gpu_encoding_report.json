@@ -1,0 +1,43 @@
+{
+ "schema": "agentrecx.esci_external.gpu_encoding.v1",
+ "hostname": "autodl-container-06fa4ab99e-6a73b008",
+ "device": "NVIDIA GeForce RTX 4090",
+ "cuda_version": "12.8",
+ "torch_version": "2.11.0+cu128",
+ "dtype": "float32",
+ "tf32": false,
+ "product_count": 164900,
+ "query_count": 8956,
+ "embedding_dim": 768,
+ "batch_size_requested": 512,
+ "batch_size_product": 512,
+ "batch_size_query": 512,
+ "product_elapsed_s": 80.464,
+ "query_elapsed_s": 1.673,
+ "product_items_per_s": 2049.36,
+ "query_items_per_s": 5352.83,
+ "peak_gpu_memory_mb_before": 418.7,
+ "peak_gpu_memory_mb_products": 4476.6,
+ "peak_gpu_memory_mb_total": 4476.6,
+ "products_sha256": "60e9477774b8556dd5fd930eddfc219fde8e66769d134fb6c8eaf7189ae7006f",
+ "queries_sha256": "4a9d17cab133d079faee86b9906490cc11d0e226bc93593960559eb1ba26b8cc",
+ "products_finite": true,
+ "queries_finite": true,
+ "product_norm_min_max": [
+  0.9999998211860657,
+  1.0000001192092896
+ ],
+ "query_norm_min_max": [
+  0.9999998211860657,
+  1.0000001192092896
+ ],
+ "protocol": {
+  "model": "BAAI/bge-base-en-v1.5",
+  "query_prefix": "Represent this sentence for searching relevant passages: ",
+  "product_prefix": "",
+  "pooling": "CLS",
+  "normalization": "L2",
+  "max_length": 512
+ },
+ "labels_sent_to_gpu": false
+}

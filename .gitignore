@@ -29,6 +29,11 @@ venv/
 data/
 *.jsonl
 *.jsonl.gz
+
+# ESCI external evaluation archive: only the frozen per-query/failure JSONL results
+# are committed (all rows); raw data, embeddings and run logs remain ignored.
+!experiments/esci_external/results/esci_per_query.jsonl.gz
+!experiments/esci_external/results/esci_failures.jsonl.gz
 *.parquet
 *.feather
 *.arrow

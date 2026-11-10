@@ -1,0 +1,187 @@
+{
+ "schema": "agentrecx.esci_external.archive_manifest.v1",
+ "official_source": {
+  "repo": "https://github.com/amazon-science/esci-data",
+  "commit": "7916cdf6ab75a462e77f20ab40428a10923998d5",
+  "license": "Apache-2.0",
+  "paper": "https://arxiv.org/abs/2206.06588",
+  "raw_files": {
+   "examples": {
+    "bytes": 51286808,
+    "sha256": "4a735b693b4a424a6fc67f5be6e4c811495c488bbf66d02a602d308b2744263a"
+   },
+   "products": {
+    "bytes": 1108857465,
+    "sha256": "25124442d064d64b26f74082d6fa09438d679efc0c183cf28d19064a2b65a265"
+   },
+   "sources": {
+    "bytes": 1682802,
+    "sha256": "a5fed8ecc016443de40bf3c63098f0e3f23bbe4daa4236f1c38b8c3184778c50"
+   }
+  }
+ },
+ "official_gain_audit": {
+  "file": "experiments/esci_external/reference/official_gain_audit.json",
+  "script_sha256": "688f9255e1b94ea2a55fa20e1e06cbb27257702c85c9f6460e980133b3067095",
+  "official_script_gain": {
+   "E": 1.0,
+   "S": 0.01,
+   "C": 0.1,
+   "I": 0.0
+  },
+  "semantic_gain_primary": {
+   "E": 1.0,
+   "S": 0.1,
+   "C": 0.01,
+   "I": 0.0
+  },
+  "official_trec_eval_formula": "linear gain / log2(rank+1)"
+ },
+ "frozen_test": {
+  "filter": {
+   "small_version": 1,
+   "split": "test",
+   "product_locale": "us"
+  },
+  "queries": 8956,
+  "candidates": 181701,
+  "labels": {
+   "E": 79708,
+   "S": 63563,
+   "C": 8099,
+   "I": 30331
+  },
+  "candidate_depth_avg": 20.2882,
+  "candidate_depth_max": 95,
+  "query_provenance": "official Amazon ESCI queries (real shopping queries)",
+  "candidate_scope": "judged-candidate reranking, not full-catalogue retrieval",
+  "test_labels_modified": false,
+  "test_tuning": false
+ },
+ "bge": {
+  "model": "BAAI/bge-base-en-v1.5",
+  "weights_sha256": "4b9d4a4b2d7ab06e3861861d5ee370974b31d17c0bb6af6f13d3dc79f33bbdcd",
+  "tokenizer_hashes": {
+   "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+   "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+   "tokenizer_config.json": "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3"
+  },
+  "query_prefix": "Represent this sentence for searching relevant passages: ",
+  "product_text": "product_title only",
+  "query_text": "official ESCI query, unchanged",
+  "pooling": "CLS",
+  "normalization": "L2",
+  "max_length": 512,
+  "dtype": "float32",
+  "tf32": false,
+  "batch_size": 512,
+  "training_or_finetuning": false
+ },
+ "bm25": {
+  "implementation": "candidate-local BM25 over each query's judged candidate set",
+  "tokenizer": "lowercase alphanumeric runs; no stemming; no stopwords",
+  "k1": 1.2,
+  "b": 0.75,
+  "tie_break": "score desc, product_id asc"
+ },
+ "metrics": {
+  "primary_definition": "semantic gain口径: E=1.0,S=0.1,C=0.01,I=0.0; official trec_eval linear nDCG = sum(gain/log2(rank+1))",
+  "official_script_definition": "official script口径: E=1.0,S=0.01,C=0.1,I=0.0; same linear nDCG",
+  "positions": [
+   "nDCG@10",
+   "nDCG_all"
+  ],
+  "aggregation": "macro mean over 8,956 queries",
+  "paired_ci": "user/query-level bootstrap, 10,000 resamples",
+  "random_seed": 20261110,
+  "test_tuning": false
+ },
+ "archived_results": {
+  "esci_per_query.jsonl.gz": {
+   "rows": 8956,
+   "sha256": "688d73b98b4e3cd387e3df500a12ea92e8567c82f34fc647be00606d17873507"
+  },
+  "esci_failures.jsonl.gz": {
+   "rows": 1529,
+   "sha256": "5b33cf027a5f1da6d6ea7b355979b6350db9b674d44147ff09638aaa8f0ab02f"
+  },
+  "esci_metrics.json": {
+   "sha256": "169841bf775209ba6160389a40d67b1109618ea156a5ddb6ae7e948b2e0127e5"
+  },
+  "esci_failure_samples.json": {
+   "sha256": "f4fcf54e458b18791f438ad4bf0000bacf6ae048027d5a9531c9bc48d79ef44a"
+  },
+  "gpu_encoding_manifest.json": {
+   "sha256": "1e7fc4f613eea33220c0612e1ccdb9cf010782629f0fd10ddbf7d8e88857bbf3"
+  },
+  "gpu_encoding_report.json": {
+   "sha256": "71aaafdad0e2d7b35044ebdff37b17b0b589ddbfa959dc8f48522e15365bd21c"
+  },
+  "frozen_esci_manifest.json": {
+   "sha256": "1b992c46e6b4a66fcbf76e7846fd6a9929261a2aa6f7fd23904bcebc2c25835c"
+  },
+  "gpu_inputs_manifest.json": {
+   "sha256": "d0ae8af00179c1c9f090520c56af36446f279e4f97cede46ce641c2b7683663b"
+  },
+  "cpu_gpu_query_diff.json": {
+   "sha256": "1bbbeb9751e5cbd5a816e96baf3989f14d2dea8638dcbbc00827d3894bbb9a67"
+  },
+  "cpu_gpu_product_diff.json": {
+   "sha256": "a712c8ff0adccd7ad4565e0cb2aec92cbe0220b92669d43c6f25ac583617dd23"
+  }
+ },
+ "archived_sources": {
+  "prepare_esci.py": {
+   "sha256": "4dec3cb5b02886b467ce68a515777153d844c6b83d6750b325f3417f1d0824e0",
+   "bytes": 8185
+  },
+  "export_gpu_inputs.py": {
+   "sha256": "94750346e489875389cb54cab3790f9708594a455a8eda62ef9ccf7e610e9621",
+   "bytes": 2624
+  },
+  "encode_esci_gpu.py": {
+   "sha256": "bc174a663cff5495e859f04e4b143a18fb031ec0c33638d43445e08a1b972f36",
+   "bytes": 8061
+  },
+  "evaluate_esci.py": {
+   "sha256": "42e4ef72fb3a48cfa1486f0b7897579a53f81abff6dae03d4d0c1cd9235c940b",
+   "bytes": 19166
+  },
+  "cpu_gpu_product_sample.py": {
+   "sha256": "fe5ee2389131fa9e784e5bcb219d72f380d27384c036f58622fac44cedc0e74e",
+   "bytes": 5344
+  },
+  "encode_esci_bge.py": {
+   "sha256": "08d571a7709837ef8c42c328815e0dd2619c19e7e88e1a8aa0c9a210a12984ec",
+   "bytes": 4345
+  },
+  "reference/official_gain_audit.json": {
+   "sha256": "300a92c169b0430b041f969bc587b1eb73acc907fe203528db728c4492f52c9e",
+   "bytes": 1213
+  },
+  "README.md": {
+   "sha256": "a427317967b7bf89ae5e391645843be0c594cd696ae5cd3d118144c37f48b355",
+   "bytes": 6310
+  },
+  "verify_archive.py": {
+   "sha256": "38f912e697450d0ab395d2a3df125d19aa4ddc3d841635e87ca973f719ea380d",
+   "bytes": 6288
+  }
+ },
+ "large_artifacts_not_committed": [
+  "data/esci_external/* raw parquet/CSV",
+  "runs/esci_external/*.npz embeddings",
+  "runs/esci_external/esci_us_test_candidates.jsonl",
+  "runs/esci_external/esci_us_test_queries.jsonl",
+  "runs/esci_external/gpu_samples.csv and other run logs"
+ ],
+ "no_commit_push_deploy_previous": true,
+ "clean_repo_reproduction": {
+  "raw_data": "download official files from the URLs/LFS paths; verify SHA-256 above",
+  "prepare": "python experiments/esci_external/prepare_esci.py",
+  "gpu_inputs": "python experiments/esci_external/export_gpu_inputs.py",
+  "gpu_encode": "run experiments/esci_external/encode_esci_gpu.py on CUDA with the remote/local BGE model",
+  "evaluate": "python experiments/esci_external/evaluate_esci.py (after placing GPU NPZ files in runs/esci_external)",
+  "archived_metrics": "decompress results/esci_per_query.jsonl.gz and verify with experiments/esci_external/verify_archive.py"
+ }
+}

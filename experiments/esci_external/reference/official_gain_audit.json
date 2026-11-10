@@ -1,0 +1,23 @@
+{
+ "schema": "agentrecx.esci_external.official_gain_audit.v1",
+ "official_repo": "https://github.com/amazon-science/esci-data",
+ "pinned_commit": "7916cdf6ab75a462e77f20ab40428a10923998d5",
+ "url": "https://raw.githubusercontent.com/amazon-science/esci-data/7916cdf6ab75a462e77f20ab40428a10923998d5/ranking/prepare_trec_eval_files.py",
+ "script_sha256": "688f9255e1b94ea2a55fa20e1e06cbb27257702c85c9f6460e980133b3067095",
+ "relevance_pos_mapping": "esci_label2relevance_pos = { \"E\" : 4, \"S\" : 2, \"C\" : 3, \"I\" : 1, }",
+ "trec_eval_command": "#../code/terrier-project-5.5/bin/terrier trec_eval ${QRELS_FILE} ${RES_FILE} -c -J -m 'ndcg.1=0,2=0.01,3=0.1,4=1'",
+ "official_script_gain": {
+  "E": 1.0,
+  "S": 0.01,
+  "C": 0.1,
+  "I": 0.0
+ },
+ "semantic_gain_primary": {
+  "E": 1.0,
+  "S": 0.1,
+  "C": 0.01,
+  "I": 0.0
+ },
+ "finding": "The pinned official script maps relevance positions E:4,S:2,C:3,I:1 and passes trec_eval gains 0,0.01,0.1,1, assigning S=0.01 and C=0.1. The main result uses semantic gain E=1,S=0.1,C=0.01,I=0; the official-script mapping is reported separately as a sensitivity result.",
+ "official_ndcg_formula": "linear gain / log2(rank+1), per trec_eval m_ndcg.c"
+}

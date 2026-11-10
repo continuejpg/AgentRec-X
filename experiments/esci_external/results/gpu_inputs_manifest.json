@@ -1,0 +1,22 @@
+{
+ "schema": "agentrecx.esci_external.gpu_inputs.v1",
+ "source_candidates_sha256": "527c7fbb5e7caf53b392a00158db647cda61d6b6442c89b5e9ffab0eae40dcd6",
+ "product_count": 164900,
+ "query_count": 8956,
+ "product_texts_sha256": "50e0fa31ae8f2c3b8b07d066d491cb0b9f71504a373c67dc210716c3e793aa22",
+ "query_texts_sha256": "c443fbc3fac52e99a39fa2bcc4195e43a3b4ecae220a9d25a34a2935aa2f8899",
+ "product_text_field": "product_title",
+ "query_field": "query",
+ "protocol": {
+  "model": "BAAI/bge-base-en-v1.5",
+  "query_prefix": "Represent this sentence for searching relevant passages: ",
+  "product_prefix": "",
+  "pooling": "CLS",
+  "normalization": "L2",
+  "max_length": 512,
+  "torch_dtype": "float32"
+ },
+ "labels_sent_to_gpu": false,
+ "candidate_pairs_sent_to_gpu": false,
+ "note": "Only unique product title and query texts are sent for embedding; labels remain local in esci_us_test_candidates.jsonl."
+}

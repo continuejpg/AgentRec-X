@@ -1,0 +1,3296 @@
+{
+ "bge_material_loss": [
+  {
+   "query_id": "30411",
+   "query": "cryptid",
+   "candidate_count": 16,
+   "label_counts": {
+    "E": 1,
+    "I": 15
+   },
+   "bm25_ndcg10_primary": 1.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 1.0,
+   "bge_ndcg_all_primary": 0.27023815442731974,
+   "bm25_ndcg10_repo_script_gain": 1.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 1.0,
+   "bge_ndcg_all_repo_script_gain": 0.27023815442731974,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B00IIY1AN6",
+     "label": "E",
+     "title": "The Awakening",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01FT6Q8VO",
+     "label": "I",
+     "title": "The Mystery Beneath",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01H4C8YEA",
+     "label": "I",
+     "title": "Dogman 2: The Wrath of The Litter",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01M0VSIR5",
+     "label": "I",
+     "title": "The Bridgewater Triangle",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01MUVDHUD",
+     "label": "I",
+     "title": "Real Monsters, Creatures, Ghosts and Demons from Hell",
+     "score": 0.0
+    },
+    {
+     "product_id": "B06WRNYDXX",
+     "label": "I",
+     "title": "Wild Men",
+     "score": 0.0
+    },
+    {
+     "product_id": "B074DQ1X4V",
+     "label": "I",
+     "title": "Animal X - Natural Mystery Unit - El Chupacabra",
+     "score": 0.0
+    },
+    {
+     "product_id": "B0763XPBT1",
+     "label": "I",
+     "title": "Invasion on Chestnut Ridge",
+     "score": 0.0
+    },
+    {
+     "product_id": "B07798RXSN",
+     "label": "I",
+     "title": "Forest Monsters: Hodag and Bigfoot",
+     "score": 0.0
+    },
+    {
+     "product_id": "B077KD8L9D",
+     "label": "I",
+     "title": "Unlocking the Abair Incident",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07TKF5SWH",
+     "label": "I",
+     "title": "7 Mysterious Cryptids",
+     "score": 0.6499052
+    },
+    {
+     "product_id": "B07798RXSN",
+     "label": "I",
+     "title": "Forest Monsters: Hodag and Bigfoot",
+     "score": 0.47421056
+    },
+    {
+     "product_id": "B07SQBW1W8",
+     "label": "I",
+     "title": "Chupacabra",
+     "score": 0.46681595
+    },
+    {
+     "product_id": "B074DQ1X4V",
+     "label": "I",
+     "title": "Animal X - Natural Mystery Unit - El Chupacabra",
+     "score": 0.44712761
+    },
+    {
+     "product_id": "B01MUVDHUD",
+     "label": "I",
+     "title": "Real Monsters, Creatures, Ghosts and Demons from Hell",
+     "score": 0.44429195
+    },
+    {
+     "product_id": "B0812CZH45",
+     "label": "I",
+     "title": "The Honey Island Monster",
+     "score": 0.43827528
+    },
+    {
+     "product_id": "B06WRNYDXX",
+     "label": "I",
+     "title": "Wild Men",
+     "score": 0.39424336
+    },
+    {
+     "product_id": "B01FT6Q8VO",
+     "label": "I",
+     "title": "The Mystery Beneath",
+     "score": 0.38914299
+    },
+    {
+     "product_id": "B07JQ4NL3V",
+     "label": "I",
+     "title": "Dinosaur Activity",
+     "score": 0.38594377
+    },
+    {
+     "product_id": "B01H4C8YEA",
+     "label": "I",
+     "title": "Dogman 2: The Wrath of The Litter",
+     "score": 0.38380101
+    }
+   ]
+  },
+  {
+   "query_id": "69143",
+   "query": "miller specteum 375",
+   "candidate_count": 16,
+   "label_counts": {
+    "C": 13,
+    "E": 1,
+    "S": 2
+   },
+   "bm25_ndcg10_primary": 0.9604297947286592,
+   "bge_ndcg10_primary": 0.06814362206390978,
+   "bm25_ndcg_all_primary": 0.9800654226219055,
+   "bge_ndcg_all_primary": 0.3258392129924756,
+   "bm25_ndcg10_repo_script_gain": 0.9580732978651045,
+   "bge_ndcg10_repo_script_gain": 0.31180672408728793,
+   "bm25_ndcg_all_repo_script_gain": 0.9766154321050927,
+   "bge_ndcg_all_repo_script_gain": 0.5405060318852225,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B007FHSXBE",
+     "label": "E",
+     "title": "Miller Electric 907529 Plasma Cutter, Inverter, Spectrum 375",
+     "score": 0.60025148
+    },
+    {
+     "product_id": "B07FJLV18Q",
+     "label": "S",
+     "title": "WeldingStop 176655 176656 Kit for Miller Spectrum 375 X-treme Plasma Cutter ICE-25C ICE-27C Torch WS OEMed consumables (NOT Spectrum 375 X-treme Cutter with XT30 torch)",
+     "score": 0.48294204
+    },
+    {
+     "product_id": "B07JCSRQ37",
+     "label": "C",
+     "title": "WeldingStop 176655 Electrode 176656 Tip for Miller Spectrum 375 X-treme Plasma Cutter ICE-25C ICE-27C Torch",
+     "score": 0.46184281
+    },
+    {
+     "product_id": "B07NJ7M7GK",
+     "label": "C",
+     "title": "249926 Electrode 40A 249928 Tip fit Miller Spectrum 375/625 X-TREME Cutter XT30 XT40 Torch Consumables 30pcs",
+     "score": 0.46184281
+    },
+    {
+     "product_id": "B07Q81CV9L",
+     "label": "C",
+     "title": "249928 Tip 40A Nozzle for Miller Spectrum 375 625 X-TREME Cutter XT30 XT40 Plasma Torch PK-10",
+     "score": 0.46184281
+    },
+    {
+     "product_id": "B07G81LQQV",
+     "label": "C",
+     "title": "Electrode Tip Kit for Miller Spectrum 375 X-treme Cutter ICE-25C ICE-27C PK-40 Ref 176655 176656",
+     "score": 0.45143346
+    },
+    {
+     "product_id": "B07HQ7P833",
+     "label": "C",
+     "title": "249969 Plasma O-Ring 30-40A for Miller Spectrum 375/625 X-TREME Cutter XT30/XT40 Torch PK-5",
+     "score": 0.45143346
+    },
+    {
+     "product_id": "B07JCSKM76",
+     "label": "C",
+     "title": "WeldingStop 176655 Electrode O-Ring 169232 fit Miller Spectrum 375 X-treme Plasma Cutter ICE-25C ICE-27C Torch",
+     "score": 0.45143346
+    },
+    {
+     "product_id": "B07SSXMS5T",
+     "label": "C",
+     "title": "PKG-10 Plasma XT30 XT40 Torch Consumables for Miller Spectrum 375 625 X-TREME Cutter 249928 Tip 249926 Electrode",
+     "score": 0.45143346
+    },
+    {
+     "product_id": "B07RYKN9L2",
+     "label": "C",
+     "title": "Electrode 249926 Swirl Ring 249931 O-Ring 249969 40A Tip 249928 Nozzle for Plasma Cutting Miller Spectrum 375 625 Cutter Torch 30pieces",
+     "score": 0.42284245
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07G81LQQV",
+     "label": "C",
+     "title": "Electrode Tip Kit for Miller Spectrum 375 X-treme Cutter ICE-25C ICE-27C PK-40 Ref 176655 176656",
+     "score": 0.59923005
+    },
+    {
+     "product_id": "B07Q81CV9L",
+     "label": "C",
+     "title": "249928 Tip 40A Nozzle for Miller Spectrum 375 625 X-TREME Cutter XT30 XT40 Plasma Torch PK-10",
+     "score": 0.59370202
+    },
+    {
+     "product_id": "B07HQ7P833",
+     "label": "C",
+     "title": "249969 Plasma O-Ring 30-40A for Miller Spectrum 375/625 X-TREME Cutter XT30/XT40 Torch PK-5",
+     "score": 0.59321737
+    },
+    {
+     "product_id": "B07JCSRQ37",
+     "label": "C",
+     "title": "WeldingStop 176655 Electrode 176656 Tip for Miller Spectrum 375 X-treme Plasma Cutter ICE-25C ICE-27C Torch",
+     "score": 0.59040272
+    },
+    {
+     "product_id": "B07SSXMS5T",
+     "label": "C",
+     "title": "PKG-10 Plasma XT30 XT40 Torch Consumables for Miller Spectrum 375 625 X-TREME Cutter 249928 Tip 249926 Electrode",
+     "score": 0.57504201
+    },
+    {
+     "product_id": "B07FJLV18Q",
+     "label": "S",
+     "title": "WeldingStop 176655 176656 Kit for Miller Spectrum 375 X-treme Plasma Cutter ICE-25C ICE-27C Torch WS OEMed consumables (NOT Spectrum 375 X-treme Cutter with XT30 torch)",
+     "score": 0.56946862
+    },
+    {
+     "product_id": "B07RWGG5KT",
+     "label": "C",
+     "title": "PKG-13 Plasma XT30 XT40 Torch Consumables for Miller Spectrum 375 625 X-TREME Cutter 249927 Tip 249926 Electrode 249969 O-Ring Swirl Ring",
+     "score": 0.55969667
+    },
+    {
+     "product_id": "B07NJ7M7GK",
+     "label": "C",
+     "title": "249926 Electrode 40A 249928 Tip fit Miller Spectrum 375/625 X-TREME Cutter XT30 XT40 Torch Consumables 30pcs",
+     "score": 0.55872118
+    },
+    {
+     "product_id": "B07SCPHF8L",
+     "label": "C",
+     "title": "PKG-13 Plasma XT30 XT40 Torch Consumables for Miller Spectrum 375 625 X-TREME Cutter 249928 Tip 249926 Electrode 249969 O-Ring Swirl Ring",
+     "score": 0.55795312
+    },
+    {
+     "product_id": "B0154C9P4A",
+     "label": "C",
+     "title": "RIVERWELD Miller ICE-25C ICE-27C Plasma Cutter Cutting Consumables Electrode and Tip Nozzle (176656 176655 20pk)",
+     "score": 0.5400672
+    }
+   ]
+  },
+  {
+   "query_id": "358",
+   "query": ".625 width 20 gal metal strapping without holes",
+   "candidate_count": 16,
+   "label_counts": {
+    "I": 12,
+    "S": 3,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.9620114938915315,
+   "bge_ndcg10_primary": 0.08538060491518684,
+   "bm25_ndcg_all_primary": 0.9620114938915315,
+   "bge_ndcg_all_primary": 0.3432448159566523,
+   "bm25_ndcg10_repo_script_gain": 0.9956754509115788,
+   "bge_ndcg10_repo_script_gain": 0.009719587711624218,
+   "bm25_ndcg_all_repo_script_gain": 0.9956754509115788,
+   "bge_ndcg_all_repo_script_gain": 0.2785491127646622,
+   "query_features": {
+    "negation": true,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B06XTKM2GJ",
+     "label": "E",
+     "title": "Poly Strapping Tensioner & Cutter Manual Banding Tools Windlass for 1/2\" -3/4\" Width Polyester Polyproplyn Strap",
+     "score": 3.52339081
+    },
+    {
+     "product_id": "B08B7YV1H1",
+     "label": "I",
+     "title": "30ft Perforated Metal Hanger Straps, Steel Hanger, ½ inches Width, 0.7 mm Thickness, Max. Load: 60 lb",
+     "score": 3.19416775
+    },
+    {
+     "product_id": "B000KKKDMK",
+     "label": "S",
+     "title": "Tie Down Engineering 59155 Certified Galvanized Strapping - 37'",
+     "score": 2.02635485
+    },
+    {
+     "product_id": "B08KXMSH73",
+     "label": "I",
+     "title": "LQ Industrial Sport Jet Boat Boarding Swim Rubber Telescoping Ladder Strap Marine Grade Secure Retaining Latch Band with 3 Adjustable Mounting Holes for 2-Step 3-Step Ladder",
+     "score": 1.93825465
+    },
+    {
+     "product_id": "B00745VXN2",
+     "label": "I",
+     "title": "Sioux Chief 524-1022PK2 3/4-Inch by 10-Feet 22-Gauge Metal Hanger Strap",
+     "score": 1.40596328
+    },
+    {
+     "product_id": "B072WC1MXT",
+     "label": "I",
+     "title": "SunplusTrade 100pcs 11.8 Inches Stainless Steel Exhaust Wrap Multi-Purpose Locking Cable Metal Zip Ties",
+     "score": 1.3716773
+    },
+    {
+     "product_id": "B07K8N2YBN",
+     "label": "S",
+     "title": "IDL Packaging - MiniCW34 3/4\" x 250' Mini Woven Cord Strapping Roll, 2400 lbs - Break Strength, 6 x 3 Core, White (Pack of 1)",
+     "score": 1.36478172
+    },
+    {
+     "product_id": "B076LDW2DJ",
+     "label": "I",
+     "title": "Ram-Pro 12 oz Aluminum Can Crusher & Bottle Opener | Heavy Duty Metal Wall Mounted Soda Beer Smasher – Eco-Friendly Recycling Tool",
+     "score": 1.22260445
+    },
+    {
+     "product_id": "B0007P4JAU",
+     "label": "I",
+     "title": "4pc Soil Sieve Set, 12\" diameter - Stainless Steel Frame Three Interchangeable Sieves With Varying Mesh Sizes Grade - Mix Soil Filter Large Debris Replacement Screens Available Great for Bonsai",
+     "score": 0.0
+    },
+    {
+     "product_id": "B000FSVUDS",
+     "label": "S",
+     "title": "Oatey 33923 28 Ga. Galvanized Hanger Strap, Bagged - 3/4-Inch x 10-Feet",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B08B7YV1H1",
+     "label": "I",
+     "title": "30ft Perforated Metal Hanger Straps, Steel Hanger, ½ inches Width, 0.7 mm Thickness, Max. Load: 60 lb",
+     "score": 0.62305748
+    },
+    {
+     "product_id": "B000KKKDMK",
+     "label": "S",
+     "title": "Tie Down Engineering 59155 Certified Galvanized Strapping - 37'",
+     "score": 0.61695528
+    },
+    {
+     "product_id": "B00745VXN2",
+     "label": "I",
+     "title": "Sioux Chief 524-1022PK2 3/4-Inch by 10-Feet 22-Gauge Metal Hanger Strap",
+     "score": 0.60186017
+    },
+    {
+     "product_id": "B00GXF083U",
+     "label": "I",
+     "title": "Oatey 33925 3/4 in. x 25' Plastic Hanger Strap, Bagged",
+     "score": 0.60169297
+    },
+    {
+     "product_id": "B00AGCTXP0",
+     "label": "I",
+     "title": "Pipe Strap Galv 3/4x100ft",
+     "score": 0.59178853
+    },
+    {
+     "product_id": "B000FSVUDS",
+     "label": "S",
+     "title": "Oatey 33923 28 Ga. Galvanized Hanger Strap, Bagged - 3/4-Inch x 10-Feet",
+     "score": 0.58395642
+    },
+    {
+     "product_id": "B08KXMSH73",
+     "label": "I",
+     "title": "LQ Industrial Sport Jet Boat Boarding Swim Rubber Telescoping Ladder Strap Marine Grade Secure Retaining Latch Band with 3 Adjustable Mounting Holes for 2-Step 3-Step Ladder",
+     "score": 0.56689936
+    },
+    {
+     "product_id": "B085582KBF",
+     "label": "I",
+     "title": "Architectural Products by Outwater 3P5.29.00065 Faux Wood Beam Strap, Black",
+     "score": 0.5539099
+    },
+    {
+     "product_id": "B072WC1MXT",
+     "label": "I",
+     "title": "SunplusTrade 100pcs 11.8 Inches Stainless Steel Exhaust Wrap Multi-Purpose Locking Cable Metal Zip Ties",
+     "score": 0.54971343
+    },
+    {
+     "product_id": "B07JH1FHTC",
+     "label": "I",
+     "title": "Habitech 250' Tree Tie Strap Staking and Guying Material, 1,800 Lbs Strength",
+     "score": 0.5381068
+    }
+   ]
+  },
+  {
+   "query_id": "67807",
+   "query": "mens professional make-up kit",
+   "candidate_count": 16,
+   "label_counts": {
+    "C": 11,
+    "S": 4,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.8816459868760849,
+   "bge_ndcg10_primary": 0.09431514259701929,
+   "bm25_ndcg_all_primary": 0.9399233692421306,
+   "bge_ndcg_all_primary": 0.362420369084654,
+   "bm25_ndcg10_repo_script_gain": 0.9763292307144372,
+   "bge_ndcg10_repo_script_gain": 0.2847073165602974,
+   "bm25_ndcg_all_repo_script_gain": 0.9926104110136148,
+   "bge_ndcg_all_repo_script_gain": 0.5198861805770648,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B0888FPJ14",
+     "label": "E",
+     "title": "YAKAMOZ Professional Hair Cutting Scissors Set 10 Pcs,Hair Cutting Scissors,Thinning Shears, Hair Razor Comb, Clips, Cape,Makeup brush,Makeup brush,Hairdressing Scissors Kit For Men Women Pet",
+     "score": 2.16112479
+    },
+    {
+     "product_id": "B07D1NWFNZ",
+     "label": "C",
+     "title": "Dopp Kit Mens Toiletry Bag Travel Bathroom Bag Shaving Shower Cosmetic Organizer Black",
+     "score": 1.97090231
+    },
+    {
+     "product_id": "B07PCPYGGL",
+     "label": "C",
+     "title": "Mens Toiletry Bag Dopp Kit Travel Bathroom Bag Waterproof Shaving Shower Cosmetic Organizer (Blue)",
+     "score": 1.92589598
+    },
+    {
+     "product_id": "B07X2PMHJS",
+     "label": "C",
+     "title": "Choco Mocha Tolietry Travel Bag Mens Overnight Toiletry Bag Cosmetics Bags Men Dobb Shaving Kits for Travel Grooming Hygiene Dual Zippers Bathroom Accessories Christmas Gift Navy Blue",
+     "score": 1.40304105
+    },
+    {
+     "product_id": "B07B4VDYZG",
+     "label": "C",
+     "title": "WOWBOX Travel Kit Toiletry Bag for Men Waterproof Cosmetic Makeup Shower Bag Shaving Dopp Kit Case Accessories Organizer with Side Hand Strap",
+     "score": 0.12467565
+    },
+    {
+     "product_id": "B07XFSMBP4",
+     "label": "S",
+     "title": "Toiletry Bag Dopp Kit for Men - Nylon Travel Toiletry Bag Waterproof Shower Cosmetic Organizer for Women Men - Travel Kit Shaving Bag for Men",
+     "score": 0.12302886
+    },
+    {
+     "product_id": "B07PV6RXML",
+     "label": "C",
+     "title": "Dopp Kit Toiletry Bag Travel Toiletries Bag Shaving Shower Cosmetic Organizer for Women Men",
+     "score": 0.10634797
+    },
+    {
+     "product_id": "B07SGX3VZ5",
+     "label": "C",
+     "title": "Toiletry Bag Small Nylon Dopp Kit Lightweight Shaving Bag for Men and Women (royal blue)",
+     "score": 0.10397369
+    },
+    {
+     "product_id": "B08BNJKCD5",
+     "label": "C",
+     "title": "Toiletry Bag for Men Travel Shaving Dopp Kit Waterproof Toiletries Organizer for Cosmetic Portable Womens Travel Makeup Bag",
+     "score": 0.09744701
+    },
+    {
+     "product_id": "B01N1ZKVK0",
+     "label": "C",
+     "title": "Kattee Men's Travel Toiletry Bag Canvas Leather Cosmetic Makeup Organizer Bathroom Shaving Large Capacity Dopp Kit (Dark Gray)",
+     "score": 0.0954498
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07X32NMY3",
+     "label": "C",
+     "title": "Toiletry Bag for Men, Packism Lightweight Dopp Kit for Men Shaving Bag, Nylon Women Travel Toiletry Makeup Organizer Bathroom Bag, Black",
+     "score": 0.63996452
+    },
+    {
+     "product_id": "B07PV6RXML",
+     "label": "C",
+     "title": "Dopp Kit Toiletry Bag Travel Toiletries Bag Shaving Shower Cosmetic Organizer for Women Men",
+     "score": 0.63400537
+    },
+    {
+     "product_id": "B01N1ZKVK0",
+     "label": "C",
+     "title": "Kattee Men's Travel Toiletry Bag Canvas Leather Cosmetic Makeup Organizer Bathroom Shaving Large Capacity Dopp Kit (Dark Gray)",
+     "score": 0.63184452
+    },
+    {
+     "product_id": "B07XFSMBP4",
+     "label": "S",
+     "title": "Toiletry Bag Dopp Kit for Men - Nylon Travel Toiletry Bag Waterproof Shower Cosmetic Organizer for Women Men - Travel Kit Shaving Bag for Men",
+     "score": 0.63177919
+    },
+    {
+     "product_id": "B07D1NWFNZ",
+     "label": "C",
+     "title": "Dopp Kit Mens Toiletry Bag Travel Bathroom Bag Shaving Shower Cosmetic Organizer Black",
+     "score": 0.61614108
+    },
+    {
+     "product_id": "B08BNJKCD5",
+     "label": "C",
+     "title": "Toiletry Bag for Men Travel Shaving Dopp Kit Waterproof Toiletries Organizer for Cosmetic Portable Womens Travel Makeup Bag",
+     "score": 0.6154319
+    },
+    {
+     "product_id": "B07C3GMX4L",
+     "label": "S",
+     "title": "Toiletry Bag for Men or Women - Dopp Kit For Travel. Large Cosmetic and Bathroom Shaving Bag. Toiletry Organizer PU Leather by QS USA (Medium, Black)",
+     "score": 0.61339164
+    },
+    {
+     "product_id": "B07PCPYGGL",
+     "label": "C",
+     "title": "Mens Toiletry Bag Dopp Kit Travel Bathroom Bag Waterproof Shaving Shower Cosmetic Organizer (Blue)",
+     "score": 0.60499489
+    },
+    {
+     "product_id": "B07B4VDYZG",
+     "label": "C",
+     "title": "WOWBOX Travel Kit Toiletry Bag for Men Waterproof Cosmetic Makeup Shower Bag Shaving Dopp Kit Case Accessories Organizer with Side Hand Strap",
+     "score": 0.5920555
+    },
+    {
+     "product_id": "B07SGX3VZ5",
+     "label": "C",
+     "title": "Toiletry Bag Small Nylon Dopp Kit Lightweight Shaving Bag for Men and Women (royal blue)",
+     "score": 0.58422589
+    }
+   ]
+  },
+  {
+   "query_id": "103728",
+   "query": "toddler play makeup brushes",
+   "candidate_count": 16,
+   "label_counts": {
+    "S": 14,
+    "E": 2
+   },
+   "bm25_ndcg10_primary": 1.0,
+   "bge_ndcg10_primary": 0.23637376781572322,
+   "bm25_ndcg_all_primary": 1.0,
+   "bge_ndcg_all_primary": 0.5134483808194656,
+   "bm25_ndcg10_repo_script_gain": 1.0,
+   "bge_ndcg10_repo_script_gain": 0.027369915248855813,
+   "bm25_ndcg_all_repo_script_gain": 1.0,
+   "bge_ndcg_all_repo_script_gain": 0.3361542259824378,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B076DXT3C2",
+     "label": "E",
+     "title": "Fani Makeup Brushes 7 Pieces Travel Makeup Brushes Set with Box Professional Foundation Cosmetic Brushes Eyeshadw Brush Lip Brush for Powder Liquid Cream Blending",
+     "score": 2.98686713
+    },
+    {
+     "product_id": "B07R7X4XFK",
+     "label": "E",
+     "title": "GirlZone: Fun Mermaid Makeup Brushes Kit Gift For Girls, Mermaid Tails on Brushes, Mermaid Tail Holder, Birthday Gift For Girls",
+     "score": 2.72766424
+    },
+    {
+     "product_id": "B07VKLTL6K",
+     "label": "S",
+     "title": "Loyo Girls Pretend Play Makeup Sets Fake Make Up Kits with Cosmetic Bag for Little Girls Birthday Christmas, Toy Makeup Set for Toddler Girls Age 3, 4, 5 (Not Real Makeup)",
+     "score": 1.93774915
+    },
+    {
+     "product_id": "B07STZDZNT",
+     "label": "S",
+     "title": "Meland Kids Makeup Kit - Girl Pretend Play Makeup & My First Purse Toy for Toddler Gifts with Pink Princess Purse, Smartphone, Sunglasses, Credit Card, Lipstick,Brush,Lights Up & Make Real Life Sounds",
+     "score": 1.93141804
+    },
+    {
+     "product_id": "B01BT8H0W2",
+     "label": "S",
+     "title": "Click N' Play Pretend Play Cosmetic and Makeup Set",
+     "score": 0.54552918
+    },
+    {
+     "product_id": "B0779LNWN8",
+     "label": "S",
+     "title": "Litti Pritti Pretend Makeup for Girls | 8 Piece Set - Play Makeup Kit & PU Leather Cosmetic Case for Pretend Play",
+     "score": 0.48094174
+    },
+    {
+     "product_id": "B01BT9FZTG",
+     "label": "S",
+     "title": "Click N' Play Pretend Cosmetic and Makeup Set for Girls, Includes Floral Tote Bag and 8-piece Set for Pretend Play",
+     "score": 0.45721208
+    },
+    {
+     "product_id": "B01C4YZOEG",
+     "label": "S",
+     "title": "PixieCrush Pretend Makeup Play Deluxe 16 Piece Set for Children",
+     "score": 0.4330411
+    },
+    {
+     "product_id": "B0837PQBNP",
+     "label": "S",
+     "title": "OCATO Pretend Makeup for Girls Kids Makeup Kit for Girl Play Makeup for Toddlers Makeup Play Set with Shiny Cosmetics Bag Birthday Xmas Gift Fake Makeup Toys for Girls Age 3, 4, 5, 6 (Not Real Makeup)",
+     "score": 0.40347093
+    },
+    {
+     "product_id": "B07KJBVVLC",
+     "label": "S",
+     "title": "Pretend Play Makeup for Toddlers and Little Girls with Cosmetic Bag ( Not Real Makeup No Mess )",
+     "score": 0.38911698
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07KJBVVLC",
+     "label": "S",
+     "title": "Pretend Play Makeup for Toddlers and Little Girls with Cosmetic Bag ( Not Real Makeup No Mess )",
+     "score": 0.68377686
+    },
+    {
+     "product_id": "B07STZDZNT",
+     "label": "S",
+     "title": "Meland Kids Makeup Kit - Girl Pretend Play Makeup & My First Purse Toy for Toddler Gifts with Pink Princess Purse, Smartphone, Sunglasses, Credit Card, Lipstick,Brush,Lights Up & Make Real Life Sounds",
+     "score": 0.66977358
+    },
+    {
+     "product_id": "B07VKLTL6K",
+     "label": "S",
+     "title": "Loyo Girls Pretend Play Makeup Sets Fake Make Up Kits with Cosmetic Bag for Little Girls Birthday Christmas, Toy Makeup Set for Toddler Girls Age 3, 4, 5 (Not Real Makeup)",
+     "score": 0.64669675
+    },
+    {
+     "product_id": "B0837PQBNP",
+     "label": "S",
+     "title": "OCATO Pretend Makeup for Girls Kids Makeup Kit for Girl Play Makeup for Toddlers Makeup Play Set with Shiny Cosmetics Bag Birthday Xmas Gift Fake Makeup Toys for Girls Age 3, 4, 5, 6 (Not Real Makeup)",
+     "score": 0.63565683
+    },
+    {
+     "product_id": "B016XIMFQY",
+     "label": "S",
+     "title": "Make it Up, Glamour Girl Pretend Play Makeup Set For Children - Great For Little Girls & Kids (Not Real Makeup) [Toy]",
+     "score": 0.63416427
+    },
+    {
+     "product_id": "B01BT8H0W2",
+     "label": "S",
+     "title": "Click N' Play Pretend Play Cosmetic and Makeup Set",
+     "score": 0.6278373
+    },
+    {
+     "product_id": "B01C4YZOEG",
+     "label": "S",
+     "title": "PixieCrush Pretend Makeup Play Deluxe 16 Piece Set for Children",
+     "score": 0.61903882
+    },
+    {
+     "product_id": "B077DKS1LL",
+     "label": "S",
+     "title": "Kangaroo Cutipie Cosmetics: Pretend Makeup Set",
+     "score": 0.59326732
+    },
+    {
+     "product_id": "B07YV3Q124",
+     "label": "S",
+     "title": "19Pcs Kids Pretend Makeup Kit - Fake Play Makeup Set with Pink Rabbit Purse, Smartphone, Sunglasses, Necklace & Bracelet, Birthday Gift for Little Girls - Hot Pink",
+     "score": 0.59211582
+    },
+    {
+     "product_id": "B01BT9FZTG",
+     "label": "S",
+     "title": "Click N' Play Pretend Cosmetic and Makeup Set for Girls, Includes Floral Tote Bag and 8-piece Set for Pretend Play",
+     "score": 0.58293724
+    }
+   ]
+  },
+  {
+   "query_id": "96332",
+   "query": "soundstrem",
+   "candidate_count": 16,
+   "label_counts": {
+    "E": 1,
+    "I": 8,
+    "S": 6,
+    "C": 1
+   },
+   "bm25_ndcg10_primary": 0.8781463384061815,
+   "bge_ndcg10_primary": 0.11480335673134849,
+   "bm25_ndcg_all_primary": 0.9399392141427596,
+   "bge_ndcg_all_primary": 0.3611536096294276,
+   "bm25_ndcg10_repo_script_gain": 0.9633655667865261,
+   "bge_ndcg10_repo_script_gain": 0.0708881625310088,
+   "bm25_ndcg_all_repo_script_gain": 0.9705723649496564,
+   "bge_ndcg_all_repo_script_gain": 0.31722115240794346,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B001UMED0U",
+     "label": "E",
+     "title": "Soundstream BX-20Z Digital Bass Reconstruction Processor",
+     "score": 0.0
+    },
+    {
+     "product_id": "B003TUNRGM",
+     "label": "I",
+     "title": "FatMat Self-Adhesive Rattletrap Sound Deadener Bulk Pack with Install Kit - 50 Sq Ft x 80 mil Thick",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00B1N06PO",
+     "label": "S",
+     "title": "Tascam TH-02 Closed Back Studio Headphones, Black",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00URUIKAK",
+     "label": "I",
+     "title": "Noico 80 mil (2 mm) 36 sqft (3.4 sqm) car Sound deadening mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and dampening",
+     "score": 0.0
+    },
+    {
+     "product_id": "B012B5EMGO",
+     "label": "I",
+     "title": "Noico 80 mil 18 sqft car Sound deadening mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and dampening",
+     "score": 0.0
+    },
+    {
+     "product_id": "B018JUPY3A",
+     "label": "C",
+     "title": "Creative Sound BlasterX G5 7.1 Headphone Surround HD Audio External Sound Card with Headphone Amplifier for Windows PC / Mac / PS4 / and Other Consoles",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01EE3Y53Q",
+     "label": "I",
+     "title": "AudioControl The Epicenter Bass Booster Expander & Bass Restoration Processor with Remote (Black)",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01KZ5X7KO",
+     "label": "I",
+     "title": "Noico 80 mil 10 sqft car Sound deadening mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and dampening",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01L9D18FC",
+     "label": "S",
+     "title": "SEYOO Headphone for Men, Sky-Blue (AV200 TV Speaker)",
+     "score": 0.0
+    },
+    {
+     "product_id": "B06XWV9CCQ",
+     "label": "S",
+     "title": "ZOWEETEK Portable Rechargeable Mini Voice Amplifier with Wired Microphone Headset and Waistband, Supports MP3 Format Audio for Teachers, Singing, Coaches, Training, Presentation, Tour Guide",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B003TUNRGM",
+     "label": "I",
+     "title": "FatMat Self-Adhesive Rattletrap Sound Deadener Bulk Pack with Install Kit - 50 Sq Ft x 80 mil Thick",
+     "score": 0.50589108
+    },
+    {
+     "product_id": "B018JUPY3A",
+     "label": "C",
+     "title": "Creative Sound BlasterX G5 7.1 Headphone Surround HD Audio External Sound Card with Headphone Amplifier for Windows PC / Mac / PS4 / and Other Consoles",
+     "score": 0.49633971
+    },
+    {
+     "product_id": "B01EE3Y53Q",
+     "label": "I",
+     "title": "AudioControl The Epicenter Bass Booster Expander & Bass Restoration Processor with Remote (Black)",
+     "score": 0.49457222
+    },
+    {
+     "product_id": "B07ZWJR9GD",
+     "label": "S",
+     "title": "XClear Wireless Earbuds with Immersive Sounds True 5.0 Bluetooth in-Ear Headphones with Charging Case/Quick-Pairing Stereo Calls/Built-in Microphones/IPX5 Sweatproof/Pumping Bass for Sports Black",
+     "score": 0.49339488
+    },
+    {
+     "product_id": "B0751G6TMV",
+     "label": "I",
+     "title": "KILMAT 50 mil 50 sqft Car Sound Deadening Mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and dampening",
+     "score": 0.48956972
+    },
+    {
+     "product_id": "B00B1N06PO",
+     "label": "S",
+     "title": "Tascam TH-02 Closed Back Studio Headphones, Black",
+     "score": 0.48341337
+    },
+    {
+     "product_id": "B00URUIKAK",
+     "label": "I",
+     "title": "Noico 80 mil (2 mm) 36 sqft (3.4 sqm) car Sound deadening mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and dampening",
+     "score": 0.48053491
+    },
+    {
+     "product_id": "B06XWV9CCQ",
+     "label": "S",
+     "title": "ZOWEETEK Portable Rechargeable Mini Voice Amplifier with Wired Microphone Headset and Waistband, Supports MP3 Format Audio for Teachers, Singing, Coaches, Training, Presentation, Tour Guide",
+     "score": 0.47893459
+    },
+    {
+     "product_id": "B07ZKPVHCB",
+     "label": "I",
+     "title": "Noico Black 80 mil 10 sqft Car Sound Deadening Mat, Butyl Automotive Sound Deadener, Audio Noise Insulation and Dampening",
+     "score": 0.4756237
+    },
+    {
+     "product_id": "B01L9D18FC",
+     "label": "S",
+     "title": "SEYOO Headphone for Men, Sky-Blue (AV200 TV Speaker)",
+     "score": 0.4741233
+    }
+   ]
+  },
+  {
+   "query_id": "98096",
+   "query": "stick fix hair wax men",
+   "candidate_count": 16,
+   "label_counts": {
+    "S": 13,
+    "E": 2,
+    "I": 1
+   },
+   "bm25_ndcg10_primary": 0.982658693311635,
+   "bge_ndcg10_primary": 0.2213354823977309,
+   "bm25_ndcg_all_primary": 0.9956823749576525,
+   "bge_ndcg_all_primary": 0.4999479400196317,
+   "bm25_ndcg10_repo_script_gain": 0.9979920356698168,
+   "bge_ndcg10_repo_script_gain": 0.0256286196677851,
+   "bm25_ndcg_all_repo_script_gain": 0.9994699916771573,
+   "bge_ndcg_all_repo_script_gain": 0.32743381666028154,
+   "query_features": {
+    "negation": false,
+    "brand": true,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B0001Z7Y6C",
+     "label": "E",
+     "title": "Stix Fix Singles 1.5 Oz.",
+     "score": 2.6773355
+    },
+    {
+     "product_id": "B082BBF8C7",
+     "label": "E",
+     "title": "3 Pack Stix Fix Singles 1.5 Oz.",
+     "score": 2.53001555
+    },
+    {
+     "product_id": "B07Z4DHFKQ",
+     "label": "S",
+     "title": "AYAROMA Hair Feel Finishing Stick, Small Broken Hair Finishing Cream, 28ML Hair Styling Wax Stick Hair Gel for Women and Men",
+     "score": 2.46279306
+    },
+    {
+     "product_id": "B07SHFK9T9",
+     "label": "S",
+     "title": "Hair Feel Finishing Stick, Small Broken Hair Finishing Cream, Hair Finishing Wax Stick, Not Greasy Shaping Gel Cream Fixing Bangs Stereotypes Cream, Hair Styling Wax Stick for Women,Men.",
+     "score": 2.44800442
+    },
+    {
+     "product_id": "B07Y1B5Q4J",
+     "label": "S",
+     "title": "Hair Finishing Stick, Neat Hair Stick, Hair Feel Finishing Stick, Small Broken Hairs Finishing Cream, 2×13ML Hair Styling Wax Stick Hair Gel for Women and Men (New upgrade)",
+     "score": 2.2938687
+    },
+    {
+     "product_id": "B07P2VHLLF",
+     "label": "S",
+     "title": "Hair LT Coffee Foot Mask for Woman and Men",
+     "score": 1.74561089
+    },
+    {
+     "product_id": "B07ZS2L65G",
+     "label": "I",
+     "title": "Nose Wax Kit for Men and Women, Hair Removal Waxing Kit for Nose, Ear and Eye-brow Hair Removal with Safe Tip 24 Applicator, Quick, Easy and Painless (80g/ 12 Times Uses Count) by PINE BEAUTY CO",
+     "score": 1.50939465
+    },
+    {
+     "product_id": "B07MKBW3HS",
+     "label": "S",
+     "title": "Hair Finishing Stick, Small Broken Hair Finishing Cream Refreshing Not Greasy Feel Shaping Gel Cream Hair Wax Stick Fixing Bangs Stereotypes Cream",
+     "score": 1.31644042
+    },
+    {
+     "product_id": "B0834WZS4C",
+     "label": "S",
+     "title": "Hair Finishing Stick, Small Broken Hair Finishing Cream Refreshing Not Greasy Feel Shaping Gel Cream Hair Wax Stick Fixing Bangs Stereotypes Cream",
+     "score": 1.31644042
+    },
+    {
+     "product_id": "B07Q276WNB",
+     "label": "S",
+     "title": "Hair Finishing Stick, 2Pack ×18ML Fly away Hair Tamer Stick Lasting Shaping Cream Broken Hairs Finishing Feel Gel Moisturizing Not Greasy Hair Moment Flash Stick Hairsilk Hair Styling Fixing Wax…",
+     "score": 1.26988326
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07SHFK9T9",
+     "label": "S",
+     "title": "Hair Feel Finishing Stick, Small Broken Hair Finishing Cream, Hair Finishing Wax Stick, Not Greasy Shaping Gel Cream Fixing Bangs Stereotypes Cream, Hair Styling Wax Stick for Women,Men.",
+     "score": 0.6958167
+    },
+    {
+     "product_id": "B07TYVX7T7",
+     "label": "S",
+     "title": "Hair Finishing Stick, Small Broken Hairs Finishing Cream Hair Styling Wax Stick Hair Gel for Kids, Woman, Man, Moisturizing and Shiny on Party, Wedding, Award, Interview",
+     "score": 0.67448556
+    },
+    {
+     "product_id": "B07RNDJLDC",
+     "label": "S",
+     "title": "Hair Feel Finishing Stick, Small Broken Hairs Finishing Cream Hair Styling Wax Stick Hair Gel for Kids, Woman, Man, Moisturizing and Shiny on Party, Wedding, Award, Interview - (2 Pack)",
+     "score": 0.65819407
+    },
+    {
+     "product_id": "B07MKBW3HS",
+     "label": "S",
+     "title": "Hair Finishing Stick, Small Broken Hair Finishing Cream Refreshing Not Greasy Feel Shaping Gel Cream Hair Wax Stick Fixing Bangs Stereotypes Cream",
+     "score": 0.64697742
+    },
+    {
+     "product_id": "B0834WZS4C",
+     "label": "S",
+     "title": "Hair Finishing Stick, Small Broken Hair Finishing Cream Refreshing Not Greasy Feel Shaping Gel Cream Hair Wax Stick Fixing Bangs Stereotypes Cream",
+     "score": 0.64697742
+    },
+    {
+     "product_id": "B07Z4DHFKQ",
+     "label": "S",
+     "title": "AYAROMA Hair Feel Finishing Stick, Small Broken Hair Finishing Cream, 28ML Hair Styling Wax Stick Hair Gel for Women and Men",
+     "score": 0.63515896
+    },
+    {
+     "product_id": "B07Y1B5Q4J",
+     "label": "S",
+     "title": "Hair Finishing Stick, Neat Hair Stick, Hair Feel Finishing Stick, Small Broken Hairs Finishing Cream, 2×13ML Hair Styling Wax Stick Hair Gel for Women and Men (New upgrade)",
+     "score": 0.63385725
+    },
+    {
+     "product_id": "B07Q276WNB",
+     "label": "S",
+     "title": "Hair Finishing Stick, 2Pack ×18ML Fly away Hair Tamer Stick Lasting Shaping Cream Broken Hairs Finishing Feel Gel Moisturizing Not Greasy Hair Moment Flash Stick Hairsilk Hair Styling Fixing Wax…",
+     "score": 0.62917352
+    },
+    {
+     "product_id": "B000NTZDHI",
+     "label": "S",
+     "title": "BED HEAD by Tigi STICK - A HAIR STICK FOR COOL PEOPLE 2.7 OZ for UNISEX -(Package Of 3)",
+     "score": 0.596883
+    },
+    {
+     "product_id": "B07ZS2L65G",
+     "label": "I",
+     "title": "Nose Wax Kit for Men and Women, Hair Removal Waxing Kit for Nose, Ear and Eye-brow Hair Removal with Safe Tip 24 Applicator, Quick, Easy and Painless (80g/ 12 Times Uses Count) by PINE BEAUTY CO",
+     "score": 0.58625501
+    }
+   ]
+  },
+  {
+   "query_id": "7132",
+   "query": "aga stove",
+   "candidate_count": 16,
+   "label_counts": {
+    "C": 6,
+    "S": 3,
+    "I": 2,
+    "E": 5
+   },
+   "bm25_ndcg10_primary": 0.9683538858921868,
+   "bge_ndcg10_primary": 0.23844925588156346,
+   "bm25_ndcg_all_primary": 0.9923109903749816,
+   "bge_ndcg_all_primary": 0.5124066081399495,
+   "bm25_ndcg10_repo_script_gain": 0.9799741203514345,
+   "bge_ndcg10_repo_script_gain": 0.2816626165347339,
+   "bm25_ndcg_all_repo_script_gain": 0.9968395551709168,
+   "bge_ndcg_all_repo_script_gain": 0.5532414927613681,
+   "query_features": {
+    "negation": false,
+    "brand": true,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B0797WQ764",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 4 Oven Lt Blue Aga Stove Miniature Kitchen Furniture",
+     "score": 1.08276564
+    },
+    {
+     "product_id": "B07B2Y4XK3",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 2 Oven Red Aga Stove Cooker Miniature Kitchen Furniture",
+     "score": 1.08276564
+    },
+    {
+     "product_id": "B0797W155W",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 2 Oven Green Aga Stove 1:12 Miniature Kitchen Furniture",
+     "score": 1.04516779
+    },
+    {
+     "product_id": "B0797WWTF5",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 4 Oven Green Aga Stove 1:12 Miniature Kitchen Furniture",
+     "score": 1.04516779
+    },
+    {
+     "product_id": "B0797YNS9W",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 4 Oven Cream Aga Stove 1:12 Miniature Kitchen Furniture",
+     "score": 1.04516779
+    },
+    {
+     "product_id": "B004URRZVG",
+     "label": "C",
+     "title": "How To Cook On An Aga Stove: Learn The Mystery Of How To Cook On The Queen Of Radiant Heat Stoves",
+     "score": 0.81794883
+    },
+    {
+     "product_id": "B0893WHY4N",
+     "label": "I",
+     "title": "Stovetop Kettle with Whistle / 304 Stainless Steel Stovetop Teakettle / 2 Liter Household Gas Kettle/Induction/Gas Stove Top Tea Pot Teapot Maker Water Boiling (Color : Silver)",
+     "score": 0.52342495
+    },
+    {
+     "product_id": "1911621149",
+     "label": "C",
+     "title": "Basic Basics Aga Handbook",
+     "score": 0.41522837
+    },
+    {
+     "product_id": "B077YXZJC9",
+     "label": "C",
+     "title": "AGA Cooker Cleaning Kit",
+     "score": 0.41522837
+    },
+    {
+     "product_id": "B01MQGZRXH",
+     "label": "I",
+     "title": "The Secrets of Aga Cakes",
+     "score": 0.39526414
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B004URRZVG",
+     "label": "C",
+     "title": "How To Cook On An Aga Stove: Learn The Mystery Of How To Cook On The Queen Of Radiant Heat Stoves",
+     "score": 0.68516862
+    },
+    {
+     "product_id": "B077YXZJC9",
+     "label": "C",
+     "title": "AGA Cooker Cleaning Kit",
+     "score": 0.66787648
+    },
+    {
+     "product_id": "B01L1T5ZS0",
+     "label": "S",
+     "title": "AGA AEL48DF-MBL Elise Dual Fuel Range with 3 Separate Ovens, 48\", Matte Black",
+     "score": 0.63548857
+    },
+    {
+     "product_id": "1899791213",
+     "label": "C",
+     "title": "The Traditional Aga Book of Slow Cooking",
+     "score": 0.59868932
+    },
+    {
+     "product_id": "1911621149",
+     "label": "C",
+     "title": "Basic Basics Aga Handbook",
+     "score": 0.59696746
+    },
+    {
+     "product_id": "B0893WHY4N",
+     "label": "I",
+     "title": "Stovetop Kettle with Whistle / 304 Stainless Steel Stovetop Teakettle / 2 Liter Household Gas Kettle/Induction/Gas Stove Top Tea Pot Teapot Maker Water Boiling (Color : Silver)",
+     "score": 0.57745731
+    },
+    {
+     "product_id": "B0797WWTF5",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 4 Oven Green Aga Stove 1:12 Miniature Kitchen Furniture",
+     "score": 0.57269597
+    },
+    {
+     "product_id": "B00AJSCFUG",
+     "label": "S",
+     "title": "TRADITIONAL COOKER (Two Oven Cooker)",
+     "score": 0.57207608
+    },
+    {
+     "product_id": "B01MQGZRXH",
+     "label": "I",
+     "title": "The Secrets of Aga Cakes",
+     "score": 0.57031024
+    },
+    {
+     "product_id": "B0797W155W",
+     "label": "E",
+     "title": "Melody Jane Dollhouse 2 Oven Green Aga Stove 1:12 Miniature Kitchen Furniture",
+     "score": 0.56928027
+    }
+   ]
+  },
+  {
+   "query_id": "18315",
+   "query": "book beach blanket",
+   "candidate_count": 16,
+   "label_counts": {
+    "E": 4,
+    "S": 2,
+    "I": 10
+   },
+   "bm25_ndcg10_primary": 0.9226254375054788,
+   "bge_ndcg10_primary": 0.22386739479216294,
+   "bm25_ndcg_all_primary": 0.941391256840179,
+   "bge_ndcg_all_primary": 0.45120498650663543,
+   "bm25_ndcg10_repo_script_gain": 0.9466425874480366,
+   "bge_ndcg10_repo_script_gain": 0.2296949566275597,
+   "bm25_ndcg_all_repo_script_gain": 0.9485680192699266,
+   "bge_ndcg_all_repo_script_gain": 0.44541283255527864,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B00B6G41OS",
+     "label": "E",
+     "title": "Beach Blanket Santa (Holiday Brides Series Book 4)",
+     "score": 2.17710329
+    },
+    {
+     "product_id": "B00J6GUFI6",
+     "label": "E",
+     "title": "Beach Blanket Barbie (Zoe Donovan Mystery Book 6)",
+     "score": 2.17710329
+    },
+    {
+     "product_id": "B07K6WXBG8",
+     "label": "E",
+     "title": "Beach Blanket Homicide (Lucy McGuffin, Psychic Amateur Detective Book 1)",
+     "score": 2.05968648
+    },
+    {
+     "product_id": "B01N6NHVI2",
+     "label": "I",
+     "title": "Weekend Fling: A Steamy Small-Town Romance (A Jetty Beach Romance Book 5)",
+     "score": 1.64193861
+    },
+    {
+     "product_id": "B07XQ9GQS1",
+     "label": "I",
+     "title": "Picnic Blanket, Waterproof SandProof with Picnic Recipes Book (70\" x 80\" Leather, Blue)",
+     "score": 1.55393742
+    },
+    {
+     "product_id": "B083DWB8MQ",
+     "label": "I",
+     "title": "AISPARKY Beach Blanket, Beach Mat Outdoor Picnic Blanket Large Sandproof Compact for 4-7 Persons Water Proof and Drying Beach Mat Nylon Pocket Picnic for Outdoor Travel (78\" X 81\")",
+     "score": 0.69934756
+    },
+    {
+     "product_id": "B07HGL7LMT",
+     "label": "I",
+     "title": "Turtles on The Beach Super Soft Plush Fleece Throw Blanket",
+     "score": 0.66495415
+    },
+    {
+     "product_id": "B074LS8XVP",
+     "label": "I",
+     "title": "Pocket Size Beach Blanket, Waterproof Picnic Mat for The Park, Large Sandless Beach Sheet: Takes Zero Place! Big Tarp for Backpacking, Picnic, Outdoor Sports, Festivals, Camping (Blue) + Accessories",
+     "score": 0.56308923
+    },
+    {
+     "product_id": "0312342500",
+     "label": "E",
+     "title": "The New York Times Beach Blanket Crosswords: Light and Easy Puzzles (The New York Times Crossword Puzzles)",
+     "score": 0.55936597
+    },
+    {
+     "product_id": "B075Q2JK66",
+     "label": "I",
+     "title": "Bertte Outdoor Blanket Large Beach Camping Picnic Blanket Oversized Hiking Park Waterproof Sand Free Handy Compact Mat Durable Foldable Machine Washable Rug for Travelling, Concert, 79\" x 59\", Rainbow",
+     "score": 0.5260179
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07XQ9GQS1",
+     "label": "I",
+     "title": "Picnic Blanket, Waterproof SandProof with Picnic Recipes Book (70\" x 80\" Leather, Blue)",
+     "score": 0.67312181
+    },
+    {
+     "product_id": "B074J3N65P",
+     "label": "I",
+     "title": "Outgear Oversized 9' X 10 Huge Fast Drying Lightweight Beach Blanket made of 100% Parachute Nylon, Durable Outdoor Picnic Mat Machine Washable with Four Stakes, Completely Sand Proof",
+     "score": 0.64253986
+    },
+    {
+     "product_id": "B07HGL7LMT",
+     "label": "I",
+     "title": "Turtles on The Beach Super Soft Plush Fleece Throw Blanket",
+     "score": 0.63025212
+    },
+    {
+     "product_id": "B083DWB8MQ",
+     "label": "I",
+     "title": "AISPARKY Beach Blanket, Beach Mat Outdoor Picnic Blanket Large Sandproof Compact for 4-7 Persons Water Proof and Drying Beach Mat Nylon Pocket Picnic for Outdoor Travel (78\" X 81\")",
+     "score": 0.625911
+    },
+    {
+     "product_id": "B075Q2JK66",
+     "label": "I",
+     "title": "Bertte Outdoor Blanket Large Beach Camping Picnic Blanket Oversized Hiking Park Waterproof Sand Free Handy Compact Mat Durable Foldable Machine Washable Rug for Travelling, Concert, 79\" x 59\", Rainbow",
+     "score": 0.59342802
+    },
+    {
+     "product_id": "B076QQYCNY",
+     "label": "I",
+     "title": "Beach & Picnic Pocket Blanket - Sandproof & Waterproof Camping & Hiking Foldable Outdoor Sand Free Mat - Compact, Portable & Packable Lightweight Travel Sheet for Festivals - Quick Drying Ground Cover",
+     "score": 0.5916667
+    },
+    {
+     "product_id": "B074LS8XVP",
+     "label": "I",
+     "title": "Pocket Size Beach Blanket, Waterproof Picnic Mat for The Park, Large Sandless Beach Sheet: Takes Zero Place! Big Tarp for Backpacking, Picnic, Outdoor Sports, Festivals, Camping (Blue) + Accessories",
+     "score": 0.58866704
+    },
+    {
+     "product_id": "B0776WJBBP",
+     "label": "I",
+     "title": "HIFUAR Sand Free Beach Blanket/Picnic Blanket-55'' x 78.7'' Family Size (3-5 Adults) -Quick Drying, Packable-Best Sand Proof Picnic Mat for Travel, Camping, Hiking and Music Festivals 4 Stakes",
+     "score": 0.58717072
+    },
+    {
+     "product_id": "0312342500",
+     "label": "E",
+     "title": "The New York Times Beach Blanket Crosswords: Light and Easy Puzzles (The New York Times Crossword Puzzles)",
+     "score": 0.58533818
+    },
+    {
+     "product_id": "B00J6GUFI6",
+     "label": "E",
+     "title": "Beach Blanket Barbie (Zoe Donovan Mystery Book 6)",
+     "score": 0.57658553
+    }
+   ]
+  },
+  {
+   "query_id": "97876",
+   "query": "steel inlet mesh awurium",
+   "candidate_count": 16,
+   "label_counts": {
+    "C": 10,
+    "E": 5,
+    "S": 1
+   },
+   "bm25_ndcg10_primary": 0.6962948735700335,
+   "bge_ndcg10_primary": 0.015163045871676472,
+   "bm25_ndcg_all_primary": 0.8680974837175993,
+   "bge_ndcg_all_primary": 0.4607059721717433,
+   "bm25_ndcg10_repo_script_gain": 0.7431867916469843,
+   "bge_ndcg10_repo_script_gain": 0.1461906194125982,
+   "bm25_ndcg_all_repo_script_gain": 0.8908147827919216,
+   "bge_ndcg_all_repo_script_gain": 0.5473425769090118,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B002XDQAA6",
+     "label": "E",
+     "title": "MIDLITE 4642-W Single Gang Décor Recessed Power Inlet",
+     "score": 2.07365611
+    },
+    {
+     "product_id": "B07LC686S8",
+     "label": "E",
+     "title": "Journeyman-Pro 15 Amp 125V AC Power Inlet Port Plug with Integrated 20\" Extension Cord + Waterproof Cover, UL Listed, NEMA 5-15 Flanged Inlet (5278GCP1-WHITE)",
+     "score": 2.05230756
+    },
+    {
+     "product_id": "B07XFMPQR1",
+     "label": "C",
+     "title": "2 Packs 304 Stainless Steel Woven Wire 120 Mesh Fine Screen Mesh Steel Woven Mesh for Filter Mesh, Filtration Cloth, 11.8 x 39.3 Inch",
+     "score": 1.54257137
+    },
+    {
+     "product_id": "B01E6N0XDU",
+     "label": "E",
+     "title": "Journeyman-Pro 5278 15 Amp 120-125 Volt, NEMA 5-15 Flanged Inlet, Black Commercial Grade, 2 Pole-3 Wire, Straight Blade Plug Charger Receptacle",
+     "score": 1.48177012
+    },
+    {
+     "product_id": "B07NPDKWDV",
+     "label": "C",
+     "title": "TIMESETL 304 Stainless Steel Woven Wire 10 Mesh - 12\" X 24\" (30cmX60cm) - Garden Fence Mesh, Window Screens Net, BBQ Wire Mesh, Cabinets Mesh Replacement",
+     "score": 1.35482883
+    },
+    {
+     "product_id": "B07JVHY55M",
+     "label": "C",
+     "title": "SATINIOR 2 Packs Stainless Steel Woven Wire Mesh Rodent Proof Screen Mesh for Cage Net Mesh, Cabinets Wire Mesh, Window Screen Door Mesh, 11.8 x 11.8 Inch",
+     "score": 1.32292024
+    },
+    {
+     "product_id": "B07MVK9BYX",
+     "label": "C",
+     "title": "3 PCS Stainless Steel Wire Mesh Screen - About 12 x 8inch - 1mm Hole 20 Mesh Easy to Cut - Air Vent Mesh, Hard and Heat Resisting Screen Mesh, Window Screen Mesh",
+     "score": 1.30938401
+    },
+    {
+     "product_id": "B07Y65H3KT",
+     "label": "C",
+     "title": "4PACK Stainless Steel Woven Wire Mesh Never Rust, Air Vent Mesh 11.8\"X8.2\"(300X 210mm), Hard and Heat Resisting Screen Mesh, 1mm Hole 20 Mesh Easy to Cut by Valchoose",
+     "score": 1.23688618
+    },
+    {
+     "product_id": "B01N5SZRS8",
+     "label": "C",
+     "title": "Woven Wire MESH Stainless Steel 400 MESH 12\"X24\" 30cm X60cm Size 0.038mm Hole 30µm Wire Filtration SS T316 Open Area 31%",
+     "score": 1.21555105
+    },
+    {
+     "product_id": "B07L1LLV63",
+     "label": "C",
+     "title": "TIMESETL 304 Stainless Steel Woven Wire 120 Mesh - 12\"X40\" Filter Screen Sheet Filtration Cloth",
+     "score": 1.21389217
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B01N5SZRS8",
+     "label": "C",
+     "title": "Woven Wire MESH Stainless Steel 400 MESH 12\"X24\" 30cm X60cm Size 0.038mm Hole 30µm Wire Filtration SS T316 Open Area 31%",
+     "score": 0.64030963
+    },
+    {
+     "product_id": "B07XFMPQR1",
+     "label": "C",
+     "title": "2 Packs 304 Stainless Steel Woven Wire 120 Mesh Fine Screen Mesh Steel Woven Mesh for Filter Mesh, Filtration Cloth, 11.8 x 39.3 Inch",
+     "score": 0.60233122
+    },
+    {
+     "product_id": "B07T39VQVQ",
+     "label": "C",
+     "title": "304 Stainless Steel Woven Wire Mesh1 Roll, 5 Mesh - Aperture 4.5mm, About 12\"X24\" (30 X 60CM) - for Vent, Cage, Cabinets Mesh, Security Guard Garden Screen",
+     "score": 0.60231519
+    },
+    {
+     "product_id": "B07ZQ1ZCKJ",
+     "label": "C",
+     "title": "304 Stainless Steel Woven Wire 80 Mesh 0.18mm Hole - About 11.8 X 39.4 inch Roll(30cm X100cm)- Filter Screen Sheet Filtration Cloth Fine Wire Mesh",
+     "score": 0.5952704
+    },
+    {
+     "product_id": "B07Y65H3KT",
+     "label": "C",
+     "title": "4PACK Stainless Steel Woven Wire Mesh Never Rust, Air Vent Mesh 11.8\"X8.2\"(300X 210mm), Hard and Heat Resisting Screen Mesh, 1mm Hole 20 Mesh Easy to Cut by Valchoose",
+     "score": 0.59284437
+    },
+    {
+     "product_id": "B07MVK9BYX",
+     "label": "C",
+     "title": "3 PCS Stainless Steel Wire Mesh Screen - About 12 x 8inch - 1mm Hole 20 Mesh Easy to Cut - Air Vent Mesh, Hard and Heat Resisting Screen Mesh, Window Screen Mesh",
+     "score": 0.58536798
+    },
+    {
+     "product_id": "B07NPDKWDV",
+     "label": "C",
+     "title": "TIMESETL 304 Stainless Steel Woven Wire 10 Mesh - 12\" X 24\" (30cmX60cm) - Garden Fence Mesh, Window Screens Net, BBQ Wire Mesh, Cabinets Mesh Replacement",
+     "score": 0.57754171
+    },
+    {
+     "product_id": "B07JVHY55M",
+     "label": "C",
+     "title": "SATINIOR 2 Packs Stainless Steel Woven Wire Mesh Rodent Proof Screen Mesh for Cage Net Mesh, Cabinets Wire Mesh, Window Screen Door Mesh, 11.8 x 11.8 Inch",
+     "score": 0.57153052
+    },
+    {
+     "product_id": "B000LX8968",
+     "label": "C",
+     "title": "Construction Metals KM625 Mesh Screening, 6\" by 25'",
+     "score": 0.56449616
+    },
+    {
+     "product_id": "B07L1LLV63",
+     "label": "C",
+     "title": "TIMESETL 304 Stainless Steel Woven Wire 120 Mesh - 12\"X40\" Filter Screen Sheet Filtration Cloth",
+     "score": 0.55552846
+    }
+   ]
+  },
+  {
+   "query_id": "71986",
+   "query": "n95 not kn95",
+   "candidate_count": 40,
+   "label_counts": {
+    "E": 7,
+    "I": 26,
+    "S": 7
+   },
+   "bm25_ndcg10_primary": 0.6870237647323656,
+   "bge_ndcg10_primary": 0.007752729384130144,
+   "bm25_ndcg_all_primary": 0.8851466239470298,
+   "bge_ndcg_all_primary": 0.4431328888189378,
+   "bm25_ndcg10_repo_script_gain": 0.7023766150133025,
+   "bge_ndcg10_repo_script_gain": 0.0007925978840136278,
+   "bm25_ndcg_all_repo_script_gain": 0.8915450198447357,
+   "bge_ndcg_all_repo_script_gain": 0.42411783783212614,
+   "query_features": {
+    "negation": true,
+    "brand": false,
+    "model_token": true,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B0002YKBV2",
+     "label": "E",
+     "title": "3M 8511 Paint Sanding Valved N95 Cool-Flow Respirator, 10-Pack",
+     "score": 2.70801575
+    },
+    {
+     "product_id": "B08NVDFB3R",
+     "label": "E",
+     "title": "Kimberly-Clark PROFESSIONAL N95 Pouch Respirator (53358), NIOSH-Approved, Made in U.S.A., Regular Size, 50 Respirators/Bag, White",
+     "score": 2.20949467
+    },
+    {
+     "product_id": "B087Z7N4XF",
+     "label": "E",
+     "title": "FANGTIAN N95 Mask NIOSH Certified Particulate Respirators Protective Face Mask (Pack of 10, Model FT-N040 / Approval Number TC-84A-7861)",
+     "score": 2.16520636
+    },
+    {
+     "product_id": "B08YS4958R",
+     "label": "E",
+     "title": "AccuMed BNX N95 Mask NIOSH Certified MADE IN USA Particulate Respirator Protective Face Mask (10-Pack, Approval Number TC-84A-9315 / Model H95W) White",
+     "score": 2.04239003
+    },
+    {
+     "product_id": "B08V4TJGRQ",
+     "label": "I",
+     "title": "Boncare KN95 Face Mask, Black KN95 Mask 50 Pack, 5-Layer Face Mask",
+     "score": 0.21967876
+    },
+    {
+     "product_id": "B08NX8SC6G",
+     "label": "I",
+     "title": "KN95 Face Mask 30 Pack, OPECTICID KN95 Masks White Individually Wrapped Cup Masks Breathable 5-Layer Filter Efficiency≥95% Against PM2.5 Disposable Certified KN95 Respirator Masks…",
+     "score": 0.21055589
+    },
+    {
+     "product_id": "B08Q8M46FK",
+     "label": "I",
+     "title": "WWDOLL KN95 Face Mask - 25 Pcs Breathable 3D Design Safety Masks, Dispoasable Masks Respirator for Protection - KN95 958 White",
+     "score": 0.20087899
+    },
+    {
+     "product_id": "B08NPSFTLR",
+     "label": "I",
+     "title": "KN95 Disposable Face Mask - Miuphro Multicolor KN95 Safety Masks, 5-Ply Breathable Respirator Protection Masks for Man and Women 25 Pack",
+     "score": 0.19530762
+    },
+    {
+     "product_id": "B08NXBG87C",
+     "label": "I",
+     "title": "KN95 Face Mask 60 PCS, OPECTICID KN95 Masks Black Individually Wrapped Breathable 5-Layer Filter Efficiency≥95% Certified Disposable Face Masks",
+     "score": 0.19530762
+    },
+    {
+     "product_id": "B08Q8MTTKJ",
+     "label": "I",
+     "title": "KN95 Face Mask 50 PCs, WWDOLL Multiple Colour 5 Layers KN95 Masks, Dispoasable Masks Respirator for Protection(Black, White, Grey, Red, Purple)",
+     "score": 0.19263624
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B08Q788PJG",
+     "label": "I",
+     "title": "KN95 Face Mask 25 PCs, WWDOLL Multiple Colour 5 Layers KN95 Masks, Filter Efficiency≥95% Protection Against PM2.5 Dust, Air Pollution(Pink, Green, Grey, Red, Purple)",
+     "score": 0.54656267
+    },
+    {
+     "product_id": "B08NX8SC6G",
+     "label": "I",
+     "title": "KN95 Face Mask 30 Pack, OPECTICID KN95 Masks White Individually Wrapped Cup Masks Breathable 5-Layer Filter Efficiency≥95% Against PM2.5 Disposable Certified KN95 Respirator Masks…",
+     "score": 0.53671962
+    },
+    {
+     "product_id": "B08NPR7WF2",
+     "label": "I",
+     "title": "KN95 Disposable Face Mask 25 Pack - Miuphro 5-Ply Breathable Safety Masks Against PM2.5, Dispoasable Respirator Protection Mask for Men and Women Black",
+     "score": 0.53198582
+    },
+    {
+     "product_id": "B08VD4X86Q",
+     "label": "I",
+     "title": "KN95 Face Masks 30PCS, 5-Ply Breathable & Comfortable Safety Mask, Protection Masks Against PM2.5 for Women and Men",
+     "score": 0.53059804
+    },
+    {
+     "product_id": "B08Q8M46FK",
+     "label": "I",
+     "title": "WWDOLL KN95 Face Mask - 25 Pcs Breathable 3D Design Safety Masks, Dispoasable Masks Respirator for Protection - KN95 958 White",
+     "score": 0.52992791
+    },
+    {
+     "product_id": "B08NPSFTLR",
+     "label": "I",
+     "title": "KN95 Disposable Face Mask - Miuphro Multicolor KN95 Safety Masks, 5-Ply Breathable Respirator Protection Masks for Man and Women 25 Pack",
+     "score": 0.52913898
+    },
+    {
+     "product_id": "B08Q8MTTKJ",
+     "label": "I",
+     "title": "KN95 Face Mask 50 PCs, WWDOLL Multiple Colour 5 Layers KN95 Masks, Dispoasable Masks Respirator for Protection(Black, White, Grey, Red, Purple)",
+     "score": 0.52895343
+    },
+    {
+     "product_id": "B08NXBG87C",
+     "label": "I",
+     "title": "KN95 Face Mask 60 PCS, OPECTICID KN95 Masks Black Individually Wrapped Breathable 5-Layer Filter Efficiency≥95% Certified Disposable Face Masks",
+     "score": 0.52777851
+    },
+    {
+     "product_id": "B08N3STLWM",
+     "label": "I",
+     "title": "AccuMed 5-Pack KN95 (Headband) Protective Face Mask (GB2626-2019), Safety Face Mask, Air Filtration Anti Dust Mask, Disposable Particulate Filtering Mask (5-Count), Black",
+     "score": 0.52593684
+    },
+    {
+     "product_id": "B08W4Y3JFW",
+     "label": "S",
+     "title": "KN95 Face Mask, 20 Pack Black Disposable Face mask, Filter Efficiency≥95%, 5 Layer Cup Dust Safety Masks Protection Against PM2.5 with Nose Bridge Clip for Men Women",
+     "score": 0.52004254
+    }
+   ]
+  },
+  {
+   "query_id": "99958",
+   "query": "swixx butter knife",
+   "candidate_count": 18,
+   "label_counts": {
+    "E": 3,
+    "I": 15
+   },
+   "bm25_ndcg10_primary": 0.6713860725233041,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.7861953672493219,
+   "bge_ndcg_all_primary": 0.35894599306410047,
+   "bm25_ndcg10_repo_script_gain": 0.6713860725233041,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.7861953672493219,
+   "bge_ndcg_all_repo_script_gain": 0.35894599306410047,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B000EB5Q72",
+     "label": "E",
+     "title": "Swix World Cup Ski Vise (3 Piece Design), 1'x8 x7",
+     "score": 0.0
+    },
+    {
+     "product_id": "B000T2035Q",
+     "label": "I",
+     "title": "Fiberlene Towels 20m by Swix",
+     "score": 0.0
+    },
+    {
+     "product_id": "B0017I8WHW",
+     "label": "I",
+     "title": "Swix 2x2 Edge Tool with Pre-Set Bevel, Red",
+     "score": 0.0
+    },
+    {
+     "product_id": "B002QJUXV4",
+     "label": "E",
+     "title": "Swix Deluxe Alpine Ski Tuning Kit",
+     "score": 0.0
+    },
+    {
+     "product_id": "B003EUBP8Y",
+     "label": "I",
+     "title": "Swix Universal Ski/Snowboard Glide Wax, 180g, One Size (U180)",
+     "score": 0.0
+    },
+    {
+     "product_id": "B003ZY44T6",
+     "label": "I",
+     "title": "Swix F4 - Universal Paste Wax - Rub On Sponge Top - Non Fluoro - 75ml",
+     "score": 0.0
+    },
+    {
+     "product_id": "B003ZY47BQ",
+     "label": "I",
+     "title": "Swix Bio Degradable Ski/Snowboard Average Temperature Wax (180g Bar), Red",
+     "score": 0.0
+    },
+    {
+     "product_id": "B003ZY9PD6",
+     "label": "I",
+     "title": "Swix Bio Degradable Ski/Snowboard Warmer Conditions Wax (180g Bar), Yellow, 7\"x3\"x2\"",
+     "score": 0.0
+    },
+    {
+     "product_id": "B004884AO2",
+     "label": "I",
+     "title": "Swix Sidewall Planer/Economy Cutter Red ,7 x 4 x 2-Inch",
+     "score": 0.0
+    },
+    {
+     "product_id": "B004LC73M6",
+     "label": "I",
+     "title": "Swix Classic Nordic Ski Wax Pack with 3-Kick Wax and Cork, 8 x 8-Inch",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B0017I8WHW",
+     "label": "I",
+     "title": "Swix 2x2 Edge Tool with Pre-Set Bevel, Red",
+     "score": 0.57125282
+    },
+    {
+     "product_id": "B0051T3BVK",
+     "label": "I",
+     "title": "Swix Phantom Edger Pro Side Edge Tool with Adjustable Bevel Red, 7 x 4 x 2-Inch",
+     "score": 0.56558847
+    },
+    {
+     "product_id": "B003ZY9PD6",
+     "label": "I",
+     "title": "Swix Bio Degradable Ski/Snowboard Warmer Conditions Wax (180g Bar), Yellow, 7\"x3\"x2\"",
+     "score": 0.55704391
+    },
+    {
+     "product_id": "B0051T3BYM",
+     "label": "I",
+     "title": "Swix TA3008 Phantom Edger Pro Side Edge Tool with Rollers with Adjustable Bevel, Red, 7 x 4 x 2-Inch",
+     "score": 0.54716516
+    },
+    {
+     "product_id": "B004LC73M6",
+     "label": "I",
+     "title": "Swix Classic Nordic Ski Wax Pack with 3-Kick Wax and Cork, 8 x 8-Inch",
+     "score": 0.54572058
+    },
+    {
+     "product_id": "B0054IDTLK",
+     "label": "I",
+     "title": "Swix Helium Vise T0144",
+     "score": 0.54178345
+    },
+    {
+     "product_id": "B08J4JJ3VJ",
+     "label": "I",
+     "title": "Swix Base-Side Dual Edger Ski Snowboard Tool with Metal File 9 Angles",
+     "score": 0.54139936
+    },
+    {
+     "product_id": "B003EUBP8Y",
+     "label": "I",
+     "title": "Swix Universal Ski/Snowboard Glide Wax, 180g, One Size (U180)",
+     "score": 0.54035789
+    },
+    {
+     "product_id": "B003ZY44T6",
+     "label": "I",
+     "title": "Swix F4 - Universal Paste Wax - Rub On Sponge Top - Non Fluoro - 75ml",
+     "score": 0.53922206
+    },
+    {
+     "product_id": "B00MQL875Q",
+     "label": "I",
+     "title": "Swix Universal Ski & Snowboard Waxing Iron with 110V Adjustable Temp, Red, Large",
+     "score": 0.53648257
+    }
+   ]
+  },
+  {
+   "query_id": "108149",
+   "query": "velvet bodysuit for women thong",
+   "candidate_count": 16,
+   "label_counts": {
+    "S": 15,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 1.0,
+   "bge_ndcg10_primary": 0.3354774933728508,
+   "bm25_ndcg_all_primary": 1.0,
+   "bge_ndcg_all_primary": 0.5704015545944101,
+   "bm25_ndcg10_repo_script_gain": 1.0,
+   "bge_ndcg10_repo_script_gain": 0.04388065628739696,
+   "bm25_ndcg_all_repo_script_gain": 1.0,
+   "bge_ndcg_all_repo_script_gain": 0.3208318328921851,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B07KZS99PC",
+     "label": "E",
+     "title": "Yandy Grey Medium Velvet Teddy Featuring Scoop Neck & Snap Crotch Thong Panty",
+     "score": 3.17497858
+    },
+    {
+     "product_id": "B07Y9GX98L",
+     "label": "S",
+     "title": "Plus Size Lingerie Set for Women, Sexy Crushed Velvet Mesh Lace Up Halter Bralette & High Waist Panty (Green,2XL,325a)",
+     "score": 2.08259687
+    },
+    {
+     "product_id": "B07ZWZTJ1R",
+     "label": "S",
+     "title": "Two Piece Sweatsuits for Women Tracksuits Outfits Velour Sleeveless Bodysuit Top Jogging Sweatpants Sets Royal Blue XL",
+     "score": 1.86651825
+    },
+    {
+     "product_id": "B07KFFQ5B1",
+     "label": "S",
+     "title": "Kitty-Kitty See Through Lingerie V-Neck Floral Lace Babydoll Sexy Lingerie for Women One Piece Bodysuit Black Medium",
+     "score": 1.77045727
+    },
+    {
+     "product_id": "B0799GVPYH",
+     "label": "S",
+     "title": "Shawhuwa Women Sheer Mesh Long Sleeve Geometric Velvet Bodysuit Tops XXL Black",
+     "score": 1.10605914
+    },
+    {
+     "product_id": "B07H26C4S7",
+     "label": "S",
+     "title": "DIDK Women's Velvet V Neck Suplice Long Sleeve Bodysuit Burgundy S",
+     "score": 1.10605914
+    },
+    {
+     "product_id": "B0784NZF5B",
+     "label": "S",
+     "title": "Dreamgirl Women's Sheer Teddy Bodysuit with Velvet Detail and Lined Cups - XSmall Black",
+     "score": 1.04072997
+    },
+    {
+     "product_id": "B07VVXVG76",
+     "label": "S",
+     "title": "Choies Women's Burgundy/Black Sexy Plunge Neck Strapless Cross Back Velvet Bodysuit (X-Large, Black-New)",
+     "score": 0.95602851
+    },
+    {
+     "product_id": "B078Y2FKJP",
+     "label": "S",
+     "title": "Clothink Strapless Lace Up Velvet Bodysuit Jumpsuit Yellow L",
+     "score": 0.86293874
+    },
+    {
+     "product_id": "B07QW76JTZ",
+     "label": "S",
+     "title": "Shawhuwa Bodysuit Blouse Sexy Sheer Mesh Sleeveless Geometric Velvet Bodysuit Black XL",
+     "score": 0.84071767
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B00XK1367K",
+     "label": "S",
+     "title": "Velvet Kitten Lacey Accent Body Shaper Bodysuit #303538 (Large, Black)",
+     "score": 0.65609652
+    },
+    {
+     "product_id": "B07VVXVG76",
+     "label": "S",
+     "title": "Choies Women's Burgundy/Black Sexy Plunge Neck Strapless Cross Back Velvet Bodysuit (X-Large, Black-New)",
+     "score": 0.64975572
+    },
+    {
+     "product_id": "B0784NZF5B",
+     "label": "S",
+     "title": "Dreamgirl Women's Sheer Teddy Bodysuit with Velvet Detail and Lined Cups - XSmall Black",
+     "score": 0.63639003
+    },
+    {
+     "product_id": "B07H26C4S7",
+     "label": "S",
+     "title": "DIDK Women's Velvet V Neck Suplice Long Sleeve Bodysuit Burgundy S",
+     "score": 0.62875348
+    },
+    {
+     "product_id": "B07KFFQ5B1",
+     "label": "S",
+     "title": "Kitty-Kitty See Through Lingerie V-Neck Floral Lace Babydoll Sexy Lingerie for Women One Piece Bodysuit Black Medium",
+     "score": 0.62337685
+    },
+    {
+     "product_id": "B07QW76JTZ",
+     "label": "S",
+     "title": "Shawhuwa Bodysuit Blouse Sexy Sheer Mesh Sleeveless Geometric Velvet Bodysuit Black XL",
+     "score": 0.61445266
+    },
+    {
+     "product_id": "B078Y2FKJP",
+     "label": "S",
+     "title": "Clothink Strapless Lace Up Velvet Bodysuit Jumpsuit Yellow L",
+     "score": 0.61386299
+    },
+    {
+     "product_id": "B0799GVPYH",
+     "label": "S",
+     "title": "Shawhuwa Women Sheer Mesh Long Sleeve Geometric Velvet Bodysuit Tops XXL Black",
+     "score": 0.61234128
+    },
+    {
+     "product_id": "B07BF7B9W4",
+     "label": "S",
+     "title": "PALINDA Women's Turtleneck Long Sleeve Bodysuit Sexy Bodycon Stretchy Leotards Black（Black，S",
+     "score": 0.60412538
+    },
+    {
+     "product_id": "B074DRCKJF",
+     "label": "S",
+     "title": "DIDK Women's Sexy Backless Lace Appliques Long Sleeve Bodysuit Black Small",
+     "score": 0.5715903
+    }
+   ]
+  },
+  {
+   "query_id": "11275",
+   "query": "auto park sensor benzel",
+   "candidate_count": 16,
+   "label_counts": {
+    "S": 14,
+    "E": 1,
+    "I": 1
+   },
+   "bm25_ndcg10_primary": 1.0,
+   "bge_ndcg10_primary": 0.3354774933728508,
+   "bm25_ndcg_all_primary": 0.9992391347882372,
+   "bge_ndcg_all_primary": 0.5440798766562334,
+   "bm25_ndcg10_repo_script_gain": 1.0,
+   "bge_ndcg10_repo_script_gain": 0.04388065628739696,
+   "bm25_ndcg_all_repo_script_gain": 0.9998921672960773,
+   "bge_ndcg_all_repo_script_gain": 0.29167811562258417,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B07SV5DVYL",
+     "label": "E",
+     "title": "Red Hound Auto 2 Parking Assist Sensor Bezels for Outer Bumper Compatible with Dodge Ram 1500 2014-2018, 1500 Classic 2019 (for Front or Rear Bumper) Pair Set",
+     "score": 2.38365288
+    },
+    {
+     "product_id": "B00LU4EFPQ",
+     "label": "S",
+     "title": "APDTY 15239247 PDC Sensor Park Assist Reverse Backup Object Sensor",
+     "score": 1.42168704
+    },
+    {
+     "product_id": "B0711TQGSS",
+     "label": "S",
+     "title": "APDTY 15239247x4 PDC Sensor Park Assist Reverse Backup Object Sensor Pack Of 4",
+     "score": 1.3371074
+    },
+    {
+     "product_id": "B07JGBCNMW",
+     "label": "S",
+     "title": "4PCS Reverse Backup Park Sensor 15239247 25961317 25961321 25962147 Parking Assist Sensor Bumper Object Sensor Compatible with Chevy Cadillac Buick GMC GM",
+     "score": 1.15274956
+    },
+    {
+     "product_id": "B0825Q6YV7",
+     "label": "S",
+     "title": "Aupoko Rear Bumper Backup Parking Sensor 15239247, 4 PC Park Assist Object Sensor Replace# 20908127, 25961317, 25961321, 25962147, Fits for GMC Sierra Buick Silverado Express Cadillac Escala",
+     "score": 1.04746822
+    },
+    {
+     "product_id": "B07RNL9LTS",
+     "label": "S",
+     "title": "LSAILON 4Pcs Reverse Bumper Parking Assist Aid Park Sensor 20908127 25961317 for Escalade Avalanche Silverado 1500 2500 3500 HD Suburban 1500 2500 Sierra 1500 2500 HD 3500 HD Yukon",
+     "score": 0.98126232
+    },
+    {
+     "product_id": "B07RTXW8K5",
+     "label": "S",
+     "title": "LSAILON 2Pcs Reverse Bumper Parking Assist Aid Park Sensor 20908127 25961317 for Escalade Avalanche Silverado 1500 2500 3500 HD Suburban 1500 2500 Sierra 1500 2500 HD 3500 HD Yukon",
+     "score": 0.98126232
+    },
+    {
+     "product_id": "B07NT32JQB",
+     "label": "S",
+     "title": "4pcs Reverse Backup Parking Sensor,Parking Assist Sensor Bumper Object Sensor for Dodge Ram Chrysler Jeep 1EW63TZZAA 1EW63AXRAA",
+     "score": 0.15397334
+    },
+    {
+     "product_id": "B07H186H5H",
+     "label": "S",
+     "title": "SYWAN 4pcs Parking Assist Sensor Bumper Object Sensor Reverse Backup Parking Sensor Compatible for Dodge Ram Jeep 1EW63TZZAA 1EW63AXRAA",
+     "score": 0.15256155
+    },
+    {
+     "product_id": "B01HO64F1C",
+     "label": "S",
+     "title": "SHINEHOME 4 PCS PDC Parking Assist Sensor - Compatible with Dodge Journey, Durango, Ram 1500 2500 3500, Jeep Commander, Liberty, Grand Cherokee - Replace 1EW63TZZAA - Reverse Backup Parking Sensor",
+     "score": 0.12356459
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07NT32JQB",
+     "label": "S",
+     "title": "4pcs Reverse Backup Parking Sensor,Parking Assist Sensor Bumper Object Sensor for Dodge Ram Chrysler Jeep 1EW63TZZAA 1EW63AXRAA",
+     "score": 0.61374563
+    },
+    {
+     "product_id": "B07H186H5H",
+     "label": "S",
+     "title": "SYWAN 4pcs Parking Assist Sensor Bumper Object Sensor Reverse Backup Parking Sensor Compatible for Dodge Ram Jeep 1EW63TZZAA 1EW63AXRAA",
+     "score": 0.59583491
+    },
+    {
+     "product_id": "B07JGBCNMW",
+     "label": "S",
+     "title": "4PCS Reverse Backup Park Sensor 15239247 25961317 25961321 25962147 Parking Assist Sensor Bumper Object Sensor Compatible with Chevy Cadillac Buick GMC GM",
+     "score": 0.59073985
+    },
+    {
+     "product_id": "B01MR15IUI",
+     "label": "S",
+     "title": "uxcell 89341-50020 Car Bumper PDC Backup Reverse Parking Assist Sensor for Lexus LS430 2002-2006",
+     "score": 0.586514
+    },
+    {
+     "product_id": "B00LU4EFPQ",
+     "label": "S",
+     "title": "APDTY 15239247 PDC Sensor Park Assist Reverse Backup Object Sensor",
+     "score": 0.58183026
+    },
+    {
+     "product_id": "B07HKQMNQ3",
+     "label": "S",
+     "title": "APDTY 795159-Silver Painted Parking Aid Assist Backup Reverse PDC Sensor Fits All Positions In Front or Rear Bumper On Select 2014-2019 GM Vehicles (See Description; Replaces 23428268, 52050134)",
+     "score": 0.57032144
+    },
+    {
+     "product_id": "B0711TQGSS",
+     "label": "S",
+     "title": "APDTY 15239247x4 PDC Sensor Park Assist Reverse Backup Object Sensor Pack Of 4",
+     "score": 0.56178743
+    },
+    {
+     "product_id": "B07RNL9LTS",
+     "label": "S",
+     "title": "LSAILON 4Pcs Reverse Bumper Parking Assist Aid Park Sensor 20908127 25961317 for Escalade Avalanche Silverado 1500 2500 3500 HD Suburban 1500 2500 Sierra 1500 2500 HD 3500 HD Yukon",
+     "score": 0.55888969
+    },
+    {
+     "product_id": "B07RTXW8K5",
+     "label": "S",
+     "title": "LSAILON 2Pcs Reverse Bumper Parking Assist Aid Park Sensor 20908127 25961317 for Escalade Avalanche Silverado 1500 2500 3500 HD Suburban 1500 2500 Sierra 1500 2500 HD 3500 HD Yukon",
+     "score": 0.55849326
+    },
+    {
+     "product_id": "B01HO64F1C",
+     "label": "S",
+     "title": "SHINEHOME 4 PCS PDC Parking Assist Sensor - Compatible with Dodge Journey, Durango, Ram 1500 2500 3500, Jeep Commander, Liberty, Grand Cherokee - Replace 1EW63TZZAA - Reverse Backup Parking Sensor",
+     "score": 0.55817109
+    }
+   ]
+  },
+  {
+   "query_id": "23631",
+   "query": "casio piano keyboard for kids",
+   "candidate_count": 16,
+   "label_counts": {
+    "E": 1,
+    "S": 15
+   },
+   "bm25_ndcg10_primary": 1.0,
+   "bge_ndcg10_primary": 0.3354774933728508,
+   "bm25_ndcg_all_primary": 1.0,
+   "bge_ndcg_all_primary": 0.5499704900092922,
+   "bm25_ndcg10_repo_script_gain": 1.0,
+   "bge_ndcg10_repo_script_gain": 0.04388065628739696,
+   "bm25_ndcg_all_repo_script_gain": 1.0,
+   "bge_ndcg_all_repo_script_gain": 0.28853160267781525,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B003VX1GI8",
+     "label": "E",
+     "title": "Casio SA-76 44 Key Mini Keyboard, Orange",
+     "score": 3.38513015
+    },
+    {
+     "product_id": "B07S8N8N2R",
+     "label": "S",
+     "title": "M SANMERSEN Kids Piano Keyboard, Piano for Kids with Microphone Portable Electronic Keyboards for Beginners 37 Keys Musical Toys Pianos for Girls Boys Ages 3-8",
+     "score": 0.66992324
+    },
+    {
+     "product_id": "B083BC6SKP",
+     "label": "S",
+     "title": "SAOCOOL Kids Piano, 32 Keys Multifunction Electronic Kids Piano Keyboard Teaching Keyboard for Children Birthday Gift (Black)",
+     "score": 0.65536149
+    },
+    {
+     "product_id": "B07S9QM5YT",
+     "label": "S",
+     "title": "M SANMERSEN Kids Piano, Piano Keyboard for Kids Electronic Keyboard 37 Keys with 4 Drums / Animals Sound / 11 Demos Portable Piano Toys for Beginners Girls Boys Ages 3-8",
+     "score": 0.65314876
+    },
+    {
+     "product_id": "B07M76JJ1B",
+     "label": "S",
+     "title": "RenFox 49 Key Kids Piano Keyboard with Microphone Portable Kids Keyboard Piano Beginner Electric Music Keyboard Piano Teaching Toy Gift for Kids Boy Girl",
+     "score": 0.64323188
+    },
+    {
+     "product_id": "B07P84QQ86",
+     "label": "S",
+     "title": "WOSTOO Piano Keyboard 49 Key, Portable Electronic Kids Keyboard Piano Educational Toy, Digital Music Piano Keyboard with Microphone for Kids Girls Boys",
+     "score": 0.64171565
+    },
+    {
+     "product_id": "B07SD4D9L5",
+     "label": "S",
+     "title": "Electronic Piano Keyboard 37 Key Kids Piano Multi-Function Keyboard Piano Toys Education Musical Instrument Gift for Boys Girls",
+     "score": 0.61752039
+    },
+    {
+     "product_id": "B07PM6RLKG",
+     "label": "S",
+     "title": "aPerfectLife 61 Keys Kids Keyboard Multifunction Portable Piano Electronic Keyboard Music Instrument for Kids Early Learning Educational (Silver)",
+     "score": 0.61046038
+    },
+    {
+     "product_id": "B07P1DLJHJ",
+     "label": "S",
+     "title": "Electric Keyboard Piano for Kids-Portable 49 Key Electronic Musical Karaoke Keyboard, Learning Keyboard for Children w/Drum Pad, Recording, Microphone, Built-in Speaker-Pyle PKBRD4911PK (Pink)",
+     "score": 0.59870984
+    },
+    {
+     "product_id": "B07DFHJFFM",
+     "label": "S",
+     "title": "aPerfectLife Chargable Keyboard Piano, 49 Keys Multi-Function Electronic Kids Piano Keyboard Educational Toy Organ for Beginners and Kids with Charging Function (Pink)",
+     "score": 0.59603035
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B07S8N8N2R",
+     "label": "S",
+     "title": "M SANMERSEN Kids Piano Keyboard, Piano for Kids with Microphone Portable Electronic Keyboards for Beginners 37 Keys Musical Toys Pianos for Girls Boys Ages 3-8",
+     "score": 0.77615118
+    },
+    {
+     "product_id": "B083BC6SKP",
+     "label": "S",
+     "title": "SAOCOOL Kids Piano, 32 Keys Multifunction Electronic Kids Piano Keyboard Teaching Keyboard for Children Birthday Gift (Black)",
+     "score": 0.75918585
+    },
+    {
+     "product_id": "B07S9QM5YT",
+     "label": "S",
+     "title": "M SANMERSEN Kids Piano, Piano Keyboard for Kids Electronic Keyboard 37 Keys with 4 Drums / Animals Sound / 11 Demos Portable Piano Toys for Beginners Girls Boys Ages 3-8",
+     "score": 0.75660157
+    },
+    {
+     "product_id": "B07PM6RLKG",
+     "label": "S",
+     "title": "aPerfectLife 61 Keys Kids Keyboard Multifunction Portable Piano Electronic Keyboard Music Instrument for Kids Early Learning Educational (Silver)",
+     "score": 0.7542026
+    },
+    {
+     "product_id": "B07F8GMW3V",
+     "label": "S",
+     "title": "aPerfectLife Kids Keyboard Piano, 37 Keys Chargable Multifunction Mini Piano Keyboard Toys for Over 3 Year Old Girls with Microphone (Pink)",
+     "score": 0.75130904
+    },
+    {
+     "product_id": "B07B4R5P4X",
+     "label": "S",
+     "title": "aPerfectLife Kids Keyboard Piano, 32 Keys Multifunction Portable Toy Piano (Dark)",
+     "score": 0.74695134
+    },
+    {
+     "product_id": "B07M76JJ1B",
+     "label": "S",
+     "title": "RenFox 49 Key Kids Piano Keyboard with Microphone Portable Kids Keyboard Piano Beginner Electric Music Keyboard Piano Teaching Toy Gift for Kids Boy Girl",
+     "score": 0.74580091
+    },
+    {
+     "product_id": "B07DFHJFFM",
+     "label": "S",
+     "title": "aPerfectLife Chargable Keyboard Piano, 49 Keys Multi-Function Electronic Kids Piano Keyboard Educational Toy Organ for Beginners and Kids with Charging Function (Pink)",
+     "score": 0.74312937
+    },
+    {
+     "product_id": "B07YBVRWNT",
+     "label": "S",
+     "title": "M SANMERSEN Piano for Kids, Kids Piano Keyboards Electronic Pianos with Dual Speakers LCD Screen 49 Keys Musical Piano Toys for 3-12 Years Old Girls Boys",
+     "score": 0.73654336
+    },
+    {
+     "product_id": "B07P84QQ86",
+     "label": "S",
+     "title": "WOSTOO Piano Keyboard 49 Key, Portable Electronic Kids Keyboard Piano Educational Toy, Digital Music Piano Keyboard with Microphone for Kids Girls Boys",
+     "score": 0.73216152
+    }
+   ]
+  }
+ ],
+ "both_zero_ndcg10": [
+  {
+   "query_id": "37789",
+   "query": "entertainment stand for tv up to 90",
+   "candidate_count": 16,
+   "label_counts": {
+    "I": 15,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.27894294565112987,
+   "bge_ndcg_all_primary": 0.26264953503719357,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.27894294565112987,
+   "bge_ndcg_all_repo_script_gain": 0.26264953503719357,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": true,
+    "main_product": false
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B01K8JEEGS",
+     "label": "I",
+     "title": "FURINNO JAYA Large Entertainment Stand for TV Up to 50 Inch, Blackwood",
+     "score": 4.12663384
+    },
+    {
+     "product_id": "B07H3LWCX3",
+     "label": "I",
+     "title": "VASAGLE TV Stand, TV Cabinet for TVs up to 43 Inches, Mid-Century Modern TV Console Entertainment Center for Living Room, Bedroom, Lounge, Rustic Brown ULTV09BX",
+     "score": 3.20038525
+    },
+    {
+     "product_id": "B00Q8MUAW2",
+     "label": "I",
+     "title": "Ameriwood Home Carson TV Stand for TVs up to 70\", Cherry",
+     "score": 2.41760914
+    },
+    {
+     "product_id": "B017R89RVK",
+     "label": "I",
+     "title": "Walker Edison Wren Classic 6 Cubby TV Stand for TVs up to 80 Inches, 70 Inch, Black",
+     "score": 2.06158147
+    },
+    {
+     "product_id": "B07TCRCTKV",
+     "label": "I",
+     "title": "Walker Edison Ashbury Coastal Style Grooved Door TV Stand for TVs up to 80 Inches, 70 Inch, Dark Walnut",
+     "score": 1.96511755
+    },
+    {
+     "product_id": "B07NDS2XSQ",
+     "label": "I",
+     "title": "Walker Edison Georgetown Modern Farmhouse Double Barn Door TV Stand for TVs up to 65 Inches, 58 Inch, Stone Grey",
+     "score": 1.92019345
+    },
+    {
+     "product_id": "B07LG44BN6",
+     "label": "I",
+     "title": "Walker Edison Saxon Mid Century Modern 2 Door Glass Shelf TV Stand for TVs up to 80 Inches, 70 Inch, Dark Walnut",
+     "score": 1.83623782
+    },
+    {
+     "product_id": "B081342DX9",
+     "label": "I",
+     "title": "Mecor Modern LED Black TV Stand,12 Colors LED TV Stand with Remote Control Lights,High Gloss TV Cabinet with Storage&2 Drawers,65 Inch Entertainment Center for Living Room",
+     "score": 1.7596337
+    },
+    {
+     "product_id": "B07WYRXT6V",
+     "label": "I",
+     "title": "Rainbow Sophia TV Stand for TVs Up to 65 Inch, Modern Farmhouse Wood Storage Cabinet with Sliding Barn Doors and Adjustable Shelves (White Oak)",
+     "score": 1.75931615
+    },
+    {
+     "product_id": "B07S7FTW98",
+     "label": "I",
+     "title": "MEBLE FURNITURE & RUGS TV Stand Milano 200 LED Wall Mounted Floating 79\" TV Stand (Oak/Black)",
+     "score": 0.16932869
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B01K8JEEGS",
+     "label": "I",
+     "title": "FURINNO JAYA Large Entertainment Stand for TV Up to 50 Inch, Blackwood",
+     "score": 0.65716177
+    },
+    {
+     "product_id": "B017R89RVK",
+     "label": "I",
+     "title": "Walker Edison Wren Classic 6 Cubby TV Stand for TVs up to 80 Inches, 70 Inch, Black",
+     "score": 0.62672287
+    },
+    {
+     "product_id": "B00Q8MUAW2",
+     "label": "I",
+     "title": "Ameriwood Home Carson TV Stand for TVs up to 70\", Cherry",
+     "score": 0.62595057
+    },
+    {
+     "product_id": "B07H3LWCX3",
+     "label": "I",
+     "title": "VASAGLE TV Stand, TV Cabinet for TVs up to 43 Inches, Mid-Century Modern TV Console Entertainment Center for Living Room, Bedroom, Lounge, Rustic Brown ULTV09BX",
+     "score": 0.61680305
+    },
+    {
+     "product_id": "B07WYRXT6V",
+     "label": "I",
+     "title": "Rainbow Sophia TV Stand for TVs Up to 65 Inch, Modern Farmhouse Wood Storage Cabinet with Sliding Barn Doors and Adjustable Shelves (White Oak)",
+     "score": 0.60385799
+    },
+    {
+     "product_id": "B07TCRCTKV",
+     "label": "I",
+     "title": "Walker Edison Ashbury Coastal Style Grooved Door TV Stand for TVs up to 80 Inches, 70 Inch, Dark Walnut",
+     "score": 0.60362697
+    },
+    {
+     "product_id": "B07LG44BN6",
+     "label": "I",
+     "title": "Walker Edison Saxon Mid Century Modern 2 Door Glass Shelf TV Stand for TVs up to 80 Inches, 70 Inch, Dark Walnut",
+     "score": 0.59811914
+    },
+    {
+     "product_id": "B07NDS2XSQ",
+     "label": "I",
+     "title": "Walker Edison Georgetown Modern Farmhouse Double Barn Door TV Stand for TVs up to 65 Inches, 58 Inch, Stone Grey",
+     "score": 0.58755732
+    },
+    {
+     "product_id": "B07WP7RGQX",
+     "label": "I",
+     "title": "Ameriwood Home Miles 70\", Espresso TV Stand,",
+     "score": 0.57479191
+    },
+    {
+     "product_id": "B081342DX9",
+     "label": "I",
+     "title": "Mecor Modern LED Black TV Stand,12 Colors LED TV Stand with Remote Control Lights,High Gloss TV Cabinet with Storage&2 Drawers,65 Inch Entertainment Center for Living Room",
+     "score": 0.55764639
+    }
+   ]
+  },
+  {
+   "query_id": "39509",
+   "query": "family costumes",
+   "candidate_count": 16,
+   "label_counts": {
+    "I": 15,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.26264953503719357,
+   "bge_ndcg_all_primary": 0.2559580248098155,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.26264953503719357,
+   "bge_ndcg_all_repo_script_gain": 0.2559580248098155,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B00XW8S8GK",
+     "label": "I",
+     "title": "California Costumes Men's Storybook Prince Costume, Blue, Large",
+     "score": 2.57843606
+    },
+    {
+     "product_id": "B000FDXA8Q",
+     "label": "I",
+     "title": "Addams Family Child's Wednesday Addams Costume, Large, Black/White",
+     "score": 2.47598164
+    },
+    {
+     "product_id": "B000XEX8ZC",
+     "label": "I",
+     "title": "Rubie's The Flintstones Fred Flintstone Costume, Multi-colored, Standard",
+     "score": 0.0
+    },
+    {
+     "product_id": "B0018SN5EG",
+     "label": "I",
+     "title": "Rubie's Women's Wilma Flintstone Costume, White, Standard",
+     "score": 0.0
+    },
+    {
+     "product_id": "B001ZSIRJM",
+     "label": "I",
+     "title": "Disguise Unisex Adult Deluxe Muscle Mr Incredible, Multi, X-Large (42-46) Costume",
+     "score": 0.0
+    },
+    {
+     "product_id": "B002JMJXU0",
+     "label": "I",
+     "title": "Disney The Incredibles Dash Classic Boys Costume, Small/4-6",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00L6DB5NG",
+     "label": "I",
+     "title": "Rock, Paper, Scissors Adult Costume Standard",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00TO6E0T8",
+     "label": "I",
+     "title": "Rubies Adult The Original Inflatable Dinosaur Costume, T-Rex, Standard",
+     "score": 0.0
+    },
+    {
+     "product_id": "B07741621Z",
+     "label": "I",
+     "title": "Carter's Boys' Big 2-Pack Tees, Light Grey Stripe/Black Stripe, 8",
+     "score": 0.0
+    },
+    {
+     "product_id": "B07998PKZ6",
+     "label": "I",
+     "title": "Rubie's unisex adult Baby Costume Party Supplies, Multicolor, 6-12 Months US",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B000FDXA8Q",
+     "label": "I",
+     "title": "Addams Family Child's Wednesday Addams Costume, Large, Black/White",
+     "score": 0.64291847
+    },
+    {
+     "product_id": "B00XW8S8GK",
+     "label": "I",
+     "title": "California Costumes Men's Storybook Prince Costume, Blue, Large",
+     "score": 0.5785042
+    },
+    {
+     "product_id": "B00TO6E0T8",
+     "label": "I",
+     "title": "Rubies Adult The Original Inflatable Dinosaur Costume, T-Rex, Standard",
+     "score": 0.57380396
+    },
+    {
+     "product_id": "B00L6DB5NG",
+     "label": "I",
+     "title": "Rock, Paper, Scissors Adult Costume Standard",
+     "score": 0.57139963
+    },
+    {
+     "product_id": "B07998PKZ6",
+     "label": "I",
+     "title": "Rubie's unisex adult Baby Costume Party Supplies, Multicolor, 6-12 Months US",
+     "score": 0.56431019
+    },
+    {
+     "product_id": "B0018SN5EG",
+     "label": "I",
+     "title": "Rubie's Women's Wilma Flintstone Costume, White, Standard",
+     "score": 0.56367463
+    },
+    {
+     "product_id": "B07PXTV32B",
+     "label": "I",
+     "title": "Rubies Baby/Toddler Baby Shark Costume with Sound Chip, Infant",
+     "score": 0.55931735
+    },
+    {
+     "product_id": "B07PWNFCLX",
+     "label": "I",
+     "title": "Rubie's Adult Mommy Shark Costume with Sound Chip, Standard",
+     "score": 0.5567733
+    },
+    {
+     "product_id": "B079M66QN1",
+     "label": "I",
+     "title": "Incredibles 2 Classic Mrs. Incredible Women's Costume Large",
+     "score": 0.55285102
+    },
+    {
+     "product_id": "B000XEX8ZC",
+     "label": "I",
+     "title": "Rubie's The Flintstones Fred Flintstone Costume, Multi-colored, Standard",
+     "score": 0.54301155
+    }
+   ]
+  },
+  {
+   "query_id": "45773",
+   "query": "gixtri",
+   "candidate_count": 42,
+   "label_counts": {
+    "I": 39,
+    "E": 3
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.2883850814506799,
+   "bge_ndcg_all_primary": 0.2796455275141009,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.2883850814506799,
+   "bge_ndcg_all_repo_script_gain": 0.2796455275141009,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B0002VG3PS",
+     "label": "I",
+     "title": "Nature Made Vitamin E 180 mg (400 IU) dl-Alpha, Dietary Supplement for Antioxidant Support, 180 Softgels, 180 Day Supply",
+     "score": 0.0
+    },
+    {
+     "product_id": "B000GG87MG",
+     "label": "I",
+     "title": "Sundown Vitamin E for Immune Support, Gluten-Free, Dairy-Free, Non-GMO, 180mg 400IU Softgels, 100 Count, 3 Month Supply",
+     "score": 0.0
+    },
+    {
+     "product_id": "B001RMP7NK",
+     "label": "I",
+     "title": "FOOTLOGIX Cracked Heel Formula, White 4.23 Ounce",
+     "score": 0.0
+    },
+    {
+     "product_id": "B007ADOL28",
+     "label": "I",
+     "title": "Kerasal Fungal Nail Renewal, Restores Appearance of Discolored or Damaged Nails, 0.33 fl oz",
+     "score": 0.0
+    },
+    {
+     "product_id": "B008CSMEGA",
+     "label": "I",
+     "title": "Footlogix Anti-Fungal Rough Skin Formula, 4.23 Ounce",
+     "score": 0.0
+    },
+    {
+     "product_id": "B008GC9T6A",
+     "label": "I",
+     "title": "Nature Made Extra Strength Vitamin D3 5000 IU (125 mcg), Dietary Supplement for Immune Support, 180 Softgels, 180 Day Supply",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00BD63ZMU",
+     "label": "I",
+     "title": "FOOTLOGIX Anti-Fungal Toe Tincture Spray, 1.7 Fl Oz",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00DDIRFDG",
+     "label": "I",
+     "title": "Neurobiologix Methyl Folate Plus™ Supplements - Bioactive Folinic Acid, Methyl Folate Dietary Capsules for Cardiovascular & Nervous System Health, Cell Growth and Tissue Repair (90 Capsules)",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00GB85JR4",
+     "label": "I",
+     "title": "NatureWise Vitamin D3 5000iu (125 mcg) 1 Year Supply for Healthy Muscle Function, and Immune Support, Non-GMO, Gluten Free in Cold-Pressed Olive Oil, Packaging Vary ( Mini Softgel), 360 Count",
+     "score": 0.0
+    },
+    {
+     "product_id": "B00O59SH3E",
+     "label": "I",
+     "title": "Thorne Research - Basic Prenatal - Folate Multivitamin for Pregnant and Lactating Women - 90 Capsules",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B01C4D2K58",
+     "label": "I",
+     "title": "ConceptionXR Motility Support Male Fertility Supplements with Antioxidants and L-Carnitine | 30 Day Supply",
+     "score": 0.46690336
+    },
+    {
+     "product_id": "B01C4D2KLM",
+     "label": "I",
+     "title": "ConceptionXR Reproductive Health Male Fertility Supplement (90 Day Supply)",
+     "score": 0.45733812
+    },
+    {
+     "product_id": "B01C3FVVAC",
+     "label": "I",
+     "title": "TheraNatal One Prenatal Multivitamin | 90 Day Supply | 90 Softgels | Vitamin & Mineral Supplement | Gluten-Free",
+     "score": 0.44348788
+    },
+    {
+     "product_id": "B01DBTFO98",
+     "label": "I",
+     "title": "Turmeric Curcumin with BioPerine 1500mg - Natural Joint & Healthy Inflammatory Support with 95% Standardized Curcuminoids for Potency & Absorption - Non-GMO, Gluten Free Capsules with Black Pepper.",
+     "score": 0.43831807
+    },
+    {
+     "product_id": "B076MMP9YN",
+     "label": "I",
+     "title": "Jocko Joint Warfare - Curcumin, Glucosamine, MSM, Boswellia, Quercetin - Inflammatory Response Support Supplement - 180 Capsules",
+     "score": 0.43559641
+    },
+    {
+     "product_id": "B00QVM8YBI",
+     "label": "I",
+     "title": "Neurobiologix Methylation Complete™ 120 Sublingual Tablets with Bioactive B12, Methyl Folate with a Light Fruit Punch Flavor for Focus, MTHFR & MTRR Gene Mutations, Vegan & Gluten Free",
+     "score": 0.43308729
+    },
+    {
+     "product_id": "B07MLRS85P",
+     "label": "I",
+     "title": "Smell Proof Bag with Combination Lock Odor Proof Stash Case Container; Medicine Lock Box Bag Travel Storage Case (Gray)",
+     "score": 0.43051493
+    },
+    {
+     "product_id": "B087JNQ4X8",
+     "label": "I",
+     "title": "Immuneti - Advanced Immune Defense, 6-in-1 Powerful Blend of Vitamin C, Vitamin D3, Zinc, Elderberries, Garlic Bulb, Echinacea - Supports Overall Health, Provides Vital Nutrients & Antioxidants",
+     "score": 0.4296844
+    },
+    {
+     "product_id": "B00GB85JR4",
+     "label": "I",
+     "title": "NatureWise Vitamin D3 5000iu (125 mcg) 1 Year Supply for Healthy Muscle Function, and Immune Support, Non-GMO, Gluten Free in Cold-Pressed Olive Oil, Packaging Vary ( Mini Softgel), 360 Count",
+     "score": 0.41422012
+    },
+    {
+     "product_id": "B07SVZVTSM",
+     "label": "I",
+     "title": "Neurobiologix DCI (D-Chiro-Inositol) 500 mg Capsules Supplements for Insulin Response, Autophagy and Glucose Levels (60 Capsules)",
+     "score": 0.41302398
+    }
+   ]
+  },
+  {
+   "query_id": "90978",
+   "query": "science auburn",
+   "candidate_count": 16,
+   "label_counts": {
+    "I": 14,
+    "E": 2
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.3102267425692945,
+   "bge_ndcg_all_primary": 0.3069467374862678,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.3102267425692945,
+   "bge_ndcg_all_repo_script_gain": 0.3069467374862678,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B000OCXG32",
+     "label": "I",
+     "title": "Summers at Castle Auburn",
+     "score": 1.19091509
+    },
+    {
+     "product_id": "B00FHPC56K",
+     "label": "I",
+     "title": "NCAA Auburn Tigers Mouthguard, Adult",
+     "score": 1.11612583
+    },
+    {
+     "product_id": "B00HY0763S",
+     "label": "I",
+     "title": "Girl with the Auburn Hair",
+     "score": 1.11612583
+    },
+    {
+     "product_id": "1660234530",
+     "label": "I",
+     "title": "Catholic Mount Auburn Cemetery East Watertown, Ma",
+     "score": 0.99158331
+    },
+    {
+     "product_id": "B074457W3B",
+     "label": "I",
+     "title": "The Witches of Auburn: The Sins of Our Fathers",
+     "score": 0.8920448
+    },
+    {
+     "product_id": "080706629X",
+     "label": "I",
+     "title": "The Lively Place: Mount Auburn, America's First Garden Cemetery, and Its Revolutionary and Literary Residents",
+     "score": 0.66011775
+    },
+    {
+     "product_id": "031638321X",
+     "label": "I",
+     "title": "The Land of Stories: An Author's Odyssey (The Land of Stories, 5)",
+     "score": 0.0
+    },
+    {
+     "product_id": "0571199976",
+     "label": "I",
+     "title": "Proof: A Play",
+     "score": 0.0
+    },
+    {
+     "product_id": "1625950829",
+     "label": "I",
+     "title": "The ARRL Ham Radio License Manual Spiral",
+     "score": 0.0
+    },
+    {
+     "product_id": "B000VLQBTM",
+     "label": "I",
+     "title": "Star Wars Princess Leia Wig, Brown, One Size",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B000OCXG32",
+     "label": "I",
+     "title": "Summers at Castle Auburn",
+     "score": 0.57077456
+    },
+    {
+     "product_id": "B00HY0763S",
+     "label": "I",
+     "title": "Girl with the Auburn Hair",
+     "score": 0.5673641
+    },
+    {
+     "product_id": "B00FHPC56K",
+     "label": "I",
+     "title": "NCAA Auburn Tigers Mouthguard, Adult",
+     "score": 0.55775934
+    },
+    {
+     "product_id": "080706629X",
+     "label": "I",
+     "title": "The Lively Place: Mount Auburn, America's First Garden Cemetery, and Its Revolutionary and Literary Residents",
+     "score": 0.49632844
+    },
+    {
+     "product_id": "B074457W3B",
+     "label": "I",
+     "title": "The Witches of Auburn: The Sins of Our Fathers",
+     "score": 0.48972732
+    },
+    {
+     "product_id": "1660234530",
+     "label": "I",
+     "title": "Catholic Mount Auburn Cemetery East Watertown, Ma",
+     "score": 0.45670563
+    },
+    {
+     "product_id": "B014H31TJ6",
+     "label": "I",
+     "title": "Colorescience Brow Kit, Mineral Eyebrow Makeup Powder & Shaping Brush, Light to Medium Shades",
+     "score": 0.45516545
+    },
+    {
+     "product_id": "B00YG3YFX0",
+     "label": "I",
+     "title": "Simply Naked Beauty Eyebrow Color and Shaping Kit with Eyebrow Shaping E-book. Mineral Makeup.",
+     "score": 0.40212393
+    },
+    {
+     "product_id": "1625950829",
+     "label": "I",
+     "title": "The ARRL Ham Radio License Manual Spiral",
+     "score": 0.36587578
+    },
+    {
+     "product_id": "0571199976",
+     "label": "I",
+     "title": "Proof: A Play",
+     "score": 0.36188889
+    }
+   ]
+  },
+  {
+   "query_id": "93331",
+   "query": "silk bodysuit long sleevetops",
+   "candidate_count": 16,
+   "label_counts": {
+    "I": 15,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.2559580248098155,
+   "bge_ndcg_all_primary": 0.26264953503719357,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.2559580248098155,
+   "bge_ndcg_all_repo_script_gain": 0.26264953503719357,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B012H3J9AO",
+     "label": "I",
+     "title": "Cherokee Women's Long Sleeve Knit Shirt, Black, X-Large",
+     "score": 0.36405573
+    },
+    {
+     "product_id": "B01D0VLKPO",
+     "label": "I",
+     "title": "DJT Off The Shoulder Tops, Womens Floral Lace Long Sleeve Top Medium Black",
+     "score": 0.33396157
+    },
+    {
+     "product_id": "B01MZ1E4L5",
+     "label": "I",
+     "title": "ACEVOG Chiffon Blouses Womens Long Sleeve Collared Work Blouse with Tie,Light Blue,Small",
+     "score": 0.32500617
+    },
+    {
+     "product_id": "B07K2XQSST",
+     "label": "I",
+     "title": "Floerns Women's Long Sleeve Slim Fit Turtleneck Basic T-Shirts A Black XS",
+     "score": 0.32500617
+    },
+    {
+     "product_id": "B07JBT4JPQ",
+     "label": "I",
+     "title": "ECOWISH Womens V Neck Leopard Casual Print Tunic Long Sleeve Button Down Shirt Tops 235White XL",
+     "score": 0.30846291
+    },
+    {
+     "product_id": "B07L9BKLXS",
+     "label": "I",
+     "title": "Floerns Women's Long Sleeve Mock Neck Slim Snakeskin T-Shirt Tops A Multi Gray M",
+     "score": 0.30846291
+    },
+    {
+     "product_id": "B07RDN6CJ4",
+     "label": "I",
+     "title": "SheIn Women's Long Sleeve Button Down Lotus Ruffled Work Shirt Chiffon Blouse Top Small Black",
+     "score": 0.30846291
+    },
+    {
+     "product_id": "B07JZ3FD9L",
+     "label": "I",
+     "title": "Milumia Women's Plus Size Geo Print Long Sleeve Print Office Blouse Tops White X-Large Plus",
+     "score": 0.30080716
+    },
+    {
+     "product_id": "B07RLKNYWW",
+     "label": "I",
+     "title": "SheIn Women's Elegant V Neck Self Tie Knot Long Sleeve Satin Blouse Shirt Top Pink Large",
+     "score": 0.30080716
+    },
+    {
+     "product_id": "B07R58GNHY",
+     "label": "I",
+     "title": "SheIn Women's Long Sleeve V Neck Ruffle Blouse Off Shoulder Tie Waist Wrap Tops X-Large White",
+     "score": 0.29352223
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B01D0VLKPO",
+     "label": "I",
+     "title": "DJT Off The Shoulder Tops, Womens Floral Lace Long Sleeve Top Medium Black",
+     "score": 0.57565957
+    },
+    {
+     "product_id": "B07L9BKLXS",
+     "label": "I",
+     "title": "Floerns Women's Long Sleeve Mock Neck Slim Snakeskin T-Shirt Tops A Multi Gray M",
+     "score": 0.54901516
+    },
+    {
+     "product_id": "B07T9BQW3Y",
+     "label": "I",
+     "title": "HOTAPEI Womens Summer Fall Casual V Neck Striped Cuffed Sleeve Button Down Chiffon Shirts Tops Blouses for Women Fashion 2021 Long Sleeve Large",
+     "score": 0.54338682
+    },
+    {
+     "product_id": "B07R58GNHY",
+     "label": "I",
+     "title": "SheIn Women's Long Sleeve V Neck Ruffle Blouse Off Shoulder Tie Waist Wrap Tops X-Large White",
+     "score": 0.52954173
+    },
+    {
+     "product_id": "B07JZ3FD9L",
+     "label": "I",
+     "title": "Milumia Women's Plus Size Geo Print Long Sleeve Print Office Blouse Tops White X-Large Plus",
+     "score": 0.52572298
+    },
+    {
+     "product_id": "B07K2XQSST",
+     "label": "I",
+     "title": "Floerns Women's Long Sleeve Slim Fit Turtleneck Basic T-Shirts A Black XS",
+     "score": 0.5209685
+    },
+    {
+     "product_id": "B07RLKNYWW",
+     "label": "I",
+     "title": "SheIn Women's Elegant V Neck Self Tie Knot Long Sleeve Satin Blouse Shirt Top Pink Large",
+     "score": 0.51652259
+    },
+    {
+     "product_id": "B07JBT4JPQ",
+     "label": "I",
+     "title": "ECOWISH Womens V Neck Leopard Casual Print Tunic Long Sleeve Button Down Shirt Tops 235White XL",
+     "score": 0.50264513
+    },
+    {
+     "product_id": "B012H3J9AO",
+     "label": "I",
+     "title": "Cherokee Women's Long Sleeve Knit Shirt, Black, X-Large",
+     "score": 0.49752152
+    },
+    {
+     "product_id": "B07RDN6CJ4",
+     "label": "I",
+     "title": "SheIn Women's Long Sleeve Button Down Lotus Ruffled Work Shirt Chiffon Blouse Top Small Black",
+     "score": 0.49216592
+    }
+   ]
+  },
+  {
+   "query_id": "94437",
+   "query": "slim whitman cd box",
+   "candidate_count": 16,
+   "label_counts": {
+    "E": 5,
+    "I": 11
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.4431064242567548,
+   "bge_ndcg_all_primary": 0.4451271491742771,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.4431064242567548,
+   "bge_ndcg_all_repo_script_gain": 0.4451271491742771,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B001DSNEME",
+     "label": "I",
+     "title": "Sanford and Son: The Complete Series (Slim Packaging)",
+     "score": 2.80643689
+    },
+    {
+     "product_id": "B01EL3NXDW",
+     "label": "I",
+     "title": "New Black 40 Disc CD DVD DJ Storage Organizer Hard Wallet Holder Album Bag Hard Box Double Side Black CD Bag",
+     "score": 2.5118014
+    },
+    {
+     "product_id": "B00063E1Z6",
+     "label": "I",
+     "title": "Vaultz Locking CD Wallet, 64 CD Capacity, 3.5 x 13.25 x 7.25 Inches, Black (VZ01149)",
+     "score": 0.70013868
+    },
+    {
+     "product_id": "B0015RB75E",
+     "label": "I",
+     "title": "EVW-24 EVA Molded 24 Capacity CD/DVD Case (Black)",
+     "score": 0.62330725
+    },
+    {
+     "product_id": "B073RGR4V6",
+     "label": "I",
+     "title": "CD/DVD Portable Carry Wallet BUBM 32 CD Disc Capacity Waterproof Storage Case Compact and Easy to Store for Car Home and Travel Orange",
+     "score": 0.62306901
+    },
+    {
+     "product_id": "B00011KM38",
+     "label": "I",
+     "title": "Case Logic CDE-24 24 Capacity Heavy Duty CD Wallet (Black)",
+     "score": 0.60123785
+    },
+    {
+     "product_id": "B000EOPSRC",
+     "label": "I",
+     "title": "Hama CD Wallet for Storing 20 CDs/DVDs/Blu-Rays, Black,00033830",
+     "score": 0.58067783
+    },
+    {
+     "product_id": "B0751TMCHQ",
+     "label": "I",
+     "title": "ELEZAY Small CD Case Round Felt 20 Capacity CDs Storage Wallet DVD Disc Holder Compact,Gray",
+     "score": 0.51080726
+    },
+    {
+     "product_id": "B076Q5RLS9",
+     "label": "I",
+     "title": "Wismart 72 Capacity Heavy Duty CD DVD Blu-ray Media Case Storage Holder Organizer Wallet (Green)",
+     "score": 0.51080726
+    },
+    {
+     "product_id": "B07FJYJ2HN",
+     "label": "I",
+     "title": "CD Case, COOFIT 160 Capacity DVD Storage DVD Case VCD Wallets Storage Organizer Flexible Plastic Protective DVD Storage Black",
+     "score": 0.46852545
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B001DSNEME",
+     "label": "I",
+     "title": "Sanford and Son: The Complete Series (Slim Packaging)",
+     "score": 0.52791226
+    },
+    {
+     "product_id": "B076Q5RLS9",
+     "label": "I",
+     "title": "Wismart 72 Capacity Heavy Duty CD DVD Blu-ray Media Case Storage Holder Organizer Wallet (Green)",
+     "score": 0.52289295
+    },
+    {
+     "product_id": "B00063E1Z6",
+     "label": "I",
+     "title": "Vaultz Locking CD Wallet, 64 CD Capacity, 3.5 x 13.25 x 7.25 Inches, Black (VZ01149)",
+     "score": 0.51472396
+    },
+    {
+     "product_id": "B07FJYJ2HN",
+     "label": "I",
+     "title": "CD Case, COOFIT 160 Capacity DVD Storage DVD Case VCD Wallets Storage Organizer Flexible Plastic Protective DVD Storage Black",
+     "score": 0.50842744
+    },
+    {
+     "product_id": "B01EL3NXDW",
+     "label": "I",
+     "title": "New Black 40 Disc CD DVD DJ Storage Organizer Hard Wallet Holder Album Bag Hard Box Double Side Black CD Bag",
+     "score": 0.50257713
+    },
+    {
+     "product_id": "B0751TMCHQ",
+     "label": "I",
+     "title": "ELEZAY Small CD Case Round Felt 20 Capacity CDs Storage Wallet DVD Disc Holder Compact,Gray",
+     "score": 0.50109869
+    },
+    {
+     "product_id": "B00011KM38",
+     "label": "I",
+     "title": "Case Logic CDE-24 24 Capacity Heavy Duty CD Wallet (Black)",
+     "score": 0.49575034
+    },
+    {
+     "product_id": "B073RGR4V6",
+     "label": "I",
+     "title": "CD/DVD Portable Carry Wallet BUBM 32 CD Disc Capacity Waterproof Storage Case Compact and Easy to Store for Car Home and Travel Orange",
+     "score": 0.48387113
+    },
+    {
+     "product_id": "B000EOPSRC",
+     "label": "I",
+     "title": "Hama CD Wallet for Storing 20 CDs/DVDs/Blu-Rays, Black,00033830",
+     "score": 0.47191042
+    },
+    {
+     "product_id": "B0015RB75E",
+     "label": "I",
+     "title": "EVW-24 EVA Molded 24 Capacity CD/DVD Case (Black)",
+     "score": 0.46075207
+    }
+   ]
+  },
+  {
+   "query_id": "102156",
+   "query": "the looming tower",
+   "candidate_count": 15,
+   "label_counts": {
+    "I": 14,
+    "E": 1
+   },
+   "bm25_ndcg10_primary": 0.0,
+   "bge_ndcg10_primary": 0.0,
+   "bm25_ndcg_all_primary": 0.2559580248098155,
+   "bge_ndcg_all_primary": 0.27894294565112987,
+   "bm25_ndcg10_repo_script_gain": 0.0,
+   "bge_ndcg10_repo_script_gain": 0.0,
+   "bm25_ndcg_all_repo_script_gain": 0.2559580248098155,
+   "bge_ndcg_all_repo_script_gain": 0.27894294565112987,
+   "query_features": {
+    "negation": false,
+    "brand": false,
+    "model_token": false,
+    "attribute": false,
+    "accessory": false,
+    "main_product": true
+   },
+   "top10_bm25": [
+    {
+     "product_id": "B074FC83Q4",
+     "label": "I",
+     "title": "The Dark Tower",
+     "score": 3.59780273
+    },
+    {
+     "product_id": "B00RUTUPYU",
+     "label": "I",
+     "title": "The Detail",
+     "score": 1.12246448
+    },
+    {
+     "product_id": "B074FBWYH8",
+     "label": "I",
+     "title": "The Lost Palace",
+     "score": 0.99172013
+    },
+    {
+     "product_id": "B002PHHDVK",
+     "label": "I",
+     "title": "The Hugo Chavez Show",
+     "score": 0.88825628
+    },
+    {
+     "product_id": "B079M49DPS",
+     "label": "I",
+     "title": "Homeland: Enemy of the State",
+     "score": 0.80434124
+    },
+    {
+     "product_id": "B00FR6EJT0",
+     "label": "I",
+     "title": "League of Denial: The NFL's Concussion Crisis",
+     "score": 0.62671954
+    },
+    {
+     "product_id": "B00404QUBA",
+     "label": "I",
+     "title": "A Touch Of Class",
+     "score": 0.0
+    },
+    {
+     "product_id": "B007X82S5M",
+     "label": "I",
+     "title": "Jellal",
+     "score": 0.0
+    },
+    {
+     "product_id": "B0087BJWK8",
+     "label": "I",
+     "title": "Al Qaeda in Yemen",
+     "score": 0.0
+    },
+    {
+     "product_id": "B01HE51IUE",
+     "label": "I",
+     "title": "Alone Against Al Qaeda: Could 9/11 Have Been Avoided?",
+     "score": 0.0
+    }
+   ],
+   "top10_bge": [
+    {
+     "product_id": "B074FC83Q4",
+     "label": "I",
+     "title": "The Dark Tower",
+     "score": 0.58598435
+    },
+    {
+     "product_id": "B01HE51IUE",
+     "label": "I",
+     "title": "Alone Against Al Qaeda: Could 9/11 Have Been Avoided?",
+     "score": 0.50108266
+    },
+    {
+     "product_id": "B00RUTUPYU",
+     "label": "I",
+     "title": "The Detail",
+     "score": 0.44408083
+    },
+    {
+     "product_id": "B079M49DPS",
+     "label": "I",
+     "title": "Homeland: Enemy of the State",
+     "score": 0.44395474
+    },
+    {
+     "product_id": "B074FBWYH8",
+     "label": "I",
+     "title": "The Lost Palace",
+     "score": 0.42869449
+    },
+    {
+     "product_id": "B07BXDC1WL",
+     "label": "I",
+     "title": "Arctic Hell Pit",
+     "score": 0.38666317
+    },
+    {
+     "product_id": "B0087BJWK8",
+     "label": "I",
+     "title": "Al Qaeda in Yemen",
+     "score": 0.37798861
+    },
+    {
+     "product_id": "B00FR6EJT0",
+     "label": "I",
+     "title": "League of Denial: The NFL's Concussion Crisis",
+     "score": 0.37134039
+    },
+    {
+     "product_id": "B081DDJJM6",
+     "label": "I",
+     "title": "Clip: Castlevania NES Secrets and History",
+     "score": 0.37069404
+    },
+    {
+     "product_id": "B079J4BHF1",
+     "label": "I",
+     "title": "Episode One",
+     "score": 0.34758979
+    }
+   ]
+  }
+ ]
+}

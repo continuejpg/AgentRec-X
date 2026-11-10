@@ -1,0 +1,237 @@
+{
+ "schema": "agentrecx.esci_external.eval.v1",
+ "task": "ESCI English-US Task 1 small_version test, judged-candidate reranking",
+ "not_full_catalog_recall": true,
+ "data": {
+  "queries": 8956,
+  "candidate_rows": 181701,
+  "catalog": "official ESCI product records, external; separate from AgentRec-X 76,263 catalogue"
+ },
+ "config": {
+  "bm25_k1": 1.2,
+  "bm25_b": 0.75,
+  "bm25_tokenizer": "lowercase alphanumeric runs; no stemming/stopwords; candidate-set local document frequency",
+  "bm25_tie_break": "score desc, product_id asc",
+  "bge_model": "BAAI/bge-base-en-v1.5 (local weights)",
+  "bge_query_prefix": "Represent this sentence for searching relevant passages: ",
+  "bge_pooling": "CLS",
+  "bge_normalization": "L2",
+  "bge_max_length": 512,
+  "bge_tie_break": "score desc, product_id asc",
+  "product_text_field": "product_title only; same field for BM25 and BGE",
+  "query_text": "official ESCI query, unchanged",
+  "gains_primary": {
+   "E": 1.0,
+   "S": 0.1,
+   "C": 0.01,
+   "I": 0.0
+  },
+  "gains_repo_script_sensitivity": {
+   "E": 1.0,
+   "S": 0.01,
+   "C": 0.1,
+   "I": 0.0
+  },
+  "ndcg_formula": "official trec_eval ndcg: sum(gain / log2(rank+1)); ideal DCG from the same candidate labels",
+  "gains_note": "Primary follows the task-specified E=1,S=0.1,C=0.01,I=0 with the official trec_eval linear nDCG formula. The official repo prepare_trec_eval_files.py uses relevance positions E:4,S:2,C:3,I:1 and trec_eval gains 0,0.01,0.1,1, i.e. S=0.01/C=0.1; the sensitivity columns use that mapping and are not mixed with primary.",
+  "test_tuning": false,
+  "target_injection": false,
+  "training": false,
+  "index_used_for_bm25": "candidate-set local BM25 only; no global catalogue index",
+  "bge_product_vectors": "runs/esci_external/bge_product_vectors.npz",
+  "bge_query_vectors": "runs/esci_external/bge_query_vectors.npz",
+  "gain_labels": {
+   "primary": "semantic_gain_E1_S0.1_C0.01_I0",
+   "official_script_sensitivity": "official_script_S0.01_C0.1"
+  }
+ },
+ "aggregate": {
+  "bm25_ndcg10_primary": {
+   "mean": 0.690665,
+   "ci95": [
+    0.686335,
+    0.695004
+   ],
+   "n": 8956
+  },
+  "bge_ndcg10_primary": {
+   "mean": 0.736566,
+   "ci95": [
+    0.732499,
+    0.740692
+   ],
+   "n": 8956
+  },
+  "bm25_ndcg_all_primary": {
+   "mean": 0.818397,
+   "ci95": [
+    0.815213,
+    0.821507
+   ],
+   "n": 8956
+  },
+  "bge_ndcg_all_primary": {
+   "mean": 0.844933,
+   "ci95": [
+    0.841912,
+    0.847941
+   ],
+   "n": 8956
+  },
+  "bm25_ndcg10_repo_script_gain": {
+   "mean": 0.669118,
+   "ci95": [
+    0.664439,
+    0.673748
+   ],
+   "n": 8956
+  },
+  "bge_ndcg10_repo_script_gain": {
+   "mean": 0.714406,
+   "ci95": [
+    0.709792,
+    0.718944
+   ],
+   "n": 8956
+  },
+  "bm25_ndcg_all_repo_script_gain": {
+   "mean": 0.797493,
+   "ci95": [
+    0.793977,
+    0.801047
+   ],
+   "n": 8956
+  },
+  "bge_ndcg_all_repo_script_gain": {
+   "mean": 0.82422,
+   "ci95": [
+    0.820619,
+    0.827708
+   ],
+   "n": 8956
+  },
+  "paired_ndcg10_primary": {
+   "mean_difference": 0.045901,
+   "ci95": [
+    0.041966,
+    0.049705
+   ],
+   "bge_wins": 5230,
+   "bm25_wins": 3381,
+   "ties": 345,
+   "n": 8956
+  },
+  "paired_ndcg_all_primary": {
+   "mean_difference": 0.026536,
+   "ci95": [
+    0.023928,
+    0.029191
+   ],
+   "bge_wins": 5278,
+   "bm25_wins": 3507,
+   "ties": 171,
+   "n": 8956
+  },
+  "paired_ndcg10_repo_script_gain": {
+   "mean_difference": 0.045288,
+   "ci95": [
+    0.041043,
+    0.049489
+   ],
+   "bge_wins": 5182,
+   "bm25_wins": 3429,
+   "ties": 345,
+   "n": 8956
+  },
+  "paired_ndcg_all_repo_script_gain": {
+   "mean_difference": 0.026727,
+   "ci95": [
+    0.023822,
+    0.02972
+   ],
+   "bge_wins": 5216,
+   "bm25_wins": 3569,
+   "ties": 171,
+   "n": 8956
+  }
+ },
+ "query_type_counts": {
+  "negation": 731,
+  "brand": 1626,
+  "model_token": 693,
+  "attribute": 1168,
+  "accessory": 595,
+  "main_product": 8361
+ },
+ "query_type_summary": {
+  "negation": {
+   "n": 731,
+   "bm25_ndcg10_mean": 0.562338,
+   "bge_ndcg10_mean": 0.585648,
+   "paired_difference": 0.02331,
+   "bm25_ndcg_all_mean": 0.764444,
+   "bge_ndcg_all_mean": 0.77532
+  },
+  "brand": {
+   "n": 1626,
+   "bm25_ndcg10_mean": 0.704307,
+   "bge_ndcg10_mean": 0.752237,
+   "paired_difference": 0.04793,
+   "bm25_ndcg_all_mean": 0.827289,
+   "bge_ndcg_all_mean": 0.857574
+  },
+  "model_token": {
+   "n": 693,
+   "bm25_ndcg10_mean": 0.670789,
+   "bge_ndcg10_mean": 0.70633,
+   "paired_difference": 0.035541,
+   "bm25_ndcg_all_mean": 0.794764,
+   "bge_ndcg_all_mean": 0.819127
+  },
+  "attribute": {
+   "n": 1168,
+   "bm25_ndcg10_mean": 0.70049,
+   "bge_ndcg10_mean": 0.742588,
+   "paired_difference": 0.042099,
+   "bm25_ndcg_all_mean": 0.82502,
+   "bge_ndcg_all_mean": 0.848881
+  },
+  "accessory": {
+   "n": 595,
+   "bm25_ndcg10_mean": 0.697846,
+   "bge_ndcg10_mean": 0.740139,
+   "paired_difference": 0.042293,
+   "bm25_ndcg_all_mean": 0.821724,
+   "bge_ndcg_all_mean": 0.849492
+  },
+  "main_product": {
+   "n": 8361,
+   "bm25_ndcg10_mean": 0.690154,
+   "bge_ndcg10_mean": 0.736311,
+   "paired_difference": 0.046157,
+   "bm25_ndcg_all_mean": 0.81816,
+   "bge_ndcg_all_mean": 0.844608
+  }
+ },
+ "failure_counts": {
+  "both_zero_ndcg10": 7,
+  "bge_material_loss": 1522,
+  "failure_rows_written": 1529
+ },
+ "per_query": "/mnt/d/IT/CODE/PROJECTION/agentrec/X/runs/esci_external/esci_per_query.jsonl",
+ "failures": "/mnt/d/IT/CODE/PROJECTION/agentrec/X/runs/esci_external/esci_failures.jsonl",
+ "hashes": {
+  "candidates_sha256": "527c7fbb5e7caf53b392a00158db647cda61d6b6442c89b5e9ffab0eae40dcd6",
+  "product_vectors_sha256": "60e9477774b8556dd5fd930eddfc219fde8e66769d134fb6c8eaf7189ae7006f",
+  "query_vectors_sha256": "4a9d17cab133d079faee86b9906490cc11d0e226bc93593960559eb1ba26b8cc"
+ },
+ "metric_labels": {
+  "nDCG@10 and nDCG_all primary": "semantic gain口径: E=1.0, S=0.1, C=0.01, I=0.0; official trec_eval linear nDCG",
+  "official_script_sensitivity": "official script口径: E=1.0, S=0.01, C=0.1, I=0.0; linear nDCG"
+ },
+ "archive": {
+  "per_query_jsonl_gz": "experiments/esci_external/results/esci_per_query.jsonl.gz",
+  "failures_jsonl_gz": "experiments/esci_external/results/esci_failures.jsonl.gz",
+  "raw_data_and_embeddings": "ignored; regenerate from the official source/GPU script"
+ }
+}
