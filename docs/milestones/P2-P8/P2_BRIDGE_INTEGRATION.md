@@ -39,8 +39,8 @@ Qwen3.5-9B Base/SFT
 ## 3. 相关产物
 
 - [P2_BRIDGE_IMPLEMENTATION_REPORT.md](P2_BRIDGE_IMPLEMENTATION_REPORT.md)
-- [P2_BRIDGE_AGENT_COMPARISON.csv](training/agent_sft/eval/P2_BRIDGE_AGENT_COMPARISON.csv)
-- [P2_BRIDGE_AGENT_SUMMARY.json](training/agent_sft/eval/P2_BRIDGE_AGENT_SUMMARY.json)
+- [P2_BRIDGE_AGENT_COMPARISON.csv](../../../training/agent_sft/eval/P2_BRIDGE_AGENT_COMPARISON.csv)
+- [P2_BRIDGE_AGENT_SUMMARY.json](../../../training/agent_sft/eval/P2_BRIDGE_AGENT_SUMMARY.json)
 - [P2_BRIDGE_TASK_FAILURE_ANALYSIS.md](P2_BRIDGE_TASK_FAILURE_ANALYSIS.md)
 - smoke：`training/agent_sft/eval/P2_BRIDGE_SMOKE_TRAJECTORY.jsonl`
 - 逐轮轨迹：`runs/p2bridge_c/trajectories.jsonl`、`runs/p2bridge_d0/trajectories.jsonl`、`runs/p2bridge_d1/trajectories.jsonl`

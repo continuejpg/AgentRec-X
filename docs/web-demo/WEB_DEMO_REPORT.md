@@ -263,18 +263,18 @@ UI 用真实 tool timeline + SSE `: keep-alive`（5s）展示长任务，不把�
 ## 6. 截图与轨迹
 
 - Desktop（1440×900）：
-  - [desktop-search.png](runs/web_demo/screenshots/desktop-search.png)（真实 10 卡 + Gate + UNKNOWN）
-  - [desktop-evidence.png](runs/web_demo/screenshots/desktop-evidence.png)（P15 原文 span + UNKNOWN）
-  - [desktop-comparison.png](runs/web_demo/screenshots/desktop-comparison.png)（P16 dimensions/claims）
-  - [desktop-clarification-memory.png](runs/web_demo/screenshots/desktop-clarification-memory.png)（Memory Update Added=2）
+  - [desktop-search.png](../../runs/web_demo/screenshots/desktop-search.png)（真实 10 卡 + Gate + UNKNOWN）
+  - [desktop-evidence.png](../../runs/web_demo/screenshots/desktop-evidence.png)（P15 原文 span + UNKNOWN）
+  - [desktop-comparison.png](../../runs/web_demo/screenshots/desktop-comparison.png)（P16 dimensions/claims）
+  - [desktop-clarification-memory.png](../../runs/web_demo/screenshots/desktop-clarification-memory.png)（Memory Update Added=2）
 - Mobile（390×844）：
-  - [mobile-search.png](runs/web_demo/screenshots/mobile-search.png)
-  - [mobile-drawer.png](runs/web_demo/screenshots/mobile-drawer.png)
-  - [mobile-comparison-sheet.png](runs/web_demo/screenshots/mobile-comparison-sheet.png)
-- 模式：[replay-mode.png](runs/web_demo/screenshots/replay-mode.png)（Historical Replay 徽标）
+  - [mobile-search.png](../../runs/web_demo/screenshots/mobile-search.png)
+  - [mobile-drawer.png](../../runs/web_demo/screenshots/mobile-drawer.png)
+  - [mobile-comparison-sheet.png](../../runs/web_demo/screenshots/mobile-comparison-sheet.png)
+- 模式：[replay-mode.png](../../runs/web_demo/screenshots/replay-mode.png)（Historical Replay 徽标）
 - 轨迹：`runs/web_demo/traces/`（retain-on-failure；全 PASS 故无 trace.zip，符合设计）；
-  E2E 汇总：[summary.json](runs/web_demo/e2e/summary.json)、
-  [REPORT.md](runs/web_demo/e2e/REPORT.md)、`evidence.jsonl`、`payloads/`。
+  E2E 汇总：[summary.json](../../runs/web_demo/e2e/summary.json)、
+  [REPORT.md](../../runs/web_demo/e2e/REPORT.md)、`evidence.jsonl`、`payloads/`。
 - 真实后端/工具证据：`runs/web_demo/bff_smoke_*.json`、`mcp_integration_transcript.json`、
   `runs/web_demo/logs/mcp-profile_*.log`。
 

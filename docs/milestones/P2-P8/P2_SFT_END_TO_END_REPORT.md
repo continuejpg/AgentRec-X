@@ -18,8 +18,8 @@ pending，不能当作正式人工 Gold。未根据困难集结果调整模型�
 详见：
 
 - [P2_SFT_ERROR_ANALYSIS.md](P2_SFT_ERROR_ANALYSIS.md)
-- [P2_SFT_TEST_OPERATION_METRICS.csv](training/agent_sft/reports/P2_SFT_TEST_OPERATION_METRICS.csv)
-- [P2_SFT_TEST_ERROR_SUMMARY.json](training/agent_sft/reports/P2_SFT_TEST_ERROR_SUMMARY.json)
+- [P2_SFT_TEST_OPERATION_METRICS.csv](../../../training/agent_sft/reports/P2_SFT_TEST_OPERATION_METRICS.csv)
+- [P2_SFT_TEST_ERROR_SUMMARY.json](../../../training/agent_sft/reports/P2_SFT_TEST_ERROR_SUMMARY.json)
 
 核心结果（200 条原 Parser Test，复用已有预测）：
 
@@ -118,8 +118,8 @@ human_reviewed_count: 0
 
 完整结果：
 
-- [P2_SFT_HARD_TEST_RESULTS.csv](training/agent_sft/eval/P2_SFT_HARD_TEST_RESULTS.csv)
-- [P2_SFT_HARD_OPERATION_METRICS.csv](training/agent_sft/reports/P2_SFT_HARD_OPERATION_METRICS.csv)
+- [P2_SFT_HARD_TEST_RESULTS.csv](../../../training/agent_sft/eval/P2_SFT_HARD_TEST_RESULTS.csv)
+- [P2_SFT_HARD_OPERATION_METRICS.csv](../../../training/agent_sft/reports/P2_SFT_HARD_OPERATION_METRICS.csv)
 - 预测：
   - `training/agent_sft/eval/hard_base/predictions.jsonl`
   - `training/agent_sft/eval/hard_sft/predictions.jsonl`
@@ -158,7 +158,7 @@ Evaluator V2: PASS 12 / FAIL 5 / UNKNOWN 3
 
 逐任务状态在：
 
-- [P2_SFT_AGENT_COMPARISON.csv](training/agent_sft/eval/P2_SFT_AGENT_COMPARISON.csv)
+- [P2_SFT_AGENT_COMPARISON.csv](../../../training/agent_sft/eval/P2_SFT_AGENT_COMPARISON.csv)
   - C 行来自 P1C 已有运行；
   - D0/D1 明确标记 `not_run`，原因为 proposal→M5 执行桥未实现。
 

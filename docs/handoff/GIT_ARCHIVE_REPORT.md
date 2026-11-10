@@ -2,7 +2,7 @@
 
 > **Question this report answers:** *Is this archive enough to reproduce the Web Demo on another
 > machine that has the lawful data and environment dependencies?* — **No from Git alone. Yes with
-> the external assets documented in [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) plus a
+> the external assets documented in [`docs/ARCHIVE_MANIFEST.md`](../ARCHIVE_MANIFEST.md) plus a
 > compatible WSL/Python/Node environment.** The source, tests, docs, locks, licences and run
 > commands are complete in Git; the multi-hundred-MB catalogue/model/index are intentionally not
 > in Git and must be obtained or rebuilt as described there.

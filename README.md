@@ -136,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
 - 停止：`powershell -ExecutionPolicy Bypass -File scripts/stop_web_demo.ps1`
 - E2E：`powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
 
-详细步骤、资产路径和已知问题见 [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) 与 [`DEMO_GUIDE.md`](DEMO_GUIDE.md)。
+详细步骤、资产路径和已知问题见 [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) 与 [`DEMO_GUIDE.md`](DEMO_GUIDE.md)。
 
 ### Legacy Serving Demo 的主要 HTTP 接口
 
@@ -166,7 +166,7 @@ Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍�
   --search-mode bge
 ```
 
-默认写入关闭；只有显式 `--allow-memory-writes` 的本地测试 server 才接受真实测试用户回复。MCP 工具、客户端调用和失败案例见 [`P17_REPORT.md`](P17_REPORT.md)。
+默认写入关闭；只有显式 `--allow-memory-writes` 的本地测试 server 才接受真实测试用户回复。MCP 工具、客户端调用和失败案例见 [`P17_REPORT.md`](docs/milestones/P15-P17/P17_REPORT.md)。
 
 ### 3. 定向测试
 
@@ -193,7 +193,7 @@ Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍�
 | Web E2E | **9/9** | 7 CPU/Replay + 2 真实 Qwen Live；另有 1/1 ASK→M9→resume 专项 |
 | MCP / Skills | **7 tools / 2 Skills** | P17 默认工具；配置 Qwen Live 时另有 1 个入口 |
 
-这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见 [`AGENTRECX_EXPERIMENT_SUMMARY.md`](AGENTRECX_EXPERIMENT_SUMMARY.md) 和 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
+这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见 [`AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) 和 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
 
 已确认的成功是：真实 catalogue、BGE 候选可达性提升、工具链/协议/记忆闭环可运行。  
 未证明/失败的部分同样重要：真实长期历史没有超过 shuffled 负对照；Planner SFT 未超过 Base；SFT Adapter 不采用；解释语义真实性没有人工审核；ESCI 不是全库 Recall。
@@ -222,18 +222,18 @@ third_party/        第三方来源、licence 与 provenance
 
 | 文档 | 适合阅读 |
 |---|---|
-| [`AGENTRECX_HANDOFF.md`](AGENTRECX_HANDOFF.md) | 接任者/新会话先读的完整交接 |
-| [`AGENTRECX_EXPERIMENT_SUMMARY.md`](AGENTRECX_EXPERIMENT_SUMMARY.md) | 全项目实验口径与失败经验 |
+| [`AGENTRECX_HANDOFF.md`](docs/handoff/AGENTRECX_HANDOFF.md) | 接任者/新会话先读的完整交接 |
+| [`AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) | 全项目实验口径与失败经验 |
 | [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md) | 更短的项目实验总结 |
 | [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md) | 当前架构与两种运行模式 |
 | [`DEMO_GUIDE.md`](DEMO_GUIDE.md) | P18 三场景 Demo 与 MCP 启动 |
-| [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
-| [`P15_REPORT.md`](P15_REPORT.md) | Evidence Bundle、Claim Validation |
-| [`P16_REPORT.md`](P16_REPORT.md) | 两个 Shopping Skills |
-| [`P17_REPORT.md`](P17_REPORT.md) | MCP 协议、工具与客户端联调 |
+| [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
+| [`P15_REPORT.md`](docs/milestones/P15-P17/P15_REPORT.md) | Evidence Bundle、Claim Validation |
+| [`P16_REPORT.md`](docs/milestones/P15-P17/P16_REPORT.md) | 两个 Shopping Skills |
+| [`P17_REPORT.md`](docs/milestones/P15-P17/P17_REPORT.md) | MCP 协议、工具与客户端联调 |
 | [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md) | 冻结、Reserved Test、最终集成 |
-| [`ESCI_EXTERNAL_EVAL_REPORT.md`](ESCI_EXTERNAL_EVAL_REPORT.md) | ESCI 外部评测 |
-| [`REAL_RETRIEVAL_EVAL_REPORT.md`](REAL_RETRIEVAL_EVAL_REPORT.md) | C4 proxy 冻结评测 |
+| [`ESCI_EXTERNAL_EVAL_REPORT.md`](docs/external-eval/ESCI_EXTERNAL_EVAL_REPORT.md) | ESCI 外部评测 |
+| [`REAL_RETRIEVAL_EVAL_REPORT.md`](docs/external-eval/REAL_RETRIEVAL_EVAL_REPORT.md) | C4 proxy 冻结评测 |
 | [`docs/README.md`](docs/README.md) | 完整文档索引 |
 | [`README_EN.md`](README_EN.md) | 完整英文版 README |
 

@@ -181,9 +181,9 @@ real BFF/SSE/Web, isolated `profile_0056_ask`.
 
 Screenshots:
 
-- [first ASK](runs/web_demo/qwen_clarification_fix/browser/qwen-fix-first-ask.png)
-- [after one reply / no follow-up](runs/web_demo/qwen_clarification_fix/browser/qwen-fix-after-reply.png)
-- [final resumed Gate/product](runs/web_demo/qwen_clarification_fix/browser/qwen-fix-resume.png)
+- [first ASK](../../runs/web_demo/qwen_clarification_fix/browser/qwen-fix-first-ask.png)
+- [after one reply / no follow-up](../../runs/web_demo/qwen_clarification_fix/browser/qwen-fix-after-reply.png)
+- [final resumed Gate/product](../../runs/web_demo/qwen_clarification_fix/browser/qwen-fix-resume.png)
 
 ---
 

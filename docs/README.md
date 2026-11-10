@@ -61,7 +61,7 @@
 | [PHASE4_HANDOFF.md](PHASE4_HANDOFF.md) | M11-era state and invariants |
 | [PHASE5_HANDOFF.md](PHASE5_HANDOFF.md) | public-data benchmark and leakage checks |
 | [PROJECT_STATE.md](PROJECT_STATE.md) | a frozen 2026-09-27 project-state snapshot |
-| [../HANDOFF_AGENTRECX.md](../HANDOFF_AGENTRECX.md) | an explicitly historical handoff; not a current serving description |
+| [../HANDOFF_AGENTRECX.md](handoff/HANDOFF_AGENTRECX.md) | an explicitly historical handoff; not a current serving description |
 
 ## Audit snapshots
 
@@ -70,6 +70,20 @@
 | [MEMORY_AGENT_CAPABILITY_AUDIT.md](MEMORY_AGENT_CAPABILITY_AUDIT.md) | the L1–L4 Memory/Agent capability matrix |
 | [MEMORY_AGENT_CALL_CHAINS.md](MEMORY_AGENT_CALL_CHAINS.md) | three traced call chains and where one stopped |
 | [MEMORY_AGENT_RESUME_CLAIMS.md](MEMORY_AGENT_RESUME_CLAIMS.md) | supported vs unsupported resume claims |
+
+## Historical milestone archives
+
+| Directory | Contains |
+| --- | --- |
+| [milestones/P2-P8/](milestones/P2-P8/) | early agent, planner, bridge, SFT, ranking and retrieval milestones |
+| [milestones/P9-P13/](milestones/P9-P13/) | serving/benchmark/retrieval milestones and source diffs |
+| [milestones/P14/](milestones/P14/) | Electronics data prep, BGE, reranking, real-history and retrieval repair milestones |
+| [milestones/P15-P17/](milestones/P15-P17/) | evidence RAG, shopping Skills and MCP tool-server milestones |
+| [milestones/P18/](milestones/P18/) | final integration source diff and evidence |
+| [handoff/](handoff/) | handoffs, status snapshots, capability matrix and final polish/archive records |
+| [external-eval/](external-eval/) | C4 proxy and ESCI external retrieval evaluation reports/manifests |
+| [qwen/](qwen/) | Qwen Live, ASK/resume and clarification-fix evidence |
+| [web-demo/](web-demo/) | P19 Web Shopping Assistant reports and evidence |
 
 ## Where things live
 

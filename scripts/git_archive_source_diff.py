@@ -25,7 +25,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 BASE = "4dec6d2"
-OUT = REPO / "GIT_ARCHIVE_SOURCE_DIFF.txt"
+OUT = REPO / "docs/handoff/GIT_ARCHIVE_SOURCE_DIFF.txt"
 BRANCH = "archive/agentrecx-web-demo-v1"
 
 
@@ -59,8 +59,8 @@ def category(rel: str) -> str:
     if rel.startswith("docs/assets/web_demo/"):
         return "P19 Web Demo (screenshots)"
     if rel.startswith("docs/") or rel.startswith("WEB_DEMO_") or rel in {
-        "README.md", "THIRD_PARTY_NOTICES.md", "GIT_ARCHIVE_REPORT.md",
-        "GIT_ARCHIVE_SOURCE_DIFF.txt", "docs/ARCHIVE_MANIFEST.md",
+        "README.md", "THIRD_PARTY_NOTICES.md", "docs/handoff/GIT_ARCHIVE_REPORT.md",
+        "docs/handoff/GIT_ARCHIVE_SOURCE_DIFF.txt", "docs/ARCHIVE_MANIFEST.md",
         "docs/archive_python_freeze.txt",
     }:
         return "Archive metadata / documentation"

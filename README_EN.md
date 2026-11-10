@@ -81,14 +81,14 @@ initialization banner; the startup cost is not hidden.
   exercised on an isolated conflict profile. A follow-up consistency fix now gives the current
   clarification reply task-scoped priority, re-evaluates the preserved candidate pool and prevents
   an explicit-wired final product without deleting historical M9 preferences; see
-  [`QWEN_CLARIFICATION_FIX_REPORT.md`](QWEN_CLARIFICATION_FIX_REPORT.md). The one-reply Qwen fix is
+  [`QWEN_CLARIFICATION_FIX_REPORT.md`](docs/qwen/QWEN_CLARIFICATION_FIX_REPORT.md). The one-reply Qwen fix is
   **GO** for that scope, with the final product's wireless evidence reported as UNKNOWN where the
   catalogue provides none. No fake ASK or Rule substitute was used.
 * **Qwen Replay (historical only):** saved P18 trajectories from `runs/p18/qwen_replay.json`,
   visibly labelled **Historical Replay — Not a Live Model Call**; read-only.
 * **Qwen Live unavailable / failures:** CPU Live and Replay remain available; no fake Qwen
   success, no silent downgrade to Rule. See [`docs/QWEN_LIVE_CONTRACT.md`](docs/QWEN_LIVE_CONTRACT.md)
-  and [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md).
+  and [`QWEN_LIVE_WEB_REPORT.md`](docs/qwen/QWEN_LIVE_WEB_REPORT.md).
 
 ### Verified results and honest limits
 
@@ -120,9 +120,9 @@ UNKNOWN and a neutral placeholder instead of inventing facts.
 * **Dependencies/resources:** [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) records Python/
   Node versions, the external catalogue/BGE-model/index/memory-fixture SHA-256 values, and
   reproduction steps.
-* **Detailed docs:** [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) ·
-  [`WEB_DEMO_REPORT.md`](WEB_DEMO_REPORT.md) · [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) ·
-  [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md).
+* **Detailed docs:** [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) ·
+  [`WEB_DEMO_REPORT.md`](docs/web-demo/WEB_DEMO_REPORT.md) · [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) ·
+  [`GIT_ARCHIVE_REPORT.md`](docs/handoff/GIT_ARCHIVE_REPORT.md).
 
 ---
 
@@ -589,11 +589,11 @@ Artifact recovery and storage:
 | [`docs/V2_KNOWN_LIMITATIONS.md`](docs/V2_KNOWN_LIMITATIONS.md) | explicitly unproven areas |
 | [`docs/HISTORICAL_ARCHITECTURE.md`](docs/HISTORICAL_ARCHITECTURE.md) | superseded detailed architecture, retained for chronology |
 | [`docs/INTERVIEW_DEMO.md`](docs/INTERVIEW_DEMO.md) | a short demo narrative for interviews |
-| [`WEB_DEMO_GUIDE.md`](WEB_DEMO_GUIDE.md) | P19 Web Shopping Assistant: one-command run, three scenarios, troubleshooting |
-| [`WEB_DEMO_REPORT.md`](WEB_DEMO_REPORT.md) | P19 final report: the eleven acceptance questions, real MCP evidence, limits |
+| [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Shopping Assistant: one-command run, three scenarios, troubleshooting |
+| [`WEB_DEMO_REPORT.md`](docs/web-demo/WEB_DEMO_REPORT.md) | P19 final report: the eleven acceptance questions, real MCP evidence, limits |
 | [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) | P19 BFF/SSE/view-model contract |
 | [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) | P19 external assets: paths, sizes, SHA-256, rebuild/obtain steps |
-| [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md) | local Git archive: commits, included/excluded content, reproducibility verdict |
+| [`GIT_ARCHIVE_REPORT.md`](docs/handoff/GIT_ARCHIVE_REPORT.md) | local Git archive: commits, included/excluded content, reproducibility verdict |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | P19 upstream reuse, Apache-2.0 compliance and dependency licences |
 
 The repository does not claim to be a deployed commercial recommender. It is a bounded,
@@ -613,8 +613,8 @@ reproducible engineering system with explicit evidence boundaries.
 
 - **Local Git archive:** branch `archive/agentrecx-web-demo-v1`; commit IDs, included/excluded
   files, tests and the reproducibility verdict are in
-  [`GIT_ARCHIVE_REPORT.md`](GIT_ARCHIVE_REPORT.md) and
-  [`GIT_ARCHIVE_SOURCE_DIFF.txt`](GIT_ARCHIVE_SOURCE_DIFF.txt).
+  [`GIT_ARCHIVE_REPORT.md`](docs/handoff/GIT_ARCHIVE_REPORT.md) and
+  [`GIT_ARCHIVE_SOURCE_DIFF.txt`](docs/handoff/GIT_ARCHIVE_SOURCE_DIFF.txt).
 - **Run:** `powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1` (front end
   `http://127.0.0.1:3000`; stop with `scripts/stop_web_demo.ps1`; E2E with
   `scripts/run_web_demo_e2e.ps1`).

@@ -170,22 +170,22 @@ AgentRec-X 完成了可运行的 Shopping Agent 原型：真实商品目录、BM
 
 | 实验/主题 | 主要报告或证据 |
 |---|---|
-| 项目总览、目录与当前状态 | [README.md](README.md) |
-| 早期探索（P5–P12） | [P5_PERSONALIZATION_AUDIT_REPORT.md](P5_PERSONALIZATION_AUDIT_REPORT.md)、[P6_CLASSICAL_EVAL_REPORT.md](P6_CLASSICAL_EVAL_REPORT.md)、[P7_B_QWEN_DEV_COMPARISON_REPORT.md](P7_B_QWEN_DEV_COMPARISON_REPORT.md)、[P8_B_REPORT.md](P8_B_REPORT.md) |
-| C4 Dev 135、BGE 检索与历史消融 | [P14D2_REPORT.md](P14D2_REPORT.md) |
-| C4 Proxy Test 129（内部冻结评测） | [REAL_RETRIEVAL_EVAL_REPORT.md](REAL_RETRIEVAL_EVAL_REPORT.md) |
-| ESCI 真实查询外部评测、semantic/official-script gain | [ESCI_EXTERNAL_EVAL_REPORT.md](ESCI_EXTERNAL_EVAL_REPORT.md) |
-| ESCI 数据、版本、GPU 编码与复现 | [ESCI_EXTERNAL_DATA_MANIFEST.md](ESCI_EXTERNAL_DATA_MANIFEST.md)、[experiments/esci_external/README.md](experiments/esci_external/README.md) |
-| V0 / BM25 / Qwen Reranker 73 任务对照 | [P14B3_EVAL100_REPORT.md](P14B3_EVAL100_REPORT.md) |
-| Rule / Qwen Base / Qwen SFT | [P14C1_REPORT.md](P14C1_REPORT.md) |
-| Evidence RAG、UNKNOWN 与解释 | [P15_REPORT.md](P15_REPORT.md) |
-| Shopping Skills | [P16_REPORT.md](P16_REPORT.md) |
-| MCP 工具与协议 | [P17_REPORT.md](P17_REPORT.md) |
-| P18 本地验收与模拟标签限制 | [P18_FINAL_REPORT.md](P18_FINAL_REPORT.md) |
-| Web Demo 与 CPU/Replay 回归 | [WEB_DEMO_REPORT.md](WEB_DEMO_REPORT.md)、[FINAL_POLISH_REPORT.md](FINAL_POLISH_REPORT.md) |
-| 真实 Qwen GPU / 浏览器验收 | [QWEN_LIVE_WEB_REPORT.md](QWEN_LIVE_WEB_REPORT.md) |
-| 真实 ASK→M9→Resume（修复前） | [QWEN_ASK_RESUME_REPORT.md](QWEN_ASK_RESUME_REPORT.md) |
-| 当前任务约束、候选重评与 Gate 修复（修复后 GO） | [QWEN_CLARIFICATION_FIX_REPORT.md](QWEN_CLARIFICATION_FIX_REPORT.md) |
+| 项目总览、目录与当前状态 | [README.md](../../README.md) |
+| 早期探索（P5–P12） | [P5_PERSONALIZATION_AUDIT_REPORT.md](../milestones/P2-P8/P5_PERSONALIZATION_AUDIT_REPORT.md)、[P6_CLASSICAL_EVAL_REPORT.md](../milestones/P2-P8/P6_CLASSICAL_EVAL_REPORT.md)、[P7_B_QWEN_DEV_COMPARISON_REPORT.md](../milestones/P2-P8/P7_B_QWEN_DEV_COMPARISON_REPORT.md)、[P8_B_REPORT.md](../milestones/P2-P8/P8_B_REPORT.md) |
+| C4 Dev 135、BGE 检索与历史消融 | [P14D2_REPORT.md](../milestones/P14/P14D2_REPORT.md) |
+| C4 Proxy Test 129（内部冻结评测） | [REAL_RETRIEVAL_EVAL_REPORT.md](../external-eval/REAL_RETRIEVAL_EVAL_REPORT.md) |
+| ESCI 真实查询外部评测、semantic/official-script gain | [ESCI_EXTERNAL_EVAL_REPORT.md](../external-eval/ESCI_EXTERNAL_EVAL_REPORT.md) |
+| ESCI 数据、版本、GPU 编码与复现 | [ESCI_EXTERNAL_DATA_MANIFEST.md](../external-eval/ESCI_EXTERNAL_DATA_MANIFEST.md)、[experiments/esci_external/README.md](../../experiments/esci_external/README.md) |
+| V0 / BM25 / Qwen Reranker 73 任务对照 | [P14B3_EVAL100_REPORT.md](../milestones/P14/P14B3_EVAL100_REPORT.md) |
+| Rule / Qwen Base / Qwen SFT | [P14C1_REPORT.md](../milestones/P14/P14C1_REPORT.md) |
+| Evidence RAG、UNKNOWN 与解释 | [P15_REPORT.md](../milestones/P15-P17/P15_REPORT.md) |
+| Shopping Skills | [P16_REPORT.md](../milestones/P15-P17/P16_REPORT.md) |
+| MCP 工具与协议 | [P17_REPORT.md](../milestones/P15-P17/P17_REPORT.md) |
+| P18 本地验收与模拟标签限制 | [P18_FINAL_REPORT.md](../../P18_FINAL_REPORT.md) |
+| Web Demo 与 CPU/Replay 回归 | [WEB_DEMO_REPORT.md](../web-demo/WEB_DEMO_REPORT.md)、[FINAL_POLISH_REPORT.md](FINAL_POLISH_REPORT.md) |
+| 真实 Qwen GPU / 浏览器验收 | [QWEN_LIVE_WEB_REPORT.md](../qwen/QWEN_LIVE_WEB_REPORT.md) |
+| 真实 ASK→M9→Resume（修复前） | [QWEN_ASK_RESUME_REPORT.md](../qwen/QWEN_ASK_RESUME_REPORT.md) |
+| 当前任务约束、候选重评与 Gate 修复（修复后 GO） | [QWEN_CLARIFICATION_FIX_REPORT.md](../qwen/QWEN_CLARIFICATION_FIX_REPORT.md) |
 | BGE 预热、single-flight 与首查性能 | [FINAL_POLISH_REPORT.md](FINAL_POLISH_REPORT.md) |
 | Git 归档与来源 | [GIT_ARCHIVE_REPORT.md](GIT_ARCHIVE_REPORT.md) |
 

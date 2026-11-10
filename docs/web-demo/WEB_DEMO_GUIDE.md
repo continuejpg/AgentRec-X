@@ -179,7 +179,7 @@ Logs:
 This section now has **real GPU validation**, not just a contract wiring:
 RTX 4090 24 GB, Qwen3.5-9B Base (`/root/autodl-tmp/models/Qwen3.5-9B-ms`, no SFT adapter), real
 `/plan` calls, real MCP `run_agent_turn`, real executor/Gate/P15, and two real browser Qwen Live
-turns. Full evidence: [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md) and
+turns. Full evidence: [`QWEN_LIVE_WEB_REPORT.md`](../qwen/QWEN_LIVE_WEB_REPORT.md) and
 `runs/web_demo/qwen_live/`.
 
 This is an **optional** live mode over the existing P17 MCP / ElectronicsPlannerExecutor stack.
@@ -234,7 +234,7 @@ optional Qwen clarification handle. `/api/chat/stream` accepts
   fix now treats "Please avoid wired headphones" as a **task-scoped hard exclusion**, overrides the
   old historical conflict only for this task, preserves the old M9 audit entry, re-evaluates the
   preserved candidate pool, and prevents an explicit-wired final product without requiring a second
-  "Forget" reply. See [`QWEN_CLARIFICATION_FIX_REPORT.md`](QWEN_CLARIFICATION_FIX_REPORT.md); the
+  "Forget" reply. See [`QWEN_CLARIFICATION_FIX_REPORT.md`](../qwen/QWEN_CLARIFICATION_FIX_REPORT.md); the
   final item's wireless evidence is UNKNOWN where the catalogue has no such evidence. No ASK or
   reply was fabricated.
 - The temporary model server/tunnel were stopped after evidence collection; the AutoDL GPU

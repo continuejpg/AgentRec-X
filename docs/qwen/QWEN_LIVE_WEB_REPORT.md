@@ -49,7 +49,7 @@
 | GPU memory | 17,549 MiB during load; **19,845 MiB peak observed** during real serving; released to 1 MiB after cleanup |
 | Lifecycle | model server and tunnel stopped after collecting evidence; the AutoDL GPU instance itself was not created/stopped/released |
 
-Artifacts: [`runs/web_demo/qwen_live/gpu_service_info.json`](runs/web_demo/qwen_live/gpu_service_info.json),
+Artifacts: [`runs/web_demo/qwen_live/gpu_service_info.json`](../../runs/web_demo/qwen_live/gpu_service_info.json),
 `model_load_measurement.txt`, `model_server.log`, `gpu_service_info_raw.txt`.
 The server log also shows optional `causal_conv1d` / `flash-linear-attention` kernels are absent and
 the model uses reference PyTorch implementations; this affects speed, not the returned action.

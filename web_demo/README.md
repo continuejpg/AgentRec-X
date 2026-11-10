@@ -66,7 +66,7 @@ shows Qwen Live as Unavailable; the BFF does not start/stop AutoDL/GPU, create a
 download/quantize a model, or silently fall back to Rule. When configured, the MCP server exposes
 the original 7 tools plus the optional 8th `run_agent_turn`. See
 [`../docs/QWEN_LIVE_CONTRACT.md`](../docs/QWEN_LIVE_CONTRACT.md) and
-[`../QWEN_LIVE_WEB_REPORT.md`](../QWEN_LIVE_WEB_REPORT.md). On 2026-11-09 this path was validated
+[`../QWEN_LIVE_WEB_REPORT.md`](../docs/qwen/QWEN_LIVE_WEB_REPORT.md). On 2026-11-09 this path was validated
 with real Qwen3.5-9B Base inference, real MCP/executor/Gate/P15 execution and two real browser
 turns on an RTX 4090; the temporary model server/tunnel are stopped afterwards. The model did not
 choose ASK in the tested prompts, so that continuation branch is not claimed.

@@ -3,8 +3,8 @@
 > Scope: the local Git archive `archive/agentrecx-web-demo-v1` of the current AgentRec-X
 > worktree. It records **what is in Git**, **what must exist outside Git to run the Web Demo**,
 > how to verify those external bytes, and how far the archive is reproducible on another
-> machine.  It complements [`GIT_ARCHIVE_REPORT.md`](../GIT_ARCHIVE_REPORT.md) and
-> [`WEB_DEMO_GUIDE.md`](../WEB_DEMO_GUIDE.md).
+> machine.  It complements [`GIT_ARCHIVE_REPORT.md`](handoff/GIT_ARCHIVE_REPORT.md) and
+> [`WEB_DEMO_GUIDE.md`](web-demo/WEB_DEMO_GUIDE.md).
 
 ## 1. Environment used to verify the archive
 

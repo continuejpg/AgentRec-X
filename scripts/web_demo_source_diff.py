@@ -24,7 +24,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 BASELINE = REPO / "runs/web_demo/baseline"
-OUT = REPO / "WEB_DEMO_SOURCE_DIFF.txt"
+OUT = REPO / "docs/web-demo/WEB_DEMO_SOURCE_DIFF.txt"
 
 # Directories/files added by this milestone.  Keep this list explicit so unrelated untracked
 # files from earlier milestones are never silently attributed to the Web Demo.
@@ -36,8 +36,8 @@ ADDED_SCOPES = (
 )
 ADDED_FILES = (
     "THIRD_PARTY_NOTICES.md",
-    "WEB_DEMO_REPORT.md",
-    "WEB_DEMO_GUIDE.md",
+    "docs/web-demo/WEB_DEMO_REPORT.md",
+    "docs/web-demo/WEB_DEMO_GUIDE.md",
     "docs/WEB_DEMO_CONTRACT.md",
     "scripts/run_web_demo.ps1",
     "scripts/stop_web_demo.ps1",
