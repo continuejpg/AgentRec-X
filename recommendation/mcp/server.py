@@ -856,17 +856,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--memory-fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--search-mode", choices=("bge", "bm25"), default="bge")
     parser.add_argument("--clarification-ttl-seconds", type=float, default=1800.0)
+    parser.add_argument("--warmup", action="store_true",
+                        help="load and exercise the BGE encoder before advertising MCP readiness")
     parser.add_argument("--allow-memory-writes", action="store_true",
                         help="enable writes only for a trusted local test client")
     args = parser.parse_args(argv)
+    startup_started = time.perf_counter()
+    catalogue_started = time.perf_counter()
     catalogue = ElectronicsCatalogue.load()
+    catalogue_ms = round((time.perf_counter() - catalogue_started) * 1000.0, 2)
+    configure_ms: float | None = None
+    warmup_ms: float | None = None
+    warmup_payload: dict[str, Any] | None = None
+    search_ready = True
     if args.search_mode == "bge":
+        configure_started = time.perf_counter()
         config = configure_catalogue(catalogue)
+        configure_ms = round((time.perf_counter() - configure_started) * 1000.0, 2)
         if config["status"] != "active":
             LOGGER.warning("BGE unavailable; keeping BM25 fallback: %s", config.get("reason"))
             search_mode = "bm25"
         else:
             search_mode = "bge"
+            if args.warmup:
+                warmup_started = time.perf_counter()
+                try:
+                    warmup_payload = catalogue.search_source.warmup()
+                except Exception as exc:  # noqa: BLE001 - fail startup instead of fake readiness
+                    LOGGER.exception("BGE prewarm failed; MCP startup will not advertise Search Ready")
+                    raise RuntimeError(f"BGE prewarm failed: {type(exc).__name__}: {exc}") from exc
+                warmup_ms = round((time.perf_counter() - warmup_started) * 1000.0, 2)
+                search_ready = bool(catalogue.search_source.search_ready)
+                LOGGER.info(
+                    "BGE Search Ready warmup_ms=%s ready=%s encoder=%s",
+                    warmup_ms, search_ready, catalogue.search_source.encoder_status(),
+                )
     else:
         search_mode = "bm25"
     memory, task = _memory_for(args.memory_fixture, args.user_key)
@@ -883,6 +907,14 @@ def main(argv: list[str] | None = None) -> int:
         "transport": "stdio", "user_key": args.user_key, "search_mode": search_mode,
         "memory_fixture": str(args.memory_fixture), "writes_enabled": bool(args.allow_memory_writes),
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
+        "search_ready": bool(search_ready),
+        "startup_timings": {
+            "catalogue_ms": catalogue_ms,
+            "configure_ms": configure_ms,
+            "warmup_ms": warmup_ms,
+            "startup_before_handshake_ms": round((time.perf_counter() - startup_started) * 1000.0, 2),
+        },
+        "warmup": warmup_payload,
     }
     sys.stderr.write("agentrecx-mcp manifest " + json.dumps(manifest, ensure_ascii=False) + "\n")
     sys.stderr.flush()

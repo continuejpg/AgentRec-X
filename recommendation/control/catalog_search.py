@@ -451,6 +451,41 @@ class CatalogSearchSource:
 
     # -- introspection ----------------------------------------------------- #
 
+    @property
+    def dense_index(self) -> Any:
+        """The configured dense index (``None`` for BM25-only mode)."""
+        return self._dense
+
+    def warmup(self, query: str = "wireless headphones") -> dict[str, Any]:
+        """Load and exercise the dense encoder/index without changing search state.
+
+        Only the BGE mode has lazy encoder state.  A BM25-only source is already ready and
+        returns an explicit no-op status rather than pretending an encoder exists.
+        """
+        if self._dense is None:
+            return {"status": "not_required", "mode": self._mode}
+        warmup = getattr(self._dense, "warmup", None)
+        if warmup is None:
+            raise RuntimeError("dense index does not expose a warmup method")
+        result = warmup(query)
+        # Exercise the actual dense retrieval path as part of Search Ready.  This is a
+        # real index read; it does not mutate the catalogue or return a fake result.
+        result["retrieval_check"] = self.search(query, limit=1).as_dict()
+        return result
+
+    def encoder_status(self) -> dict[str, Any]:
+        if self._dense is None:
+            return {"ready": True, "mode": self._mode, "required": False}
+        status = getattr(self._dense, "encoder_status", None)
+        return status() if status is not None else {"ready": True, "mode": self._mode}
+
+    @property
+    def search_ready(self) -> bool:
+        if self._mode not in {"bge", "hybrid"}:
+            return True
+        status = self.encoder_status()
+        return bool(status.get("ready"))
+
     def status(self) -> dict[str, Any]:
         """Return a small JSON-serialisable description of the index."""
         return {
@@ -461,4 +496,6 @@ class CatalogSearchSource:
             "score_kind": self.score_kind,
             "dense_index": self._dense is not None,
             "hybrid_bm25_head": self._hybrid_bm25_head,
+            "search_ready": self.search_ready,
+            "encoder": self.encoder_status(),
         }

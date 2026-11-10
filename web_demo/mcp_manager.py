@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shlex
 import time
 from contextlib import suppress
@@ -188,6 +189,14 @@ class MCPManager:
             "--clarification-ttl-seconds",
             repr(float(self.settings.clarification_ttl_s)),
         ]
+        if self.settings.search_mode == "bge":
+            # The Web BFF advertises ready only after the real encoder warm-up and a real
+            # retrieval check completed in the child process.  This removes the old first
+            # user-query wait without claiming a fake readiness.  Set
+            # AGENTRECX_WEB_DEMO_BGE_WARMUP=0 only for controlled before/after measurements.
+            _warmup = str(os.environ.get("AGENTRECX_WEB_DEMO_BGE_WARMUP", "1")).strip().lower()
+            if _warmup not in {"0", "false", "no", "off"}:
+                parts.append("--warmup")
         if runtime.writes_enabled:
             parts.append("--allow-memory-writes")
         inner = " ".join(shlex.quote(part) for part in parts)
