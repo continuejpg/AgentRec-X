@@ -1,0 +1,3278 @@
+AGENTREC-X WEB DEMO — QWEN BASE LIVE SOURCE DIFF
+================================================================================
+Local, uncommitted working tree on top of the previous archive commit.
+BRANCH: archive/agentrecx-web-demo-v1
+BASELINE HEAD: c24b138bbc003689e3d75cd1f8dcae35d9dcad41
+NO COMMIT / NO PUSH was performed. The 34 pre-existing Qwen Live changes are preserved;
+the real GPU validation adds the E2E spec, report/guide updates and local evidence (ignored).
+
+SUMMARY
+  tracked files changed: 25
+  new non-ignored files: 10
+
+== NEW FILES (non-ignored; bytes/sha256) ==
+A	QWEN_LIVE_WEB_REPORT.md	bytes=12806	sha256=385835e737c6bc2a9808a575f3591dce41565002acdd0078bc5e77f76a3741de
+A	docs/QWEN_LIVE_CONTRACT.md	bytes=8007	sha256=58fea3533be3bfb6a247c7e3e0e1d3b41f0954d0cd3a774b7acefb7bc08cd47a
+A	e2e/tests/07-qwen-live-real.spec.ts	bytes=7146	sha256=b4d723f257f1c00d6246612ac24949b4673d6304c664414acb7c2bfe500741a3
+A	tests/test_qwen_live_bff.py	bytes=9492	sha256=f8f8c7e129144fbf65865b4e3c661ecdb970e9ec6d442c36f26e00e8dd9af060
+A	tests/test_qwen_live_mcp_integration.py	bytes=7357	sha256=1bb291d5d702b4b80648161ab949f1ca725c430fa8370ee8c624f33d4bf32777
+A	tests/test_qwen_live_unit.py	bytes=4466	sha256=1d29578da382d366ec6520358cdfd23324fd78cd51854022c07807aa873f75b5
+A	web/components/QwenLiveNotice.tsx	bytes=3751	sha256=b6fac5287e42007be45c0afccf179b7ca1a61d479f66ef72940b6c0ddca4901d
+A	web/lib/modes.ts	bytes=3152	sha256=583de885c2d10148a5f4867e7d69e8fe1f9abb2d727baf0eca00ba5f68edadb7
+A	web/lib/planner.ts	bytes=6604	sha256=2102a9033328ffd444e8a2fad726ede737543106c986b119a8327b5b004ce8df
+A	web_demo/qwen_health.py	bytes=7304	sha256=9d4e0f8ea2feaf31620cbebbb5ec90aa885c253f046bd57d68311e9e7dae2f08
+
+== TRACKED DIFF (git diff HEAD) ==
+diff --git a/README.md b/README.md
+index ff69161..7661738 100644
+--- a/README.md
++++ b/README.md
+@@ -63,12 +63,22 @@ warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2
+    `confirmation_source="web_ui_explicit_user_reply"`, the real update (`added=2`) and refreshed
+    active preferences appear in the panel, and the pending recommendation resumes.
+ 
+-### CPU Live vs Qwen Replay
++### CPU Live vs Qwen Base Live vs Qwen Replay
+ 
+ * **CPU Live (default, live):** real local MCP/BGE/Rule Planner/Gate/P15/P16/M9; no GPU, no Qwen.
++* **Qwen Base Live (real GPU-validated optional mode):** when explicitly configured and a real
++  `/plan` health check returns a valid PlannerAction, the browser can select Qwen Base Live. The real
++  Qwen3.5-9B Base PlannerActions are executed by the **existing** electronics executor — same
++  catalogue/search/Scorer/CandidateLedger/Eligibility/Gate/P15/M9. No Rule→Qwen rewriting and no
++  Qwen→Rule fallback. On 2026-11-09 this was validated on an RTX 4090 with real `/plan` inference,
++  real MCP executor runs and two real browser turns; the temporary service/tunnel are stopped now,
++  so a rerun requires starting them. The model did not choose ASK in the tested prompts; that
++  specific continuation branch remains unexercised (no ASK was fabricated).
+ * **Qwen Replay (historical only):** saved P18 trajectories from `runs/p18/qwen_replay.json`,
+   visibly labelled **Historical Replay — Not a Live Model Call**; read-only.
+-* **Qwen Live:** disabled — no live Qwen service is connected.
++* **Qwen Live unavailable / failures:** CPU Live and Replay remain available; no fake Qwen
++  success, no silent downgrade to Rule. See [`docs/QWEN_LIVE_CONTRACT.md`](docs/QWEN_LIVE_CONTRACT.md)
++  and [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md).
+ 
+ ### Verified results and honest limits
+ 
+@@ -77,13 +87,15 @@ warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2
+ | Electronics catalogue | 76,263 accepted products |
+ | BGE candidate reachability | Recall@100 **20/135 → 66/135** (P14-D2; retrieval layer, not final quality) |
+ | P18 Reserved Test | recommendation Top-1 **11/12** — **simulated rule labels**, not real users |
+-| Web E2E | **7/7 passed**, 64 real DOM+network checks, 8 screenshots (Playwright + system Chrome) |
+-| MCP tools / P16 Skills | **7** tools (`search_products`, `get_product_info`, …) / **2** Skills |
++| Web E2E | **9/9 passed** (7 CPU/Replay + 2 real Qwen Live), 8 CPU/Replay screenshots + 2 Qwen screenshots (Playwright + system Chrome) |
++| MCP tools / P16 Skills | **7** default tools (+ optional 8th `run_agent_turn` when Qwen Live is configured) / **2** Skills |
+ | Web Demo answer quality | **NOT ESTABLISHED** (no online A/B, clicks, conversion or satisfaction) |
+ 
+ Limits that must travel with these numbers: the Reserved Test uses simulated rule labels; real
+ long-term-history personalization gain is **not established**; Planner SFT did not beat Base;
+-the Web CPU Live path uses the Rule Planner (no live Qwen); Qwen is Replay-only; semantic truth of
++the Web CPU Live path uses the Rule Planner; Qwen Base Live is a separate real GPU-validated mode
++(available only after a real model health/PlannerAction check; no ASK observed in the tested
++prompts); Qwen Replay is historical only; semantic truth of
+ generated explanations has **not** been human-reviewed; the local demo has no auth/TLS and is not
+ production-ready. The catalogue snapshot has no trusted price/stock/rating/image, so the UI shows
+ UNKNOWN and a neutral placeholder instead of inventing facts.
+@@ -520,8 +532,11 @@ default Serving V1 result.
+ * **No database server:** the legacy serving demo uses a local SQLite preference store; the P19
+   Web Demo's M9 preference memory is a process-local fixture (`data/p14e2/benchmark/dev.agent.jsonl`)
+   that resets when the BFF restarts.
+-* **No external LLM by default:** deterministic mode is offline; provider mode is opt-in and the
+-  P19 demo's Qwen mode is historical Replay only.
++* **No external LLM by default:** deterministic mode is offline; the optional Qwen Base Live mode
++  is explicit opt-in, uses the existing Qwen3.5-9B Base planner/executor stack, and is only
++  available after a real model health/PlannerAction check. It was GPU-validated on 2026-11-09;
++  the temporary model service is not kept running by this repository. Qwen Replay remains
++  historical only.
+ * **Licences and provenance:** external design sources and backend files are documented in
+   [`backends/tiger_public/PROVENANCE.md`](backends/tiger_public/PROVENANCE.md); the Web Demo's
+   upstream reuse is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+@@ -598,5 +613,6 @@ reproducible engineering system with explicit evidence boundaries.
+   documented with SHA-256 and obtain/rebuild steps in
+   [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md). Without them the real-data demo cannot
+   start; the archive states this explicitly.
+-- **Boundary:** local demo only; no auth/TLS; Qwen is Replay-only; quality/online effectiveness is
+-  **NOT ESTABLISHED**.
++- **Boundary:** local demo only; no auth/TLS; Qwen Base Live is real GPU-validated but
++  availability-gated and its service is stopped by default; Qwen Replay is historical;
++  quality/online effectiveness is **NOT ESTABLISHED**.
+diff --git a/WEB_DEMO_GUIDE.md b/WEB_DEMO_GUIDE.md
+index 1d25032..61ec3f9 100644
+--- a/WEB_DEMO_GUIDE.md
++++ b/WEB_DEMO_GUIDE.md
+@@ -28,9 +28,12 @@ Browser (Windows, Chrome/Edge)
+ - **Real clarification + memory**: a Gate clarification is answered by you in the browser; the
+   reply is persisted through the existing M9 writer, then the preference panel refreshes and the
+   recommendation resumes.
+-- **CPU Live vs Qwen Replay**: CPU Live is the only live mode. Qwen is shown only as saved P18
+-  trajectories, always labelled **Historical Replay — Not a Live Model Call**. Qwen Live is
+-  disabled (no live service).
++- **CPU Live vs Qwen Base Live vs Qwen Replay**: CPU Live is the default live mode. **Qwen Base
++  Live is optional**: it becomes selectable only after the BFF's real `/plan` health check returns
++  a valid PlannerAction from the configured Qwen3.5-9B Base service. Qwen Replay remains saved P18
++  trajectories, always labelled **Historical Replay — Not a Live Model Call** and never presented
++  as live. When no Qwen service is configured/reachable, Qwen Live shows **Unavailable** with the
++  real reason; there is no silent Rule fallback.
+ - **No cart, checkout, payment, order or stock.** `Price unavailable / UNKNOWN` is the honest
+   state for this catalogue snapshot.
+ 
+@@ -158,9 +161,10 @@ Logs:
+ 
+ ### Other UI
+ 
+-- **Modes**: the header shows **CPU Live** as the live mode, **Qwen Replay** (clearly labelled
+-  *Historical Replay — Not a Live Model Call*) for saved trajectories, and **Qwen Live**
+-  disabled with its reason. Replay never calls a model.
++- **Modes**: the header shows **CPU Live** as the default live mode, **Qwen Replay** (clearly
++  labelled *Historical Replay — Not a Live Model Call*) for saved trajectories, and **Qwen Base
++  Live** — selectable only when the real backend health check says available, otherwise disabled
++  with its real reason. Replay never calls a model; Qwen Live never falls back to Rule.
+ - **Mobile**: width < 1280 becomes a single column; preferences, details/evidence and comparison
+   open in drawers/sheets; the composer stays at the bottom.
+ - **Recovery**: if a tool fails, the UI shows the real error/status (with tool name and latency);
+@@ -169,7 +173,94 @@ Logs:
+ - **Recent conversations** are in-process; the browser remembers only the session id. BFF
+   restart starts a fresh list.
+ 
+-## 6. Tests and verification
++## 6. Qwen Base Live (real GPU validated 2026-11-09)
++
++This section now has **real GPU validation**, not just a contract wiring:
++RTX 4090 24 GB, Qwen3.5-9B Base (`/root/autodl-tmp/models/Qwen3.5-9B-ms`, no SFT adapter), real
++`/plan` calls, real MCP `run_agent_turn`, real executor/Gate/P15, and two real browser Qwen Live
++turns. Full evidence: [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md) and
++`runs/web_demo/qwen_live/`.
++
++This is an **optional** live mode over the existing P17 MCP / ElectronicsPlannerExecutor stack.
++It is not a new Agent loop: the real Qwen3.5-9B Base returns a PlannerAction (`ASK`, `RETRIEVE`,
++`RERANK`, `FINALIZE`), and the existing executor/search/scorer/ledger/eligibility/Gate/P15/M9
++components execute it. A Rule→Qwen rewrite or Qwen→Rule fallback is not implemented.
++
++### Configuration
++
++Set these in the **same Windows PowerShell session** that launches the demo (the launcher forwards
++them into WSL; the endpoint is never shown in the browser):
++
++```powershell
++$env:QWEN_LIVE_ENABLED = "1"                       # explicit opt-in
++$env:QWEN_MODEL_ENDPOINT = "http://127.0.0.1:18009"  # existing model server, NOT auto-started
++$env:QWEN_MODEL_NAME = "Qwen3.5-9B-Base"
++$env:QWEN_LIVE_TIMEOUT_S = "180"                    # each /plan call
++$env:QWEN_LIVE_HEALTH_TIMEOUT_S = "60"             # real PlannerAction health probe
++$env:QWEN_LIVE_TURN_TIMEOUT_S = "600"              # bounds the complete multi-step turn
++$env:QWEN_LIVE_MAX_STEPS = "8"
++powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
++```
++
++Availability is deliberately strict: the BFF performs a real `POST /plan` health probe and only
++shows Qwen Live as available after it parses a valid PlannerAction. A configured-but-unreachable
++service leaves **Qwen Live Unavailable**; CPU Live and Qwen Replay continue to work, and a Qwen
++request never silently becomes a Rule request. The BFF does **not** start/stop AutoDL/GPU, create
++SSH tunnels, download or quantize a model. Start the model service yourself, using the repository's
++`training/agent_sft/model_server.py` or your existing endpoint.
++
++The MCP server exposes the original 7 tools plus one conditional 8th tool,
++`run_agent_turn`, only when Qwen Live is configured. `run_agent_turn` returns the model's real
++actions, tool observations, Gate result, P15 evidence, planner/explainer latencies and the
++optional Qwen clarification handle. `/api/chat/stream` accepts
++`{"mode":"qwen_live", ...}` and emits the same SSE event names plus planner metadata on `done`.
++
++### Last verified status (2026-11-09, real GPU)
++
++- Instance: `autodl-container-06fa4ab99e-6a73b008`, GPU RTX 4090 24,564 MiB; CUDA true.
++- Existing `training/agent_sft/model_server.py`, base model only (`adapter=None`), port 8009;
++  model load **12.203 s**; GPU peak observed **19,845 MiB**; `/plan` 2.6–3.6 s direct/tunnel
++  (2.6–4.7 s inside the agent loop); token counts 388–874 input / 69–107 output per call.
++- Temporary WSL tunnel `127.0.0.1:18009 → remote 127.0.0.1:8009`; BFF health reported
++  `qwen_live.status=available`, `planner_action=RETRIEVE`, both MCP servers exposed **8 tools**.
++- Real MCP: 3 finalized turns (`B08D32JM5F`, `B07GPH9WF3`, `B00B93N0PO`, all
++  `ALLOW_FINALIZE/evidence_sufficient`, P15 evidence/`rag` present) and one real non-FINALIZE
++  (`under $1`: 7 bounded planner calls, Gate `NEED_MORE_PRODUCT_EVIDENCE`, no finalize).
++- Real browser: full Playwright **9/9 PASS** (7 CPU/Replay + 2 real Qwen); screenshots
++  `qwen-live-real.png` / `qwen-live-nonfinal.png`.
++- The real model did **not** choose ASK for the tested prompts; the Qwen ASK→M9→resume branch was
++  not exercised. The CPU clarification/M9 path remained green; no ASK was fabricated.
++- The temporary model server/tunnel were stopped after evidence collection; the AutoDL GPU
++  instance lifecycle was not touched. Start the service and tunnel yourself for a rerun:
++
++```bash
++# remote GPU host: existing model_server.py + Base model (no adapter)
++cd /root/autodl-tmp/agentrecx
++nohup /root/autodl-tmp/agentrecx-sft/bin/python -m training.agent_sft.model_server \
++  --model /root/autodl-tmp/models/Qwen3.5-9B-ms --port 8009 --max-new-tokens 256 \
++  > /root/autodl-tmp/qwen_live_model_server.log 2>&1 &
++```
++
++```bash
++# WSL: temporary tunnel (do not create/stop the GPU instance)
++ssh -N -L 18009:127.0.0.1:8009 -p <port> -i <key> root@<host>
++```
++
++Then use the Qwen env block above and start `scripts/run_web_demo.ps1`. Qwen Live is selectable
++only after `/api/health` reports `qwen_live.status=available`.
++
++### Contract/regression tests (no GPU required)
++
++```bash
++# contract-only tests (a local HTTP planner double, clearly not Qwen)
++.venv/bin/python -m pytest -q tests/test_qwen_live_unit.py tests/test_qwen_live_bff.py
++AGENTRECX_RUN_QWEN_MCP_INTEGRATION=1 .venv/bin/python -m pytest -q tests/test_qwen_live_mcp_integration.py
++```
++
++For a real GPU rerun, the browser tests are
++`e2e/tests/07-qwen-live-real.spec.ts` (requires a real available Qwen service).
++
++## 7. Tests and verification
+ 
+ Run targeted tests only (the repository has a large unrelated test suite; do not run all of it).
+ 
+@@ -194,10 +285,15 @@ End-to-end (real browser, real BFF/MCP; starts and stops the demo itself):
+ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1
+ ```
+ 
+-Latest verified result: **7/7 tests PASS**, 64 real evidence checks, 8 screenshots with validated
+-1440×900 / 390×844 sizes, ports released after cleanup. Artifacts:
+-`runs/web_demo/screenshots/`, `runs/web_demo/e2e/summary.json`,
+-`runs/web_demo/e2e/REPORT.md`, `runs/web_demo/e2e/evidence.jsonl`.
++Latest verified result: **9/9 tests PASS** (7 original CPU/Replay + 2 real Qwen Live tests),
++zero failures, real screenshots including `qwen-live-real.png` / `qwen-live-nonfinal.png`.
++Artifacts:
++
++- `runs/web_demo/qwen_live/e2e_real/summary.json`, `evidence.jsonl`, `full_suite_results.json`;
++- `runs/web_demo/qwen_live/real_qwen_mcp_transcript.json`,
++  `real_qwen_nonfinal.json`, `gpu_service_info.json`, `real_plan_*.json`;
++- original CPU/Replay artifacts: `runs/web_demo/e2e/summary.json` and
++  `runs/web_demo/screenshots/`.
+ 
+ License/header audit:
+ 
+@@ -205,7 +301,7 @@ License/header audit:
+ wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/python third_party/tools/check_copied_headers.py --root web --notices THIRD_PARTY_NOTICES.md
+ ```
+ 
+-## 7. Troubleshooting
++## 8. Troubleshooting
+ 
+ | Symptom | What to check |
+ |---|---|
+@@ -216,8 +312,10 @@ wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/pytho
+ | `memory_writes_disabled` on clarification reply | You are on Demo A (read-only). Create a conversation with Demo B, and start the BFF via the demo launcher (writes enabled). |
+ | BFF exits with `PermissionError` writing `runs/` | Run the BFF inside WSL as documented; do not use a Windows Python interpreter. |
+ | Memory changed unexpectedly / want a clean slate | Restart the BFF (fixture-backed M9); `POST /api/demo/restart` also restarts both MCP servers. |
++| Qwen Live stays Unavailable despite config | Check `/api/health` → `qwen_live` (`status`, `planner_action`, `latency_ms`, `detail`); verify `QWEN_LIVE_ENABLED=1`, `QWEN_MODEL_ENDPOINT` is reachable from the WSL BFF, and the service returns a valid `/plan` PlannerAction. The BFF never creates a tunnel or starts a GPU/model server. |
++| Qwen Live request fails | The UI/API shows a real `qwen_*` error; it never falls back to Rule or Replay. Fix/reconnect the service, then retry. |
+ 
+-## 8. Known limitations (honest)
++## 9. Known limitations (honest)
+ 
+ 1. **Catalogue evidence only.** No live price, stock, ratings, images, seller data or real-world
+    quality can be verified; UNKNOWN is never filled.
+@@ -228,7 +326,11 @@ wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/pytho
+ 4. **Memory is demo-local**: process memory, fixture-backed, reset on restart; there is no
+    durable user database.
+ 5. **No authentication / TLS / rate limiting**; localhost only.
+-6. **Qwen Agent mode is replay-only**; there is no live Qwen/GPU path in this demo.
++6. **Qwen Base Live is GPU-validated but not always-on**: real Qwen3.5-9B Base inference, real
++   MCP/executor/Gate and two real browser turns passed on 2026-11-09. The temporary model service
++   and tunnel are stopped; rerun requires starting them. The real model did not emit ASK in the
++   tested prompts, so the Qwen ASK→M9 continuation branch remains unexercised. Qwen Replay is
++   still historical only.
+ 7. Recommendation/comparison results are bounded catalogue results; they are not a claim of
+    objective product quality or online shopping success.
+ 8. The frontend is a local demo, not a production storefront: no cart, checkout, orders,
+diff --git a/docs/WEB_DEMO_CONTRACT.md b/docs/WEB_DEMO_CONTRACT.md
+index 3aff42d..5476f53 100644
+--- a/docs/WEB_DEMO_CONTRACT.md
++++ b/docs/WEB_DEMO_CONTRACT.md
+@@ -8,7 +8,9 @@
+ ## 0. Non-negotiable boundaries
+ 
+ - **MCP server is the only tool boundary.** The BFF may call only the 7 P17 MCP tools through
+-  the official `mcp.Client` + stdio long-lived connection. It must not import
++  the official `mcp.Client` + stdio long-lived connection. P20 adds exactly one optional 8th tool,
++  `run_agent_turn`, present only when real Qwen Base Live is explicitly configured; the original 7
++  schemas/defaults remain unchanged. It must not import
+   `recommendation.*` core modules or read the catalogue directly.
+ - **No fake data.** Every product, evidence span, preference and gate decision must come from a
+   real MCP tool result. No mock products, no invented price/rating/stock/brand, no fabricated
+@@ -20,8 +22,10 @@
+   - `profile_0057` → MCP server `--user-key p14e2_lite_0057`, write-enabled only when
+     `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1`.
+   Frontend receives only `profile_id`; it never sends `user_id`/`user_key`/`confirmed_by_user`.
+-- **No new runtime/model.** No LLM calls, no Qwen, no GPU, no retraining, no re-indexing.
+-  Qwen is replay-only.
++- **No new model/training/GPU management by default.** CPU mode makes no LLM call. P20 optionally
++  connects to an **existing** Qwen3.5-9B Base model service only when explicitly configured and
++  healthy; it never starts/stops AutoDL/GPU, creates tunnels, trains/fine-tunes, or falls back to
++  Rule while claiming Qwen. Qwen Replay remains historical only.
+ - **Local demo only.** Bind 127.0.0.1; no public deployment/auth claims.
+ 
+ ## 1. Process topology
+@@ -67,12 +71,22 @@ session id.
+                  "detail":"BGE dense retrieval + BM25 fallback + Rule Planner + V0 Scorer + P15/P16 + P17 MCP"},
+     "qwen_replay": {"available": true, "label":"Qwen Replay Mode",
+                     "badge":"Historical Replay — Not a Live Model Call"},
+-    "qwen_live": {"available": false, "label":"Qwen Live Mode",
+-                  "disabled_reason":"No live Qwen service detected (P18)"}
++    "qwen_live": {"available": false, "label":"Qwen Base Live",
++                  "detail":"Real Qwen3.5-9B Base PlannerAction → existing electronics executor",
++                  "badge":"Live Qwen3.5-9B Base",
++                  "disabled_reason":"No live Qwen service detected (QWEN_LIVE_ENABLED / QWEN_MODEL_ENDPOINT not configured)"}
++  },
++  "qwen_live": {
++    "enabled": false, "configured": false, "status": "disabled|checking|available|unavailable|error",
++    "available": false, "model": "Qwen3.5-9B-Base", "planner_action": null,
++    "latency_ms": null, "checked_at": null, "detail": "..."
+   },
+   "memory_writes_enabled": true
+ }
+ ```
++The `qwen_live` block never contains the endpoint or credentials.  Availability is true only after
++a real `/plan` health probe returns a valid PlannerAction; an unreachable service leaves the mode
++Unavailable and never turns a Qwen request into Rule output.
+ 
+ ### GET /api/demo/config
+ Profiles, modes, limits, verified comparison ids and notices. Frontend must use this list for
+@@ -116,7 +130,8 @@ the profile selector; it must not invent a profile.
+ `TurnView` fields: `turn_id`, `user_text`, `assistant_text`, `tool_activity` (ToolStatus[]),
+ `products` (ProductsPayload|null), `comparison` (ComparisonPayload|null),
+ `clarification` (ClarificationPayload|null), `memory_update` (MemoryUpdatePayload|null),
+-`error` (ErrorPayload|null), `created_at`.
++`error` (ErrorPayload|null), optional `planner`/`planner_model`/`planner_calls`/
++`planner_latency_ms`, `created_at`.
+ 
+ `PreferenceState`
+ ```json
+@@ -135,8 +150,10 @@ Only real `active_preferences` may be labelled active. Withdrawn/inactive entrie
+ under "Inactive / audit history".
+ 
+ ### POST /api/chat/stream  (SSE)
+-Body: `{"session_id":"...","message":"...","selected_product_ids":["..."]}` (selected ids optional).
+-Response: `text/event-stream`. Events are `event: <type>\ndata: <json>\n\n`; heartbeat comment
++Body: `{"session_id":"...","message":"...","selected_product_ids":["..."],"mode":"cpu_live|qwen_live"}`
++(`selected_product_ids` and `mode` optional; `mode` defaults to `cpu_live`). A Qwen request before
++the real health probe is available returns HTTP 409 `qwen_unavailable` and is not silently routed
++to Rule. Response: `text/event-stream`. Events are `event: <type>\ndata: <json>\n\n`; heartbeat comment
+ `: keep-alive\n\n` every 5 s while a tool is running. All payloads are view models, never raw MCP JSON.
+ 
+ Event types (exact names):
+@@ -148,7 +165,9 @@ Event types (exact names):
+ - `comparison` — ComparisonPayload (only when user asks to compare selected items).
+ - `clarification` — ClarificationPayload.
+ - `memory_update` — MemoryUpdatePayload.
+-- `done` — `{turn_id, stop_reason:"finalized|awaiting_clarification|error|comparison", total_ms}`.
++- `done` — `{turn_id, stop_reason:"finalized|awaiting_clarification|error|comparison", total_ms,
++  planner?, planner_model?, planner_calls?, planner_latency_ms?}`. Planner metadata is the real
++  planner actually used (`rule`/`qwen_base`/`none`); it must not be inferred client-side.
+ - `error` — `{code, message, tool?, detail?}`. Never emit fake success after an error.
+ 
+ Chat flow (deterministic demo controller; no LLM):
+@@ -206,7 +225,9 @@ Rules:
+ Reads `runs/p18/qwen_replay.json` (existing real saved Qwen trajectories) and returns
+ `{"mode":"Qwen_Agent_Replay","replay":true,"live_call":false,
+   "badge":"Historical Replay — Not a Live Model Call","examples":[...]}`.
+-No live Qwen endpoint exists. The frontend must visibly label replay; never present it as live.
++No live Qwen endpoint is required for this replay endpoint. Qwen Base Live is a separate real mode
++(`POST /api/chat/stream` with `mode:"qwen_live"`, availability-gated by the real health probe); the
++frontend must never present replay as live.
+ The saved file is passed through as data: some trajectories are final-answer-only and have
+ `terminal: null` (or no `terminal` field) while still carrying `final_answer`. The frontend must
+ render those honestly as "terminal not recorded / final answer only" and must not crash or invent
+@@ -327,7 +348,8 @@ web_demo/README.md        # API + run + known behaviour
+ - Logs: `runs/web_demo/logs/bff.log`, `mcp-<profile>.log` (create dirs).
+ - Config env: `AGENTRECX_WEB_DEMO_PORT` (8787), `AGENTRECX_WEB_DEMO_SEARCH_MODE`
+   (`bge` default, `bm25` dev), `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES` (`0` default; launcher
+-  for the demo sets `1`), `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` (180).
++  for the demo sets `1`), `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` (180), plus optional
++  `QWEN_LIVE_ENABLED` / `QWEN_MODEL_ENDPOINT` / `QWEN_LIVE_*` (see P20 section below).
+ - Minimal allowed edit outside `web_demo/`: add `"web_ui_explicit_user_reply"` to the
+   `confirmation_source` Literal in `recommendation/mcp/server.py`; keep old values and old tests.
+   No other core change.
+@@ -344,7 +366,8 @@ Required layout:
+ - Mobile (<768): single column; sidebar/preferences/details/comparison in Sheets/Drawers;
+   composer fixed at bottom; product cards adapt to narrow width.
+ - Header: AgentRec-X brand, current profile, mode badge (CPU Live default; Qwen Replay clearly
+-  labelled `Historical Replay — Not a Live Model Call`; Qwen Live disabled), readiness status.
++  labelled `Historical Replay — Not a Live Model Call`; Qwen Base Live availability-gated by the
++  real backend health check and otherwise explicitly Unavailable), readiness status.
+ - Chat: user/assistant bubbles, tool-activity timeline with real tool labels/statuses/latencies,
+   product cards, evidence, comparison, clarification card, error state, suggested real actions.
+ - Product card: neutral placeholder image (own SVG; no random photos), title, ID/namespace,
+@@ -390,7 +413,8 @@ Acceptance for the whole demo:
+    comparison; invalid id returns a real error.
+ 4. Scenario 3: vague query → real NEED_USER_CLARIFICATION → user reply → M9 memory update
+    (added 2 for the P18 reply) → preferences panel refresh → recommendation continues.
+-5. CPU Live vs Qwen Replay visibly distinct; Qwen Live disabled.
++5. CPU Live vs Qwen Replay visibly distinct; Qwen Base Live is availability-gated by the real
++   health probe and never fakes availability.
+ 6. One local command starts BFF + frontend; docs and notices complete; no git commit/push.
+ 
+ ## 7. Environment quick reference
+@@ -402,3 +426,41 @@ Acceptance for the whole demo:
+ - Reference clones (read-only, outside repo): `D:\IT\CODE\PROJECTION\agentrec\_refs\<repo>`.
+ - Existing worktree has 332 untracked + many modified files from earlier milestones: do not
+   revert/overwrite them; only add new files in the scopes listed in the team task.
++
++## 8. P20 Qwen Base Live (optional real mode)
++
++This section extends, and does not replace, the CPU/Replay contract above.
++
++- **Explicit opt-in only:** `QWEN_LIVE_ENABLED=1` AND a configured `QWEN_MODEL_ENDPOINT`
++  (aliases accepted internally: `AGENTRECX_QWEN_PLANNER`, `AGENTRECX_QWEN_PLANNER_URL`).
++  Optional: `QWEN_MODEL_NAME`, `QWEN_LIVE_TIMEOUT_S`, `QWEN_LIVE_HEALTH_TIMEOUT_S`,
++  `QWEN_LIVE_TURN_TIMEOUT_S`, `QWEN_LIVE_MAX_STEPS`, `QWEN_LIVE_HEALTH_INTERVAL_S`,
++  `QWEN_LIVE_EXPLAIN`. The endpoint is never exposed in health/config/SSE or logs.
++- **Health:** the BFF performs a real `POST {endpoint}/plan` with the existing planner contract and
++  only marks `qwen_live.available=true` when the response contains a valid PlannerAction for that
++  observation. The snapshot (`/api/health` → `qwen_live`) reports enabled/configured/status/
++  available/model/planner_action/latency_ms/checked_at/detail. No health pass → Unavailable.
++- **No fallback:** Qwen mode requests are sent only after availability; a `run_agent_turn` failure
++  is a real `qwen_*` error. The BFF never runs Rule and labels it Qwen, never turns missing model
++  output into FINALIZE, and never writes M9 from model-generated text.
++- **MCP:** original 7 tools remain unchanged. When Qwen is configured the server additionally
++  exposes `run_agent_turn` (8th tool, `{"query": str}`). It uses `HttpPlannerProposer` +
++  `run_planner` + `ElectronicsPlannerExecutor` (real catalogue/BGE, Scorer, CandidateLedger,
++  Eligibility, Gate, P15 evidence, P16 registry). It emits MCP progress notifications for
++  `Qwen Planner Request`, `Planner Action`, RETRIEVE/RERANK/FINALIZE, Decision Gate and Evidence
++  Preparation; no hidden chain-of-thought. It does not write M9.
++- **Clarification:** a real Qwen `ASK` returns a server-issued `clarification_id` + question.
++  After the existing `submit_clarification_reply` M9 write + preference refresh, the BFF resumes
++  with `run_agent_turn` (not `recommend_products`). If the model does not ASK, no ASK is inserted.
++- **SSE additions:** real progress `tool_status` rows (as above); `done` may include
++  `planner: "qwen_base"|"rule"|"none"`, `planner_model`, `planner_calls`, `planner_latency_ms`;
++  `TurnView` persists the same fields. Product/evidence payload shapes are unchanged.
++- **Errors:** `qwen_unavailable`, `qwen_planner_error`, `qwen_planner_contract_error`,
++  `agent_execution_error`; all visible to the UI. CPU/Replay remain available.
++- **Tests:** `tests/test_qwen_live_unit.py`, `tests/test_qwen_live_bff.py`,
++  gated `tests/test_qwen_live_mcp_integration.py` (real catalogue + MCP + deterministic HTTP
++  planner double, clearly not Qwen). Real browser Qwen turns were validated on 2026-11-09 with
++  real Qwen3.5-9B Base on an RTX 4090 and the real browser/BFF/MCP/executor stack; see
++  `QWEN_LIVE_WEB_REPORT.md` and `runs/web_demo/qwen_live/e2e_real/`. The model did not emit ASK in
++  the tested prompts, so that branch remains unexercised; no fake ASK is permitted.
++
+diff --git a/e2e/tests/05-modes.spec.ts b/e2e/tests/05-modes.spec.ts
+index aa3a268..653883a 100644
+--- a/e2e/tests/05-modes.spec.ts
++++ b/e2e/tests/05-modes.spec.ts
+@@ -1,17 +1,37 @@
+ /**
+- * Modes acceptance: CPU Live is the default *real* mode; Qwen Replay is visibly labelled
+- * "Historical Replay — Not a Live Model Call" and read-only; Qwen Live is disabled with its real
+- * disabled_reason. Data comes from the real GET /api/health + GET /api/replay.
++ * Modes acceptance.
++ *
++ * CPU Live is the default *real* mode. Qwen Replay is visibly labelled
++ * "Historical Replay — Not a Live Model Call" and read-only. Qwen Live is availability-gated by
++ * docs/QWEN_LIVE_CONTRACT.md §2: it is selectable only when the backend actually reports
++ * `modes.qwen_live.available === true`; otherwise the mode control is disabled with the backend's
++ * real `disabled_reason` and an explicit Unavailable notice is rendered (never a silent fallback).
++ *
++ * Data comes from the real GET /api/health + GET /api/demo/config + GET /api/replay. No mocks and
++ * no fabricated Qwen response: when the live mode is available the test only asserts the real UI
++ * wiring, and a real chat turn is attempted only when the operator opts in with QWEN_LIVE_E2E=1.
+  */
+ import { expect, test } from "@playwright/test";
+-import { ensureArtifactDirs, recordCheck, recordPayload, saveScreenshot } from "../fixtures/evidence";
+-import { bffGetJson, openDemo, waitForHealthReady } from "../fixtures/demo";
++import {
++  ensureArtifactDirs,
++  recordCheck,
++  recordPayload,
++  recordTiming,
++  saveScreenshot,
++} from "../fixtures/evidence";
++import {
++  bffGetJson,
++  lastTurn,
++  openDemo,
++  TURN_TIMEOUT_MS,
++  waitForHealthReady,
++} from "../fixtures/demo";
+ 
+ const DESKTOP = { width: 1440, height: 900 };
+ const BADGE = "Historical Replay — Not a Live Model Call";
+ 
+-test.describe("Modes — CPU Live default, Qwen Replay labelled, Qwen Live disabled", () => {
+-  test("replay mode is visibly historical and never presented as a live model call", async ({
++test.describe("Modes — CPU Live default, Qwen Replay labelled, Qwen Live availability-gated", () => {
++  test("replay mode is visibly historical and qwen live availability is honest", async ({
+     page,
+     request,
+   }, testInfo) => {
+@@ -23,23 +43,49 @@ test.describe("Modes — CPU Live default, Qwen Replay labelled, Qwen Live disab
+     // ---- real mode metadata from the BFF --------------------------------------------
+     const health = await bffGetJson(request, "/api/health");
+     expect(health.status).toBe(200);
+-    const modes = health.body.modes ?? {};
+-    recordPayload(testInfo, "modes", modes);
+-    expect(modes.qwen_live?.available).toBe(false);
++    const config = await bffGetJson(request, "/api/demo/config");
++    expect(config.status).toBe(200);
++    const healthModes = health.body.modes ?? {};
++    const configModes = config.body.modes ?? {};
++    const modes = { ...configModes, ...healthModes };
++    recordPayload(testInfo, "modes", {
++      health_modes: health.body.modes,
++      config_modes: config.body.modes,
++      health_qwen_live: health.body.qwen_live ?? null,
++    });
+     expect(modes.qwen_replay?.available).toBe(true);
+     expect(modes.qwen_replay?.badge).toBe(BADGE);
++
++    // Resolve Qwen Live exactly like web/lib/modes.ts: the current /api/health mode block first,
++    // then the health snapshot, then /api/demo/config; anything else is unavailable.
++    const qwenHealth = health.body.qwen_live ?? null;
++    const healthQwenMode = healthModes.qwen_live ?? null;
++    const configQwenMode = configModes.qwen_live ?? null;
++    const qwenAvailable =
++      typeof healthQwenMode?.available === "boolean"
++        ? healthQwenMode.available
++        : typeof qwenHealth?.available === "boolean"
++          ? qwenHealth.available
++          : configQwenMode?.available === true;
++    const qwenMode = configQwenMode ?? healthQwenMode ?? {};
++    const qwenReason: string =
++      qwenMode.disabled_reason ?? healthQwenMode?.disabled_reason ?? qwenHealth?.detail ?? "";
++    const qwenBadge: string =
++      (qwenAvailable ? (qwenMode.badge ?? healthQwenMode?.badge) : null) ?? "Live Qwen mode";
+     recordCheck(
+       testInfo,
+       "network.modes",
+-      `GET /api/health modes: cpu_live=${JSON.stringify(modes.cpu_live)} qwen_replay.badge="${modes.qwen_replay?.badge}" qwen_live.available=${modes.qwen_live?.available} disabled_reason="${modes.qwen_live?.disabled_reason}"`,
+-      modes.qwen_live?.available === false && modes.qwen_replay?.badge === BADGE,
++      `GET /api/health modes: cpu_live=${JSON.stringify(modes.cpu_live)} qwen_replay.badge="${modes.qwen_replay?.badge}" qwen_live.available=${String(qwenAvailable)} qwen_live.disabled_reason="${qwenReason}"`,
++      modes.qwen_replay?.badge === BADGE && (qwenAvailable || qwenReason.length > 0),
+     );
+ 
+     // ---- CPU Live is the default mode ------------------------------------------------
+     const modeGroup = page.getByRole("group", { name: "Assistant mode" });
+     const cpuLive = modeGroup.getByRole("button", { name: "CPU Live", exact: true });
+     const qwenReplay = modeGroup.getByRole("button", { name: "Qwen Replay", exact: true });
+-    const qwenLive = modeGroup.getByRole("button", { name: "Qwen Live", exact: true });
++    const qwenLive = page.getByTestId("mode-qwen-live");
++    const qwenLiveBadge = page.getByTestId("qwen-live-badge");
++    const qwenUnavailableNotice = page.getByTestId("qwen-unavailable-notice");
+     await expect(cpuLive).toBeVisible({ timeout: 60_000 });
+     await expect(cpuLive).toHaveAttribute("aria-pressed", "true");
+     await expect(cpuLive).toBeEnabled();
+@@ -50,16 +96,127 @@ test.describe("Modes — CPU Live default, Qwen Replay labelled, Qwen Live disab
+       (await cpuLive.getAttribute("aria-pressed")) === "true",
+     );
+ 
+-    // ---- Qwen Live is disabled with the real reason ----------------------------------
+-    await expect(qwenLive).toBeDisabled();
+-    const qwenLiveTitle = (await qwenLive.getAttribute("title")) ?? "";
+-    expect(qwenLiveTitle).toContain("No live Qwen service detected");
+-    recordCheck(
+-      testInfo,
+-      "modes.qwen_live_disabled",
+-      `Qwen Live button disabled; title="${qwenLiveTitle}"`,
+-      qwenLiveTitle.includes("No live Qwen service detected"),
+-    );
++    // ---- Qwen Live: explicit available or explicit Unavailable, never ambiguous ------
++    await expect(qwenLive).toBeVisible();
++    if (!qwenAvailable) {
++      await expect(qwenLive).toBeDisabled();
++      await expect(qwenLive).toHaveAttribute("data-state", "unavailable");
++      await expect(qwenLive).toHaveAttribute("aria-pressed", "false");
++      const qwenLiveTitle = (await qwenLive.getAttribute("title")) ?? "";
++      expect(qwenReason.length).toBeGreaterThan(0);
++      expect(qwenLiveTitle).toBe(qwenReason);
++      // docs/QWEN_LIVE_CONTRACT.md §2: with no live service the reason must say so.
++      expect(qwenReason).toContain("No live Qwen service detected");
++      // The explicit Unavailable state is rendered with the backend's real reason.
++      await expect(qwenUnavailableNotice).toBeVisible({ timeout: 60_000 });
++      await expect(qwenUnavailableNotice).toHaveAttribute("data-state", "unavailable");
++      await expect(qwenUnavailableNotice).toContainText("Unavailable");
++      await expect(qwenUnavailableNotice).toContainText(qwenReason);
++      // No live badge may appear while the mode is unavailable.
++      await expect(qwenLiveBadge).toHaveCount(0);
++      // The default CPU mode is still live: availability is reported, not silently faked.
++      await expect(page.getByTestId("composer-input")).toBeEnabled();
++      recordCheck(
++        testInfo,
++        "modes.qwen_live_disabled",
++        `Qwen Live button disabled with data-state=unavailable, title="${qwenLiveTitle}"; qwen-unavailable-notice shows the real disabled_reason; no qwen-live-badge; CPU Live remains the live default`,
++        qwenLiveTitle.includes("No live Qwen service detected"),
++      );
++    } else {
++      await expect(qwenLive).toBeEnabled();
++      await expect(qwenLive).toHaveAttribute("data-state", "available");
++      await expect(qwenUnavailableNotice).toHaveCount(0);
++      await qwenLive.click();
++      await expect(qwenLive).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
++      // The header badge is the backend's own live badge, not client copy.
++      await expect(qwenLiveBadge).toBeVisible({ timeout: 30_000 });
++      await expect(qwenLiveBadge).toContainText(qwenBadge);
++      // Replay-only restrictions must not appear in the live Qwen mode.
++      await expect(page.getByTestId("replay-mode-notice")).toHaveCount(0);
++      await expect(page.getByTestId("composer-input")).toBeEnabled();
++      recordCheck(
++        testInfo,
++        "modes.qwen_live_selectable",
++        `Qwen Live button enabled (data-state=available, aria-pressed=true); qwen-live-badge="${qwenBadge}"; composer enabled; no replay-only notice`,
++        true,
++      );
++
++      // Optional real live run: only when an operator explicitly opts in, and only if the
++      // backend is actually ready. The test asserts a real outcome (planner metadata or an
++      // explicit qwen_* error event) and never fabricates a response.
++      if (process.env.QWEN_LIVE_E2E === "1" && health.body.ready === true) {
++        const turnsBefore = await page.getByTestId("turn").count();
++        const input = page.getByTestId("composer-input");
++        await input.fill("I need wireless earbuds I can use while working out.");
++        const started = Date.now();
++        const responsePromise = page.waitForResponse(
++          (response) =>
++            response.url().includes("/api/chat/stream") && response.request().method() === "POST",
++          { timeout: 120_000 },
++        );
++        await page.getByTestId("composer-send").click();
++        const response = await responsePromise;
++        let requestBody: any = null;
++        try {
++          requestBody = response.request().postDataJSON();
++        } catch {
++          requestBody = null;
++        }
++        expect(response.status()).toBe(200);
++        expect(requestBody?.mode).toBe("qwen_live");
++        await expect
++          .poll(
++            async () => {
++              const turns = page.getByTestId("turn");
++              if ((await turns.count()) < turnsBefore + 1) return "no-turn";
++              const last = turns.last();
++              const terminal =
++                (await last.getByTestId("turn-meta").count()) +
++                (await last.getByTestId("error-bubble").count());
++              const running = await last.locator('[data-testid="tool-row"][data-status="running"]').count();
++              return terminal > 0 && running === 0 ? "idle" : "busy";
++            },
++            { timeout: TURN_TIMEOUT_MS },
++          )
++          .toBe("idle");
++        recordTiming(testInfo, "qwen.live.turn", Date.now() - started, "real Qwen Live SSE turn");
++        const turn = lastTurn(page);
++        const plannerRows = await turn.getByTestId("turn-planner").count();
++        const errorBubbles = await turn.getByTestId("error-bubble").count();
++        // Real outcome only: either reported planner metadata or a real error event.
++        expect(plannerRows + errorBubbles).toBeGreaterThan(0);
++        if (plannerRows > 0) {
++          await expect(turn.getByTestId("turn-planner")).toContainText("Qwen Base Live");
++          await expect(turn.getByTestId("turn-planner")).toHaveAttribute("data-planner-kind", "qwen_base");
++          recordCheck(
++            testInfo,
++            "modes.qwen_live_turn",
++            "real Qwen Live turn rendered backend planner metadata (Qwen Base Live) from the done/products payload",
++            true,
++          );
++        } else {
++          const errorText = await turn.getByTestId("error-bubble").innerText();
++          expect(errorText.toLowerCase()).toContain("qwen");
++          recordCheck(
++            testInfo,
++            "modes.qwen_live_turn",
++            `real Qwen Live turn failed honestly with a qwen_* error event (no CPU fallback): ${errorText.slice(0, 180)}`,
++            true,
++          );
++        }
++      } else {
++        recordCheck(
++          testInfo,
++          "modes.qwen_live_turn",
++          "Qwen Live selected with the backend's real live badge; no chat turn was sent (set QWEN_LIVE_E2E=1 with a reachable live service to exercise a real turn — nothing is faked here)",
++          true,
++        );
++      }
++
++      // Back to the default live mode for the replay part of this test.
++      await cpuLive.click();
++      await expect(cpuLive).toHaveAttribute("aria-pressed", "true");
++    }
+ 
+     // ---- switch to Qwen Replay: real /api/replay payload + loud badge ----------------
+     const replayResponsePromise = page.waitForResponse(
+diff --git a/experiments/p14c1/search_backend.py b/experiments/p14c1/search_backend.py
+index 4c67993..639c19a 100644
+--- a/experiments/p14c1/search_backend.py
++++ b/experiments/p14c1/search_backend.py
+@@ -8,6 +8,8 @@ default and is the recorded fallback when the BGE index/encoder cannot be used.
+ from __future__ import annotations
+ 
+ import json
++import threading
++import time
+ from pathlib import Path
+ from typing import Any
+ 
+@@ -23,6 +25,10 @@ DEFAULT_INDEX = REPO / "runs/p14d2/bge_index.npz"
+ DEFAULT_MODEL = REPO / "models/bge-base-en-v1.5"
+ QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+ MAX_LENGTH = 512
++#: A real, small query used only to initialise the encoder/tokenizer caches.  It never changes the
++#: catalogue index or the model; the actual user query is still encoded by the normal search path.
++WARMUP_QUERY = "wireless earbuds for working out"
++MAX_ENCODER_ATTEMPTS = 2
+ 
+ 
+ class LocalBGEDenseIndex:
+@@ -35,6 +41,18 @@ class LocalBGEDenseIndex:
+         self.model_path = str(model_path)
+         self._tokenizer = None
+         self._model = None
++        # Lazy encoder initialisation is single-flight.  ``_encoder_ready`` is set only after
++        # tokenizer + model have both loaded successfully, so a second reader can never observe a
++        # half-initialised model (the old meta-device race).
++        self._encoder_lock = threading.Lock()
++        self._encoder_ready = threading.Event()
++        self._encoder_attempts = 0
++        self._encoder_loading = False
++        self._encoder_error: str | None = None
++        self._encoder_load_ms: float | None = None
++        self._tokenizer_load_ms: float | None = None
++        self._model_load_ms: float | None = None
++        self._last_warmup: dict[str, Any] | None = None
+         if self.vectors.shape != (len(self.identities), 768):
+             raise ValueError("BGE index vectors do not align with identities")
+         if len(set(self.identities)) != len(self.identities):
+@@ -50,13 +68,119 @@ class LocalBGEDenseIndex:
+                    titles=data["titles"], model_path=model_path)
+ 
+     def _load_encoder(self):
+-        if self._model is None:
++        """Load the encoder exactly once; concurrent callers wait for the same completed state.
++
++        A failed initialisation is retried at most ``MAX_ENCODER_ATTEMPTS`` times by later callers;
++        after that a clear error is raised instead of re-using a partially loaded model.  The model
++        object is published only after the tokenizer, model and ``eval()`` all succeed.
++        """
++        if self._encoder_ready.is_set():
++            return self._tokenizer, self._model
++        if self._encoder_error and self._encoder_attempts >= MAX_ENCODER_ATTEMPTS:
++            raise RuntimeError(
++                "BGE encoder initialization failed after "
++                f"{MAX_ENCODER_ATTEMPTS} attempts: {self._encoder_error}"
++            )
++        with self._encoder_lock:
++            # Double-checked after acquiring the lock: another caller may have loaded it while we
++            # were waiting.
++            if self._encoder_ready.is_set():
++                return self._tokenizer, self._model
++            if self._encoder_error and self._encoder_attempts >= MAX_ENCODER_ATTEMPTS:
++                raise RuntimeError(
++                    "BGE encoder initialization failed after "
++                    f"{MAX_ENCODER_ATTEMPTS} attempts: {self._encoder_error}"
++                )
++            self._encoder_attempts += 1
++            self._encoder_loading = True
++            started = time.perf_counter()
++            try:
++                import torch
++                from transformers import AutoModel, AutoTokenizer
++
++                tokenizer_started = time.perf_counter()
++                tokenizer = AutoTokenizer.from_pretrained(self.model_path)
++                self._tokenizer_load_ms = round(
++                    (time.perf_counter() - tokenizer_started) * 1000.0, 2
++                )
++                model_started = time.perf_counter()
++                model = AutoModel.from_pretrained(self.model_path, torch_dtype=torch.float32)
++                model.eval()
++                self._model_load_ms = round(
++                    (time.perf_counter() - model_started) * 1000.0, 2
++                )
++                # Publish only after every piece is fully initialised.
++                self._tokenizer = tokenizer
++                self._model = model
++                self._encoder_error = None
++                self._encoder_ready.set()
++                return tokenizer, model
++            except Exception as exc:  # noqa: BLE001 - explicit error; caller may retry once
++                self._tokenizer = None
++                self._model = None
++                self._encoder_error = f"{type(exc).__name__}: {exc}"
++                raise RuntimeError(
++                    "BGE encoder initialization failed "
++                    f"(attempt {self._encoder_attempts}/{MAX_ENCODER_ATTEMPTS}): "
++                    f"{self._encoder_error}"
++                ) from exc
++            finally:
++                self._encoder_loading = False
++                self._encoder_load_ms = round((time.perf_counter() - started) * 1000.0, 2)
++
++    def warmup(self, query: str = WARMUP_QUERY) -> dict[str, Any]:
++        """Controlled real-query warm-up: load the encoder and run one forward pass.
++
++        The catalogue index and search results are untouched.  The returned timings are the real
++        measured costs; callers must not present a failed warm-up as ready.
++        """
++        started = time.perf_counter()
++        try:
++            tokenizer, model = self._load_encoder()
+             import torch
+-            from transformers import AutoModel, AutoTokenizer
+-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+-            self._model = AutoModel.from_pretrained(self.model_path, torch_dtype=torch.float32)
+-            self._model.eval()
+-        return self._tokenizer, self._model
++
++            text = QUERY_INSTRUCTION + str(query or WARMUP_QUERY)
++            tokenize_started = time.perf_counter()
++            inputs = tokenizer([text], truncation=True, max_length=MAX_LENGTH, return_tensors="pt")
++            tokenize_ms = round((time.perf_counter() - tokenize_started) * 1000.0, 2)
++            forward_started = time.perf_counter()
++            with torch.inference_mode():
++                hidden = model(**inputs).last_hidden_state[:, 0]
++                _ = torch.nn.functional.normalize(hidden.float(), p=2, dim=1)[0].numpy()
++            forward_ms = round((time.perf_counter() - forward_started) * 1000.0, 2)
++            result = {
++                "status": "ok",
++                "query": query,
++                "encoder_load_ms": self._encoder_load_ms,
++                "tokenizer_load_ms": self._tokenizer_load_ms,
++                "model_load_ms": self._model_load_ms,
++                "tokenization_ms": tokenize_ms,
++                "forward_ms": forward_ms,
++                "total_ms": round((time.perf_counter() - started) * 1000.0, 2),
++            }
++            self._last_warmup = result
++            return result
++        except Exception as exc:
++            result = {
++                "status": "error",
++                "query": query,
++                "error": f"{type(exc).__name__}: {exc}",
++                "total_ms": round((time.perf_counter() - started) * 1000.0, 2),
++            }
++            self._last_warmup = result
++            raise
++
++    def encoder_status(self) -> dict[str, Any]:
++        return {
++            "ready": bool(self._encoder_ready.is_set()),
++            "loading": bool(self._encoder_loading),
++            "attempts": int(self._encoder_attempts),
++            "error": self._encoder_error,
++            "encoder_load_ms": self._encoder_load_ms,
++            "tokenizer_load_ms": self._tokenizer_load_ms,
++            "model_load_ms": self._model_load_ms,
++            "last_warmup": dict(self._last_warmup) if self._last_warmup else None,
++        }
+ 
+     def search(self, query: str, *, limit: int = 10) -> list[DenseHit]:
+         tokenizer, model = self._load_encoder()
+diff --git a/recommendation/demo/planner_http_proposer.py b/recommendation/demo/planner_http_proposer.py
+index 0264e0f..f09232e 100644
+--- a/recommendation/demo/planner_http_proposer.py
++++ b/recommendation/demo/planner_http_proposer.py
+@@ -23,6 +23,7 @@ from recommendation.demo.planner_contract import (
+ ENV_ENABLED = "AGENTRECX_QWEN_PLANNER"
+ ENV_URL = "AGENTRECX_QWEN_PLANNER_URL"
+ ENV_MODEL = "AGENTRECX_QWEN_PLANNER_MODEL"
++ENV_TIMEOUT = "AGENTRECX_QWEN_PLANNER_TIMEOUT_S"
+ CONTRACT_VERSION = "agentrecx.planner_action.v1"
+ 
+ 
+@@ -70,7 +71,22 @@ class HttpPlannerProposer:
+         url = (os.environ.get(ENV_URL) or "").strip()
+         if not url:
+             raise HttpPlannerError("planner_misconfigured", "AGENTRECX_QWEN_PLANNER_URL is empty")
+-        return cls(url, model=(os.environ.get(ENV_MODEL) or "").strip() or None)
++        timeout_raw = (os.environ.get(ENV_TIMEOUT) or "").strip()
++        timeout = 120.0
++        if timeout_raw:
++            try:
++                timeout = float(timeout_raw)
++            except ValueError as exc:
++                raise HttpPlannerError(
++                    "planner_misconfigured",
++                    f"{ENV_TIMEOUT} must be a number, got {timeout_raw!r}",
++                ) from exc
++            if timeout <= 0:
++                raise HttpPlannerError(
++                    "planner_misconfigured", f"{ENV_TIMEOUT} must be positive"
++                )
++        return cls(url, model=(os.environ.get(ENV_MODEL) or "").strip() or None,
++                   timeout=timeout)
+ 
+     def propose(self, observation: PlannerObservation) -> ActionProposal:
+         request_payload = {
+diff --git a/recommendation/mcp/server.py b/recommendation/mcp/server.py
+index af65b29..6358c2c 100644
+--- a/recommendation/mcp/server.py
++++ b/recommendation/mcp/server.py
+@@ -14,25 +14,36 @@ production-authenticated online user).
+ from __future__ import annotations
+ 
+ import argparse
++import asyncio
+ import json
+ import logging
++import os
+ import sys
+ import threading
+ import time
+ import uuid
+ from dataclasses import dataclass, field
+ from pathlib import Path
+-from typing import Annotated, Any, Literal
++from typing import Annotated, Any, Literal, Mapping
+ 
+ from mcp.server import MCPServer
++from mcp.server.mcpserver import Context
+ from mcp.server.mcpserver.exceptions import ToolError
+ from pydantic import Field
+ 
+ from experiments.p14c0.electronics_executor import MAX_STEPS, ElectronicsPlannerExecutor, prepare_hard, prepare_preferences
+ from experiments.p14c1.search_backend import configure_catalogue
+ from experiments.p14e.catalogue import ElectronicsCatalogue, ElectronicsProduct
++from experiments.p15.explainer import EvidenceExplainer, QwenExplanationClient
+ from recommendation.control.rag_evidence import build_bundle, build_product_evidence, validate_claims
+-from recommendation.demo.planner_contract import PlannerObservation, run_planner
++from recommendation.demo.planner_contract import PlannerContractError, PlannerObservation, run_planner
++from recommendation.demo.planner_http_proposer import (
++    ENV_MODEL,
++    ENV_URL,
++    HttpPlannerError,
++    HttpPlannerProposer,
++    planner_enabled,
++)
+ from recommendation.preference.history import HistoryStateReader
+ from recommendation.shopping_companion.memory import SOURCE_KIND_SYNTHETIC_FIXTURE, ShoppingCompanionMemory
+ from recommendation.shopping_companion.planner_bridge import PHASE_PRODUCT_RETRIEVE, P14ARulePlanner
+@@ -72,6 +83,10 @@ class AppContext:
+     search_mode: str
+     writes_enabled: bool
+     clarification_ttl_seconds: float = 1800.0
++    # Optional P20 Qwen Base Live: the tool is only registered when both the explicit flag and a
++    # model-service URL are configured.  The legacy 7-tool surface stays byte-for-byte the same.
++    qwen_configured: bool = False
++    qwen_model: str = "Qwen3.5-9B-Base"
+     skill_registry: Any = field(default_factory=build_registry)
+     handles: dict[str, ClarificationState] = field(default_factory=dict)
+     lock: threading.Lock = field(default_factory=threading.Lock)
+@@ -251,6 +266,333 @@ def _recommend_products(query: Annotated[str, Field(min_length=1, description="C
+     }
+ 
+ 
++def _qwen_config() -> dict[str, Any]:
++    """Read the optional Qwen Base service configuration; never log the endpoint."""
++    url = (os.environ.get(ENV_URL) or "").strip()
++    enabled = planner_enabled()
++    try:
++        timeout_s = float(os.environ.get("AGENTRECX_QWEN_PLANNER_TIMEOUT_S") or 120.0)
++    except ValueError as exc:
++        raise ToolError("qwen_misconfigured: planner timeout must be numeric") from exc
++    try:
++        max_steps = int(os.environ.get("AGENTRECX_QWEN_MAX_STEPS") or MAX_STEPS)
++    except ValueError as exc:
++        raise ToolError("qwen_misconfigured: max steps must be an integer") from exc
++    return {
++        "enabled": enabled,
++        "configured": bool(enabled and url),
++        "url": url,
++        "model": (os.environ.get(ENV_MODEL) or "").strip() or "Qwen3.5-9B-Base",
++        "timeout_s": max(1.0, timeout_s),
++        "max_steps": max(1, min(MAX_STEPS, max_steps)),
++        "explain": (os.environ.get("AGENTRECX_QWEN_EXPLAIN", "1").strip().casefold()
++                    not in {"0", "false", "no", "off"}),
++    }
++
++
++class _ProgressBridge:
++    """Small event bridge from the synchronous executor/Qwen calls to MCP progress notifications.
++
++    It does not own any Agent state: the existing ``run_planner`` + ``ElectronicsPlannerExecutor``
++    are still the only loop/executor.  Events carry action/tool names, status, counts and real
++    latency only; prompts and hidden reasoning are never sent.
++    """
++
++    def __init__(self, context: Context, loop: asyncio.AbstractEventLoop) -> None:
++        self.context = context
++        self.loop = loop
++        self.counter = 0
++        self.pending: list[asyncio.Future[Any]] = []
++
++    def emit(self, *, tool: str, label: str, status: str,
++             detail: str | None = None, latency_ms: float | None = None) -> None:
++        self.counter = min(99, self.counter + 1)
++        payload: dict[str, Any] = {
++            "tool": tool, "label": label, "status": status, "progress": self.counter,
++        }
++        if detail is not None:
++            payload["detail"] = detail
++        if latency_ms is not None:
++            payload["latency_ms"] = round(float(latency_ms), 2)
++        try:
++            future = asyncio.run_coroutine_threadsafe(self._send(payload), self.loop)
++            self.pending.append(future)
++            future.add_done_callback(lambda done: done.exception())
++        except Exception:  # progress is observability; it must never fail the real execution
++            LOGGER.debug("progress notification could not be scheduled", exc_info=True)
++
++    async def flush(self) -> None:
++        """Wait until every queued progress notification has been handed to the transport."""
++        while self.pending:
++            future = self.pending.pop(0)
++            try:
++                await asyncio.wrap_future(future)
++            except Exception:
++                LOGGER.debug("queued progress notification failed", exc_info=True)
++
++    async def _send(self, payload: Mapping[str, Any]) -> None:
++        try:
++            await self.context.report_progress(
++                float(payload.get("progress") or 0), 100.0,
++                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
++            )
++        except Exception:  # no progress token / disconnected client: execution continues
++            LOGGER.debug("progress notification could not be delivered", exc_info=True)
++
++
++class _RecordingQwenPlanner:
++    """Record real model calls/actions while delegating the decision to HttpPlannerProposer."""
++
++    def __init__(self, inner: HttpPlannerProposer, bridge: _ProgressBridge, model: str) -> None:
++        self.inner = inner
++        self.bridge = bridge
++        self.model = model
++        self.calls: list[dict[str, Any]] = []
++
++    def propose(self, observation: PlannerObservation):  # noqa: ANN201 - existing protocol
++        step = len(self.calls) + 1
++        self.bridge.emit(tool="qwen_planner", label="Qwen Planner Request", status="running",
++                         detail=f"{self.model}; step {step}")
++        started = time.perf_counter()
++        try:
++            proposal = self.inner.propose(observation)
++        except Exception as exc:
++            self.bridge.emit(tool="qwen_planner", label="Qwen Planner Request", status="error",
++                             detail=f"{type(exc).__name__}: {exc}",
++                             latency_ms=(time.perf_counter() - started) * 1000.0)
++            raise
++        response = dict(getattr(self.inner, "last_response", {}) or {})
++        latency_ms = response.get("latency_ms")
++        if latency_ms is None:
++            latency_ms = (time.perf_counter() - started) * 1000.0
++        self.bridge.emit(tool="qwen_planner", label="Qwen Planner Request", status="ok",
++                         detail=f"{self.model}; step {step}", latency_ms=latency_ms)
++        self.calls.append({
++            "step": step,
++            "action": proposal.action.value,
++            "arguments": dict(proposal.arguments),
++            "rationale": proposal.rationale,
++            "latency_ms": round(float(latency_ms), 2),
++            "input_tokens": response.get("input_tokens"),
++            "output_tokens": response.get("output_tokens"),
++            "parser_errors": list(response.get("errors") or ()),
++            "raw_output": str(response.get("text") or "")[:2000],
++        })
++        args = dict(proposal.arguments)
++        visible = args.get("query") or args.get("question") or ""
++        self.bridge.emit(tool="planner_action",
++                         label=f"Planner Action: {proposal.action.value}", status="ok",
++                         detail=(f"step {step}" + (f"; {visible}" if visible else "")),
++                         latency_ms=latency_ms)
++        return proposal
++
++
++class _ProgressExecutor:
++    """Emit real tool-start/end events around the existing executor's execute()."""
++
++    _LABELS = {
++        "ASK": "ASK", "RETRIEVE": "RETRIEVE", "RERANK": "RERANK", "FINALIZE": "FINALIZE",
++    }
++
++    def __init__(self, inner: ElectronicsPlannerExecutor, bridge: _ProgressBridge) -> None:
++        self.inner = inner
++        self.bridge = bridge
++        self.counter = 0
++
++    def execute(self, proposal, observation):  # noqa: ANN001, ANN201 - existing protocol
++        action = proposal.action.value
++        self.counter += 1
++        tool = f"{action.lower()}_{self.counter}"
++        self.bridge.emit(tool=tool, label=self._LABELS.get(action, action), status="running",
++                         detail="existing ElectronicsPlannerExecutor")
++        started = time.perf_counter()
++        try:
++            after, tool_observation, terminal = self.inner.execute(proposal, observation)
++        except Exception as exc:
++            self.bridge.emit(tool=tool, label=self._LABELS.get(action, action), status="error",
++                             detail=f"{type(exc).__name__}: {exc}",
++                             latency_ms=(time.perf_counter() - started) * 1000.0)
++            raise
++        latency_ms = (time.perf_counter() - started) * 1000.0
++        obs = dict(tool_observation or {})
++        detail_parts = [str(obs.get("status") or "done")]
++        if "candidate_count" in obs:
++            detail_parts.append(f"{obs['candidate_count']} candidates")
++        self.bridge.emit(tool=tool, label=self._LABELS.get(action, action), status="ok",
++                         detail=" - ".join(detail_parts), latency_ms=latency_ms)
++        return after, tool_observation, terminal
++
++
++async def _run_agent_turn(
++    query: Annotated[str, Field(min_length=1, description="Current natural-language shopping query")],
++    ctx: Context,
++) -> dict[str, Any]:
++    """Run the existing electronics executor with the real Qwen3.5-9B Base planner.
++
++    The model's PlannerAction(s) are parsed by the existing contract and executed by
++    ``ElectronicsPlannerExecutor``.  No Rule fallback exists: a missing/invalid model action is a
++    typed tool error.  M9 writes are not performed here; clarification replies still go through
++    ``submit_clarification_reply``.
++    """
++    started = time.perf_counter()
++    config = _qwen_config()
++    if not config["configured"]:
++        raise ToolError(
++            "qwen_unavailable: QWEN_LIVE_ENABLED/AGENTRECX_QWEN_PLANNER and a model endpoint "
++            "must both be configured"
++        )
++    context = _context()
++    history = context.read_history()
++    task = context.current_task(query)
++    proposer = HttpPlannerProposer(
++        str(config["url"]), model=str(config["model"]), timeout=float(config["timeout_s"])
++    )
++    explainer = None
++    if config["explain"]:
++        explainer = EvidenceExplainer(
++            QwenExplanationClient(str(config["url"]), timeout=float(config["timeout_s"]))
++        )
++    executor = ElectronicsPlannerExecutor(
++        catalogue=context.catalogue, current_query=query,
++        preferences=prepare_preferences(history), hard=prepare_hard(query),
++        task_context=task, memory_history=history, explainer=explainer,
++    )
++    observation = PlannerObservation(
++        step=0, query=query,
++        m5_state={"phase": PHASE_PRODUCT_RETRIEVE, "next_query": query,
++                  "preferences": executor.preferences},
++    )
++    loop = asyncio.get_running_loop()
++    bridge = _ProgressBridge(ctx, loop)
++    planner = _RecordingQwenPlanner(proposer, bridge, str(config["model"]))
++    progress_executor = _ProgressExecutor(executor, bridge)
++
++    def _run_sync():  # executed in a worker thread; progress is bridged to the MCP loop
++        return run_planner(
++            planner=planner, executor=progress_executor,
++            initial_observation=observation, max_steps=int(config["max_steps"]),
++        )
++
++    try:
++        run = await asyncio.to_thread(_run_sync)
++    except HttpPlannerError as exc:
++        raise ToolError(f"qwen_planner_error: {exc.code}: {exc.detail}") from exc
++    except PlannerContractError as exc:
++        raise ToolError(f"qwen_planner_contract_error: {exc.code}: {exc.detail}") from exc
++    except Exception as exc:  # noqa: BLE001 - real executor/transport failure, no Rule fallback
++        raise ToolError(f"agent_execution_error: {type(exc).__name__}: {exc}") from exc
++
++    status = executor.terminal_status
++    if status in {"not_started", "in_progress", "need_more_candidates", "need_more_product_evidence"}:
++        status = "budget_exhausted"
++        executor.terminal_status = status
++    selected = executor.selected_candidate_id
++    gate = executor.last_decision
++    if gate is not None:
++        bridge.emit(tool="decision_gate", label="Decision Gate", status="ok",
++                    detail=f"{gate.get('action')} ({gate.get('reason_code')})")
++    bundle = None
++    if selected:
++        bridge.emit(tool="evidence_preparation", label="Evidence Preparation", status="running",
++                    detail="P15 evidence bundle")
++        try:
++            bundle = build_bundle(
++                task=task, selected_item_id=selected, catalogue=context.catalogue,
++                history=history, gate_decision=gate or {},
++                search_mode=context.search_mode,
++                ledger_source=f"CatalogSearchSource(mode={context.search_mode})",
++            ).as_dict()
++            bridge.emit(tool="evidence_preparation", label="Evidence Preparation", status="ok",
++                        detail=f"{len(bundle.get('evidence') or [])} evidence items")
++        except Exception as exc:  # evidence failure must be visible, not replaced
++            bridge.emit(tool="evidence_preparation", label="Evidence Preparation", status="error",
++                        detail=f"{type(exc).__name__}: {exc}")
++            bundle = None
++
++    clarification = None
++    if status == "awaiting_clarification" and executor.ask_question:
++        clarification_id = "qclar_" + uuid.uuid4().hex
++        now = time.time()
++        state = ClarificationState(
++            clarification_id=clarification_id, user_key=context.user_key,
++            question=str(executor.ask_question), current_query=query, task=task,
++            created_at=now, expires_at=now + context.clarification_ttl_seconds,
++        )
++        with context.lock:
++            context.handles[clarification_id] = state
++        clarification = {
++            "clarification_id": clarification_id,
++            "question": str(executor.ask_question),
++            "reason": "qwen_planner_ask",
++            "expires_in_seconds": context.clarification_ttl_seconds,
++            "memory_write_enabled": context.writes_enabled,
++        }
++
++    candidate_ids: list[str] = []
++    for item in (executor.last_search or {}).get("hit_ids") or ():
++        item_id = str(item)
++        if item_id and item_id not in candidate_ids:
++            candidate_ids.append(item_id)
++    for item in (observation.candidate_ids or ()):
++        item_id = str(item)
++        if item_id and item_id not in candidate_ids:
++            candidate_ids.append(item_id)
++    candidate_ids = candidate_ids[:20]
++
++    rag = None
++    if executor.last_explanation is not None:
++        explanation = executor.last_explanation
++        rag = {
++            "status": explanation.get("status"),
++            "final_answer": explanation.get("final_answer"),
++            "evidence_bundle": explanation.get("bundle"),
++            "claim_validation": explanation.get("validation"),
++            "model_stats": explanation.get("model_stats"),
++            "error": executor.explanation_error,
++        }
++    elif executor.explanation_error:
++        rag = {"status": "error", "final_answer": None, "error": executor.explanation_error}
++
++    latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
++    await bridge.flush()
++    return {
++        "schema": "agentrecx.p17.run_agent_turn.v1",
++        "status": status,
++        "query": query,
++        "planner": {
++            "kind": "qwen_base",
++            "model": str(config["model"]),
++            "max_steps": int(config["max_steps"]),
++            "calls": len(planner.calls),
++            "actions": planner.calls,
++            "latency_ms": [call.get("latency_ms") for call in planner.calls],
++            "input_tokens": sum(int(call.get("input_tokens") or 0) for call in planner.calls),
++            "output_tokens": sum(int(call.get("output_tokens") or 0) for call in planner.calls),
++            "parser_errors": [call.get("parser_errors") for call in planner.calls
++                              if call.get("parser_errors")],
++        },
++        "selected_product_id": selected,
++        "candidate_ids": candidate_ids,
++        "gate": gate,
++        "evidence_bundle": bundle,
++        "planner_steps": run.as_dict(),
++        "clarification": clarification,
++        "search": {
++            "search_mode": context.search_mode,
++            "score_kind": (executor.last_search or {}).get("score_kind"),
++            "catalogue_size": (executor.last_search or {}).get("catalogue_size"),
++        },
++        "rag": rag,
++        "error": None,
++        "latency_ms": latency_ms,
++        "notes": [
++            "real Qwen Base PlannerAction(s) executed by the existing electronics executor",
++            "no Rule→Qwen rewriting and no Qwen→Rule fallback",
++            "Decision Gate remains authoritative; awaiting_clarification/no_verified_candidate_in_scope is not a successful recommendation",
++        ],
++    }
++
++
+ def _get_active_preferences() -> dict[str, Any]:
+     """Read only this server's trusted local user's active/inactive M9 preferences and audit trail."""
+     ctx = _context()
+@@ -380,6 +722,10 @@ def build_server(ctx: AppContext) -> MCPServer:
+     server.add_tool(_compare_products, name="compare_products")
+     server.add_tool(_request_preference_clarification, name="request_preference_clarification")
+     server.add_tool(_submit_clarification_reply, name="submit_clarification_reply")
++    if ctx.qwen_configured:
++        # Optional 8th tool.  It is absent unless Qwen Base Live is explicitly configured, so the
++        # original 7-tool schema/default behaviour is unchanged for every legacy/CPU-only run.
++        server.add_tool(_run_agent_turn, name="run_agent_turn")
+     return server
+ 
+ 
+@@ -403,14 +749,19 @@ def main(argv: list[str] | None = None) -> int:
+     else:
+         search_mode = "bm25"
+     memory, task = _memory_for(args.memory_fixture, args.user_key)
++    qwen_url = (os.environ.get(ENV_URL) or "").strip()
++    qwen_configured = bool(planner_enabled() and qwen_url)
++    qwen_model = (os.environ.get(ENV_MODEL) or "").strip() or "Qwen3.5-9B-Base"
+     ctx = AppContext(user_key=args.user_key, catalogue=catalogue, memory=memory, task=task,
+                      search_mode=search_mode, writes_enabled=bool(args.allow_memory_writes),
+-                     clarification_ttl_seconds=float(args.clarification_ttl_seconds))
++                     clarification_ttl_seconds=float(args.clarification_ttl_seconds),
++                     qwen_configured=qwen_configured, qwen_model=qwen_model)
+     server = build_server(ctx)
+     manifest = {
+         "server": SERVER_NAME, "version": SERVER_VERSION, "protocol_target": PROTOCOL_TARGET,
+         "transport": "stdio", "user_key": args.user_key, "search_mode": search_mode,
+         "memory_fixture": str(args.memory_fixture), "writes_enabled": bool(args.allow_memory_writes),
++        "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
+     }
+     sys.stderr.write("agentrecx-mcp manifest " + json.dumps(manifest, ensure_ascii=False) + "\n")
+     sys.stderr.flush()
+diff --git a/scripts/run_web_demo.ps1 b/scripts/run_web_demo.ps1
+index 31ddb2e..293a650 100644
+--- a/scripts/run_web_demo.ps1
++++ b/scripts/run_web_demo.ps1
+@@ -90,9 +90,31 @@ $bffArgs = @(
+     "--", "env",
+     "AGENTRECX_WEB_DEMO_PORT=$BffPort",
+     "AGENTRECX_WEB_DEMO_SEARCH_MODE=bge",
+-    "AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1",
+-    "bash", "scripts/run_web_demo_bff.sh"
++    "AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1"
+ )
++# Optional real Qwen Base Live: propagate only explicitly configured values to the WSL BFF.
++# The endpoint is never printed by this launcher; if it is absent, Qwen Live stays Unavailable.
++$qwenEnvNames = @(
++    "QWEN_LIVE_ENABLED", "QWEN_MODEL_ENDPOINT", "QWEN_MODEL_NAME",
++    "QWEN_LIVE_TIMEOUT_S", "QWEN_LIVE_HEALTH_TIMEOUT_S", "QWEN_LIVE_TURN_TIMEOUT_S",
++    "QWEN_LIVE_MAX_STEPS", "QWEN_LIVE_EXPLAIN", "QWEN_LIVE_HEALTH_INTERVAL_S"
++)
++$qwenConfigured = $false
++foreach ($name in $qwenEnvNames) {
++    $value = [Environment]::GetEnvironmentVariable($name)
++    if (-not [string]::IsNullOrWhiteSpace($value)) {
++        $bffArgs += "$name=$value"
++        if ($name -eq "QWEN_LIVE_ENABLED" -and $value -match '^(1|true|yes|on)$') {
++            $qwenConfigured = $true
++        }
++    }
++}
++$bffArgs += @("bash", "scripts/run_web_demo_bff.sh")
++if ($qwenConfigured) {
++    Write-Host "  Qwen Live: requested (endpoint configured; health check decides availability)" -ForegroundColor DarkGray
++} else {
++    Write-Host "  Qwen Live: not configured (CPU Live + Qwen Replay remain available)" -ForegroundColor DarkGray
++}
+ $bff = Start-DemoProcess -FilePath "wsl.exe" -Arguments $bffArgs -StdOut $BffConsole -StdErr $BffConsoleErr
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/scripts/run_web_demo_bff.sh b/scripts/run_web_demo_bff.sh
+index 6c4fac2..7e7faf9 100644
+--- a/scripts/run_web_demo_bff.sh
++++ b/scripts/run_web_demo_bff.sh
+@@ -43,7 +43,8 @@ fi
+   echo "=== AgentRec-X Web Demo BFF $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+   echo "repo=${REPO_ROOT} search_mode=${AGENTRECX_WEB_DEMO_SEARCH_MODE}" \
+        "memory_writes=${AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES}" \
+-       "port=${AGENTRECX_WEB_DEMO_PORT:-8787}"
++       "port=${AGENTRECX_WEB_DEMO_PORT:-8787}" \
++       "qwen_requested=${QWEN_LIVE_ENABLED:-0}"
+ } | tee -a "$LOG_FILE"
+ 
+ # Process substitution keeps $! pointing at the python process (not at tee), so the PID file and
+diff --git a/web/README.md b/web/README.md
+index d1df87b..d5624a1 100644
+--- a/web/README.md
++++ b/web/README.md
+@@ -62,14 +62,26 @@ cmd /c "pnpm --dir web start"              :: serve the production build on :300
+   the write-enabled Demo profile and retry the same query.
+ - **Modes**: CPU Live is the default live pipeline. Qwen Replay opens the saved
+   `runs/p18/qwen_replay.json` trajectories through `GET /api/replay`, loudly labelled
+-  `Historical Replay — Not a Live Model Call`; Qwen Live is disabled with the backend's reason.
++  `Historical Replay — Not a Live Model Call` and read-only. Qwen Live is an optional **real**
++  mode (`docs/QWEN_LIVE_CONTRACT.md`): it is selectable only while `GET /api/health` /
++  `GET /api/demo/config` report `modes.qwen_live.available === true` (a real PlannerAction health
++  check). While unavailable the backend's `disabled_reason` is shown with an explicit Unavailable
++  notice and there is no silent fallback; if availability disappears while it is selected, the
++  turn is not run, the mode is not auto-switched, and the user must switch back. In Qwen Live the
++  composer sends `mode: "qwen_live"` to `POST /api/chat/stream` (the CPU request shape is
++  unchanged), the turn's real `planner` metadata is shown (`Qwen Base Live · N planner calls`),
++  and the tool timeline renders the real planner/executor progress rows (`Qwen Planner Request`,
++  `Planner Action: RETRIEVE`, `RETRIEVE`, `RERANK`, `Decision Gate`, `FINALIZE`, `Evidence
++  Preparation`). No hidden reasoning is shown, and a progress row the backend never completed is
++  labelled unreported rather than animated.
+ - **Readiness**: real `/api/health` polling with per-MCP-server status, startup time, catalogue
+   size and memory-write state; the page stays interactive while services start.
+ - **Session state**: sessions are backend in-memory; only the session id is persisted in
+   `localStorage`, so a refresh restores the conversation. `New conversation` creates a new
+   session; `Clear session` resets turns/pending clarification (M9 memory is not cleared).
+ 
+-Out of scope by contract: cart, checkout, payment, auth, public deployment, live Qwen calls.
++Out of scope by contract: cart, checkout, payment, auth and public deployment. Qwen Base Live is
++optional, never downloadable from the page, and only usable when the backend reports it available.
+ 
+ ## Source layout
+ 
+diff --git a/web/components/ChatPanel.tsx b/web/components/ChatPanel.tsx
+index de1c100..0ae3dc3 100644
+--- a/web/components/ChatPanel.tsx
++++ b/web/components/ChatPanel.tsx
+@@ -9,15 +9,18 @@
+ 
+ import { useCallback, useMemo } from "react";
+ import type { LocalTurn } from "@/lib/chat";
++import type { QwenLiveState } from "@/lib/modes";
++import { plannerLatencyTotal, plannerSummary } from "@/lib/planner";
+ import type {
+   DemoConfig,
+   ErrorPayload,
+   Health,
++  PlannerMeta,
+   ProductCard,
+   SessionView,
+ } from "@/lib/types";
+ import { BFF_BASE } from "@/lib/api";
+-import { formatDuration, plural, statusLabel, toolPhaseLabel } from "@/lib/format";
++import { formatDuration, formatLatency, plural, statusLabel, toolPhaseLabel } from "@/lib/format";
+ import { useStickToBottom } from "@/lib/scroll";
+ import { Icon } from "./icons";
+ import { AssistantText, ErrorBubble, UserBubble } from "./MessageBubble";
+@@ -27,6 +30,7 @@ import ComparisonBar from "./ComparisonBar";
+ import { ComparisonSummaryCard } from "./ComparisonView";
+ import { Composer, type Prefill } from "./Composer";
+ import ProductsBlock from "./ProductsBlock";
++import QwenLiveNotice from "./QwenLiveNotice";
+ import ReadinessBanner from "./ReadinessBanner";
+ import ToolTimeline from "./ToolTimeline";
+ import type { UiMode } from "./Header";
+@@ -50,6 +54,40 @@ function preferredProduct(turn: LocalTurn): ProductCard | null {
+   );
+ }
+ 
++/**
++ * Real planner metadata for one assistant turn (docs/QWEN_LIVE_CONTRACT.md §3).
++ *
++ * Rendered only when the backend reported a planner `kind`; the label comes from that kind and
++ * nothing is inferred when it is absent (an older BFF or a Rule turn without metadata).
++ */
++function PlannerBadge({ planner }: { planner: PlannerMeta }) {
++  const latency = plannerLatencyTotal(planner);
++  const title = [
++    planner.model ? `model ${planner.model}` : null,
++    latency != null ? `planner latency ${formatLatency(latency)}` : null,
++    planner.actions?.length ? `${planner.actions.length} reported actions` : null,
++  ]
++    .filter(Boolean)
++    .join(" · ");
++  return (
++    <div
++      className="flex flex-wrap items-center gap-x-2 gap-y-1"
++      data-testid="turn-planner"
++      data-planner-kind={planner.kind}
++      title={title || undefined}
++    >
++      <Pill tone={planner.kind === "qwen_base" ? "accent" : "muted"} dot>
++        <Icon name="spark" size={10} />
++        {plannerSummary(planner)}
++      </Pill>
++      {latency != null ? (
++        <span className="font-mono text-[10px] text-(--ink-faint)">planner {formatLatency(latency)}</span>
++      ) : null}
++      {planner.model ? <span className="font-mono text-[10px] text-(--ink-faint)">{planner.model}</span> : null}
++    </div>
++  );
++}
++
+ function ActivityLine({ turn }: { turn: LocalTurn }) {
+   return (
+     <div role="status" className="flex items-center gap-2 text-[12.5px] text-(--ink-soft)" data-testid="activity-line">
+@@ -260,6 +298,8 @@ function TurnItem({
+ 
+           {turn.error ? <ErrorBubble error={turn.error} /> : null}
+ 
++          {turn.planner ? <PlannerBadge planner={turn.planner} /> : null}
++
+           {showActivity ? <ActivityLine turn={turn} /> : null}
+ 
+           <TurnMeta turn={turn} />
+@@ -373,7 +413,7 @@ function EmptyConversation({
+             <button
+               key={prompt.key}
+               type="button"
+-              disabled={!ready || mode !== "cpu_live"}
++              disabled={!ready || mode === "qwen_replay"}
+               onClick={() => onSend(prompt.text, prompt.selectedIds)}
+               data-testid={`demo-prompt-${prompt.key}`}
+               className="flex flex-col gap-1 rounded-xl border border-(--line) bg-(--card) p-2.5 text-left transition-colors hover:border-(--accent) hover:bg-(--accent-soft)/40 disabled:cursor-not-allowed disabled:opacity-50"
+@@ -432,6 +472,8 @@ export default function ChatPanel({
+   turns,
+   busy,
+   mode,
++  qwenLive,
++  onSwitchToCpuLive,
+   selection,
+   compareMin,
+   compareMax,
+@@ -468,6 +510,8 @@ export default function ChatPanel({
+   turns: LocalTurn[];
+   busy: boolean;
+   mode: UiMode;
++  qwenLive: QwenLiveState;
++  onSwitchToCpuLive: () => void;
+   selection: string[];
+   compareMin: number;
+   compareMax: number;
+@@ -497,8 +541,11 @@ export default function ChatPanel({
+ }) {
+   const { scrollRef, onScroll, showLatest, jumpToLatest } = useStickToBottom(turns, busy);
+   const ready = health?.ready === true;
+-  const liveReady = ready && mode === "cpu_live";
+   const pausedForReplay = mode === "qwen_replay";
++  // Qwen Live is a live mode only while the backend reports it available; while it is not, the
++  // composer stays disabled and an explicit notice replaces any silent fallback.
++  const qwenBlocked = mode === "qwen_live" && !qwenLive.available;
++  const liveReady = ready && !pausedForReplay && !qwenBlocked;
+ 
+   const jump = useCallback(() => jumpToLatest(), [jumpToLatest]);
+ 
+@@ -522,6 +569,7 @@ export default function ChatPanel({
+               onRetry={onRetryHealth}
+             />
+           </div>
++          <QwenLiveNotice qwenLive={qwenLive} mode={mode} onSwitchToCpu={onSwitchToCpuLive} />
+           {sessionError ? (
+             <div className="mt-4 rounded-xl border border-(--danger)/40 bg-(--danger-soft)/50 p-3" data-testid="session-error">
+               <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-(--danger)">
+@@ -623,9 +671,11 @@ export default function ChatPanel({
+             disabledHint={
+               pausedForReplay
+                 ? "Qwen Replay is read-only historical trajectories — switch to CPU Live to chat."
+-                : !ready
+-                  ? "Waiting for the local BFF and MCP servers (cold start ~35–45 s)…"
+-                  : undefined
++                : qwenBlocked
++                  ? "Qwen Live is unavailable — switch back to CPU Live to chat (no silent fallback)."
++                  : !ready
++                    ? "Waiting for the local BFF and MCP servers (cold start ~35–45 s)…"
++                    : undefined
+             }
+             placeholder={
+               session
+diff --git a/web/components/DemoApp.tsx b/web/components/DemoApp.tsx
+index 096bc92..89d51ed 100644
+--- a/web/components/DemoApp.tsx
++++ b/web/components/DemoApp.tsx
+@@ -4,15 +4,23 @@
+ 
+ "use client";
+ 
+-import { useCallback, useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { api, BFF_BASE, errorPayload, isAbortError } from "@/lib/api";
+ import {
++  finaliseStaleToolRows,
++  mergeToolStatus,
+   newTurnKey,
+   turnFromView,
+   type ClarificationReplyState,
+   type LocalTurn,
+-  type LocalToolStatus,
+ } from "@/lib/chat";
++import { resolveQwenLive } from "@/lib/modes";
++import {
++  mergePlanner,
++  plannerFromDone,
++  plannerFromProducts,
++  plannerFromReplyResponse,
++} from "@/lib/planner";
+ import type {
+   ClarificationPayload,
+   ComparisonPayload,
+@@ -26,7 +34,6 @@ import type {
+   ReplayResponse,
+   SessionSummary,
+   SessionView,
+-  ToolStatus,
+ } from "@/lib/types";
+ import { useIsDesktop } from "@/lib/useMediaQuery";
+ import ChatPanel from "./ChatPanel";
+@@ -84,6 +91,7 @@ function emptyLocalTurn(partial: Partial<LocalTurn>): LocalTurn {
+     status: partial.status ?? "complete",
+     stop_reason: partial.stop_reason ?? null,
+     total_ms: partial.total_ms ?? null,
++    planner: partial.planner ?? null,
+     startedAt: partial.startedAt ?? 0,
+     text_final: partial.text_final ?? true,
+     reply: partial.reply ?? null,
+@@ -112,21 +120,6 @@ function toErrorPayload(error: unknown): ErrorPayload {
+   return errorPayload(error);
+ }
+ 
+-/** Merges a `tool_status` event into the timeline: a final status closes the latest running row. */
+-function mergeToolStatus(list: LocalToolStatus[], incoming: ToolStatus): LocalToolStatus[] {
+-  if (incoming.status === "running") {
+-    return [...list, { ...incoming, receivedAt: performance.now() }];
+-  }
+-  for (let index = list.length - 1; index >= 0; index -= 1) {
+-    if (list[index].tool === incoming.tool && list[index].status === "running") {
+-      const next = [...list];
+-      next[index] = { ...next[index], ...incoming };
+-      return next;
+-    }
+-  }
+-  return [...list, { ...incoming }];
+-}
+-
+ export default function DemoApp() {
+   const isDesktop = useIsDesktop();
+ 
+@@ -206,6 +199,12 @@ export default function DemoApp() {
+   const compareMax = config?.limits.compare_max ?? 5;
+   const busy = streamingKey != null;
+ 
++  // Real Qwen Base Live availability from GET /api/health + GET /api/demo/config. Never inferred.
++  const qwenLive = useMemo(() => resolveQwenLive(health, config), [health, config]);
++  const qwenLiveAvailable = qwenLive.available;
++  const qwenLiveAvailableRef = useRef(qwenLiveAvailable);
++  qwenLiveAvailableRef.current = qwenLiveAvailable;
++
+   // ---------------------------------------------------------------------------
+   // Health polling (real /api/health; keeps retrying while the BFF starts)
+   // ---------------------------------------------------------------------------
+@@ -612,17 +611,21 @@ export default function DemoApp() {
+         preferences: null,
+         recommendation: null,
+         error: null,
++        planner: null,
+       };
+       setTurns(prev => prev.map(entry => (entry.key === turn.key ? { ...entry, reply: sending } : entry)));
+       try {
+         const response = await api.clarificationReply(sessionId, clarification.clarification_id, text);
+         if (sessionRef.current?.session_id !== sessionId) return;
+         const failed = Boolean(response.error);
++        // A resumed Qwen Live turn reports its real planner metadata in the reply response.
++        const replyPlanner = failed ? null : plannerFromReplyResponse(response);
+         setTurns(prev =>
+           prev.map(entry =>
+             entry.key === turn.key
+               ? {
+                   ...entry,
++                  planner: mergePlanner(entry.planner, replyPlanner),
+                   reply: {
+                     text,
+                     status: failed ? "error" : "done",
+@@ -631,6 +634,7 @@ export default function DemoApp() {
+                     preferences: response.preferences ?? null,
+                     recommendation: response.recommendation ?? null,
+                     error: response.error ?? null,
++                    planner: replyPlanner,
+                   },
+                 }
+               : entry,
+@@ -666,7 +670,11 @@ export default function DemoApp() {
+     async (raw: string, presetSelection?: string[]) => {
+       const text = raw.trim();
+       const sessionId = sessionRef.current?.session_id;
+-      if (!text || !sessionId || streamingRef.current || mode !== "cpu_live") return;
++      if (!text || !sessionId || streamingRef.current) return;
++      // Qwen Replay is historical/read-only; Qwen Live runs only while the backend reports it
++      // available. Neither case ever quietly falls back to the CPU pipeline.
++      if (mode === "qwen_replay") return;
++      if (mode === "qwen_live" && !qwenLiveAvailable) return;
+       if (health?.ready !== true) return;
+ 
+       const key = newTurnKey();
+@@ -700,6 +708,8 @@ export default function DemoApp() {
+             session_id: sessionId,
+             message: text,
+             selected_product_ids: selectedSnapshot.length ? selectedSnapshot : undefined,
++            // Sent only for the real live Qwen mode; the CPU request shape stays unchanged.
++            mode: mode === "qwen_live" ? "qwen_live" : undefined,
+           },
+           {
+             signal: controller.signal,
+@@ -725,7 +735,12 @@ export default function DemoApp() {
+             }
+             case "products": {
+               const payload = event.data;
+-              patchTurn(entry => ({ ...entry, products: payload }));
++              patchTurn(entry => ({
++                ...entry,
++                products: payload,
++                // Real planner metadata either on `products` or later on `done`; merged, not invented.
++                planner: mergePlanner(entry.planner, plannerFromProducts(payload)),
++              }));
+               const candidate =
+                 payload.recommended_product_id ??
+                 payload.items.find(item => item.recommended)?.product_id ??
+@@ -776,6 +791,7 @@ export default function DemoApp() {
+                 turn_id: payload.turn_id,
+                 stop_reason: payload.stop_reason,
+                 total_ms: payload.total_ms,
++                planner: mergePlanner(entry.planner, plannerFromDone(payload)),
+                 pending: false,
+                 text_final: true,
+                 status: entry.error ? "error" : "complete",
+@@ -794,6 +810,9 @@ export default function DemoApp() {
+                 stop_reason: "error",
+               }));
+               setPendingClarification(null);
++              // A real Qwen planner failure can also make the live mode unavailable server-side.
++              // Refresh health so the UI can show the backend's own reason; never retry as CPU.
++              if (payload.code?.startsWith("qwen_")) setHealthNonce(value => value + 1);
+               break;
+             }
+             default:
+@@ -813,6 +832,9 @@ export default function DemoApp() {
+           }));
+         }
+       } finally {
++        // The stream is over: any progress row the backend never closed is shown as explicitly
++        // unreported (browser-local) instead of a fake endless spinner or a fabricated success.
++        patchTurn(entry => ({ ...entry, tool_activity: finaliseStaleToolRows(entry.tool_activity) }));
+         abortRef.current = null;
+         streamingRef.current = false;
+         setStreamingKey(null);
+@@ -821,7 +843,7 @@ export default function DemoApp() {
+         if (sessionRef.current?.session_id) void refreshPreferences();
+       }
+     },
+-    [health?.ready, isDesktop, loadDetailsById, mode, refreshPreferences, refreshRecent, selection],
++    [health?.ready, isDesktop, loadDetailsById, mode, qwenLiveAvailable, refreshPreferences, refreshRecent, selection],
+   );
+ 
+   const stopStream = useCallback(() => {
+@@ -892,13 +914,19 @@ export default function DemoApp() {
+   const changeMode = useCallback(
+     (next: UiMode) => {
+       if (streamingRef.current) return;
++      // Qwen Live is selectable only while the backend explicitly reports it available.
++      if (next === "qwen_live" && !qwenLiveAvailableRef.current) return;
+       setMode(next);
+       if (next === "qwen_replay") {
+         setReplayOpen(true);
+         if (!replay) void loadReplay();
+       }
++      if (next === "qwen_live") {
++        // Re-probe health on selection so a stale availability cannot be presented as live.
++        retryHealth();
++      }
+     },
+-    [loadReplay, replay],
++    [loadReplay, replay, retryHealth],
+   );
+ 
+   // Abort any in-flight stream when the page unmounts.
+@@ -968,6 +996,7 @@ export default function DemoApp() {
+         config={config}
+         mode={mode}
+         onModeChange={changeMode}
++        qwenLive={qwenLive}
+         onOpenSidebar={() => setSidebarOpen(true)}
+         onOpenPanel={() => setPanelSheetOpen(true)}
+         onTogglePanel={() => setPanelOpen(value => !value)}
+@@ -1010,6 +1039,8 @@ export default function DemoApp() {
+             turns={turns}
+             busy={streaming}
+             mode={mode}
++            qwenLive={qwenLive}
++            onSwitchToCpuLive={() => changeMode("cpu_live")}
+             selection={selection}
+             compareMin={compareMin}
+             compareMax={compareMax}
+diff --git a/web/components/Header.tsx b/web/components/Header.tsx
+index 9a63a7d..5438233 100644
+--- a/web/components/Header.tsx
++++ b/web/components/Header.tsx
+@@ -5,11 +5,16 @@
+ "use client";
+ 
+ import type { DemoConfig, Health, ModeKey } from "@/lib/types";
++import type { QwenLiveState } from "@/lib/modes";
+ import { formatElapsed } from "@/lib/format";
+ import { Icon } from "./icons";
+ import { IconButton, Pill, StatusDot, type Tone } from "./ui";
+ 
+-export type UiMode = "cpu_live" | "qwen_replay";
++/**
++ * The three run modes. Qwen Live is a real live mode only when the backend reports it available;
++ * Qwen Replay is a historical, read-only trajectory viewer.
++ */
++export type UiMode = "cpu_live" | "qwen_replay" | "qwen_live";
+ 
+ function BrandMark({ small = false }: { small?: boolean }) {
+   return (
+@@ -75,16 +80,24 @@ function ModeControl({
+   mode,
+   onChange,
+   disabled,
++  qwenLive,
+ }: {
+   modes: Partial<Record<ModeKey, ModeInfoUnavailable>>;
+   mode: UiMode;
+   onChange: (mode: UiMode) => void;
+   disabled: boolean;
++  qwenLive: QwenLiveState;
+ }) {
+   const replay = modes.qwen_replay;
+-  const live = modes.qwen_live;
+   const cpu = modes.cpu_live;
+-  const items: { key: UiMode | "qwen_live"; label: string; title: string; available: boolean; active: boolean }[] = [
++  const items: {
++    key: UiMode;
++    label: string;
++    title: string;
++    available: boolean;
++    active: boolean;
++    testId: string;
++  }[] = [
+     {
+       key: "cpu_live",
+       label: "CPU Live",
+@@ -92,6 +105,7 @@ function ModeControl({
+       // CPU Live is the default live mode; readiness is reported separately by the readiness chip.
+       available: true,
+       active: mode === "cpu_live",
++      testId: "mode-cpu-live",
+     },
+     {
+       key: "qwen_replay",
+@@ -99,13 +113,18 @@ function ModeControl({
+       title: replay?.badge ?? "Historical Replay — Not a Live Model Call",
+       available: replay?.available !== false,
+       active: mode === "qwen_replay",
++      testId: "mode-qwen-replay",
+     },
+     {
+       key: "qwen_live",
+       label: "Qwen Live",
+-      title: live?.disabled_reason ?? "No live Qwen service detected (P18).",
+-      available: false,
+-      active: false,
++      // Real backend reason while unavailable; the real backend detail/badge while available.
++      title: qwenLive.available
++        ? (qwenLive.detail ?? qwenLive.badge ?? "Real Qwen Base Live planner call")
++        : (qwenLive.disabledReason ?? "No live Qwen service detected"),
++      available: qwenLive.available,
++      active: mode === "qwen_live",
++      testId: "mode-qwen-live",
+     },
+   ];
+   return (
+@@ -119,8 +138,12 @@ function ModeControl({
+             aria-pressed={item.active}
+             disabled={isDisabled}
+             title={item.title}
++            data-testid={item.testId}
++            data-state={
++              item.key === "qwen_live" ? (item.available ? "available" : "unavailable") : undefined
++            }
+             onClick={() => {
+-              if (item.key === "qwen_live") return;
++              if (!item.available) return;
+               onChange(item.key);
+             }}
+             className={`flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] transition-colors ${
+@@ -132,7 +155,13 @@ function ModeControl({
+             }`}
+           >
+             {item.key === "qwen_replay" ? <Icon name="play" size={10} /> : null}
+-            {item.key === "qwen_live" ? <Icon name="alert" size={10} className="text-(--ink-faint)" /> : null}
++            {item.key === "qwen_live" ? (
++              <Icon
++                name={item.available ? "spark" : "alert"}
++                size={10}
++                className={item.available ? "text-(--accent)" : "text-(--ink-faint)"}
++              />
++            ) : null}
+             {item.label}
+           </button>
+         );
+@@ -155,6 +184,7 @@ export default function Header({
+   config,
+   mode,
+   onModeChange,
++  qwenLive,
+   onOpenSidebar,
+   onOpenPanel,
+   onTogglePanel,
+@@ -170,6 +200,7 @@ export default function Header({
+   config: DemoConfig | null;
+   mode: UiMode;
+   onModeChange: (mode: UiMode) => void;
++  qwenLive: QwenLiveState;
+   onOpenSidebar: () => void;
+   onOpenPanel: () => void;
+   onTogglePanel: () => void;
+@@ -222,7 +253,7 @@ export default function Header({
+           </button>
+         ) : null}
+         <div className="hidden md:block">
+-          <ModeControl modes={modes} mode={mode} onChange={onModeChange} disabled={streaming} />
++          <ModeControl modes={modes} mode={mode} onChange={onModeChange} disabled={streaming} qwenLive={qwenLive} />
+         </div>
+         <button
+           type="button"
+@@ -251,6 +282,13 @@ export default function Header({
+           onClick={onTogglePanel}
+           className="hidden xl:grid"
+         />
++        {mode === "qwen_live" && qwenLive.available ? (
++          <span data-testid="qwen-live-badge" className="hidden sm:inline-flex" title={qwenLive.detail ?? undefined}>
++            <Pill tone="accent" dot>
++              {qwenLive.badge ?? "Live Qwen mode"}
++            </Pill>
++          </span>
++        ) : null}
+         {mode === "qwen_replay" ? (
+           <Pill tone="warn" className="hidden sm:inline-flex">
+             Historical Replay — not live
+diff --git a/web/components/ToolTimeline.tsx b/web/components/ToolTimeline.tsx
+index 8d10fd4..f8b51ef 100644
+--- a/web/components/ToolTimeline.tsx
++++ b/web/components/ToolTimeline.tsx
+@@ -55,6 +55,9 @@ export default function ToolTimeline({
+ 
+   const running = activity.filter((row) => row.status === "running").length;
+   const failed = activity.filter((row) => row.status === "error").length;
++  // Browser-local rows whose completion the backend never reported (see lib/chat.ts); shown
++  // honestly as unreported, never as a fake spinner or a fabricated success.
++  const unreported = activity.filter((row) => row.status === "unknown").length;
+   const heartbeatAgo =
+     streaming && lastHeartbeatAt != null && now > 0 ? Math.max(0, Math.round((now - lastHeartbeatAt) / 1000)) : null;
+ 
+@@ -75,6 +78,7 @@ export default function ToolTimeline({
+             {activity.length} step{activity.length === 1 ? "" : "s"}
+             {running ? " · running" : ""}
+             {failed ? ` · ${failed} failed` : ""}
++            {unreported ? ` · ${unreported} unreported` : ""}
+           </span>
+         </span>
+         {totalMs != null ? (
+@@ -110,6 +114,8 @@ export default function ToolTimeline({
+                         <RunningGlyph />
+                       ) : row.status === "ok" ? (
+                         <Icon name="check" size={12} className="text-(--ok)" />
++                      ) : row.status === "unknown" ? (
++                        <Icon name="info" size={12} className="text-(--ink-faint)" />
+                       ) : (
+                         <Icon name="alert" size={12} className="text-(--danger)" />
+                       )}
+@@ -127,7 +133,13 @@ export default function ToolTimeline({
+                           {row.tool}
+                         </span>
+                         <span className="ml-auto shrink-0 font-mono text-[10.5px] tabular-nums text-(--ink-soft)">
+-                          {row.status === "running" ? (elapsed != null ? `${formatLatency(elapsed)}…` : "running…") : formatLatency(elapsed)}
++                          {row.status === "running"
++                            ? elapsed != null
++                              ? `${formatLatency(elapsed)}…`
++                              : "running…"
++                            : row.status === "unknown"
++                              ? "unreported"
++                              : formatLatency(elapsed)}
+                         </span>
+                       </div>
+                       {row.detail ? (
+diff --git a/web/lib/api.ts b/web/lib/api.ts
+index 2004747..8b34589 100644
+--- a/web/lib/api.ts
++++ b/web/lib/api.ts
+@@ -285,7 +285,17 @@ export class BffClient {
+   }
+ 
+   async *chatStream(
+-    body: { session_id: string; message: string; selected_product_ids?: string[] },
++    body: {
++      session_id: string;
++      message: string;
++      selected_product_ids?: string[];
++      /**
++       * Optional chat mode (docs/QWEN_LIVE_CONTRACT.md §3). `cpu_live` is the BFF default, so the
++       * field is only sent when the user explicitly picked the live Qwen mode; the CPU/Replay
++       * request shape stays byte-identical to the historical contract.
++       */
++      mode?: "cpu_live" | "qwen_live";
++    },
+     options: StreamOptions = {},
+   ): AsyncGenerator<ServerEvent> {
+     const response = await fetch(`${BFF_BASE}/api/chat/stream`, {
+@@ -297,6 +307,7 @@ export class BffClient {
+         ...(body.selected_product_ids && body.selected_product_ids.length
+           ? { selected_product_ids: body.selected_product_ids }
+           : {}),
++        ...(body.mode === "qwen_live" ? { mode: "qwen_live" } : {}),
+       }),
+       signal: options.signal,
+       cache: "no-store",
+diff --git a/web/lib/chat.ts b/web/lib/chat.ts
+index fbe8226..4724941 100644
+--- a/web/lib/chat.ts
++++ b/web/lib/chat.ts
+@@ -9,11 +9,13 @@ import type {
+   ComparisonPayload,
+   ErrorPayload,
+   MemoryUpdatePayload,
++  PlannerMeta,
+   PreferenceState,
+   ProductsPayload,
+   ToolStatus,
+   TurnView,
+ } from "./types";
++import { plannerFromTurnView } from "./planner";
+ 
+ export interface LocalToolStatus extends ToolStatus {
+   /** performance.now() when the running row arrived; used for the live elapsed counter. */
+@@ -28,6 +30,8 @@ export interface ClarificationReplyState {
+   preferences: PreferenceState | null;
+   recommendation: ProductsPayload | null;
+   error: ErrorPayload | null;
++  /** Real planner metadata when the resumed turn was a Qwen Live turn. */
++  planner: PlannerMeta | null;
+ }
+ 
+ export type TurnStatus = "streaming" | "complete" | "interrupted" | "error";
+@@ -48,6 +52,8 @@ export interface LocalTurn {
+   status: TurnStatus;
+   stop_reason: string | null;
+   total_ms: number | null;
++  /** Real planner metadata from the backend (Qwen Base Live / Rule); null when unreported. */
++  planner: PlannerMeta | null;
+   startedAt: number;
+   /** Set when the BFF marked the narrative final. */
+   text_final: boolean;
+@@ -69,7 +75,8 @@ export function turnFromView(view: TurnView, index: number): LocalTurn {
+     turn_id: view.turn_id || null,
+     user_text: view.user_text ?? "",
+     assistant_text: view.assistant_text ?? "",
+-    tool_activity: (view.tool_activity ?? []).map((row) => ({ ...row })),
++    // A persisted turn is finished; a `running` row in it can never still be running.
++    tool_activity: finaliseStaleToolRows((view.tool_activity ?? []).map((row) => ({ ...row }))),
+     products: view.products ?? null,
+     comparison: view.comparison ?? null,
+     clarification: view.clarification ?? null,
+@@ -80,6 +87,7 @@ export function turnFromView(view: TurnView, index: number): LocalTurn {
+     status: view.error ? "error" : "complete",
+     stop_reason: null,
+     total_ms: null,
++    planner: plannerFromTurnView(view),
+     startedAt: 0,
+     text_final: true,
+     reply: null,
+@@ -94,3 +102,65 @@ export function hasOpenClarification(turns: LocalTurn[]): boolean {
+   }
+   return false;
+ }
++
++function replaceRow(
++  list: LocalToolStatus[],
++  index: number,
++  incoming: Partial<LocalToolStatus>,
++): LocalToolStatus[] {
++  const next = [...list];
++  next[index] = { ...list[index], ...incoming };
++  return next;
++}
++
++/**
++ * Merges one real `tool_status` event into the timeline.
++ *
++ * `running` opens a row (a repeated identical notification is not duplicated). A terminal status
++ * closes the newest matching running row; rows are matched on tool *and* label first because a
++ * Qwen turn legitimately repeats the same tool with a different label per planner action
++ * (`planner_action` → "Planner Action: RETRIEVE", then "Planner Action: RERANK", …). If the
++ * backend only ever sent a terminal status, it is appended as its own completed row — never
++ * dropped, never turned into a fake animation.
++ */
++export function mergeToolStatus(list: LocalToolStatus[], incoming: ToolStatus): LocalToolStatus[] {
++  if (incoming.status === "running") {
++    const last = list[list.length - 1];
++    if (last && last.status === "running" && last.tool === incoming.tool && last.label === incoming.label) {
++      // MCP progress notifications may repeat; refresh the open row instead of duplicating it.
++      return replaceRow(list, list.length - 1, { ...incoming, receivedAt: performance.now() });
++    }
++    return [...list, { ...incoming, receivedAt: performance.now() }];
++  }
++  let fallbackIndex = -1;
++  for (let index = list.length - 1; index >= 0; index -= 1) {
++    const row = list[index];
++    if (row.tool !== incoming.tool || row.status !== "running") continue;
++    if (row.label === incoming.label) return replaceRow(list, index, incoming);
++    if (fallbackIndex < 0) fallbackIndex = index;
++  }
++  if (fallbackIndex >= 0) return replaceRow(list, fallbackIndex, incoming);
++  return [...list, { ...incoming }];
++}
++
++/**
++ * Closes progress rows whose completion the backend never reported.
++ *
++ * A finished turn (SSE `done`, an aborted stream, or a persisted turn restored from the session)
++ * cannot still have a running step. Such a row is shown as browser-local `unknown` with an
++ * explicit note — never as an endless spinner (fake animation) and never as a fabricated "ok".
++ */
++export function finaliseStaleToolRows(list: LocalToolStatus[]): LocalToolStatus[] {
++  if (!list.some((row) => row.status === "running")) return list;
++  return list.map((row) =>
++    row.status === "running"
++      ? {
++          ...row,
++          status: "unknown",
++          detail: [row.detail, "Completion was not reported by the backend before the turn ended."]
++            .filter(Boolean)
++            .join(" · "),
++        }
++      : row,
++  );
++}
+diff --git a/web/lib/format.ts b/web/lib/format.ts
+index db4cd69..f925c9d 100644
+--- a/web/lib/format.ts
++++ b/web/lib/format.ts
+@@ -112,6 +112,18 @@ const TOOL_PHASES: Record<string, string> = {
+   get_product_evidence: "Preparing Evidence",
+   product_evidence: "Preparing Evidence",
+   check_product_type: "Checking Product Type",
++  // Qwen Base Live progress rows (docs/QWEN_LIVE_CONTRACT.md §3): the BFF usually sends its own
++  // descriptive label ("Qwen Planner Request", "Planner Action: RETRIEVE", "Decision Gate", …);
++  // these fallbacks only apply when a label is missing, so real text is preferred whenever sent.
++  qwen_planner: "Qwen Planner Request",
++  planner_action: "Planner Action",
++  run_agent_turn: "Qwen Agent Turn",
++  retrieve: "RETRIEVE",
++  rerank: "RERANK",
++  decision_gate: "Decision Gate",
++  ask: "ASK",
++  finalize: "FINALIZE",
++  evidence_preparation: "Evidence Preparation",
+ };
+ 
+ /** Short noun labels the BFF uses; these are replaced by the phase copy above. */
+diff --git a/web/lib/types.ts b/web/lib/types.ts
+index dbeed4d..17169f6 100644
+--- a/web/lib/types.ts
++++ b/web/lib/types.ts
+@@ -37,6 +37,24 @@ export interface ModeInfo {
+   disabled_reason?: string | null;
+ }
+ 
++/**
++ * Optional Qwen Base Live health block from GET /api/health (docs/QWEN_LIVE_CONTRACT.md §2).
++ *
++ * Deliberately contains no endpoint or credential fields. All fields are optional so an older
++ * BFF (no live mode yet) still type-checks and renders as "unavailable", never as fake live.
++ */
++export interface QwenLiveHealth {
++  enabled?: boolean | null;
++  configured?: boolean | null;
++  status?: string | null;
++  available?: boolean | null;
++  model?: string | null;
++  planner_action?: unknown;
++  latency_ms?: number | null;
++  checked_at?: string | null;
++  detail?: string | null;
++}
++
+ export interface Health {
+   status: ServiceStatus;
+   ready: boolean;
+@@ -46,6 +64,8 @@ export interface Health {
+   servers: HealthServer[];
+   modes: Partial<Record<ModeKey, ModeInfo>>;
+   memory_writes_enabled?: boolean;
++  /** Real Qwen Live probe result; absent on an older BFF. Never inferred client-side. */
++  qwen_live?: QwenLiveHealth | null;
+ }
+ 
+ export interface ProfileInfo {
+@@ -73,6 +93,30 @@ export interface DemoConfig {
+   notices: string[];
+ }
+ 
++// ---------------------------------------------------------------------------
++// Planner metadata (real Qwen Base Live / Rule reports only)
++// ---------------------------------------------------------------------------
++
++/**
++ * Real planner metadata as reported by the backend (docs/QWEN_LIVE_CONTRACT.md §3/§4).
++ *
++ * `kind` is the only planner label the UI renders: `"qwen_base"` or `"rule"` come from the
++ * backend verbatim. The UI never substitutes a planner label of its own, and an absent planner
++ * block renders nothing rather than an inferred "rule" claim.
++ */
++export interface PlannerMeta {
++  kind: string;
++  model?: string | null;
++  calls?: number | null;
++  /** `done` reports one scalar; the MCP planner object reports an array of per-call latencies. */
++  latency_ms?: number | number[] | null;
++  actions?: unknown[] | null;
++  parser_errors?: string[] | null;
++}
++
++/** Wire shape: an object, a bare kind string, or absent (older BFF). */
++export type PlannerMetaWire = PlannerMeta | string | null | undefined;
++
+ // ---------------------------------------------------------------------------
+ // Sessions
+ // ---------------------------------------------------------------------------
+@@ -108,6 +152,12 @@ export interface TurnView {
+   memory_update: MemoryUpdatePayload | null;
+   error: ErrorPayload | null;
+   created_at: string;
++  /** Optional real planner metadata added by the Qwen Live backend; never inferred here. */
++  planner?: PlannerMetaWire;
++  planner_model?: string | null;
++  planner_kind?: string | null;
++  planner_calls?: number | null;
++  planner_latency_ms?: number | null;
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -139,7 +189,12 @@ export interface PreferenceState {
+ // Chat SSE view models
+ // ---------------------------------------------------------------------------
+ 
+-export type ToolRunStatus = "running" | "ok" | "error";
++/**
++ * Real row status from the BFF (`running|ok|error`). `unknown` is a browser-local finalisation
++ * used only when the backend persisted/ended a turn without ever reporting completion for a row:
++ * the UI states that honestly instead of leaving a fake endless spinner or claiming success.
++ */
++export type ToolRunStatus = "running" | "ok" | "error" | "unknown";
+ 
+ export interface ToolStatus {
+   tool: string;
+@@ -218,6 +273,12 @@ export interface ProductsPayload {
+   items: ProductCard[];
+   recommended_product_id: string | null;
+   gate: GateDecision | null;
++  /** Optional real planner metadata; product/evidence shapes are otherwise unchanged. */
++  planner?: PlannerMetaWire;
++  planner_model?: string | null;
++  planner_kind?: string | null;
++  planner_calls?: number | null;
++  planner_latency_ms?: number | null;
+ }
+ 
+ export interface EvidencePayload {
+@@ -364,6 +425,11 @@ export interface DonePayload {
+   turn_id: string;
+   stop_reason: StopReason;
+   total_ms: number;
++  /** Optional real planner metadata added by the Qwen Live backend. */
++  planner?: PlannerMetaWire;
++  planner_model?: string | null;
++  planner_calls?: number | null;
++  planner_latency_ms?: number | null;
+ }
+ 
+ export interface ClarificationReplyResponse {
+@@ -375,6 +441,11 @@ export interface ClarificationReplyResponse {
+   clarification_id: string;
+   message: string;
+   error: ErrorPayload | null;
++  /** Optional real planner metadata when the resumed turn was a Qwen Live turn. */
++  planner?: PlannerMetaWire;
++  planner_model?: string | null;
++  planner_calls?: number | null;
++  planner_latency_ms?: number | null;
+ }
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/web_demo/README.md b/web_demo/README.md
+index 74e0e74..49cf4bc 100644
+--- a/web_demo/README.md
++++ b/web_demo/README.md
+@@ -13,11 +13,14 @@ Browser (Windows)
+ ```
+ 
+ **No fake data.** Every product, evidence span, UNKNOWN field, preference and Gate decision is a
+-real payload from one of the seven P17 MCP tools. The BFF never imports `recommendation.*` core
+-modules, never re-ranks/reorders/filters tool results, and never invents price/rating/stock/brand.
++real payload from the P17 MCP tools. The BFF never imports `recommendation.*` core modules, never
++re-ranks/reorders/filters tool results, and never invents price/rating/stock/brand.
+ 
+-**No new runtime/model.** No LLM, no Qwen, no GPU. Qwen Agent mode is historical replay only
+-(`GET /api/replay`, `live_call=false`). Local demo only: binds `127.0.0.1`.
++**CPU default; optional Qwen Base Live.** CPU mode makes no LLM call. P20 can optionally connect to
++an **existing** Qwen3.5-9B Base model service when explicitly configured and healthy; a missing
++service leaves Qwen Live Unavailable and never falls back to Rule while claiming Qwen. Qwen Agent
++Replay (`GET /api/replay`, `live_call=false`) remains historical only. Local demo only: binds
++`127.0.0.1`.
+ 
+ ## Run
+ 
+@@ -50,6 +53,23 @@ the page must render before readiness. BGE is the demo default; `bm25` is for fa
+ | `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES` | `0` | `1` enables writes for profile_0057's MCP server |
+ | `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` | `180` | per-tool-call timeout (startup uses the same ceiling) |
+ | `AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG` | unset | launcher-only: BFF skips its own bff.log handler because the launcher tees console output there |
++| `QWEN_LIVE_ENABLED` | `0` | explicit opt-in for the optional real Qwen Base Live mode |
++| `QWEN_MODEL_ENDPOINT` | unset | existing model server base URL; never exposed to the browser/logs |
++| `QWEN_MODEL_NAME` | `Qwen3.5-9B-Base` | informational model label |
++| `QWEN_LIVE_TIMEOUT_S` / `QWEN_LIVE_HEALTH_TIMEOUT_S` | `180` / `60` | planner call / real PlannerAction health timeout |
++| `QWEN_LIVE_TURN_TIMEOUT_S` | `600` | bound for the complete multi-step Qwen turn |
++| `QWEN_LIVE_MAX_STEPS` | `8` | planner step budget (server also hard-caps) |
++
++Qwen Live is available only after the BFF's real `POST /plan` health probe returns a valid
++PlannerAction. A configured-but-unreachable service keeps CPU Live and Qwen Replay working and
++shows Qwen Live as Unavailable; the BFF does not start/stop AutoDL/GPU, create an SSH tunnel,
++download/quantize a model, or silently fall back to Rule. When configured, the MCP server exposes
++the original 7 tools plus the optional 8th `run_agent_turn`. See
++[`../docs/QWEN_LIVE_CONTRACT.md`](../docs/QWEN_LIVE_CONTRACT.md) and
++[`../QWEN_LIVE_WEB_REPORT.md`](../QWEN_LIVE_WEB_REPORT.md). On 2026-11-09 this path was validated
++with real Qwen3.5-9B Base inference, real MCP/executor/Gate/P15 execution and two real browser
++turns on an RTX 4090; the temporary model server/tunnel are stopped afterwards. The model did not
++choose ASK in the tested prompts, so that continuation branch is not claimed.
+ 
+ Stop a launcher-started BFF with `kill "$(cat runs/web_demo/bff.pid)"` (graceful: MCP clients are
+ closed in the FastAPI lifespan). From Windows PowerShell use
+diff --git a/web_demo/app.py b/web_demo/app.py
+index 05443c7..e0bb9ca 100644
+--- a/web_demo/app.py
++++ b/web_demo/app.py
+@@ -25,7 +25,7 @@ import logging
+ import time
+ from contextlib import asynccontextmanager, suppress
+ from pathlib import Path
+-from typing import Any, AsyncIterator
++from typing import Any, AsyncIterator, Literal
+ 
+ from fastapi import FastAPI, Query, Request
+ from fastapi.encoders import jsonable_encoder
+@@ -47,6 +47,7 @@ from web_demo.config import (
+     modes_public,
+ )
+ from web_demo.mcp_manager import MCPManager, MCPManagerError
++from web_demo.qwen_health import QwenHealthMonitor
+ from web_demo.sessions import DEFAULT_TITLE, Session, SessionStore, iso, utc_now
+ 
+ LOGGER = logging.getLogger("agentrecx.web_demo.bff")
+@@ -69,6 +70,7 @@ class ChatRequest(BaseModel):
+     session_id: str = Field(min_length=1)
+     message: str = Field(min_length=1)
+     selected_product_ids: list[str] | None = None
++    mode: Literal["cpu_live", "qwen_live"] = "cpu_live"
+ 
+ 
+ class ProductDetailsRequest(BaseModel):
+@@ -219,10 +221,12 @@ def create_app(
+     settings: Settings | None = None,
+     manager: MCPManager | Any | None = None,
+     sessions: SessionStore | None = None,
++    qwen_health: QwenHealthMonitor | Any | None = None,
+ ) -> FastAPI:
+     settings = settings or load_settings()
+     manager = manager or MCPManager(settings)
+     store = sessions or SessionStore()
++    monitor = qwen_health or QwenHealthMonitor(settings)
+     meta: dict[str, Any] = {"started_at": iso(utc_now()), "monotonic": time.monotonic()}
+     handlers_added: list[logging.Handler] = []
+ 
+@@ -230,14 +234,17 @@ def create_app(
+     async def lifespan(app: FastAPI):  # noqa: ARG001
+         handlers_added.extend(configure_logging(settings))
+         LOGGER.info(
+-            "BFF starting host=%s port=%s search_mode=%s writes=%s",
++            "BFF starting host=%s port=%s search_mode=%s writes=%s qwen_configured=%s",
+             settings.host, settings.port, settings.search_mode, settings.allow_memory_writes,
++            settings.qwen_live_configured,
+         )
+         manager.start()
++        monitor.start()
+         try:
+             yield
+         finally:
+             LOGGER.info("BFF stopping; closing MCP clients")
++            await monitor.stop()
+             await manager.stop()
+             _remove_handlers(logging.getLogger("agentrecx.web_demo"), handlers_added)
+             handlers_added.clear()
+@@ -251,6 +258,7 @@ def create_app(
+     app.state.settings = settings
+     app.state.manager = manager
+     app.state.sessions = store
++    app.state.qwen_health = monitor
+     app.state.meta = meta
+ 
+     @app.exception_handler(MCPManagerError)
+@@ -307,6 +315,7 @@ def create_app(
+     @app.get("/api/health")
+     async def health() -> dict[str, Any]:
+         status, ready, cpu_available = manager.aggregate_status()
++        qwen = monitor.snapshot()
+         return {
+             "status": status,
+             "ready": ready,
+@@ -314,19 +323,22 @@ def create_app(
+             "uptime_s": round(time.monotonic() - meta["monotonic"], 1),
+             "catalogue_size": manager.catalogue_size(),
+             "servers": manager.health_servers(),
+-            "modes": modes_public(cpu_live_available=cpu_available),
++            "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
++            "qwen_live": qwen,
+             "memory_writes_enabled": bool(settings.allow_memory_writes),
+         }
+ 
+     @app.get("/api/demo/config")
+     async def demo_config() -> dict[str, Any]:
+         _status, _ready, cpu_available = manager.aggregate_status()
++        qwen = monitor.snapshot()
+         return {
+             "profiles": [settings.profile_public(profile_id) for profile_id in PROFILE_BY_ID],
+             "default_profile_id": DEFAULT_PROFILE_ID,
+             "limits": limits_public(settings),
+             "verified_comparison_ids": list(VERIFIED_COMPARISON_IDS),
+-            "modes": modes_public(cpu_live_available=cpu_available),
++            "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
++            "qwen_live": qwen,
+             "notices": list(NOTICES),
+         }
+ 
+@@ -406,12 +418,21 @@ def create_app(
+     async def chat_stream(body: ChatRequest) -> StreamingResponse:
+         session = get_session(body.session_id)
+         require_ready(session)
++        if body.mode == "qwen_live" and not monitor.snapshot()["available"]:
++            raise MCPManagerError(
++                "Qwen Base Live is unavailable: " + str(monitor.snapshot().get("detail") or "health check failed"),
++                code="qwen_unavailable",
++                http_status=409,
++                detail={"mode": "qwen_live", "qwen_status": monitor.snapshot().get("status")},
++            )
+         events = demo_flow.chat_events(
+             manager=manager,
+             session=session,
+             settings=settings,
+             message=body.message,
+             selected_product_ids=list(body.selected_product_ids or []),
++            mode=body.mode,
++            qwen_health=monitor,
+         )
+         return sse_response(events)
+ 
+@@ -442,6 +463,7 @@ def create_app(
+             session=session,
+             clarification_id=body.clarification_id,
+             message=body.message,
++            qwen_health=monitor,
+         )
+ 
+     return app
+diff --git a/web_demo/config.py b/web_demo/config.py
+index d4f9a29..aa4ea2b 100644
+--- a/web_demo/config.py
++++ b/web_demo/config.py
+@@ -35,6 +35,11 @@ COMPARE_MAX = 5
+ DEFAULT_MCP_TIMEOUT_S = 180.0
+ DEFAULT_CLARIFICATION_TTL_S = 1800.0
+ DEFAULT_PORT = 8787
++DEFAULT_QWEN_TIMEOUT_S = 180.0
++DEFAULT_QWEN_HEALTH_TIMEOUT_S = 60.0
++DEFAULT_QWEN_TURN_TIMEOUT_S = 600.0
++DEFAULT_QWEN_MAX_STEPS = 8
++DEFAULT_QWEN_HEALTH_INTERVAL_S = 60.0
+ 
+ # Frozen P18/P17 catalogue snapshot size (76,263 Electronics products).  Health reports this
+ # verified value until a real tool result observed on this process returns catalogue_size.
+@@ -47,7 +52,7 @@ VERIFIED_COMPARISON_IDS = ("B004K6R43G", "B00008VF63")
+ NOTICES = [
+     "Local CPU demo; catalogue facts only; no live price/stock/ratings.",
+     "Memory writes for Demo B are local process memory and reset when the BFF restarts.",
+-    "Qwen Agent mode is historical replay only; there is no live Qwen call.",
++    "Qwen Base Live is optional and only available after a real PlannerAction health check; Qwen Replay is historical and never a live model call.",
+     "Catalogue evidence does not prove real-world quality or user satisfaction.",
+ ]
+ 
+@@ -94,6 +99,25 @@ def _env_bool(value: str | None) -> bool:
+     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+ 
+ 
++def _env_float(env: Mapping[str, str], name: str, default: float) -> float:
++    raw = str(env.get(name, default)).strip()
++    try:
++        value = float(raw)
++    except ValueError as exc:
++        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
++    if value <= 0:
++        raise ValueError(f"{name} must be positive, got {value}")
++    return value
++
++
++def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
++    raw = str(env.get(name, default)).strip()
++    try:
++        return int(raw)
++    except ValueError as exc:
++        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
++
++
+ @dataclass(frozen=True)
+ class Settings:
+     host: str = "127.0.0.1"
+@@ -103,12 +127,26 @@ class Settings:
+     mcp_timeout_s: float = DEFAULT_MCP_TIMEOUT_S
+     clarification_ttl_s: float = DEFAULT_CLARIFICATION_TTL_S
+     console_only_log: bool = False
++    # Optional real Qwen3.5-9B Base Live.  The endpoint is deliberately never exposed publicly.
++    qwen_live_enabled: bool = False
++    qwen_model_endpoint: str = ""
++    qwen_model_name: str = "Qwen3.5-9B-Base"
++    qwen_live_timeout_s: float = DEFAULT_QWEN_TIMEOUT_S
++    qwen_health_timeout_s: float = DEFAULT_QWEN_HEALTH_TIMEOUT_S
++    qwen_turn_timeout_s: float = DEFAULT_QWEN_TURN_TIMEOUT_S
++    qwen_max_steps: int = DEFAULT_QWEN_MAX_STEPS
++    qwen_health_interval_s: float = DEFAULT_QWEN_HEALTH_INTERVAL_S
++    qwen_explain: bool = True
+     repo: Path = REPO
+     log_dir: Path = LOG_DIR
+     replay_path: Path = REPLAY_PATH
+     memory_fixture: Path = MEMORY_FIXTURE
+     python_executable: str = field(default_factory=lambda: sys.executable)
+ 
++    @property
++    def qwen_live_configured(self) -> bool:
++        return bool(self.qwen_live_enabled and self.qwen_model_endpoint)
++
+     def writes_enabled_for(self, profile_id: str) -> bool:
+         profile = PROFILE_BY_ID[profile_id]
+         return bool(profile.memory_writes and self.allow_memory_writes)
+@@ -146,17 +184,61 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
+         ) from exc
+     if timeout <= 0:
+         raise ValueError("AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S must be positive")
++    qwen_enabled = _env_bool(
++        want.get("QWEN_LIVE_ENABLED") or want.get("AGENTRECX_WEB_DEMO_QWEN_LIVE")
++    )
++    qwen_endpoint = str(
++        want.get("QWEN_MODEL_ENDPOINT") or want.get("AGENTRECX_QWEN_PLANNER_URL") or ""
++    ).strip()
++    qwen_model = (
++        str(want.get("QWEN_MODEL_NAME") or "Qwen3.5-9B-Base").strip()
++        or "Qwen3.5-9B-Base"
++    )
+     return Settings(
+         port=port,
+         search_mode=mode,
+         allow_memory_writes=_env_bool(want.get("AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES")),
+         mcp_timeout_s=timeout,
+         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
++        qwen_live_enabled=qwen_enabled,
++        qwen_model_endpoint=qwen_endpoint,
++        qwen_model_name=qwen_model,
++        qwen_live_timeout_s=_env_float(want, "QWEN_LIVE_TIMEOUT_S", DEFAULT_QWEN_TIMEOUT_S),
++        qwen_health_timeout_s=_env_float(
++            want, "QWEN_LIVE_HEALTH_TIMEOUT_S", DEFAULT_QWEN_HEALTH_TIMEOUT_S
++        ),
++        qwen_turn_timeout_s=_env_float(
++            want, "QWEN_LIVE_TURN_TIMEOUT_S", DEFAULT_QWEN_TURN_TIMEOUT_S
++        ),
++        qwen_max_steps=max(1, min(8, _env_int(want, "QWEN_LIVE_MAX_STEPS", DEFAULT_QWEN_MAX_STEPS))),
++        qwen_health_interval_s=max(
++            5.0, _env_float(want, "QWEN_LIVE_HEALTH_INTERVAL_S", DEFAULT_QWEN_HEALTH_INTERVAL_S)
++        ),
++        qwen_explain=_env_bool(want.get("QWEN_LIVE_EXPLAIN", "1")),
+     )
+ 
+ 
+-def modes_public(*, cpu_live_available: bool) -> dict[str, Any]:
+-    """The three run modes exposed to the UI.  CPU live is the only live mode."""
++def modes_public(
++    *,
++    cpu_live_available: bool,
++    qwen_health: Mapping[str, Any] | None = None,
++) -> dict[str, Any]:
++    """The three run modes exposed to the UI; only CPU Live and (when healthy) Qwen are live."""
++    health = dict(qwen_health or {})
++    qwen_available = bool(health.get("available"))
++    qwen_status = str(health.get("status") or "disabled")
++    if qwen_available:
++        qwen_reason = None
++    elif qwen_status == "disabled" or not health.get("enabled") or not health.get("configured"):
++        qwen_reason = "No live Qwen service detected (QWEN_LIVE_ENABLED / QWEN_MODEL_ENDPOINT not configured)"
++    elif qwen_status == "checking":
++        qwen_reason = "No live Qwen service detected yet (real PlannerAction health check in progress)"
++    else:
++        qwen_reason = (
++            "No live Qwen service detected (health check failed: "
++            + str(health.get("detail") or qwen_status)
++            + ")"
++        )
+     return {
+         "cpu_live": {
+             "available": bool(cpu_live_available),
+@@ -172,9 +254,15 @@ def modes_public(*, cpu_live_available: bool) -> dict[str, Any]:
+             "badge": "Historical Replay — Not a Live Model Call",
+         },
+         "qwen_live": {
+-            "available": False,
+-            "label": "Qwen Live Mode",
+-            "disabled_reason": "No live Qwen service detected (P18)",
++            "available": qwen_available,
++            "label": "Qwen Base Live",
++            "detail": (
++                "Real Qwen3.5-9B Base PlannerAction → existing electronics executor → "
++                "Gate/P15/P16"
++            ),
++            "badge": "Live Qwen3.5-9B Base",
++            "disabled_reason": qwen_reason,
++            "planner": "qwen_base" if qwen_available else None,
+         },
+     }
+ 
+@@ -185,4 +273,5 @@ def limits_public(settings: Settings) -> dict[str, Any]:
+         "compare_min": COMPARE_MIN,
+         "compare_max": COMPARE_MAX,
+         "clarification_ttl_s": settings.clarification_ttl_s,
++        "qwen_live_max_steps": settings.qwen_max_steps,
+     }
+diff --git a/web_demo/demo_flow.py b/web_demo/demo_flow.py
+index baf3833..854ee2e 100644
+--- a/web_demo/demo_flow.py
++++ b/web_demo/demo_flow.py
+@@ -7,6 +7,8 @@ with the real per-call latency; failures become ``error`` events (never a fake s
+ 
+ from __future__ import annotations
+ 
++import asyncio
++import json
+ import re
+ import time
+ from dataclasses import dataclass
+@@ -25,6 +27,11 @@ TOOL_LABELS = {
+     "request_preference_clarification": "Clarification",
+     "submit_clarification_reply": "Clarification",
+     "get_active_preferences": "Memory",
++    "run_agent_turn": "Qwen Agent",
++    "qwen_planner": "Qwen Planner Request",
++    "planner_action": "Planner Action",
++    "decision_gate": "Decision Gate",
++    "evidence_preparation": "Evidence Preparation",
+ }
+ 
+ # Explicit comparison intent.  The comparison path is only taken when the request also carries
+@@ -101,8 +108,10 @@ async def chat_events(
+     settings: Settings,
+     message: str,
+     selected_product_ids: list[str] | None = None,
++    mode: str = "cpu_live",
++    qwen_health: Any | None = None,
+ ) -> AsyncIterator[dict[str, Any]]:
+-    """Full deterministic chat turn as contract-ordered SSE events (including ``done``)."""
++    """Full chat turn as contract-ordered SSE events (including ``done``)."""
+     turn = Turn(turn_id=session.next_turn_id(), user_text=message)
+     session.set_title_from(message)
+     recorder = TurnRecorder(turn)
+@@ -110,13 +119,32 @@ async def chat_events(
+     started = time.perf_counter()
+     try:
+         ids = list(selected_product_ids or [])
+-        if is_comparison_request(message, ids):
++        if mode == "qwen_live":
++            if is_comparison_request(message, ids):
++                # Comparison/history are not a Qwen planner decision; do not label a Skill call
++                # as Qwen reasoning.  Keep the existing comparison skill path and record planner=none.
++                turn.planner = "none"
++                async for payload_event in _comparison_turn(
++                    manager=manager, session=session, turn=turn, recorder=recorder,
++                    product_refs=ids, state=state,
++                ):
++                    yield payload_event
++            else:
++                async for payload_event in _qwen_live_turn(
++                    manager=manager, session=session, settings=settings, turn=turn,
++                    recorder=recorder, message=message, state=state,
++                    qwen_health=qwen_health,
++                ):
++                    yield payload_event
++        elif is_comparison_request(message, ids):
++            turn.planner = "rule"
+             async for payload_event in _comparison_turn(
+                 manager=manager, session=session, turn=turn, recorder=recorder,
+                 product_refs=ids, state=state,
+             ):
+                 yield payload_event
+         else:
++            turn.planner = "rule"
+             async for payload_event in _search_and_recommend_turn(
+                 manager=manager, session=session, settings=settings, turn=turn,
+                 recorder=recorder, message=message, state=state,
+@@ -135,7 +163,14 @@ async def chat_events(
+         yield event("error", error)
+         yield event(
+             "done",
+-            {"turn_id": turn.turn_id, "stop_reason": "error", "total_ms": _ms(started)},
++            {
++                "turn_id": turn.turn_id,
++                "stop_reason": "error",
++                "total_ms": _ms(started),
++                "planner": turn.planner,
++                "planner_calls": turn.planner_calls,
++                "planner_latency_ms": turn.planner_latency_ms,
++            },
+         )
+         return
+     except Exception as exc:  # noqa: BLE001 - unexpected failure must be visible, not swallowed
+@@ -152,7 +187,14 @@ async def chat_events(
+         yield event("error", error)
+         yield event(
+             "done",
+-            {"turn_id": turn.turn_id, "stop_reason": "error", "total_ms": _ms(started)},
++            {
++                "turn_id": turn.turn_id,
++                "stop_reason": "error",
++                "total_ms": _ms(started),
++                "planner": turn.planner,
++                "planner_calls": turn.planner_calls,
++                "planner_latency_ms": turn.planner_latency_ms,
++            },
+         )
+         return
+ 
+@@ -163,6 +205,10 @@ async def chat_events(
+             "turn_id": turn.turn_id,
+             "stop_reason": state["stop_reason"],
+             "total_ms": _ms(started),
++            "planner": turn.planner,
++            "planner_model": turn.planner_model,
++            "planner_calls": turn.planner_calls,
++            "planner_latency_ms": turn.planner_latency_ms,
+         },
+     )
+ 
+@@ -352,6 +398,198 @@ async def _search_and_recommend_turn(
+     state["stop_reason"] = "finalized"
+ 
+ 
++async def _qwen_live_turn(
++    *,
++    manager: MCPManager,
++    session: Session,
++    settings: Settings,
++    turn: Turn,
++    recorder: TurnRecorder,
++    message: str,
++    state: dict[str, Any],
++    qwen_health: Any | None,
++) -> AsyncIterator[dict[str, Any]]:
++    """Real Qwen Base Live: MCP run_agent_turn + MCP progress notifications + P15 products.
++
++    No Rule fallback: any planner/transport failure becomes a visible error.  The BFF only calls
++    this path after the background health check has validated a real PlannerAction.
++    """
++    profile_id = session.profile_id
++    entry = recorder.start("run_agent_turn", label="Qwen Agent")
++    yield event("tool_status", entry)
++
++    progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
++
++    async def progress_callback(progress: float, total: float | None, text: str | None) -> None:
++        del progress, total
++        try:
++            payload = json.loads(text or "")
++        except (TypeError, ValueError):
++            return
++        if not isinstance(payload, dict):
++            return
++        tool = str(payload.get("tool") or "qwen_progress")
++        item = {
++            "tool": tool,
++            "label": str(payload.get("label") or TOOL_LABELS.get(tool, tool)),
++            "status": str(payload.get("status") or "ok"),
++            "detail": payload.get("detail"),
++            "latency_ms": payload.get("latency_ms"),
++        }
++        _record_progress(turn, item)
++        await progress_queue.put(event("tool_status", item))
++
++    started = time.perf_counter()
++    task = asyncio.create_task(
++        manager.call_tool(
++            profile_id, "run_agent_turn", {"query": message},
++            timeout_s=settings.qwen_turn_timeout_s,
++            progress_callback=progress_callback,
++        ),
++        name="qwen-live-run-agent-turn",
++    )
++    try:
++        while True:
++            if task.done():
++                while not progress_queue.empty():
++                    yield progress_queue.get_nowait()
++                break
++            try:
++                item = await asyncio.wait_for(progress_queue.get(), timeout=0.25)
++            except asyncio.TimeoutError:
++                continue
++            yield item
++        result = await task
++    except MCPManagerError as exc:
++        recorder.error(entry, detail=exc.message)
++        if qwen_health is not None:
++            qwen_health.mark_unavailable(exc.message)
++        raise
++    except Exception:
++        if qwen_health is not None:
++            qwen_health.mark_unavailable("Qwen agent turn failed")
++        raise
++    latency_ms = _ms(started)
++    recorder.ok(entry, latency_ms=latency_ms)
++    yield event("tool_status", entry)
++
++    planner = result.get("planner") or {}
++    turn.planner = "qwen_base"
++    turn.planner_model = planner.get("model")
++    turn.planner_calls = planner.get("calls")
++    planner_latencies = [float(value) for value in (planner.get("latency_ms") or []) if value is not None]
++    turn.planner_latency_ms = round(sum(planner_latencies), 2) if planner_latencies else None
++
++    status = str(result.get("status") or "error")
++    gate = result.get("gate") or {}
++    selected_id = result.get("selected_product_id")
++    candidate_ids = [str(item) for item in (result.get("candidate_ids") or []) if str(item).strip()][:10]
++    search = result.get("search") or {}
++    retrieval_source = vm.search_retrieval_source(search)
++
++    info_entry = recorder.start("get_product_info", label="Product Info")
++    yield event("tool_status", info_entry)
++    infos: dict[str, dict[str, Any]] = {}
++    fetch_started = time.perf_counter()
++    fetch_ids = list(candidate_ids)
++    if selected_id and str(selected_id) not in fetch_ids:
++        fetch_ids.append(str(selected_id))
++    for item_id in fetch_ids:
++        infos[item_id] = await manager.call_tool(
++            profile_id, "get_product_info", {"product_ref": item_id}
++        )
++    recorder.ok(
++        info_entry,
++        latency_ms=_ms(fetch_started),
++        detail=f"{len(infos)} real catalogue records for Qwen candidates",
++    )
++    yield event("tool_status", info_entry)
++
++    items: list[dict[str, Any]] = []
++    selected_card: dict[str, Any] | None = None
++    for item_id in candidate_ids:
++        card = vm.product_card(
++            infos[item_id], source="search", retrieval_source=retrieval_source,
++            match_status="search_result",
++            recommended=bool(selected_id) and item_id == str(selected_id),
++            product_role=(gate.get("product_role") if selected_id and item_id == str(selected_id) else None),
++        )
++        items.append(card)
++        if selected_id and item_id == str(selected_id):
++            selected_card = card
++    if selected_id and str(selected_id) not in candidate_ids and str(selected_id) in infos:
++        selected_card = vm.product_card(
++            infos[str(selected_id)], source="recommendation",
++            retrieval_source=vm.RETRIEVAL_CATALOGUE, match_status="recommended",
++            recommended=True, product_role=gate.get("product_role"),
++        )
++        items.append(selected_card)
++
++    products = vm.products_payload(
++        query=message,
++        search_mode=search.get("search_mode") or settings.search_mode,
++        score_kind=search.get("score_kind"),
++        catalogue_size=search.get("catalogue_size") or manager.catalogue_size(),
++        items=items,
++        recommended_product_id=str(selected_id) if selected_id else None,
++        gate=gate,
++    )
++    turn.products = products
++    yield event("products", products)
++
++    if status == "awaiting_clarification":
++        clarification_raw = result.get("clarification") or {}
++        clarification = vm.clarification_payload(clarification_raw)
++        clarification["memory_write_enabled"] = bool(clarification_raw.get("memory_write_enabled"))
++        turn.clarification = clarification
++        session.pending_clarification = PendingClarification(
++            payload=clarification,
++            query=message,
++            turn_id=turn.turn_id,
++            reply_turn_id=session.next_reply_turn_id(),
++            mode="qwen_live",
++        )
++        yield event("clarification", clarification)
++        narrative = vm.narrative_qwen(
++            status=status, gate=gate, planner=planner, selected_card=None,
++            clarification=clarification, catalogue_size=products.get("catalogue_size"),
++        )
++        turn.assistant_text = narrative
++        yield event("text", {"text": narrative, "final": True})
++        state["stop_reason"] = "awaiting_clarification"
++        return
++
++    if selected_id and selected_card is not None:
++        evidence = vm.evidence_payload(infos.get(str(selected_id)))
++        yield event("evidence", evidence)
++
++    rag = result.get("rag") or {}
++    final_answer = rag.get("final_answer") if isinstance(rag, Mapping) else None
++    narrative = vm.narrative_qwen(
++        status=status, gate=gate, planner=planner, selected_card=selected_card,
++        clarification=None, catalogue_size=products.get("catalogue_size"),
++        final_answer=str(final_answer) if final_answer else None,
++        planner_steps=(result.get("planner_steps") or {}),
++    )
++    turn.assistant_text = narrative
++    yield event("text", {"text": narrative, "final": True})
++    state["stop_reason"] = status
++
++
++def _record_progress(turn: Turn, item: dict[str, Any]) -> None:
++    """Persist real progress rows on the turn (same view model as live SSE)."""
++    incoming = dict(item)
++    if incoming.get("status") == "running":
++        turn.tool_activity.append(incoming)
++        return
++    for index in range(len(turn.tool_activity) - 1, -1, -1):
++        row = turn.tool_activity[index]
++        if row.get("tool") == incoming.get("tool") and row.get("status") == "running":
++            turn.tool_activity[index] = {**row, **incoming}
++            return
++    turn.tool_activity.append(incoming)
++
++
+ async def _comparison_turn(
+     *,
+     manager: MCPManager,
+@@ -437,6 +675,7 @@ async def clarification_reply(
+     session: Session,
+     clarification_id: str,
+     message: str,
++    qwen_health: Any | None = None,
+ ) -> dict[str, Any]:
+     """Persist a real user reply through M9, refresh preferences and resume the pending query.
+ 
+@@ -507,31 +746,106 @@ async def clarification_reply(
+ 
+     # 3. Resume the pending query through the real recommendation pipeline.
+     recommendation: dict[str, Any] | None = None
++    planner_meta: dict[str, Any] | None = None
+     if pending.query:
+-        rec_entry = recorder.start("recommend_products", label="Recommend")
+-        started = time.perf_counter()
+-        rec_payload = await manager.call_tool(
+-            profile_id, "recommend_products", {"query": pending.query}
+-        )
+-        recorder.ok(rec_entry, latency_ms=_ms(started))
+-        steps.append(_step("recommend_products", started))
+-        _raise_for_recommendation_failure(rec_payload)
+-        recommendation = await _recommendation_view(
+-            manager=manager,
+-            session=session,
+-            query=pending.query,
+-            recommendation=rec_payload,
+-            recorder=recorder,
+-            steps=steps,
+-        )
++        if pending.mode == "qwen_live":
++            # Real Qwen Base resume after the M9 write: no silent Rule fallback.
++            qwen_entry = recorder.start("run_agent_turn", label="Qwen Agent")
++            started = time.perf_counter()
++            timeout_s = float(
++                getattr(getattr(manager, "settings", None), "qwen_turn_timeout_s", 600.0)
++            )
++            try:
++                rec_payload = await manager.call_tool(
++                    profile_id, "run_agent_turn", {"query": pending.query},
++                    timeout_s=timeout_s,
++                )
++            except MCPManagerError as exc:
++                recorder.error(qwen_entry, detail=exc.message)
++                if qwen_health is not None:
++                    qwen_health.mark_unavailable(exc.message)
++                raise
++            recorder.ok(qwen_entry, latency_ms=_ms(started))
++            steps.append(_step("run_agent_turn", started))
++            planner_meta = dict(rec_payload.get("planner") or {})
++            turn.planner = "qwen_base"
++            turn.planner_model = planner_meta.get("model")
++            turn.planner_calls = planner_meta.get("calls")
++            latencies = [float(v) for v in (planner_meta.get("latency_ms") or []) if v is not None]
++            turn.planner_latency_ms = round(sum(latencies), 2) if latencies else None
++            selected_id = rec_payload.get("selected_product_id")
++            products_items: list[dict[str, Any]] = []
++            selected_info: dict[str, Any] | None = None
++            if selected_id:
++                info_entry = recorder.start("get_product_info", label="Product Info")
++                info_started = time.perf_counter()
++                selected_info = await manager.call_tool(
++                    profile_id, "get_product_info", {"product_ref": str(selected_id)}
++                )
++                recorder.ok(info_entry, latency_ms=_ms(info_started))
++                steps.append(_step("get_product_info", info_started))
++                gate = rec_payload.get("gate") or {}
++                products_items.append(
++                    vm.product_card(
++                        selected_info, source="recommendation",
++                        retrieval_source=vm.RETRIEVAL_CATALOGUE,
++                        match_status="recommended", recommended=True,
++                        product_role=gate.get("product_role"),
++                    )
++                )
++            recommendation = vm.products_payload(
++                query=pending.query,
++                search_mode=(rec_payload.get("search") or {}).get("search_mode"),
++                score_kind=(rec_payload.get("search") or {}).get("score_kind"),
++                catalogue_size=(rec_payload.get("search") or {}).get("catalogue_size")
++                or manager.catalogue_size(),
++                items=products_items,
++                recommended_product_id=str(selected_id) if selected_id else None,
++                gate=rec_payload.get("gate"),
++            )
++        else:
++            turn.planner = "rule"
++            rec_entry = recorder.start("recommend_products", label="Recommend")
++            started = time.perf_counter()
++            rec_payload = await manager.call_tool(
++                profile_id, "recommend_products", {"query": pending.query}
++            )
++            recorder.ok(rec_entry, latency_ms=_ms(started))
++            steps.append(_step("recommend_products", started))
++            _raise_for_recommendation_failure(rec_payload)
++            recommendation = await _recommendation_view(
++                manager=manager,
++                session=session,
++                query=pending.query,
++                recommendation=rec_payload,
++                recorder=recorder,
++                steps=steps,
++            )
++    else:
++        rec_payload = None
+ 
+     memory_update = vm.memory_update_payload(reply, preferences)
++    selected_product = None
++    selected_info = locals().get("selected_info")
++    if selected_info:
++        selected_product = selected_info.get("selected_product") or {}
+     narrative = vm.narrative_memory(
+         profile_id=profile_id,
+         memory_update=memory_update,
+         preference_payload=preferences,
+-        recommendation_payload=rec_payload if pending.query else None,
++        recommendation_payload=(
++            {
++                "status": rec_payload.get("status"),
++                "selected_product": selected_product,
++            }
++            if rec_payload is not None else None
++        ),
+     )
++    if turn.planner == "qwen_base":
++        narrative = (
++            f"Planner: {turn.planner_model or 'Qwen3.5-9B-Base'} "
++            f"({turn.planner_calls or 0} real model calls).\n" + narrative
++        )
+     turn.tool_activity = list(turn.tool_activity)
+     turn.memory_update = memory_update
+     turn.products = recommendation
+@@ -546,6 +860,10 @@ async def clarification_reply(
+         "steps": steps,
+         "clarification_id": clarification_id,
+         "message": narrative,
++        "planner": turn.planner,
++        "planner_model": turn.planner_model,
++        "planner_calls": turn.planner_calls,
++        "planner_latency_ms": turn.planner_latency_ms,
+         "error": None,
+     }
+ 
+diff --git a/web_demo/mcp_manager.py b/web_demo/mcp_manager.py
+index dd5ce8a..74cd068 100644
+--- a/web_demo/mcp_manager.py
++++ b/web_demo/mcp_manager.py
+@@ -99,6 +99,12 @@ def _classify_tool_error(message: str) -> str:
+         ("user_confirmation_required", "user_confirmation_required"),
+         ("comparison_failed", "comparison_failed"),
+         ("invalid_product_reference", "invalid_product_reference"),
++        ("qwen_unavailable", "qwen_unavailable"),
++        ("qwen_planner_timeout", "qwen_planner_timeout"),
++        ("qwen_planner_invalid", "qwen_planner_invalid"),
++        ("qwen_planner_error", "qwen_planner_error"),
++        ("qwen_planner_contract_error", "qwen_planner_error"),
++        ("agent_execution_error", "agent_execution_error"),
+     ):
+         if text.startswith(prefix):
+             return code
+@@ -185,18 +191,30 @@ class MCPManager:
+         if runtime.writes_enabled:
+             parts.append("--allow-memory-writes")
+         inner = " ".join(shlex.quote(part) for part in parts)
++        child_env: dict[str, str] = {
++            "PYTHONPATH": str(self.settings.repo),
++            "OMP_NUM_THREADS": "1",
++            "MKL_NUM_THREADS": "1",
++            "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
++        }
++        if self.settings.qwen_live_configured:
++            # The Qwen endpoint is passed only to the trusted stdio child process. It is never
++            # included in health/config/SSE payloads or logs.
++            child_env.update({
++                "AGENTRECX_QWEN_PLANNER": "1",
++                "AGENTRECX_QWEN_PLANNER_URL": self.settings.qwen_model_endpoint,
++                "AGENTRECX_QWEN_PLANNER_MODEL": self.settings.qwen_model_name,
++                "AGENTRECX_QWEN_PLANNER_TIMEOUT_S": repr(float(self.settings.qwen_live_timeout_s)),
++                "AGENTRECX_QWEN_MAX_STEPS": str(int(self.settings.qwen_max_steps)),
++                "AGENTRECX_QWEN_EXPLAIN": "1" if self.settings.qwen_explain else "0",
++            })
+         return StdioServerParameters(
+             # A shell wrapper is the only supported way to capture the server's real stderr;
+             # stdout stays untouched (it carries the MCP stdio protocol).
+             command="/bin/bash",
+             args=["-c", f"exec {inner} 2>>{shlex.quote(str(log_path))}"],
+             cwd=str(self.settings.repo),
+-            env={
+-                "PYTHONPATH": str(self.settings.repo),
+-                "OMP_NUM_THREADS": "1",
+-                "MKL_NUM_THREADS": "1",
+-                "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
+-            },
++            env=child_env,
+         )
+ 
+     def start(self) -> None:
+@@ -405,8 +423,12 @@ class MCPManager:
+         profile_id: str,
+         tool: str,
+         arguments: Mapping[str, Any] | None = None,
++        *,
++        timeout_s: float | None = None,
++        progress_callback: Any | None = None,
+     ) -> dict[str, Any]:
+         runtime = self.ensure_ready(profile_id)
++        call_timeout = float(timeout_s) if timeout_s is not None else float(self.settings.mcp_timeout_s)
+         async with runtime.lock:
+             # Re-check after waiting for the lock: the server may have failed or been restarted
+             # while this request was queued.
+@@ -417,13 +439,16 @@ class MCPManager:
+             started = time.perf_counter()
+             try:
+                 result = await asyncio.wait_for(
+-                    client.call_tool(tool, dict(arguments or {})),
+-                    timeout=self.settings.mcp_timeout_s,
++                    client.call_tool(
++                        tool, dict(arguments or {}),
++                        progress_callback=progress_callback,
++                    ),
++                    timeout=call_timeout,
+                 )
+             except asyncio.TimeoutError as exc:
+                 raise MCPToolTimeout(
+                     f"tool {tool!r} on {profile_id} exceeded "
+-                    f"{self.settings.mcp_timeout_s:.0f}s timeout",
++                    f"{call_timeout:.0f}s timeout",
+                     tool=tool,
+                     detail={"profile_id": profile_id},
+                 ) from exc
+diff --git a/web_demo/sessions.py b/web_demo/sessions.py
+index 49f5ff3..32af822 100644
+--- a/web_demo/sessions.py
++++ b/web_demo/sessions.py
+@@ -37,6 +37,11 @@ class Turn:
+     clarification: dict[str, Any] | None = None
+     memory_update: dict[str, Any] | None = None
+     error: dict[str, Any] | None = None
++    # Actual planner used for this turn (never inferred or fabricated by the UI).
++    planner: str | None = None
++    planner_model: str | None = None
++    planner_calls: int | None = None
++    planner_latency_ms: float | None = None
+     created_at: str = field(default_factory=iso)
+ 
+     def view(self) -> dict[str, Any]:
+@@ -50,6 +55,10 @@ class Turn:
+             "clarification": self.clarification,
+             "memory_update": self.memory_update,
+             "error": self.error,
++            "planner": self.planner,
++            "planner_model": self.planner_model,
++            "planner_calls": self.planner_calls,
++            "planner_latency_ms": self.planner_latency_ms,
+             "created_at": self.created_at,
+         }
+ 
+@@ -66,6 +75,7 @@ class PendingClarification:
+     query: str
+     turn_id: str
+     reply_turn_id: str
++    mode: str = "cpu_live"
+     created_at: str = field(default_factory=iso)
+     reply_attempts: int = 0
+ 
+diff --git a/web_demo/viewmodels.py b/web_demo/viewmodels.py
+index 119bc70..2c59b51 100644
+--- a/web_demo/viewmodels.py
++++ b/web_demo/viewmodels.py
+@@ -578,6 +578,48 @@ def narrative_search(
+     return "\n".join(lines)
+ 
+ 
++def narrative_qwen(
++    *,
++    status: str,
++    gate: Mapping[str, Any] | None,
++    planner: Mapping[str, Any],
++    selected_card: Mapping[str, Any] | None,
++    clarification: Mapping[str, Any] | None,
++    catalogue_size: int | None,
++    final_answer: str | None = None,
++    planner_steps: Mapping[str, Any] | None = None,
++) -> str:
++    """Deterministic narrative for a real Qwen turn; P15 final_answer wins when present."""
++    if final_answer:
++        # The P15 explanation already carries validated evidence claims; do not rewrite it.
++        return str(final_answer)
++    calls = planner.get("calls")
++    lines = [
++        f"Planner: {planner.get('model') or 'Qwen3.5-9B-Base'} "
++        f"({calls or 0} real model calls). Status: {status}.",
++    ]
++    if gate:
++        lines.append(f"Decision Gate: {gate.get('action')} ({gate.get('reason_code')}).")
++    if clarification:
++        lines.append(f"Question: {clarification.get('question')}")
++        lines.append("No product recommendation has been finalized in this turn.")
++    elif selected_card:
++        lines.append(
++            f"Selected product: {selected_card.get('title')} ({selected_card.get('product_id')})."
++        )
++        unknown = [item.get("attribute") for item in selected_card.get("unknown_fields") or ()]
++        if unknown:
++            lines.append("UNKNOWN fields: " + ", ".join(str(item) for item in unknown) + ".")
++    else:
++        lines.append("No product was finalized by the Decision Gate; nothing was invented.")
++    if catalogue_size:
++        lines.append(f"Catalogue: {int(catalogue_size):,} products; evidence is catalogue-only.")
++    lines.append(
++        "Catalogue evidence only; not a claim about real-world quality, price, stock or ratings."
++    )
++    return "\n".join(lines)
++
++
+ def narrative_clarification(clarification: Mapping[str, Any]) -> str:
+     lines = [
+         "Recommendation paused: the Decision Gate requires a user clarification before it can select a product.",
+
+
+== REAL GPU EVIDENCE (ignored local artifacts, not source) ==
+runs/web_demo/qwen_live/gpu_service_info.json
+runs/web_demo/qwen_live/real_plan_probe_remote.json
+runs/web_demo/qwen_live/real_plan_probe_tunnel.json
+runs/web_demo/qwen_live/real_plan_ask_probe.json
+runs/web_demo/qwen_live/real_qwen_mcp_transcript.json
+runs/web_demo/qwen_live/real_qwen_nonfinal.json
+runs/web_demo/qwen_live/e2e_real/ (full 9-test Playwright results/evidence)
+runs/web_demo/qwen_live/qwen-live-real.png
+runs/web_demo/qwen_live/qwen-live-nonfinal.png
+runs/web_demo/qwen_live/model_load_measurement.txt
+runs/web_demo/qwen_live/model_server.log
+
+== DISTINCTION ==
+REAL_QWEN_LIVE: real_* and e2e_real/ artifacts above (RTX 4090, real Qwen3.5-9B Base, no adapter).
+CONTRACT_DOUBLE: runs/web_demo/qwen_live/e2e_contract_fake/ and mcp_contract_transcript.json
+  from the previous round; retained but NOT used for the GO verdict.
+HISTORICAL_REPLAY: runs/p18/qwen_replay.json via GET /api/replay; live_call=false.
+
+== SCOPE NOTES ==
+- Real Qwen path reuses the existing P17 MCP server / ElectronicsPlannerExecutor / Gate / P15;
+  no V0/Gate/Memory semantic change, no training/SFT, no BGE rebuild, no Reserved Test.
+- The prior BGE cold-start single-flight/warmup edit from the interrupted performance round is
+  also present in this uncommitted diff and is not part of the Qwen GO claim.
+- The temporary GPU model server and SSH tunnel were stopped after evidence collection; the
+  AutoDL GPU instance lifecycle was not created/stopped/released/replaced.
+- Excluded from this source diff: ignored data/, models/, runs/, node_modules, venvs, secrets.
+
+END OF QWEN LIVE SOURCE DIFF
