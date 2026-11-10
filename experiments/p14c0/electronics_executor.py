@@ -8,6 +8,7 @@ same objects and budgets.
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from typing import Any
 
@@ -30,6 +31,11 @@ from recommendation.demo.planner_contract import (
     PlannerObservation,
 )
 from recommendation.preference.product_role import assess_candidate_role, infer_product_target
+from recommendation.preference.current_task_constraints import (
+    CurrentTaskConstraints,
+    candidate_constraint_status,
+    effective_preferences,
+)
 from recommendation.preference.decision_gate import (
     ALLOW_FINALIZE,
     NEED_MORE_CANDIDATES,
@@ -68,10 +74,15 @@ class ElectronicsPlannerExecutor:
         explainer: Any | None = None,
         task_context: dict[str, Any] | None = None,
         memory_history: dict[str, Any] | None = None,
+        task_constraints: CurrentTaskConstraints | None = None,
     ) -> None:
         self.catalogue = catalogue
         self.current_query = current_query
-        self.preferences = list(preferences)
+        self.history_preferences = list(preferences)
+        self.task_constraints = task_constraints or CurrentTaskConstraints()
+        # Historical preferences stay untouched; the current task can add an exclusion
+        # that overrides them only in this effective view.
+        self.preferences = effective_preferences(self.history_preferences, self.task_constraints)
         self.hard = list(hard)
         self.namespace = namespace
         self.gate = gate or DecisionGate()
@@ -104,6 +115,8 @@ class ElectronicsPlannerExecutor:
         self.memory_history = memory_history
         self.last_explanation: dict[str, Any] | None = None
         self.explanation_error: str | None = None
+        self.last_task_constraint_summary: dict[str, Any] = {}
+        self.last_reevaluation: dict[str, Any] | None = None
 
     # -- helpers ------------------------------------------------------------ #
     def _log(self, tool: str, inputs: dict[str, Any], output: dict[str, Any]) -> None:
@@ -136,25 +149,56 @@ class ElectronicsPlannerExecutor:
         pool = {"task_id": "p14c0", "current_query": self.current_query,
                 "candidate_ids": ids, "search_scores": {item_id: scores.get(item_id) for item_id in ids}}
         rows = candidate_rows(pool, self.catalogue, self.scorer, self.preferences, self.hard)
+        task_checked: list[dict[str, Any]] = []
         for row in rows:
             product = self.catalogue.get(row["product_ref"]["item_id"])
             if product is not None:
+                row["form_factor"] = product.form_factor
+                row["attributes"] = dict(product.attributes or {})
                 assessment = assess_candidate_role(
                     product_type=product.product_type, title=product.title,
                     target=self.product_target,
                 )
                 row.update(assessment.as_dict())
             else:
+                row["form_factor"] = None
+                row["attributes"] = {}
                 row.update({"role_status": "UNKNOWN", "role_evidence": ["product not in catalogue"],
                             "role_source": "catalog_meta:title", "product_type": None,
                             "candidate_role": "unknown"})
+            constraint_status = candidate_constraint_status(
+                attributes=row.get("attributes") or {},
+                form_factor=row.get("form_factor"),
+                constraints=self.task_constraints,
+                product_type=row.get("product_type"),
+            )
+            row["task_constraint_status"] = constraint_status
+            row["task_constraint_conflicts"] = constraint_status["violations"]
+            row["task_constraint_unknown"] = constraint_status["unknown"]
+            if constraint_status["violations"]:
+                row["presentable"] = False
+            task_checked.append(row)
         compatible = [
-            row for row in rows
+            row for row in task_checked
             if row.get("role_status") in {"MATCH", "NOT_REQUIRED"}
             or not self.product_target.product_type
         ]
+        # A current hard exclusion is authoritative for this task.  Excluded rows stay
+        # in the CandidateLedger score rows for audit, but never enter last_rows/Gate.
+        eligible = [row for row in compatible if not row.get("task_constraint_conflicts")]
         self._role_compatible_rows = compatible
-        top = [row["product_ref"]["item_id"] for row in rows[:INSPECT_TOP_K]]
+        self._task_filtered_rows = [row for row in compatible if row.get("task_constraint_conflicts")]
+        self.last_task_constraint_summary = {
+            "hard_exclusions": [item.as_dict() for item in self.task_constraints.hard_exclusions],
+            "soft_preferences": [item.as_dict() for item in self.task_constraints.soft_preferences],
+            "compatible_candidates": len(compatible),
+            "task_constraint_violations": len(self._task_filtered_rows),
+            "eligible_candidates": len(eligible),
+            "excluded_candidate_ids": [
+                row["product_ref"]["item_id"] for row in self._task_filtered_rows
+            ],
+        }
+        top = [row["product_ref"]["item_id"] for row in task_checked[:INSPECT_TOP_K]]
         inspected = []
         for item_id in top:
             view = self.catalogue.inspect(item_id, requested=sorted({p["value"] for p in self.hard} | {"price", "brand"}))
@@ -164,11 +208,10 @@ class ElectronicsPlannerExecutor:
                 "present": [name for name, fact in view["facts"].items() if fact.get("status") == "present"],
             })
         self.last_inspection = inspected
-        # The planner/Finalize only ever sees candidates that pass the Product Type/Role
-        # check.  Mismatched/unknown-role products remain in the ledger for audit but are
-        # not presented as recommendations.
-        self.last_rows = compatible
-        self._rows_by_rank = {row["product_ref"]["item_id"]: row for row in rows}
+        # The planner/Finalize only ever sees candidates that pass Product Type/Role and
+        # the current task's explicit hard exclusions.
+        self.last_rows = eligible
+        self._rows_by_rank = {row["product_ref"]["item_id"]: row for row in task_checked}
         namespaced = [f"{self.namespace}:{item_id}" for item_id in top]
         requirements = [ConstraintRequirement(kind=ConstraintKind.CATEGORY, expected="Electronics",
                                               source_text="catalogue category")]
@@ -177,10 +220,60 @@ class ElectronicsPlannerExecutor:
             "verified": feasibility.verified_eligible_count,
             "ineligible": feasibility.ineligible_count,
             "unresolved": feasibility.unresolved_count,
+            "task_constraint_violations": len(self._task_filtered_rows),
+            "task_constraint_unknown": sum(
+                1 for row in eligible if (row.get("task_constraint_status") or {}).get("status") == "unknown"
+            ),
         }
         self._log("product_view", {"product_ids": top}, {"inspected": inspected})
         self._log("eligibility", {"candidates": len(namespaced)}, self.last_eligibility)
-        return rows
+        self._log("task_constraints", {"exclusions": len(self.task_constraints.hard_exclusions)},
+                  self.last_task_constraint_summary)
+        return task_checked
+
+    def refresh_for_task(
+        self,
+        *,
+        history: dict[str, Any],
+        task_constraints: CurrentTaskConstraints | None,
+        candidate_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Re-evaluate the preserved candidate pool under an updated current task.
+
+        CandidateLedger, retrieved candidates and tool budgets are retained; only stale
+        scorer rows / eligibility / Gate-derived state are recomputed from the latest M9
+        read and current task constraints.
+        """
+        started = time.perf_counter()
+        self.task_constraints = task_constraints or CurrentTaskConstraints()
+        self.history_preferences = prepare_preferences(history)
+        self.preferences = effective_preferences(self.history_preferences, self.task_constraints)
+        self.memory_history = history
+        self.last_rows = []
+        self._rows_by_rank = {}
+        self.last_inspection = []
+        self.last_decision = None
+        self.last_eligibility = None
+        ids = list(candidate_ids or [])
+        if not ids and self.last_search:
+            ids = list(self.last_search.get("hit_ids") or [])
+        rows = self._score_and_inspect(ids) if ids else []
+        valid_ids = [row["product_ref"]["item_id"] for row in self.last_rows]
+        self.last_reevaluation = {
+            "input_candidate_count": len(ids),
+            "candidate_ids": valid_ids,
+            "eligible_count": len(valid_ids),
+            "excluded_candidate_ids": list(self.last_task_constraint_summary.get("excluded_candidate_ids") or []),
+            "task_constraint_status": {
+                "violations": len(self._task_filtered_rows),
+                "unknown": sum(
+                    1 for row in rows
+                    if (row.get("task_constraint_status") or {}).get("status") == "unknown"
+                ),
+            },
+            "latency_ms": round((time.perf_counter() - started) * 1000.0, 2),
+        }
+        return self.last_reevaluation
 
     # -- PlannerExecutor protocol ------------------------------------------ #
     def invoke_skill(self, registry: Any, name: str, **arguments: Any) -> dict[str, Any]:
@@ -279,6 +372,9 @@ class ElectronicsPlannerExecutor:
                 expected_product_type=self.product_target.product_type,
                 expected_product_role=self.product_target.role.value,
                 budget=self.gate_budget,
+                task_constraints=[
+                    item.as_dict() for item in self.task_constraints.hard_exclusions
+                ],
             )
             decision = self.gate.check(context)
             self.last_decision = decision.as_dict()
@@ -287,6 +383,20 @@ class ElectronicsPlannerExecutor:
             if decision.allow_finalize:
                 selected = decision.selected_candidate_id
                 row = self._rows_by_rank.get(selected or "", None)
+                # Final defense-in-depth check: even if a Gate implementation returned
+                # ALLOW_FINALIZE with stale candidate rows, the current task hard exclusion
+                # is checked against the selected row immediately before presentation.
+                task_conflicts = list((row or {}).get("task_constraint_conflicts") or ())
+                if task_conflicts:
+                    self.terminal_status = "current_task_constraint_violation"
+                    return (replace(observation, terminal=True, candidate_ids=(),
+                                    m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
+                                              "gate_action": decision.action,
+                                              "status": self.terminal_status,
+                                              "task_constraint_conflicts": task_conflicts}),
+                            {"status": self.terminal_status, "gate": decision.as_dict(),
+                             "candidate_id": selected, "task_constraint_conflicts": task_conflicts,
+                             "bounded_scope": True}, True)
                 self.selected_candidate_id = selected
                 self.terminal_status = "finalized"
                 recommendation = {
@@ -294,6 +404,7 @@ class ElectronicsPlannerExecutor:
                     "rank": row["rank"] if row else None,
                     "evidence_refs": (row or {}).get("evidence_refs"),
                     "unknown_fields": list(decision.unknown_fields),
+                    "task_constraint_status": (row or {}).get("task_constraint_status"),
                 }
                 if self.explainer is not None and self.task_context is not None:
                     try:

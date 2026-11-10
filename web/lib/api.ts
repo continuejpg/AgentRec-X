@@ -285,7 +285,17 @@ export class BffClient {
   }
 
   async *chatStream(
-    body: { session_id: string; message: string; selected_product_ids?: string[] },
+    body: {
+      session_id: string;
+      message: string;
+      selected_product_ids?: string[];
+      /**
+       * Optional chat mode (docs/QWEN_LIVE_CONTRACT.md §3). `cpu_live` is the BFF default, so the
+       * field is only sent when the user explicitly picked the live Qwen mode; the CPU/Replay
+       * request shape stays byte-identical to the historical contract.
+       */
+      mode?: "cpu_live" | "qwen_live";
+    },
     options: StreamOptions = {},
   ): AsyncGenerator<ServerEvent> {
     const response = await fetch(`${BFF_BASE}/api/chat/stream`, {
@@ -297,6 +307,7 @@ export class BffClient {
         ...(body.selected_product_ids && body.selected_product_ids.length
           ? { selected_product_ids: body.selected_product_ids }
           : {}),
+        ...(body.mode === "qwen_live" ? { mode: "qwen_live" } : {}),
       }),
       signal: options.signal,
       cache: "no-store",

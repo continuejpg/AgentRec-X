@@ -99,6 +99,12 @@ def _classify_tool_error(message: str) -> str:
         ("user_confirmation_required", "user_confirmation_required"),
         ("comparison_failed", "comparison_failed"),
         ("invalid_product_reference", "invalid_product_reference"),
+        ("qwen_unavailable", "qwen_unavailable"),
+        ("qwen_planner_timeout", "qwen_planner_timeout"),
+        ("qwen_planner_invalid", "qwen_planner_invalid"),
+        ("qwen_planner_error", "qwen_planner_error"),
+        ("qwen_planner_contract_error", "qwen_planner_error"),
+        ("agent_execution_error", "agent_execution_error"),
     ):
         if text.startswith(prefix):
             return code
@@ -185,18 +191,30 @@ class MCPManager:
         if runtime.writes_enabled:
             parts.append("--allow-memory-writes")
         inner = " ".join(shlex.quote(part) for part in parts)
+        child_env: dict[str, str] = {
+            "PYTHONPATH": str(self.settings.repo),
+            "OMP_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
+        }
+        if self.settings.qwen_live_configured:
+            # The Qwen endpoint is passed only to the trusted stdio child process. It is never
+            # included in health/config/SSE payloads or logs.
+            child_env.update({
+                "AGENTRECX_QWEN_PLANNER": "1",
+                "AGENTRECX_QWEN_PLANNER_URL": self.settings.qwen_model_endpoint,
+                "AGENTRECX_QWEN_PLANNER_MODEL": self.settings.qwen_model_name,
+                "AGENTRECX_QWEN_PLANNER_TIMEOUT_S": repr(float(self.settings.qwen_live_timeout_s)),
+                "AGENTRECX_QWEN_MAX_STEPS": str(int(self.settings.qwen_max_steps)),
+                "AGENTRECX_QWEN_EXPLAIN": "1" if self.settings.qwen_explain else "0",
+            })
         return StdioServerParameters(
             # A shell wrapper is the only supported way to capture the server's real stderr;
             # stdout stays untouched (it carries the MCP stdio protocol).
             command="/bin/bash",
             args=["-c", f"exec {inner} 2>>{shlex.quote(str(log_path))}"],
             cwd=str(self.settings.repo),
-            env={
-                "PYTHONPATH": str(self.settings.repo),
-                "OMP_NUM_THREADS": "1",
-                "MKL_NUM_THREADS": "1",
-                "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
-            },
+            env=child_env,
         )
 
     def start(self) -> None:
@@ -405,8 +423,12 @@ class MCPManager:
         profile_id: str,
         tool: str,
         arguments: Mapping[str, Any] | None = None,
+        *,
+        timeout_s: float | None = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         runtime = self.ensure_ready(profile_id)
+        call_timeout = float(timeout_s) if timeout_s is not None else float(self.settings.mcp_timeout_s)
         async with runtime.lock:
             # Re-check after waiting for the lock: the server may have failed or been restarted
             # while this request was queued.
@@ -417,13 +439,16 @@ class MCPManager:
             started = time.perf_counter()
             try:
                 result = await asyncio.wait_for(
-                    client.call_tool(tool, dict(arguments or {})),
-                    timeout=self.settings.mcp_timeout_s,
+                    client.call_tool(
+                        tool, dict(arguments or {}),
+                        progress_callback=progress_callback,
+                    ),
+                    timeout=call_timeout,
                 )
             except asyncio.TimeoutError as exc:
                 raise MCPToolTimeout(
                     f"tool {tool!r} on {profile_id} exceeded "
-                    f"{self.settings.mcp_timeout_s:.0f}s timeout",
+                    f"{call_timeout:.0f}s timeout",
                     tool=tool,
                     detail={"profile_id": profile_id},
                 ) from exc

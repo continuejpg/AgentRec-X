@@ -37,6 +37,11 @@ class Turn:
     clarification: dict[str, Any] | None = None
     memory_update: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    # Actual planner used for this turn (never inferred or fabricated by the UI).
+    planner: str | None = None
+    planner_model: str | None = None
+    planner_calls: int | None = None
+    planner_latency_ms: float | None = None
     created_at: str = field(default_factory=iso)
 
     def view(self) -> dict[str, Any]:
@@ -50,6 +55,10 @@ class Turn:
             "clarification": self.clarification,
             "memory_update": self.memory_update,
             "error": self.error,
+            "planner": self.planner,
+            "planner_model": self.planner_model,
+            "planner_calls": self.planner_calls,
+            "planner_latency_ms": self.planner_latency_ms,
             "created_at": self.created_at,
         }
 
@@ -66,6 +75,7 @@ class PendingClarification:
     query: str
     turn_id: str
     reply_turn_id: str
+    mode: str = "cpu_live"
     created_at: str = field(default_factory=iso)
     reply_attempts: int = 0
 

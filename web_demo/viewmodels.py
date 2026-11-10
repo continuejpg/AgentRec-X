@@ -578,6 +578,48 @@ def narrative_search(
     return "\n".join(lines)
 
 
+def narrative_qwen(
+    *,
+    status: str,
+    gate: Mapping[str, Any] | None,
+    planner: Mapping[str, Any],
+    selected_card: Mapping[str, Any] | None,
+    clarification: Mapping[str, Any] | None,
+    catalogue_size: int | None,
+    final_answer: str | None = None,
+    planner_steps: Mapping[str, Any] | None = None,
+) -> str:
+    """Deterministic narrative for a real Qwen turn; P15 final_answer wins when present."""
+    if final_answer:
+        # The P15 explanation already carries validated evidence claims; do not rewrite it.
+        return str(final_answer)
+    calls = planner.get("calls")
+    lines = [
+        f"Planner: {planner.get('model') or 'Qwen3.5-9B-Base'} "
+        f"({calls or 0} real model calls). Status: {status}.",
+    ]
+    if gate:
+        lines.append(f"Decision Gate: {gate.get('action')} ({gate.get('reason_code')}).")
+    if clarification:
+        lines.append(f"Question: {clarification.get('question')}")
+        lines.append("No product recommendation has been finalized in this turn.")
+    elif selected_card:
+        lines.append(
+            f"Selected product: {selected_card.get('title')} ({selected_card.get('product_id')})."
+        )
+        unknown = [item.get("attribute") for item in selected_card.get("unknown_fields") or ()]
+        if unknown:
+            lines.append("UNKNOWN fields: " + ", ".join(str(item) for item in unknown) + ".")
+    else:
+        lines.append("No product was finalized by the Decision Gate; nothing was invented.")
+    if catalogue_size:
+        lines.append(f"Catalogue: {int(catalogue_size):,} products; evidence is catalogue-only.")
+    lines.append(
+        "Catalogue evidence only; not a claim about real-world quality, price, stock or ratings."
+    )
+    return "\n".join(lines)
+
+
 def narrative_clarification(clarification: Mapping[str, Any]) -> str:
     lines = [
         "Recommendation paused: the Decision Gate requires a user clarification before it can select a product.",

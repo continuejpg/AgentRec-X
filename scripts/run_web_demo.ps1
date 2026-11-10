@@ -90,9 +90,32 @@ $bffArgs = @(
     "--", "env",
     "AGENTRECX_WEB_DEMO_PORT=$BffPort",
     "AGENTRECX_WEB_DEMO_SEARCH_MODE=bge",
-    "AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1",
-    "bash", "scripts/run_web_demo_bff.sh"
+    "AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1"
 )
+# Optional real Qwen Base Live: propagate only explicitly configured values to the WSL BFF.
+# The endpoint is never printed by this launcher; if it is absent, Qwen Live stays Unavailable.
+$qwenEnvNames = @(
+    "QWEN_LIVE_ENABLED", "QWEN_MODEL_ENDPOINT", "QWEN_MODEL_NAME",
+    "QWEN_LIVE_TIMEOUT_S", "QWEN_LIVE_HEALTH_TIMEOUT_S", "QWEN_LIVE_TURN_TIMEOUT_S",
+    "QWEN_LIVE_MAX_STEPS", "QWEN_LIVE_EXPLAIN", "QWEN_LIVE_HEALTH_INTERVAL_S",
+    "AGENTRECX_WEB_DEMO_ASK_TEST_PROFILE"
+)
+$qwenConfigured = $false
+foreach ($name in $qwenEnvNames) {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+        $bffArgs += "$name=$value"
+        if ($name -eq "QWEN_LIVE_ENABLED" -and $value -match '^(1|true|yes|on)$') {
+            $qwenConfigured = $true
+        }
+    }
+}
+$bffArgs += @("bash", "scripts/run_web_demo_bff.sh")
+if ($qwenConfigured) {
+    Write-Host "  Qwen Live: requested (endpoint configured; health check decides availability)" -ForegroundColor DarkGray
+} else {
+    Write-Host "  Qwen Live: not configured (CPU Live + Qwen Replay remain available)" -ForegroundColor DarkGray
+}
 $bff = Start-DemoProcess -FilePath "wsl.exe" -Arguments $bffArgs -StdOut $BffConsole -StdErr $BffConsoleErr
 
 # ---------------------------------------------------------------------------

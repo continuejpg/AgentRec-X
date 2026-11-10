@@ -13,11 +13,14 @@ Browser (Windows)
 ```
 
 **No fake data.** Every product, evidence span, UNKNOWN field, preference and Gate decision is a
-real payload from one of the seven P17 MCP tools. The BFF never imports `recommendation.*` core
-modules, never re-ranks/reorders/filters tool results, and never invents price/rating/stock/brand.
+real payload from the P17 MCP tools. The BFF never imports `recommendation.*` core modules, never
+re-ranks/reorders/filters tool results, and never invents price/rating/stock/brand.
 
-**No new runtime/model.** No LLM, no Qwen, no GPU. Qwen Agent mode is historical replay only
-(`GET /api/replay`, `live_call=false`). Local demo only: binds `127.0.0.1`.
+**CPU default; optional Qwen Base Live.** CPU mode makes no LLM call. P20 can optionally connect to
+an **existing** Qwen3.5-9B Base model service when explicitly configured and healthy; a missing
+service leaves Qwen Live Unavailable and never falls back to Rule while claiming Qwen. Qwen Agent
+Replay (`GET /api/replay`, `live_call=false`) remains historical only. Local demo only: binds
+`127.0.0.1`.
 
 ## Run
 
@@ -50,6 +53,23 @@ the page must render before readiness. BGE is the demo default; `bm25` is for fa
 | `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES` | `0` | `1` enables writes for profile_0057's MCP server |
 | `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` | `180` | per-tool-call timeout (startup uses the same ceiling) |
 | `AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG` | unset | launcher-only: BFF skips its own bff.log handler because the launcher tees console output there |
+| `QWEN_LIVE_ENABLED` | `0` | explicit opt-in for the optional real Qwen Base Live mode |
+| `QWEN_MODEL_ENDPOINT` | unset | existing model server base URL; never exposed to the browser/logs |
+| `QWEN_MODEL_NAME` | `Qwen3.5-9B-Base` | informational model label |
+| `QWEN_LIVE_TIMEOUT_S` / `QWEN_LIVE_HEALTH_TIMEOUT_S` | `180` / `60` | planner call / real PlannerAction health timeout |
+| `QWEN_LIVE_TURN_TIMEOUT_S` | `600` | bound for the complete multi-step Qwen turn |
+| `QWEN_LIVE_MAX_STEPS` | `8` | planner step budget (server also hard-caps) |
+
+Qwen Live is available only after the BFF's real `POST /plan` health probe returns a valid
+PlannerAction. A configured-but-unreachable service keeps CPU Live and Qwen Replay working and
+shows Qwen Live as Unavailable; the BFF does not start/stop AutoDL/GPU, create an SSH tunnel,
+download/quantize a model, or silently fall back to Rule. When configured, the MCP server exposes
+the original 7 tools plus the optional 8th `run_agent_turn`. See
+[`../docs/QWEN_LIVE_CONTRACT.md`](../docs/QWEN_LIVE_CONTRACT.md) and
+[`../QWEN_LIVE_WEB_REPORT.md`](../QWEN_LIVE_WEB_REPORT.md). On 2026-11-09 this path was validated
+with real Qwen3.5-9B Base inference, real MCP/executor/Gate/P15 execution and two real browser
+turns on an RTX 4090; the temporary model server/tunnel are stopped afterwards. The model did not
+choose ASK in the tested prompts, so that continuation branch is not claimed.
 
 Stop a launcher-started BFF with `kill "$(cat runs/web_demo/bff.pid)"` (graceful: MCP clients are
 closed in the FastAPI lifespan). From Windows PowerShell use

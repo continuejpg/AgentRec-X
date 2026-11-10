@@ -5,11 +5,16 @@
 "use client";
 
 import type { DemoConfig, Health, ModeKey } from "@/lib/types";
+import type { QwenLiveState } from "@/lib/modes";
 import { formatElapsed } from "@/lib/format";
 import { Icon } from "./icons";
 import { IconButton, Pill, StatusDot, type Tone } from "./ui";
 
-export type UiMode = "cpu_live" | "qwen_replay";
+/**
+ * The three run modes. Qwen Live is a real live mode only when the backend reports it available;
+ * Qwen Replay is a historical, read-only trajectory viewer.
+ */
+export type UiMode = "cpu_live" | "qwen_replay" | "qwen_live";
 
 function BrandMark({ small = false }: { small?: boolean }) {
   return (
@@ -75,16 +80,24 @@ function ModeControl({
   mode,
   onChange,
   disabled,
+  qwenLive,
 }: {
   modes: Partial<Record<ModeKey, ModeInfoUnavailable>>;
   mode: UiMode;
   onChange: (mode: UiMode) => void;
   disabled: boolean;
+  qwenLive: QwenLiveState;
 }) {
   const replay = modes.qwen_replay;
-  const live = modes.qwen_live;
   const cpu = modes.cpu_live;
-  const items: { key: UiMode | "qwen_live"; label: string; title: string; available: boolean; active: boolean }[] = [
+  const items: {
+    key: UiMode;
+    label: string;
+    title: string;
+    available: boolean;
+    active: boolean;
+    testId: string;
+  }[] = [
     {
       key: "cpu_live",
       label: "CPU Live",
@@ -92,6 +105,7 @@ function ModeControl({
       // CPU Live is the default live mode; readiness is reported separately by the readiness chip.
       available: true,
       active: mode === "cpu_live",
+      testId: "mode-cpu-live",
     },
     {
       key: "qwen_replay",
@@ -99,13 +113,18 @@ function ModeControl({
       title: replay?.badge ?? "Historical Replay — Not a Live Model Call",
       available: replay?.available !== false,
       active: mode === "qwen_replay",
+      testId: "mode-qwen-replay",
     },
     {
       key: "qwen_live",
       label: "Qwen Live",
-      title: live?.disabled_reason ?? "No live Qwen service detected (P18).",
-      available: false,
-      active: false,
+      // Real backend reason while unavailable; the real backend detail/badge while available.
+      title: qwenLive.available
+        ? (qwenLive.detail ?? qwenLive.badge ?? "Real Qwen Base Live planner call")
+        : (qwenLive.disabledReason ?? "No live Qwen service detected"),
+      available: qwenLive.available,
+      active: mode === "qwen_live",
+      testId: "mode-qwen-live",
     },
   ];
   return (
@@ -119,8 +138,12 @@ function ModeControl({
             aria-pressed={item.active}
             disabled={isDisabled}
             title={item.title}
+            data-testid={item.testId}
+            data-state={
+              item.key === "qwen_live" ? (item.available ? "available" : "unavailable") : undefined
+            }
             onClick={() => {
-              if (item.key === "qwen_live") return;
+              if (!item.available) return;
               onChange(item.key);
             }}
             className={`flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] transition-colors ${
@@ -132,7 +155,13 @@ function ModeControl({
             }`}
           >
             {item.key === "qwen_replay" ? <Icon name="play" size={10} /> : null}
-            {item.key === "qwen_live" ? <Icon name="alert" size={10} className="text-(--ink-faint)" /> : null}
+            {item.key === "qwen_live" ? (
+              <Icon
+                name={item.available ? "spark" : "alert"}
+                size={10}
+                className={item.available ? "text-(--accent)" : "text-(--ink-faint)"}
+              />
+            ) : null}
             {item.label}
           </button>
         );
@@ -155,6 +184,7 @@ export default function Header({
   config,
   mode,
   onModeChange,
+  qwenLive,
   onOpenSidebar,
   onOpenPanel,
   onTogglePanel,
@@ -170,6 +200,7 @@ export default function Header({
   config: DemoConfig | null;
   mode: UiMode;
   onModeChange: (mode: UiMode) => void;
+  qwenLive: QwenLiveState;
   onOpenSidebar: () => void;
   onOpenPanel: () => void;
   onTogglePanel: () => void;
@@ -222,7 +253,7 @@ export default function Header({
           </button>
         ) : null}
         <div className="hidden md:block">
-          <ModeControl modes={modes} mode={mode} onChange={onModeChange} disabled={streaming} />
+          <ModeControl modes={modes} mode={mode} onChange={onModeChange} disabled={streaming} qwenLive={qwenLive} />
         </div>
         <button
           type="button"
@@ -251,6 +282,13 @@ export default function Header({
           onClick={onTogglePanel}
           className="hidden xl:grid"
         />
+        {mode === "qwen_live" && qwenLive.available ? (
+          <span data-testid="qwen-live-badge" className="hidden sm:inline-flex" title={qwenLive.detail ?? undefined}>
+            <Pill tone="accent" dot>
+              {qwenLive.badge ?? "Live Qwen mode"}
+            </Pill>
+          </span>
+        ) : null}
         {mode === "qwen_replay" ? (
           <Pill tone="warn" className="hidden sm:inline-flex">
             Historical Replay — not live

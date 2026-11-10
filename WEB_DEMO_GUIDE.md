@@ -28,9 +28,12 @@ Browser (Windows, Chrome/Edge)
 - **Real clarification + memory**: a Gate clarification is answered by you in the browser; the
   reply is persisted through the existing M9 writer, then the preference panel refreshes and the
   recommendation resumes.
-- **CPU Live vs Qwen Replay**: CPU Live is the only live mode. Qwen is shown only as saved P18
-  trajectories, always labelled **Historical Replay — Not a Live Model Call**. Qwen Live is
-  disabled (no live service).
+- **CPU Live vs Qwen Base Live vs Qwen Replay**: CPU Live is the default live mode. **Qwen Base
+  Live is optional**: it becomes selectable only after the BFF's real `/plan` health check returns
+  a valid PlannerAction from the configured Qwen3.5-9B Base service. Qwen Replay remains saved P18
+  trajectories, always labelled **Historical Replay — Not a Live Model Call** and never presented
+  as live. When no Qwen service is configured/reachable, Qwen Live shows **Unavailable** with the
+  real reason; there is no silent Rule fallback.
 - **No cart, checkout, payment, order or stock.** `Price unavailable / UNKNOWN` is the honest
   state for this catalogue snapshot.
 
@@ -158,9 +161,10 @@ Logs:
 
 ### Other UI
 
-- **Modes**: the header shows **CPU Live** as the live mode, **Qwen Replay** (clearly labelled
-  *Historical Replay — Not a Live Model Call*) for saved trajectories, and **Qwen Live**
-  disabled with its reason. Replay never calls a model.
+- **Modes**: the header shows **CPU Live** as the default live mode, **Qwen Replay** (clearly
+  labelled *Historical Replay — Not a Live Model Call*) for saved trajectories, and **Qwen Base
+  Live** — selectable only when the real backend health check says available, otherwise disabled
+  with its real reason. Replay never calls a model; Qwen Live never falls back to Rule.
 - **Mobile**: width < 1280 becomes a single column; preferences, details/evidence and comparison
   open in drawers/sheets; the composer stays at the bottom.
 - **Recovery**: if a tool fails, the UI shows the real error/status (with tool name and latency);
@@ -169,7 +173,100 @@ Logs:
 - **Recent conversations** are in-process; the browser remembers only the session id. BFF
   restart starts a fresh list.
 
-## 6. Tests and verification
+## 6. Qwen Base Live (real GPU validated 2026-11-09)
+
+This section now has **real GPU validation**, not just a contract wiring:
+RTX 4090 24 GB, Qwen3.5-9B Base (`/root/autodl-tmp/models/Qwen3.5-9B-ms`, no SFT adapter), real
+`/plan` calls, real MCP `run_agent_turn`, real executor/Gate/P15, and two real browser Qwen Live
+turns. Full evidence: [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md) and
+`runs/web_demo/qwen_live/`.
+
+This is an **optional** live mode over the existing P17 MCP / ElectronicsPlannerExecutor stack.
+It is not a new Agent loop: the real Qwen3.5-9B Base returns a PlannerAction (`ASK`, `RETRIEVE`,
+`RERANK`, `FINALIZE`), and the existing executor/search/scorer/ledger/eligibility/Gate/P15/M9
+components execute it. A Rule→Qwen rewrite or Qwen→Rule fallback is not implemented.
+
+### Configuration
+
+Set these in the **same Windows PowerShell session** that launches the demo (the launcher forwards
+them into WSL; the endpoint is never shown in the browser):
+
+```powershell
+$env:QWEN_LIVE_ENABLED = "1"                       # explicit opt-in
+$env:QWEN_MODEL_ENDPOINT = "http://127.0.0.1:18009"  # existing model server, NOT auto-started
+$env:QWEN_MODEL_NAME = "Qwen3.5-9B-Base"
+$env:QWEN_LIVE_TIMEOUT_S = "180"                    # each /plan call
+$env:QWEN_LIVE_HEALTH_TIMEOUT_S = "60"             # real PlannerAction health probe
+$env:QWEN_LIVE_TURN_TIMEOUT_S = "600"              # bounds the complete multi-step turn
+$env:QWEN_LIVE_MAX_STEPS = "8"
+powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
+```
+
+Availability is deliberately strict: the BFF performs a real `POST /plan` health probe and only
+shows Qwen Live as available after it parses a valid PlannerAction. A configured-but-unreachable
+service leaves **Qwen Live Unavailable**; CPU Live and Qwen Replay continue to work, and a Qwen
+request never silently becomes a Rule request. The BFF does **not** start/stop AutoDL/GPU, create
+SSH tunnels, download or quantize a model. Start the model service yourself, using the repository's
+`training/agent_sft/model_server.py` or your existing endpoint.
+
+The MCP server exposes the original 7 tools plus one conditional 8th tool,
+`run_agent_turn`, only when Qwen Live is configured. `run_agent_turn` returns the model's real
+actions, tool observations, Gate result, P15 evidence, planner/explainer latencies and the
+optional Qwen clarification handle. `/api/chat/stream` accepts
+`{"mode":"qwen_live", ...}` and emits the same SSE event names plus planner metadata on `done`.
+
+### Last verified status (2026-11-09, real GPU)
+
+- Instance: `autodl-container-06fa4ab99e-6a73b008`, GPU RTX 4090 24,564 MiB; CUDA true.
+- Existing `training/agent_sft/model_server.py`, base model only (`adapter=None`), port 8009;
+  model load **12.203 s**; GPU peak observed **19,845 MiB**; `/plan` 2.6–3.6 s direct/tunnel
+  (2.6–4.7 s inside the agent loop); token counts 388–874 input / 69–107 output per call.
+- Temporary WSL tunnel `127.0.0.1:18009 → remote 127.0.0.1:8009`; BFF health reported
+  `qwen_live.status=available`, `planner_action=RETRIEVE`, both MCP servers exposed **8 tools**.
+- Real MCP: 3 finalized turns (`B08D32JM5F`, `B07GPH9WF3`, `B00B93N0PO`, all
+  `ALLOW_FINALIZE/evidence_sufficient`, P15 evidence/`rag` present) and one real non-FINALIZE
+  (`under $1`: 7 bounded planner calls, Gate `NEED_MORE_PRODUCT_EVIDENCE`, no finalize).
+- Real browser: full Playwright **9/9 PASS** (7 CPU/Replay + 2 real Qwen) **plus 1/1 separate
+  real ASK→M9→resume browser test**; screenshots `qwen-live-real.png` / `qwen-live-nonfinal.png`
+  and `runs/web_demo/qwen_ask_resume/browser_final/`.
+- On 2026-11-10 the real Qwen ASK branch was triggered on an isolated conflict profile. A follow-up
+  fix now treats "Please avoid wired headphones" as a **task-scoped hard exclusion**, overrides the
+  old historical conflict only for this task, preserves the old M9 audit entry, re-evaluates the
+  preserved candidate pool, and prevents an explicit-wired final product without requiring a second
+  "Forget" reply. See [`QWEN_CLARIFICATION_FIX_REPORT.md`](QWEN_CLARIFICATION_FIX_REPORT.md); the
+  final item's wireless evidence is UNKNOWN where the catalogue has no such evidence. No ASK or
+  reply was fabricated.
+- The temporary model server/tunnel were stopped after evidence collection; the AutoDL GPU
+  instance lifecycle was not touched. Start the service and tunnel yourself for a rerun:
+
+```bash
+# remote GPU host: existing model_server.py + Base model (no adapter)
+cd /root/autodl-tmp/agentrecx
+nohup /root/autodl-tmp/agentrecx-sft/bin/python -m training.agent_sft.model_server \
+  --model /root/autodl-tmp/models/Qwen3.5-9B-ms --port 8009 --max-new-tokens 256 \
+  > /root/autodl-tmp/qwen_live_model_server.log 2>&1 &
+```
+
+```bash
+# WSL: temporary tunnel (do not create/stop the GPU instance)
+ssh -N -L 18009:127.0.0.1:8009 -p <port> -i <key> root@<host>
+```
+
+Then use the Qwen env block above and start `scripts/run_web_demo.ps1`. Qwen Live is selectable
+only after `/api/health` reports `qwen_live.status=available`.
+
+### Contract/regression tests (no GPU required)
+
+```bash
+# contract-only tests (a local HTTP planner double, clearly not Qwen)
+.venv/bin/python -m pytest -q tests/test_qwen_live_unit.py tests/test_qwen_live_bff.py
+AGENTRECX_RUN_QWEN_MCP_INTEGRATION=1 .venv/bin/python -m pytest -q tests/test_qwen_live_mcp_integration.py
+```
+
+For a real GPU rerun, the browser tests are
+`e2e/tests/07-qwen-live-real.spec.ts` (requires a real available Qwen service).
+
+## 7. Tests and verification
 
 Run targeted tests only (the repository has a large unrelated test suite; do not run all of it).
 
@@ -194,10 +291,15 @@ End-to-end (real browser, real BFF/MCP; starts and stops the demo itself):
 powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1
 ```
 
-Latest verified result: **7/7 tests PASS**, 64 real evidence checks, 8 screenshots with validated
-1440×900 / 390×844 sizes, ports released after cleanup. Artifacts:
-`runs/web_demo/screenshots/`, `runs/web_demo/e2e/summary.json`,
-`runs/web_demo/e2e/REPORT.md`, `runs/web_demo/e2e/evidence.jsonl`.
+Latest verified result: **9/9 tests PASS** (7 original CPU/Replay + 2 real Qwen Live tests),
+zero failures, real screenshots including `qwen-live-real.png` / `qwen-live-nonfinal.png`.
+Artifacts:
+
+- `runs/web_demo/qwen_live/e2e_real/summary.json`, `evidence.jsonl`, `full_suite_results.json`;
+- `runs/web_demo/qwen_live/real_qwen_mcp_transcript.json`,
+  `real_qwen_nonfinal.json`, `gpu_service_info.json`, `real_plan_*.json`;
+- original CPU/Replay artifacts: `runs/web_demo/e2e/summary.json` and
+  `runs/web_demo/screenshots/`.
 
 License/header audit:
 
@@ -205,7 +307,7 @@ License/header audit:
 wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/python third_party/tools/check_copied_headers.py --root web --notices THIRD_PARTY_NOTICES.md
 ```
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | What to check |
 |---|---|
@@ -216,8 +318,10 @@ wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/pytho
 | `memory_writes_disabled` on clarification reply | You are on Demo A (read-only). Create a conversation with Demo B, and start the BFF via the demo launcher (writes enabled). |
 | BFF exits with `PermissionError` writing `runs/` | Run the BFF inside WSL as documented; do not use a Windows Python interpreter. |
 | Memory changed unexpectedly / want a clean slate | Restart the BFF (fixture-backed M9); `POST /api/demo/restart` also restarts both MCP servers. |
+| Qwen Live stays Unavailable despite config | Check `/api/health` → `qwen_live` (`status`, `planner_action`, `latency_ms`, `detail`); verify `QWEN_LIVE_ENABLED=1`, `QWEN_MODEL_ENDPOINT` is reachable from the WSL BFF, and the service returns a valid `/plan` PlannerAction. The BFF never creates a tunnel or starts a GPU/model server. |
+| Qwen Live request fails | The UI/API shows a real `qwen_*` error; it never falls back to Rule or Replay. Fix/reconnect the service, then retry. |
 
-## 8. Known limitations (honest)
+## 9. Known limitations (honest)
 
 1. **Catalogue evidence only.** No live price, stock, ratings, images, seller data or real-world
    quality can be verified; UNKNOWN is never filled.
@@ -228,7 +332,12 @@ wsl -d Ubuntu-22.04 --cd /mnt/d/IT/CODE/PROJECTION/agentrec/X -- .venv/bin/pytho
 4. **Memory is demo-local**: process memory, fixture-backed, reset on restart; there is no
    durable user database.
 5. **No authentication / TLS / rate limiting**; localhost only.
-6. **Qwen Agent mode is replay-only**; there is no live Qwen/GPU path in this demo.
+6. **Qwen Base Live is GPU-validated but not always-on**: real Qwen3.5-9B Base inference, real
+   MCP/executor/Gate and two real browser turns passed on 2026-11-09. The temporary model service
+   and tunnel are stopped; rerun requires starting them. On 2026-11-10 the real ASK→M9→resume branch
+   was exercised and a follow-up fix made the current task constraint authoritative for the resumed
+   candidate/Gate decision; see `QWEN_CLARIFICATION_FIX_REPORT.md` (GO for explicit-wired exclusion;
+   wireless evidence remains UNKNOWN where the catalogue has none). Qwen Replay is still historical only.
 7. Recommendation/comparison results are bounded catalogue results; they are not a claim of
    objective product quality or online shopping success.
 8. The frontend is a local demo, not a production storefront: no cart, checkout, orders,

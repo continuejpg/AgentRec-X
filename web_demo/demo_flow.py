@@ -7,6 +7,8 @@ with the real per-call latency; failures become ``error`` events (never a fake s
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -25,6 +27,11 @@ TOOL_LABELS = {
     "request_preference_clarification": "Clarification",
     "submit_clarification_reply": "Clarification",
     "get_active_preferences": "Memory",
+    "run_agent_turn": "Qwen Agent",
+    "qwen_planner": "Qwen Planner Request",
+    "planner_action": "Planner Action",
+    "decision_gate": "Decision Gate",
+    "evidence_preparation": "Evidence Preparation",
 }
 
 # Explicit comparison intent.  The comparison path is only taken when the request also carries
@@ -101,8 +108,10 @@ async def chat_events(
     settings: Settings,
     message: str,
     selected_product_ids: list[str] | None = None,
+    mode: str = "cpu_live",
+    qwen_health: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Full deterministic chat turn as contract-ordered SSE events (including ``done``)."""
+    """Full chat turn as contract-ordered SSE events (including ``done``)."""
     turn = Turn(turn_id=session.next_turn_id(), user_text=message)
     session.set_title_from(message)
     recorder = TurnRecorder(turn)
@@ -110,13 +119,32 @@ async def chat_events(
     started = time.perf_counter()
     try:
         ids = list(selected_product_ids or [])
-        if is_comparison_request(message, ids):
+        if mode == "qwen_live":
+            if is_comparison_request(message, ids):
+                # Comparison/history are not a Qwen planner decision; do not label a Skill call
+                # as Qwen reasoning.  Keep the existing comparison skill path and record planner=none.
+                turn.planner = "none"
+                async for payload_event in _comparison_turn(
+                    manager=manager, session=session, turn=turn, recorder=recorder,
+                    product_refs=ids, state=state,
+                ):
+                    yield payload_event
+            else:
+                async for payload_event in _qwen_live_turn(
+                    manager=manager, session=session, settings=settings, turn=turn,
+                    recorder=recorder, message=message, state=state,
+                    qwen_health=qwen_health,
+                ):
+                    yield payload_event
+        elif is_comparison_request(message, ids):
+            turn.planner = "rule"
             async for payload_event in _comparison_turn(
                 manager=manager, session=session, turn=turn, recorder=recorder,
                 product_refs=ids, state=state,
             ):
                 yield payload_event
         else:
+            turn.planner = "rule"
             async for payload_event in _search_and_recommend_turn(
                 manager=manager, session=session, settings=settings, turn=turn,
                 recorder=recorder, message=message, state=state,
@@ -135,7 +163,14 @@ async def chat_events(
         yield event("error", error)
         yield event(
             "done",
-            {"turn_id": turn.turn_id, "stop_reason": "error", "total_ms": _ms(started)},
+            {
+                "turn_id": turn.turn_id,
+                "stop_reason": "error",
+                "total_ms": _ms(started),
+                "planner": turn.planner,
+                "planner_calls": turn.planner_calls,
+                "planner_latency_ms": turn.planner_latency_ms,
+            },
         )
         return
     except Exception as exc:  # noqa: BLE001 - unexpected failure must be visible, not swallowed
@@ -152,7 +187,14 @@ async def chat_events(
         yield event("error", error)
         yield event(
             "done",
-            {"turn_id": turn.turn_id, "stop_reason": "error", "total_ms": _ms(started)},
+            {
+                "turn_id": turn.turn_id,
+                "stop_reason": "error",
+                "total_ms": _ms(started),
+                "planner": turn.planner,
+                "planner_calls": turn.planner_calls,
+                "planner_latency_ms": turn.planner_latency_ms,
+            },
         )
         return
 
@@ -163,6 +205,10 @@ async def chat_events(
             "turn_id": turn.turn_id,
             "stop_reason": state["stop_reason"],
             "total_ms": _ms(started),
+            "planner": turn.planner,
+            "planner_model": turn.planner_model,
+            "planner_calls": turn.planner_calls,
+            "planner_latency_ms": turn.planner_latency_ms,
         },
     )
 
@@ -352,6 +398,198 @@ async def _search_and_recommend_turn(
     state["stop_reason"] = "finalized"
 
 
+async def _qwen_live_turn(
+    *,
+    manager: MCPManager,
+    session: Session,
+    settings: Settings,
+    turn: Turn,
+    recorder: TurnRecorder,
+    message: str,
+    state: dict[str, Any],
+    qwen_health: Any | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Real Qwen Base Live: MCP run_agent_turn + MCP progress notifications + P15 products.
+
+    No Rule fallback: any planner/transport failure becomes a visible error.  The BFF only calls
+    this path after the background health check has validated a real PlannerAction.
+    """
+    profile_id = session.profile_id
+    entry = recorder.start("run_agent_turn", label="Qwen Agent")
+    yield event("tool_status", entry)
+
+    progress_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    async def progress_callback(progress: float, total: float | None, text: str | None) -> None:
+        del progress, total
+        try:
+            payload = json.loads(text or "")
+        except (TypeError, ValueError):
+            return
+        if not isinstance(payload, dict):
+            return
+        tool = str(payload.get("tool") or "qwen_progress")
+        item = {
+            "tool": tool,
+            "label": str(payload.get("label") or TOOL_LABELS.get(tool, tool)),
+            "status": str(payload.get("status") or "ok"),
+            "detail": payload.get("detail"),
+            "latency_ms": payload.get("latency_ms"),
+        }
+        _record_progress(turn, item)
+        await progress_queue.put(event("tool_status", item))
+
+    started = time.perf_counter()
+    task = asyncio.create_task(
+        manager.call_tool(
+            profile_id, "run_agent_turn", {"query": message},
+            timeout_s=settings.qwen_turn_timeout_s,
+            progress_callback=progress_callback,
+        ),
+        name="qwen-live-run-agent-turn",
+    )
+    try:
+        while True:
+            if task.done():
+                while not progress_queue.empty():
+                    yield progress_queue.get_nowait()
+                break
+            try:
+                item = await asyncio.wait_for(progress_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+            yield item
+        result = await task
+    except MCPManagerError as exc:
+        recorder.error(entry, detail=exc.message)
+        if qwen_health is not None:
+            qwen_health.mark_unavailable(exc.message)
+        raise
+    except Exception:
+        if qwen_health is not None:
+            qwen_health.mark_unavailable("Qwen agent turn failed")
+        raise
+    latency_ms = _ms(started)
+    recorder.ok(entry, latency_ms=latency_ms)
+    yield event("tool_status", entry)
+
+    planner = result.get("planner") or {}
+    turn.planner = "qwen_base"
+    turn.planner_model = planner.get("model")
+    turn.planner_calls = planner.get("calls")
+    planner_latencies = [float(value) for value in (planner.get("latency_ms") or []) if value is not None]
+    turn.planner_latency_ms = round(sum(planner_latencies), 2) if planner_latencies else None
+
+    status = str(result.get("status") or "error")
+    gate = result.get("gate") or {}
+    selected_id = result.get("selected_product_id")
+    candidate_ids = [str(item) for item in (result.get("candidate_ids") or []) if str(item).strip()][:10]
+    search = result.get("search") or {}
+    retrieval_source = vm.search_retrieval_source(search)
+
+    info_entry = recorder.start("get_product_info", label="Product Info")
+    yield event("tool_status", info_entry)
+    infos: dict[str, dict[str, Any]] = {}
+    fetch_started = time.perf_counter()
+    fetch_ids = list(candidate_ids)
+    if selected_id and str(selected_id) not in fetch_ids:
+        fetch_ids.append(str(selected_id))
+    for item_id in fetch_ids:
+        infos[item_id] = await manager.call_tool(
+            profile_id, "get_product_info", {"product_ref": item_id}
+        )
+    recorder.ok(
+        info_entry,
+        latency_ms=_ms(fetch_started),
+        detail=f"{len(infos)} real catalogue records for Qwen candidates",
+    )
+    yield event("tool_status", info_entry)
+
+    items: list[dict[str, Any]] = []
+    selected_card: dict[str, Any] | None = None
+    for item_id in candidate_ids:
+        card = vm.product_card(
+            infos[item_id], source="search", retrieval_source=retrieval_source,
+            match_status="search_result",
+            recommended=bool(selected_id) and item_id == str(selected_id),
+            product_role=(gate.get("product_role") if selected_id and item_id == str(selected_id) else None),
+        )
+        items.append(card)
+        if selected_id and item_id == str(selected_id):
+            selected_card = card
+    if selected_id and str(selected_id) not in candidate_ids and str(selected_id) in infos:
+        selected_card = vm.product_card(
+            infos[str(selected_id)], source="recommendation",
+            retrieval_source=vm.RETRIEVAL_CATALOGUE, match_status="recommended",
+            recommended=True, product_role=gate.get("product_role"),
+        )
+        items.append(selected_card)
+
+    products = vm.products_payload(
+        query=message,
+        search_mode=search.get("search_mode") or settings.search_mode,
+        score_kind=search.get("score_kind"),
+        catalogue_size=search.get("catalogue_size") or manager.catalogue_size(),
+        items=items,
+        recommended_product_id=str(selected_id) if selected_id else None,
+        gate=gate,
+    )
+    turn.products = products
+    yield event("products", products)
+
+    if status == "awaiting_clarification":
+        clarification_raw = result.get("clarification") or {}
+        clarification = vm.clarification_payload(clarification_raw)
+        clarification["memory_write_enabled"] = bool(clarification_raw.get("memory_write_enabled"))
+        turn.clarification = clarification
+        session.pending_clarification = PendingClarification(
+            payload=clarification,
+            query=message,
+            turn_id=turn.turn_id,
+            reply_turn_id=session.next_reply_turn_id(),
+            mode="qwen_live",
+        )
+        yield event("clarification", clarification)
+        narrative = vm.narrative_qwen(
+            status=status, gate=gate, planner=planner, selected_card=None,
+            clarification=clarification, catalogue_size=products.get("catalogue_size"),
+        )
+        turn.assistant_text = narrative
+        yield event("text", {"text": narrative, "final": True})
+        state["stop_reason"] = "awaiting_clarification"
+        return
+
+    if selected_id and selected_card is not None:
+        evidence = vm.evidence_payload(infos.get(str(selected_id)))
+        yield event("evidence", evidence)
+
+    rag = result.get("rag") or {}
+    final_answer = rag.get("final_answer") if isinstance(rag, Mapping) else None
+    narrative = vm.narrative_qwen(
+        status=status, gate=gate, planner=planner, selected_card=selected_card,
+        clarification=None, catalogue_size=products.get("catalogue_size"),
+        final_answer=str(final_answer) if final_answer else None,
+        planner_steps=(result.get("planner_steps") or {}),
+    )
+    turn.assistant_text = narrative
+    yield event("text", {"text": narrative, "final": True})
+    state["stop_reason"] = status
+
+
+def _record_progress(turn: Turn, item: dict[str, Any]) -> None:
+    """Persist real progress rows on the turn (same view model as live SSE)."""
+    incoming = dict(item)
+    if incoming.get("status") == "running":
+        turn.tool_activity.append(incoming)
+        return
+    for index in range(len(turn.tool_activity) - 1, -1, -1):
+        row = turn.tool_activity[index]
+        if row.get("tool") == incoming.get("tool") and row.get("status") == "running":
+            turn.tool_activity[index] = {**row, **incoming}
+            return
+    turn.tool_activity.append(incoming)
+
+
 async def _comparison_turn(
     *,
     manager: MCPManager,
@@ -437,6 +675,7 @@ async def clarification_reply(
     session: Session,
     clarification_id: str,
     message: str,
+    qwen_health: Any | None = None,
 ) -> dict[str, Any]:
     """Persist a real user reply through M9, refresh preferences and resume the pending query.
 
@@ -507,36 +746,141 @@ async def clarification_reply(
 
     # 3. Resume the pending query through the real recommendation pipeline.
     recommendation: dict[str, Any] | None = None
+    planner_meta: dict[str, Any] | None = None
+    followup_clarification: dict[str, Any] | None = None
+    resume_task_constraints: dict[str, Any] | None = None
+    candidate_reevaluation: dict[str, Any] | None = None
     if pending.query:
-        rec_entry = recorder.start("recommend_products", label="Recommend")
-        started = time.perf_counter()
-        rec_payload = await manager.call_tool(
-            profile_id, "recommend_products", {"query": pending.query}
-        )
-        recorder.ok(rec_entry, latency_ms=_ms(started))
-        steps.append(_step("recommend_products", started))
-        _raise_for_recommendation_failure(rec_payload)
-        recommendation = await _recommendation_view(
-            manager=manager,
-            session=session,
-            query=pending.query,
-            recommendation=rec_payload,
-            recorder=recorder,
-            steps=steps,
-        )
+        if pending.mode == "qwen_live":
+            # Real Qwen Base resume after the M9 write: no silent Rule fallback.
+            qwen_entry = recorder.start("run_agent_turn", label="Qwen Agent")
+            started = time.perf_counter()
+            timeout_s = float(
+                getattr(getattr(manager, "settings", None), "qwen_turn_timeout_s", 600.0)
+            )
+            try:
+                rec_payload = await manager.call_tool(
+                    profile_id, "run_agent_turn",
+                    {"query": pending.query, "clarification_id": clarification_id},
+                    timeout_s=timeout_s,
+                )
+            except MCPManagerError as exc:
+                recorder.error(qwen_entry, detail=exc.message)
+                if qwen_health is not None:
+                    qwen_health.mark_unavailable(exc.message)
+                raise
+            recorder.ok(qwen_entry, latency_ms=_ms(started))
+            steps.append(_step("run_agent_turn", started))
+            planner_meta = dict(rec_payload.get("planner") or {})
+            resume_task_constraints = rec_payload.get("task_constraints")
+            candidate_reevaluation = rec_payload.get("candidate_reevaluation")
+            turn.planner = "qwen_base"
+            turn.planner_model = planner_meta.get("model")
+            turn.planner_calls = planner_meta.get("calls")
+            latencies = [float(v) for v in (planner_meta.get("latency_ms") or []) if v is not None]
+            turn.planner_latency_ms = round(sum(latencies), 2) if latencies else None
+            selected_id = rec_payload.get("selected_product_id")
+            products_items: list[dict[str, Any]] = []
+            selected_info: dict[str, Any] | None = None
+            if selected_id:
+                info_entry = recorder.start("get_product_info", label="Product Info")
+                info_started = time.perf_counter()
+                selected_info = await manager.call_tool(
+                    profile_id, "get_product_info", {"product_ref": str(selected_id)}
+                )
+                recorder.ok(info_entry, latency_ms=_ms(info_started))
+                steps.append(_step("get_product_info", info_started))
+                gate = rec_payload.get("gate") or {}
+                products_items.append(
+                    vm.product_card(
+                        selected_info, source="recommendation",
+                        retrieval_source=vm.RETRIEVAL_CATALOGUE,
+                        match_status="recommended", recommended=True,
+                        product_role=gate.get("product_role"),
+                    )
+                )
+            recommendation = vm.products_payload(
+                query=pending.query,
+                search_mode=(rec_payload.get("search") or {}).get("search_mode"),
+                score_kind=(rec_payload.get("search") or {}).get("score_kind"),
+                catalogue_size=(rec_payload.get("search") or {}).get("catalogue_size")
+                or manager.catalogue_size(),
+                items=products_items,
+                recommended_product_id=str(selected_id) if selected_id else None,
+                gate=rec_payload.get("gate"),
+            )
+            if rec_payload.get("status") == "awaiting_clarification" and rec_payload.get("clarification"):
+                # The real model asked a follow-up because M9 still contains an unresolved conflict
+                # (e.g. "avoid wired" is an AVOID entry, not an explicit retraction).  Expose the
+                # server-issued handle honestly; do not force FINALIZE or fake a resolved memory.
+                followup_clarification = vm.clarification_payload(rec_payload["clarification"])
+                followup_clarification["memory_write_enabled"] = bool(
+                    (rec_payload.get("clarification") or {}).get("memory_write_enabled")
+                )
+                turn.clarification = followup_clarification
+                session.pending_clarification = PendingClarification(
+                    payload=followup_clarification,
+                    query=pending.query,
+                    turn_id=turn.turn_id,
+                    reply_turn_id=session.next_reply_turn_id(),
+                    mode="qwen_live",
+                )
+        else:
+            turn.planner = "rule"
+            rec_entry = recorder.start("recommend_products", label="Recommend")
+            started = time.perf_counter()
+            rec_payload = await manager.call_tool(
+                profile_id, "recommend_products", {"query": pending.query}
+            )
+            recorder.ok(rec_entry, latency_ms=_ms(started))
+            steps.append(_step("recommend_products", started))
+            _raise_for_recommendation_failure(rec_payload)
+            recommendation = await _recommendation_view(
+                manager=manager,
+                session=session,
+                query=pending.query,
+                recommendation=rec_payload,
+                recorder=recorder,
+                steps=steps,
+            )
+    else:
+        rec_payload = None
 
     memory_update = vm.memory_update_payload(reply, preferences)
+    selected_product = None
+    selected_info = locals().get("selected_info")
+    if selected_info:
+        selected_product = selected_info.get("selected_product") or {}
     narrative = vm.narrative_memory(
         profile_id=profile_id,
         memory_update=memory_update,
         preference_payload=preferences,
-        recommendation_payload=rec_payload if pending.query else None,
+        recommendation_payload=(
+            {
+                "status": rec_payload.get("status"),
+                "selected_product": selected_product,
+            }
+            if rec_payload is not None else None
+        ),
     )
+    if turn.planner == "qwen_base":
+        narrative = (
+            f"Planner: {turn.planner_model or 'Qwen3.5-9B-Base'} "
+            f"({turn.planner_calls or 0} real model calls).\n" + narrative
+        )
     turn.tool_activity = list(turn.tool_activity)
     turn.memory_update = memory_update
     turn.products = recommendation
     turn.assistant_text = narrative
-    session.pending_clarification = None
+    if followup_clarification is None:
+        session.pending_clarification = None
+    else:
+        narrative = (
+            narrative
+            + "\n\nFollow-up needed from the real Qwen planner: "
+            + str(followup_clarification.get("question") or "")
+        )
+        turn.assistant_text = narrative
     session.add_turn(turn)
     return {
         "turn_id": turn.turn_id,
@@ -546,6 +890,13 @@ async def clarification_reply(
         "steps": steps,
         "clarification_id": clarification_id,
         "message": narrative,
+        "clarification": followup_clarification,
+        "task_constraints": resume_task_constraints,
+        "candidate_reevaluation": candidate_reevaluation,
+        "planner": turn.planner,
+        "planner_model": turn.planner_model,
+        "planner_calls": turn.planner_calls,
+        "planner_latency_ms": turn.planner_latency_ms,
         "error": None,
     }
 

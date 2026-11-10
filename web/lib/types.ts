@@ -37,6 +37,24 @@ export interface ModeInfo {
   disabled_reason?: string | null;
 }
 
+/**
+ * Optional Qwen Base Live health block from GET /api/health (docs/QWEN_LIVE_CONTRACT.md §2).
+ *
+ * Deliberately contains no endpoint or credential fields. All fields are optional so an older
+ * BFF (no live mode yet) still type-checks and renders as "unavailable", never as fake live.
+ */
+export interface QwenLiveHealth {
+  enabled?: boolean | null;
+  configured?: boolean | null;
+  status?: string | null;
+  available?: boolean | null;
+  model?: string | null;
+  planner_action?: unknown;
+  latency_ms?: number | null;
+  checked_at?: string | null;
+  detail?: string | null;
+}
+
 export interface Health {
   status: ServiceStatus;
   ready: boolean;
@@ -46,6 +64,8 @@ export interface Health {
   servers: HealthServer[];
   modes: Partial<Record<ModeKey, ModeInfo>>;
   memory_writes_enabled?: boolean;
+  /** Real Qwen Live probe result; absent on an older BFF. Never inferred client-side. */
+  qwen_live?: QwenLiveHealth | null;
 }
 
 export interface ProfileInfo {
@@ -72,6 +92,30 @@ export interface DemoConfig {
   modes: Partial<Record<ModeKey, ModeInfo>>;
   notices: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Planner metadata (real Qwen Base Live / Rule reports only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Real planner metadata as reported by the backend (docs/QWEN_LIVE_CONTRACT.md §3/§4).
+ *
+ * `kind` is the only planner label the UI renders: `"qwen_base"` or `"rule"` come from the
+ * backend verbatim. The UI never substitutes a planner label of its own, and an absent planner
+ * block renders nothing rather than an inferred "rule" claim.
+ */
+export interface PlannerMeta {
+  kind: string;
+  model?: string | null;
+  calls?: number | null;
+  /** `done` reports one scalar; the MCP planner object reports an array of per-call latencies. */
+  latency_ms?: number | number[] | null;
+  actions?: unknown[] | null;
+  parser_errors?: string[] | null;
+}
+
+/** Wire shape: an object, a bare kind string, or absent (older BFF). */
+export type PlannerMetaWire = PlannerMeta | string | null | undefined;
 
 // ---------------------------------------------------------------------------
 // Sessions
@@ -108,6 +152,12 @@ export interface TurnView {
   memory_update: MemoryUpdatePayload | null;
   error: ErrorPayload | null;
   created_at: string;
+  /** Optional real planner metadata added by the Qwen Live backend; never inferred here. */
+  planner?: PlannerMetaWire;
+  planner_model?: string | null;
+  planner_kind?: string | null;
+  planner_calls?: number | null;
+  planner_latency_ms?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +189,12 @@ export interface PreferenceState {
 // Chat SSE view models
 // ---------------------------------------------------------------------------
 
-export type ToolRunStatus = "running" | "ok" | "error";
+/**
+ * Real row status from the BFF (`running|ok|error`). `unknown` is a browser-local finalisation
+ * used only when the backend persisted/ended a turn without ever reporting completion for a row:
+ * the UI states that honestly instead of leaving a fake endless spinner or claiming success.
+ */
+export type ToolRunStatus = "running" | "ok" | "error" | "unknown";
 
 export interface ToolStatus {
   tool: string;
@@ -218,6 +273,12 @@ export interface ProductsPayload {
   items: ProductCard[];
   recommended_product_id: string | null;
   gate: GateDecision | null;
+  /** Optional real planner metadata; product/evidence shapes are otherwise unchanged. */
+  planner?: PlannerMetaWire;
+  planner_model?: string | null;
+  planner_kind?: string | null;
+  planner_calls?: number | null;
+  planner_latency_ms?: number | null;
 }
 
 export interface EvidencePayload {
@@ -364,6 +425,11 @@ export interface DonePayload {
   turn_id: string;
   stop_reason: StopReason;
   total_ms: number;
+  /** Optional real planner metadata added by the Qwen Live backend. */
+  planner?: PlannerMetaWire;
+  planner_model?: string | null;
+  planner_calls?: number | null;
+  planner_latency_ms?: number | null;
 }
 
 export interface ClarificationReplyResponse {
@@ -373,8 +439,18 @@ export interface ClarificationReplyResponse {
   recommendation: ProductsPayload | null;
   steps: ToolStatus[];
   clarification_id: string;
+  /** A real follow-up Qwen question when M9 still has an unresolved conflict. */
+  clarification?: ClarificationPayload | null;
   message: string;
   error: ErrorPayload | null;
+  /** Optional real planner metadata when the resumed turn was a Qwen Live turn. */
+  planner?: PlannerMetaWire;
+  planner_model?: string | null;
+  planner_calls?: number | null;
+  planner_latency_ms?: number | null;
+  /** Current-task constraints and candidate re-evaluation metadata for a resumed Qwen turn. */
+  task_constraints?: unknown;
+  candidate_reevaluation?: unknown;
 }
 
 // ---------------------------------------------------------------------------

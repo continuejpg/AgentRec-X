@@ -8,7 +8,9 @@
 ## 0. Non-negotiable boundaries
 
 - **MCP server is the only tool boundary.** The BFF may call only the 7 P17 MCP tools through
-  the official `mcp.Client` + stdio long-lived connection. It must not import
+  the official `mcp.Client` + stdio long-lived connection. P20 adds exactly one optional 8th tool,
+  `run_agent_turn`, present only when real Qwen Base Live is explicitly configured; the original 7
+  schemas/defaults remain unchanged. It must not import
   `recommendation.*` core modules or read the catalogue directly.
 - **No fake data.** Every product, evidence span, preference and gate decision must come from a
   real MCP tool result. No mock products, no invented price/rating/stock/brand, no fabricated
@@ -20,8 +22,10 @@
   - `profile_0057` → MCP server `--user-key p14e2_lite_0057`, write-enabled only when
     `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1`.
   Frontend receives only `profile_id`; it never sends `user_id`/`user_key`/`confirmed_by_user`.
-- **No new runtime/model.** No LLM calls, no Qwen, no GPU, no retraining, no re-indexing.
-  Qwen is replay-only.
+- **No new model/training/GPU management by default.** CPU mode makes no LLM call. P20 optionally
+  connects to an **existing** Qwen3.5-9B Base model service only when explicitly configured and
+  healthy; it never starts/stops AutoDL/GPU, creates tunnels, trains/fine-tunes, or falls back to
+  Rule while claiming Qwen. Qwen Replay remains historical only.
 - **Local demo only.** Bind 127.0.0.1; no public deployment/auth claims.
 
 ## 1. Process topology
@@ -67,12 +71,22 @@ session id.
                  "detail":"BGE dense retrieval + BM25 fallback + Rule Planner + V0 Scorer + P15/P16 + P17 MCP"},
     "qwen_replay": {"available": true, "label":"Qwen Replay Mode",
                     "badge":"Historical Replay — Not a Live Model Call"},
-    "qwen_live": {"available": false, "label":"Qwen Live Mode",
-                  "disabled_reason":"No live Qwen service detected (P18)"}
+    "qwen_live": {"available": false, "label":"Qwen Base Live",
+                  "detail":"Real Qwen3.5-9B Base PlannerAction → existing electronics executor",
+                  "badge":"Live Qwen3.5-9B Base",
+                  "disabled_reason":"No live Qwen service detected (QWEN_LIVE_ENABLED / QWEN_MODEL_ENDPOINT not configured)"}
+  },
+  "qwen_live": {
+    "enabled": false, "configured": false, "status": "disabled|checking|available|unavailable|error",
+    "available": false, "model": "Qwen3.5-9B-Base", "planner_action": null,
+    "latency_ms": null, "checked_at": null, "detail": "..."
   },
   "memory_writes_enabled": true
 }
 ```
+The `qwen_live` block never contains the endpoint or credentials.  Availability is true only after
+a real `/plan` health probe returns a valid PlannerAction; an unreachable service leaves the mode
+Unavailable and never turns a Qwen request into Rule output.
 
 ### GET /api/demo/config
 Profiles, modes, limits, verified comparison ids and notices. Frontend must use this list for
@@ -116,7 +130,8 @@ the profile selector; it must not invent a profile.
 `TurnView` fields: `turn_id`, `user_text`, `assistant_text`, `tool_activity` (ToolStatus[]),
 `products` (ProductsPayload|null), `comparison` (ComparisonPayload|null),
 `clarification` (ClarificationPayload|null), `memory_update` (MemoryUpdatePayload|null),
-`error` (ErrorPayload|null), `created_at`.
+`error` (ErrorPayload|null), optional `planner`/`planner_model`/`planner_calls`/
+`planner_latency_ms`, `created_at`.
 
 `PreferenceState`
 ```json
@@ -135,8 +150,10 @@ Only real `active_preferences` may be labelled active. Withdrawn/inactive entrie
 under "Inactive / audit history".
 
 ### POST /api/chat/stream  (SSE)
-Body: `{"session_id":"...","message":"...","selected_product_ids":["..."]}` (selected ids optional).
-Response: `text/event-stream`. Events are `event: <type>\ndata: <json>\n\n`; heartbeat comment
+Body: `{"session_id":"...","message":"...","selected_product_ids":["..."],"mode":"cpu_live|qwen_live"}`
+(`selected_product_ids` and `mode` optional; `mode` defaults to `cpu_live`). A Qwen request before
+the real health probe is available returns HTTP 409 `qwen_unavailable` and is not silently routed
+to Rule. Response: `text/event-stream`. Events are `event: <type>\ndata: <json>\n\n`; heartbeat comment
 `: keep-alive\n\n` every 5 s while a tool is running. All payloads are view models, never raw MCP JSON.
 
 Event types (exact names):
@@ -148,7 +165,9 @@ Event types (exact names):
 - `comparison` — ComparisonPayload (only when user asks to compare selected items).
 - `clarification` — ClarificationPayload.
 - `memory_update` — MemoryUpdatePayload.
-- `done` — `{turn_id, stop_reason:"finalized|awaiting_clarification|error|comparison", total_ms}`.
+- `done` — `{turn_id, stop_reason:"finalized|awaiting_clarification|error|comparison", total_ms,
+  planner?, planner_model?, planner_calls?, planner_latency_ms?}`. Planner metadata is the real
+  planner actually used (`rule`/`qwen_base`/`none`); it must not be inferred client-side.
 - `error` — `{code, message, tool?, detail?}`. Never emit fake success after an error.
 
 Chat flow (deterministic demo controller; no LLM):
@@ -206,7 +225,9 @@ Rules:
 Reads `runs/p18/qwen_replay.json` (existing real saved Qwen trajectories) and returns
 `{"mode":"Qwen_Agent_Replay","replay":true,"live_call":false,
   "badge":"Historical Replay — Not a Live Model Call","examples":[...]}`.
-No live Qwen endpoint exists. The frontend must visibly label replay; never present it as live.
+No live Qwen endpoint is required for this replay endpoint. Qwen Base Live is a separate real mode
+(`POST /api/chat/stream` with `mode:"qwen_live"`, availability-gated by the real health probe); the
+frontend must never present replay as live.
 The saved file is passed through as data: some trajectories are final-answer-only and have
 `terminal: null` (or no `terminal` field) while still carrying `final_answer`. The frontend must
 render those honestly as "terminal not recorded / final answer only" and must not crash or invent
@@ -327,7 +348,8 @@ web_demo/README.md        # API + run + known behaviour
 - Logs: `runs/web_demo/logs/bff.log`, `mcp-<profile>.log` (create dirs).
 - Config env: `AGENTRECX_WEB_DEMO_PORT` (8787), `AGENTRECX_WEB_DEMO_SEARCH_MODE`
   (`bge` default, `bm25` dev), `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES` (`0` default; launcher
-  for the demo sets `1`), `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` (180).
+  for the demo sets `1`), `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` (180), plus optional
+  `QWEN_LIVE_ENABLED` / `QWEN_MODEL_ENDPOINT` / `QWEN_LIVE_*` (see P20 section below).
 - Minimal allowed edit outside `web_demo/`: add `"web_ui_explicit_user_reply"` to the
   `confirmation_source` Literal in `recommendation/mcp/server.py`; keep old values and old tests.
   No other core change.
@@ -344,7 +366,8 @@ Required layout:
 - Mobile (<768): single column; sidebar/preferences/details/comparison in Sheets/Drawers;
   composer fixed at bottom; product cards adapt to narrow width.
 - Header: AgentRec-X brand, current profile, mode badge (CPU Live default; Qwen Replay clearly
-  labelled `Historical Replay — Not a Live Model Call`; Qwen Live disabled), readiness status.
+  labelled `Historical Replay — Not a Live Model Call`; Qwen Base Live availability-gated by the
+  real backend health check and otherwise explicitly Unavailable), readiness status.
 - Chat: user/assistant bubbles, tool-activity timeline with real tool labels/statuses/latencies,
   product cards, evidence, comparison, clarification card, error state, suggested real actions.
 - Product card: neutral placeholder image (own SVG; no random photos), title, ID/namespace,
@@ -390,7 +413,8 @@ Acceptance for the whole demo:
    comparison; invalid id returns a real error.
 4. Scenario 3: vague query → real NEED_USER_CLARIFICATION → user reply → M9 memory update
    (added 2 for the P18 reply) → preferences panel refresh → recommendation continues.
-5. CPU Live vs Qwen Replay visibly distinct; Qwen Live disabled.
+5. CPU Live vs Qwen Replay visibly distinct; Qwen Base Live is availability-gated by the real
+   health probe and never fakes availability.
 6. One local command starts BFF + frontend; docs and notices complete; no git commit/push.
 
 ## 7. Environment quick reference
@@ -402,3 +426,44 @@ Acceptance for the whole demo:
 - Reference clones (read-only, outside repo): `D:\IT\CODE\PROJECTION\agentrec\_refs\<repo>`.
 - Existing worktree has 332 untracked + many modified files from earlier milestones: do not
   revert/overwrite them; only add new files in the scopes listed in the team task.
+
+## 8. P20 Qwen Base Live (optional real mode)
+
+This section extends, and does not replace, the CPU/Replay contract above.
+
+- **Explicit opt-in only:** `QWEN_LIVE_ENABLED=1` AND a configured `QWEN_MODEL_ENDPOINT`
+  (aliases accepted internally: `AGENTRECX_QWEN_PLANNER`, `AGENTRECX_QWEN_PLANNER_URL`).
+  Optional: `QWEN_MODEL_NAME`, `QWEN_LIVE_TIMEOUT_S`, `QWEN_LIVE_HEALTH_TIMEOUT_S`,
+  `QWEN_LIVE_TURN_TIMEOUT_S`, `QWEN_LIVE_MAX_STEPS`, `QWEN_LIVE_HEALTH_INTERVAL_S`,
+  `QWEN_LIVE_EXPLAIN`. The endpoint is never exposed in health/config/SSE or logs.
+- **Health:** the BFF performs a real `POST {endpoint}/plan` with the existing planner contract and
+  only marks `qwen_live.available=true` when the response contains a valid PlannerAction for that
+  observation. The snapshot (`/api/health` → `qwen_live`) reports enabled/configured/status/
+  available/model/planner_action/latency_ms/checked_at/detail. No health pass → Unavailable.
+- **No fallback:** Qwen mode requests are sent only after availability; a `run_agent_turn` failure
+  is a real `qwen_*` error. The BFF never runs Rule and labels it Qwen, never turns missing model
+  output into FINALIZE, and never writes M9 from model-generated text.
+- **MCP:** original 7 tools remain unchanged. When Qwen is configured the server additionally
+  exposes `run_agent_turn` (8th tool, `{"query": str}`). It uses `HttpPlannerProposer` +
+  `run_planner` + `ElectronicsPlannerExecutor` (real catalogue/BGE, Scorer, CandidateLedger,
+  Eligibility, Gate, P15 evidence, P16 registry). It emits MCP progress notifications for
+  `Qwen Planner Request`, `Planner Action`, RETRIEVE/RERANK/FINALIZE, Decision Gate and Evidence
+  Preparation; no hidden chain-of-thought. It does not write M9.
+- **Clarification:** a real Qwen `ASK` returns a server-issued `clarification_id` + question.
+  After the existing `submit_clarification_reply` M9 write + preference refresh, the BFF resumes
+  with `run_agent_turn` (not `recommend_products`). If the model does not ASK, no ASK is inserted.
+- **SSE additions:** real progress `tool_status` rows (as above); `done` may include
+  `planner: "qwen_base"|"rule"|"none"`, `planner_model`, `planner_calls`, `planner_latency_ms`;
+  `TurnView` persists the same fields. Product/evidence payload shapes are unchanged.
+- **Errors:** `qwen_unavailable`, `qwen_planner_error`, `qwen_planner_contract_error`,
+  `agent_execution_error`; all visible to the UI. CPU/Replay remain available.
+- **Tests:** `tests/test_qwen_live_unit.py`, `tests/test_qwen_live_bff.py`,
+  gated `tests/test_qwen_live_mcp_integration.py` (real catalogue + MCP + deterministic HTTP
+  planner double, clearly not Qwen). Real browser Qwen turns were validated on 2026-11-09 with
+  real Qwen3.5-9B Base on an RTX 4090 and the real browser/BFF/MCP/executor stack; see
+  `QWEN_LIVE_WEB_REPORT.md` and `runs/web_demo/qwen_live/e2e_real/`. The real ASK→M9→resume branch
+  was exercised on 2026-11-10 on an isolated conflict profile; a follow-up fix makes the current
+  clarification reply a task-scoped hard exclusion, re-evaluates the preserved candidates and
+  prevents an explicit-wired final item while preserving historical M9 audit entries. See
+  `QWEN_CLARIFICATION_FIX_REPORT.md` (GO for that scope; unknown wireless evidence remains UNKNOWN).
+  No fake ASK or forced finalization is permitted.

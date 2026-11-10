@@ -133,7 +133,9 @@ export default function ClarificationCard({
   const [draft, setDraft] = useState("");
   const [validation, setValidation] = useState<string | null>(null);
   const pending = reply?.status === "sending";
-  const done = reply?.status === "done";
+  const followup =
+    reply?.clarification_id != null && reply.clarification_id !== clarification.clarification_id;
+  const done = reply?.status === "done" && !followup;
   const writesOff = clarification.memory_write_enabled === false;
   const disabled = busy || pending || done || writesOff;
 

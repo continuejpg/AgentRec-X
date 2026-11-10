@@ -63,12 +63,27 @@ warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2
    `confirmation_source="web_ui_explicit_user_reply"`, the real update (`added=2`) and refreshed
    active preferences appear in the panel, and the pending recommendation resumes.
 
-### CPU Live vs Qwen Replay
+### CPU Live vs Qwen Base Live vs Qwen Replay
 
 * **CPU Live (default, live):** real local MCP/BGE/Rule Planner/Gate/P15/P16/M9; no GPU, no Qwen.
+* **Qwen Base Live (real GPU-validated optional mode):** when explicitly configured and a real
+  `/plan` health check returns a valid PlannerAction, the browser can select Qwen Base Live. The real
+  Qwen3.5-9B Base PlannerActions are executed by the **existing** electronics executor — same
+  catalogue/search/Scorer/CandidateLedger/Eligibility/Gate/P15/M9. No Rule→Qwen rewriting and no
+  Qwen→Rule fallback. On 2026-11-09 this was validated on an RTX 4090 with real `/plan` inference,
+  real MCP executor runs and two real browser turns; the temporary service/tunnel are stopped now,
+  so a rerun requires starting them. On 2026-11-10 the real **Qwen ASK → M9 → resume** branch was
+  exercised on an isolated conflict profile. A follow-up consistency fix now gives the current
+  clarification reply task-scoped priority, re-evaluates the preserved candidate pool and prevents
+  an explicit-wired final product without deleting historical M9 preferences; see
+  [`QWEN_CLARIFICATION_FIX_REPORT.md`](QWEN_CLARIFICATION_FIX_REPORT.md). The one-reply Qwen fix is
+  **GO** for that scope, with the final product's wireless evidence reported as UNKNOWN where the
+  catalogue provides none. No fake ASK or Rule substitute was used.
 * **Qwen Replay (historical only):** saved P18 trajectories from `runs/p18/qwen_replay.json`,
   visibly labelled **Historical Replay — Not a Live Model Call**; read-only.
-* **Qwen Live:** disabled — no live Qwen service is connected.
+* **Qwen Live unavailable / failures:** CPU Live and Replay remain available; no fake Qwen
+  success, no silent downgrade to Rule. See [`docs/QWEN_LIVE_CONTRACT.md`](docs/QWEN_LIVE_CONTRACT.md)
+  and [`QWEN_LIVE_WEB_REPORT.md`](QWEN_LIVE_WEB_REPORT.md).
 
 ### Verified results and honest limits
 
@@ -77,13 +92,16 @@ warm-up (57–83 s in the verified CPU environment), later queries are ~0.15–2
 | Electronics catalogue | 76,263 accepted products |
 | BGE candidate reachability | Recall@100 **20/135 → 66/135** (P14-D2; retrieval layer, not final quality) |
 | P18 Reserved Test | recommendation Top-1 **11/12** — **simulated rule labels**, not real users |
-| Web E2E | **7/7 passed**, 64 real DOM+network checks, 8 screenshots (Playwright + system Chrome) |
-| MCP tools / P16 Skills | **7** tools (`search_products`, `get_product_info`, …) / **2** Skills |
+| Web E2E | **9/9 regression passed** (7 CPU/Replay + 2 real Qwen Live) **+ 1/1 real one-reply ASK→task-constraint→resume test** (isolated profile; see fix report) |
+| MCP tools / P16 Skills | **7** default tools (+ optional 8th `run_agent_turn` when Qwen Live is configured) / **2** Skills |
 | Web Demo answer quality | **NOT ESTABLISHED** (no online A/B, clicks, conversion or satisfaction) |
 
 Limits that must travel with these numbers: the Reserved Test uses simulated rule labels; real
 long-term-history personalization gain is **not established**; Planner SFT did not beat Base;
-the Web CPU Live path uses the Rule Planner (no live Qwen); Qwen is Replay-only; semantic truth of
+the Web CPU Live path uses the Rule Planner; Qwen Base Live is a separate real GPU-validated mode
+(available only after a real model health/PlannerAction check; its real ASK/memory continuation now
+uses task-scoped clarification constraints and is **GO** for the explicit-wired-exclusion scope per
+`QWEN_CLARIFICATION_FIX_REPORT.md`, with unknown wireless evidence retained as UNKNOWN); Qwen Replay is historical only; semantic truth of
 generated explanations has **not** been human-reviewed; the local demo has no auth/TLS and is not
 production-ready. The catalogue snapshot has no trusted price/stock/rating/image, so the UI shows
 UNKNOWN and a neutral placeholder instead of inventing facts.
@@ -520,8 +538,11 @@ default Serving V1 result.
 * **No database server:** the legacy serving demo uses a local SQLite preference store; the P19
   Web Demo's M9 preference memory is a process-local fixture (`data/p14e2/benchmark/dev.agent.jsonl`)
   that resets when the BFF restarts.
-* **No external LLM by default:** deterministic mode is offline; provider mode is opt-in and the
-  P19 demo's Qwen mode is historical Replay only.
+* **No external LLM by default:** deterministic mode is offline; the optional Qwen Base Live mode
+  is explicit opt-in, uses the existing Qwen3.5-9B Base planner/executor stack, and is only
+  available after a real model health/PlannerAction check. It was GPU-validated on 2026-11-09;
+  the temporary model service is not kept running by this repository. Qwen Replay remains
+  historical only.
 * **Licences and provenance:** external design sources and backend files are documented in
   [`backends/tiger_public/PROVENANCE.md`](backends/tiger_public/PROVENANCE.md); the Web Demo's
   upstream reuse is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
@@ -598,5 +619,6 @@ reproducible engineering system with explicit evidence boundaries.
   documented with SHA-256 and obtain/rebuild steps in
   [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md). Without them the real-data demo cannot
   start; the archive states this explicitly.
-- **Boundary:** local demo only; no auth/TLS; Qwen is Replay-only; quality/online effectiveness is
-  **NOT ESTABLISHED**.
+- **Boundary:** local demo only; no auth/TLS; Qwen Base Live is real GPU-validated but
+  availability-gated and its service is stopped by default; Qwen Replay is historical;
+  quality/online effectiveness is **NOT ESTABLISHED**.

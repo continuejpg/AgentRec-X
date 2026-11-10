@@ -112,6 +112,9 @@ def resume_with_user_reply(
         "active_preferences": history.get("active_preferences") or [],
         "inactive_preferences": history.get("inactive_preferences") or [],
         "history_status": history.get("status"),
+        # Current-turn extraction for the task-scoped constraint layer.  This is not a
+        # second memory store and does not change M9's permanent retraction semantics.
+        "reply_extraction": result.extraction.as_dict(),
         "audit_source": "M9 PreferenceMemoryService.process_turn (same accepted writer); "
                         "inactive/removed entries retained in get_memory_history",
         "latency_ms": round((time.perf_counter() - started) * 1000.0, 2),

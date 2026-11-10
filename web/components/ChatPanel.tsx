@@ -9,15 +9,18 @@
 
 import { useCallback, useMemo } from "react";
 import type { LocalTurn } from "@/lib/chat";
+import type { QwenLiveState } from "@/lib/modes";
+import { plannerLatencyTotal, plannerSummary } from "@/lib/planner";
 import type {
   DemoConfig,
   ErrorPayload,
   Health,
+  PlannerMeta,
   ProductCard,
   SessionView,
 } from "@/lib/types";
 import { BFF_BASE } from "@/lib/api";
-import { formatDuration, plural, statusLabel, toolPhaseLabel } from "@/lib/format";
+import { formatDuration, formatLatency, plural, statusLabel, toolPhaseLabel } from "@/lib/format";
 import { useStickToBottom } from "@/lib/scroll";
 import { Icon } from "./icons";
 import { AssistantText, ErrorBubble, UserBubble } from "./MessageBubble";
@@ -27,6 +30,7 @@ import ComparisonBar from "./ComparisonBar";
 import { ComparisonSummaryCard } from "./ComparisonView";
 import { Composer, type Prefill } from "./Composer";
 import ProductsBlock from "./ProductsBlock";
+import QwenLiveNotice from "./QwenLiveNotice";
 import ReadinessBanner from "./ReadinessBanner";
 import ToolTimeline from "./ToolTimeline";
 import type { UiMode } from "./Header";
@@ -47,6 +51,40 @@ function preferredProduct(turn: LocalTurn): ProductCard | null {
     payload.items.find((item) => item.product_id === payload.recommended_product_id) ??
     payload.items.find((item) => item.recommended) ??
     payload.items[0]
+  );
+}
+
+/**
+ * Real planner metadata for one assistant turn (docs/QWEN_LIVE_CONTRACT.md §3).
+ *
+ * Rendered only when the backend reported a planner `kind`; the label comes from that kind and
+ * nothing is inferred when it is absent (an older BFF or a Rule turn without metadata).
+ */
+function PlannerBadge({ planner }: { planner: PlannerMeta }) {
+  const latency = plannerLatencyTotal(planner);
+  const title = [
+    planner.model ? `model ${planner.model}` : null,
+    latency != null ? `planner latency ${formatLatency(latency)}` : null,
+    planner.actions?.length ? `${planner.actions.length} reported actions` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-2 gap-y-1"
+      data-testid="turn-planner"
+      data-planner-kind={planner.kind}
+      title={title || undefined}
+    >
+      <Pill tone={planner.kind === "qwen_base" ? "accent" : "muted"} dot>
+        <Icon name="spark" size={10} />
+        {plannerSummary(planner)}
+      </Pill>
+      {latency != null ? (
+        <span className="font-mono text-[10px] text-(--ink-faint)">planner {formatLatency(latency)}</span>
+      ) : null}
+      {planner.model ? <span className="font-mono text-[10px] text-(--ink-faint)">{planner.model}</span> : null}
+    </div>
   );
 }
 
@@ -260,6 +298,8 @@ function TurnItem({
 
           {turn.error ? <ErrorBubble error={turn.error} /> : null}
 
+          {turn.planner ? <PlannerBadge planner={turn.planner} /> : null}
+
           {showActivity ? <ActivityLine turn={turn} /> : null}
 
           <TurnMeta turn={turn} />
@@ -373,7 +413,7 @@ function EmptyConversation({
             <button
               key={prompt.key}
               type="button"
-              disabled={!ready || mode !== "cpu_live"}
+              disabled={!ready || mode === "qwen_replay"}
               onClick={() => onSend(prompt.text, prompt.selectedIds)}
               data-testid={`demo-prompt-${prompt.key}`}
               className="flex flex-col gap-1 rounded-xl border border-(--line) bg-(--card) p-2.5 text-left transition-colors hover:border-(--accent) hover:bg-(--accent-soft)/40 disabled:cursor-not-allowed disabled:opacity-50"
@@ -432,6 +472,8 @@ export default function ChatPanel({
   turns,
   busy,
   mode,
+  qwenLive,
+  onSwitchToCpuLive,
   selection,
   compareMin,
   compareMax,
@@ -468,6 +510,8 @@ export default function ChatPanel({
   turns: LocalTurn[];
   busy: boolean;
   mode: UiMode;
+  qwenLive: QwenLiveState;
+  onSwitchToCpuLive: () => void;
   selection: string[];
   compareMin: number;
   compareMax: number;
@@ -497,8 +541,11 @@ export default function ChatPanel({
 }) {
   const { scrollRef, onScroll, showLatest, jumpToLatest } = useStickToBottom(turns, busy);
   const ready = health?.ready === true;
-  const liveReady = ready && mode === "cpu_live";
   const pausedForReplay = mode === "qwen_replay";
+  // Qwen Live is a live mode only while the backend reports it available; while it is not, the
+  // composer stays disabled and an explicit notice replaces any silent fallback.
+  const qwenBlocked = mode === "qwen_live" && !qwenLive.available;
+  const liveReady = ready && !pausedForReplay && !qwenBlocked;
 
   const jump = useCallback(() => jumpToLatest(), [jumpToLatest]);
 
@@ -522,6 +569,7 @@ export default function ChatPanel({
               onRetry={onRetryHealth}
             />
           </div>
+          <QwenLiveNotice qwenLive={qwenLive} mode={mode} onSwitchToCpu={onSwitchToCpuLive} />
           {sessionError ? (
             <div className="mt-4 rounded-xl border border-(--danger)/40 bg-(--danger-soft)/50 p-3" data-testid="session-error">
               <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-(--danger)">
@@ -623,9 +671,11 @@ export default function ChatPanel({
             disabledHint={
               pausedForReplay
                 ? "Qwen Replay is read-only historical trajectories — switch to CPU Live to chat."
-                : !ready
-                  ? "Waiting for the local BFF and MCP servers (cold start ~35–45 s)…"
-                  : undefined
+                : qwenBlocked
+                  ? "Qwen Live is unavailable — switch back to CPU Live to chat (no silent fallback)."
+                  : !ready
+                    ? "Waiting for the local BFF and MCP servers (cold start ~35–45 s)…"
+                    : undefined
             }
             placeholder={
               session

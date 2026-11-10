@@ -55,6 +55,9 @@ export default function ToolTimeline({
 
   const running = activity.filter((row) => row.status === "running").length;
   const failed = activity.filter((row) => row.status === "error").length;
+  // Browser-local rows whose completion the backend never reported (see lib/chat.ts); shown
+  // honestly as unreported, never as a fake spinner or a fabricated success.
+  const unreported = activity.filter((row) => row.status === "unknown").length;
   const heartbeatAgo =
     streaming && lastHeartbeatAt != null && now > 0 ? Math.max(0, Math.round((now - lastHeartbeatAt) / 1000)) : null;
 
@@ -75,6 +78,7 @@ export default function ToolTimeline({
             {activity.length} step{activity.length === 1 ? "" : "s"}
             {running ? " · running" : ""}
             {failed ? ` · ${failed} failed` : ""}
+            {unreported ? ` · ${unreported} unreported` : ""}
           </span>
         </span>
         {totalMs != null ? (
@@ -110,6 +114,8 @@ export default function ToolTimeline({
                         <RunningGlyph />
                       ) : row.status === "ok" ? (
                         <Icon name="check" size={12} className="text-(--ok)" />
+                      ) : row.status === "unknown" ? (
+                        <Icon name="info" size={12} className="text-(--ink-faint)" />
                       ) : (
                         <Icon name="alert" size={12} className="text-(--danger)" />
                       )}
@@ -127,7 +133,13 @@ export default function ToolTimeline({
                           {row.tool}
                         </span>
                         <span className="ml-auto shrink-0 font-mono text-[10.5px] tabular-nums text-(--ink-soft)">
-                          {row.status === "running" ? (elapsed != null ? `${formatLatency(elapsed)}…` : "running…") : formatLatency(elapsed)}
+                          {row.status === "running"
+                            ? elapsed != null
+                              ? `${formatLatency(elapsed)}…`
+                              : "running…"
+                            : row.status === "unknown"
+                              ? "unreported"
+                              : formatLatency(elapsed)}
                         </span>
                       </div>
                       {row.detail ? (

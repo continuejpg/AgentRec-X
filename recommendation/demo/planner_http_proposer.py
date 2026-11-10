@@ -11,6 +11,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from recommendation.demo.planner_contract import (
@@ -23,6 +24,7 @@ from recommendation.demo.planner_contract import (
 ENV_ENABLED = "AGENTRECX_QWEN_PLANNER"
 ENV_URL = "AGENTRECX_QWEN_PLANNER_URL"
 ENV_MODEL = "AGENTRECX_QWEN_PLANNER_MODEL"
+ENV_TIMEOUT = "AGENTRECX_QWEN_PLANNER_TIMEOUT_S"
 CONTRACT_VERSION = "agentrecx.planner_action.v1"
 
 
@@ -70,7 +72,22 @@ class HttpPlannerProposer:
         url = (os.environ.get(ENV_URL) or "").strip()
         if not url:
             raise HttpPlannerError("planner_misconfigured", "AGENTRECX_QWEN_PLANNER_URL is empty")
-        return cls(url, model=(os.environ.get(ENV_MODEL) or "").strip() or None)
+        timeout_raw = (os.environ.get(ENV_TIMEOUT) or "").strip()
+        timeout = 120.0
+        if timeout_raw:
+            try:
+                timeout = float(timeout_raw)
+            except ValueError as exc:
+                raise HttpPlannerError(
+                    "planner_misconfigured",
+                    f"{ENV_TIMEOUT} must be a number, got {timeout_raw!r}",
+                ) from exc
+            if timeout <= 0:
+                raise HttpPlannerError(
+                    "planner_misconfigured", f"{ENV_TIMEOUT} must be positive"
+                )
+        return cls(url, model=(os.environ.get(ENV_MODEL) or "").strip() or None,
+                   timeout=timeout)
 
     def propose(self, observation: PlannerObservation) -> ActionProposal:
         request_payload = {
@@ -111,6 +128,19 @@ class HttpPlannerProposer:
         if isinstance(payload, dict):
             self.last_response = dict(payload)
             self.last_raw = str(payload.get("text") or "")
+            # Optional local diagnostic: record the exact planner request/response envelope.
+            trace_path = (os.environ.get("AGENTRECX_QWEN_PLANNER_TRACE") or "").strip()
+            if trace_path:
+                try:
+                    record = {
+                        "request": request_payload,
+                        "response": payload,
+                        "raw_text": self.last_raw,
+                    }
+                    with Path(trace_path).open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                except OSError:
+                    pass
             # model_server returns an envelope {payload,text,errors,...}; a Stub server
             # may return the action object directly.  Unwrap only the envelope form.
             action_payload = payload.get("payload")

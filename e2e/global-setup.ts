@@ -51,9 +51,10 @@ export default async function globalSetup(): Promise<void> {
     }
     const servers = Array.isArray(health.servers) ? health.servers : [];
     const notReady = servers.filter((server: any) => server.status !== "ready");
-    if (servers.length !== 2 || notReady.length > 0) {
+    const expectedProfiles = Number(process.env.E2E_EXPECTED_PROFILES ?? "2");
+    if (servers.length < expectedProfiles || notReady.length > 0) {
       throw new Error(
-        `Expected 2 ready MCP profiles, got ${JSON.stringify(servers.map((s: any) => ({ id: s.profile_id, status: s.status })))}`,
+        `Expected at least ${expectedProfiles} ready MCP profiles, got ${JSON.stringify(servers.map((s: any) => ({ id: s.profile_id, status: s.status })))}`,
       );
     }
 

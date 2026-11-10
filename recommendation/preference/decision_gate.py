@@ -99,6 +99,9 @@ class GateContext:
     expected_product_role: str | None = None
     budget: GateBudget = field(default_factory=GateBudget)
     extra_reasons: Sequence[str] = field(default_factory=tuple)
+    #: Explicit current-task exclusions (e.g. "for this purchase, avoid wired").  These
+    #: are task-scoped, not M9 state; rows carry the evaluated task_constraint_conflicts.
+    task_constraints: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
 
 
 @dataclass
@@ -120,6 +123,7 @@ class GateDecision:
     budget_used: dict[str, int] = field(default_factory=dict)
     gate_version: str = GATE_VERSION
     reasons: tuple[str, ...] = ()
+    task_constraint_status: str = "none"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +144,7 @@ class GateDecision:
             "budget_used": dict(self.budget_used),
             "gate_version": self.gate_version,
             "reasons": list(self.reasons),
+            "task_constraint_status": self.task_constraint_status,
         }
 
 
@@ -198,6 +203,37 @@ class DecisionGate:
                 hard_constraint_status={"namespace": "violated"},
                 budget_used=budget_used,
             )
+
+        # 0b. Current-task hard exclusions.  These are stronger than historical
+        #     preferences for this purchase but do not delete the M9 audit trail.
+        task_checked = []
+        task_violations: list[Mapping[str, Any]] = []
+        for candidate in candidates:
+            conflicts = list(candidate.get("task_constraint_conflicts") or ())
+            if conflicts:
+                task_violations.append(candidate)
+            else:
+                task_checked.append(candidate)
+        if task_violations:
+            candidates = task_checked
+            if not candidates:
+                if budget.retrievals_remaining > 0:
+                    action = NEED_MORE_CANDIDATES
+                    reason_code = "current_task_constraint_violation"
+                else:
+                    action = NO_VERIFIED_CANDIDATE_IN_SCOPE
+                    reason_code = "current_task_constraint_violation"
+                return GateDecision(
+                    action=action,
+                    allow_finalize=False,
+                    reason_code=reason_code,
+                    reason=("all examined candidates violate the current task's explicit "
+                            "exclusion; the excluded rows remain in the ledger for audit"),
+                    hard_constraint_status={"current_task_constraints": "violated"},
+                    task_constraint_status="violated",
+                    bounded_scope=True,
+                    budget_used=budget_used,
+                )
 
         # 1. An unresolved clarification blocks FINALIZE; no fabricated answer is allowed.
         if context.ask_pending:
@@ -392,6 +428,18 @@ class DecisionGate:
             reason += f"; {len(matched)} positive preference(s) supported by catalogue evidence"
         if uncertainty:
             reason += "; limited recommendation: some soft/unknown evidence remains undisclosed"
+        task_statuses = [
+            str((c.get("task_constraint_status") or {}).get("status") or "none")
+            for c in presentable
+        ]
+        if "violated" in task_statuses:
+            task_constraint_status = "violated"
+        elif "unknown" in task_statuses:
+            task_constraint_status = "unknown"
+        elif context.task_constraints:
+            task_constraint_status = "verified"
+        else:
+            task_constraint_status = "none"
         return GateDecision(
             action=ALLOW_FINALIZE,
             allow_finalize=True,
@@ -406,4 +454,5 @@ class DecisionGate:
             product_type=(chosen.get("product_type") or None),
             product_role=str(chosen.get("candidate_role") or role_status),
             budget_used=budget_used,
+            task_constraint_status=task_constraint_status,
         )

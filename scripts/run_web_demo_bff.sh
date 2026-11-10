@@ -43,7 +43,8 @@ fi
   echo "=== AgentRec-X Web Demo BFF $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
   echo "repo=${REPO_ROOT} search_mode=${AGENTRECX_WEB_DEMO_SEARCH_MODE}" \
        "memory_writes=${AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES}" \
-       "port=${AGENTRECX_WEB_DEMO_PORT:-8787}"
+       "port=${AGENTRECX_WEB_DEMO_PORT:-8787}" \
+       "qwen_requested=${QWEN_LIVE_ENABLED:-0}"
 } | tee -a "$LOG_FILE"
 
 # Process substitution keeps $! pointing at the python process (not at tee), so the PID file and

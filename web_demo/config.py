@@ -35,6 +35,11 @@ COMPARE_MAX = 5
 DEFAULT_MCP_TIMEOUT_S = 180.0
 DEFAULT_CLARIFICATION_TTL_S = 1800.0
 DEFAULT_PORT = 8787
+DEFAULT_QWEN_TIMEOUT_S = 180.0
+DEFAULT_QWEN_HEALTH_TIMEOUT_S = 60.0
+DEFAULT_QWEN_TURN_TIMEOUT_S = 600.0
+DEFAULT_QWEN_MAX_STEPS = 8
+DEFAULT_QWEN_HEALTH_INTERVAL_S = 60.0
 
 # Frozen P18/P17 catalogue snapshot size (76,263 Electronics products).  Health reports this
 # verified value until a real tool result observed on this process returns catalogue_size.
@@ -47,7 +52,7 @@ VERIFIED_COMPARISON_IDS = ("B004K6R43G", "B00008VF63")
 NOTICES = [
     "Local CPU demo; catalogue facts only; no live price/stock/ratings.",
     "Memory writes for Demo B are local process memory and reset when the BFF restarts.",
-    "Qwen Agent mode is historical replay only; there is no live Qwen call.",
+    "Qwen Base Live is optional and only available after a real PlannerAction health check; Qwen Replay is historical and never a live model call.",
     "Catalogue evidence does not prove real-world quality or user satisfaction.",
 ]
 
@@ -86,12 +91,49 @@ PROFILES: tuple[ProfileConfig, ...] = (
         memory_writes=True,
     ),
 )
+# Optional isolated ASK/Memory acceptance identity.  p14e2_lite_0056 is a benchmark fixture user
+# with real M9-created wired/wireless conflict events; it is not one of the normal demo users and
+# is exposed only when explicitly enabled for this acceptance test.
+_ASK_TEST_PROFILE = ProfileConfig(
+    profile_id="profile_0056_ask",
+    user_key="p14e2_lite_0056",
+    label="ASK Test · Conflict",
+    description=(
+        "Isolated ASK/Memory test profile (p14e2_lite_0056): real M9 conflict history; "
+        "enabled only for the controlled Qwen ASK-resume acceptance."
+    ),
+    memory_writes=True,
+)
+_ASK_TEST_ENABLED = str(os.environ.get("AGENTRECX_WEB_DEMO_ASK_TEST_PROFILE", "")).strip().lower() in {
+    "1", "true", "yes", "on",
+}
+if _ASK_TEST_ENABLED:
+    PROFILES = PROFILES + (_ASK_TEST_PROFILE,)
 PROFILE_BY_ID: dict[str, ProfileConfig] = {profile.profile_id: profile for profile in PROFILES}
 DEFAULT_PROFILE_ID = "profile_0049"
 
 
 def _env_bool(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_float(env: Mapping[str, str], name: str, default: float) -> float:
+    raw = str(env.get(name, default)).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be positive, got {value}")
+    return value
+
+
+def _env_int(env: Mapping[str, str], name: str, default: int) -> int:
+    raw = str(env.get(name, default)).strip()
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
 
 
 @dataclass(frozen=True)
@@ -103,11 +145,25 @@ class Settings:
     mcp_timeout_s: float = DEFAULT_MCP_TIMEOUT_S
     clarification_ttl_s: float = DEFAULT_CLARIFICATION_TTL_S
     console_only_log: bool = False
+    # Optional real Qwen3.5-9B Base Live.  The endpoint is deliberately never exposed publicly.
+    qwen_live_enabled: bool = False
+    qwen_model_endpoint: str = ""
+    qwen_model_name: str = "Qwen3.5-9B-Base"
+    qwen_live_timeout_s: float = DEFAULT_QWEN_TIMEOUT_S
+    qwen_health_timeout_s: float = DEFAULT_QWEN_HEALTH_TIMEOUT_S
+    qwen_turn_timeout_s: float = DEFAULT_QWEN_TURN_TIMEOUT_S
+    qwen_max_steps: int = DEFAULT_QWEN_MAX_STEPS
+    qwen_health_interval_s: float = DEFAULT_QWEN_HEALTH_INTERVAL_S
+    qwen_explain: bool = True
     repo: Path = REPO
     log_dir: Path = LOG_DIR
     replay_path: Path = REPLAY_PATH
     memory_fixture: Path = MEMORY_FIXTURE
     python_executable: str = field(default_factory=lambda: sys.executable)
+
+    @property
+    def qwen_live_configured(self) -> bool:
+        return bool(self.qwen_live_enabled and self.qwen_model_endpoint)
 
     def writes_enabled_for(self, profile_id: str) -> bool:
         profile = PROFILE_BY_ID[profile_id]
@@ -146,17 +202,61 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ) from exc
     if timeout <= 0:
         raise ValueError("AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S must be positive")
+    qwen_enabled = _env_bool(
+        want.get("QWEN_LIVE_ENABLED") or want.get("AGENTRECX_WEB_DEMO_QWEN_LIVE")
+    )
+    qwen_endpoint = str(
+        want.get("QWEN_MODEL_ENDPOINT") or want.get("AGENTRECX_QWEN_PLANNER_URL") or ""
+    ).strip()
+    qwen_model = (
+        str(want.get("QWEN_MODEL_NAME") or "Qwen3.5-9B-Base").strip()
+        or "Qwen3.5-9B-Base"
+    )
     return Settings(
         port=port,
         search_mode=mode,
         allow_memory_writes=_env_bool(want.get("AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES")),
         mcp_timeout_s=timeout,
         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
+        qwen_live_enabled=qwen_enabled,
+        qwen_model_endpoint=qwen_endpoint,
+        qwen_model_name=qwen_model,
+        qwen_live_timeout_s=_env_float(want, "QWEN_LIVE_TIMEOUT_S", DEFAULT_QWEN_TIMEOUT_S),
+        qwen_health_timeout_s=_env_float(
+            want, "QWEN_LIVE_HEALTH_TIMEOUT_S", DEFAULT_QWEN_HEALTH_TIMEOUT_S
+        ),
+        qwen_turn_timeout_s=_env_float(
+            want, "QWEN_LIVE_TURN_TIMEOUT_S", DEFAULT_QWEN_TURN_TIMEOUT_S
+        ),
+        qwen_max_steps=max(1, min(8, _env_int(want, "QWEN_LIVE_MAX_STEPS", DEFAULT_QWEN_MAX_STEPS))),
+        qwen_health_interval_s=max(
+            5.0, _env_float(want, "QWEN_LIVE_HEALTH_INTERVAL_S", DEFAULT_QWEN_HEALTH_INTERVAL_S)
+        ),
+        qwen_explain=_env_bool(want.get("QWEN_LIVE_EXPLAIN", "1")),
     )
 
 
-def modes_public(*, cpu_live_available: bool) -> dict[str, Any]:
-    """The three run modes exposed to the UI.  CPU live is the only live mode."""
+def modes_public(
+    *,
+    cpu_live_available: bool,
+    qwen_health: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The three run modes exposed to the UI; only CPU Live and (when healthy) Qwen are live."""
+    health = dict(qwen_health or {})
+    qwen_available = bool(health.get("available"))
+    qwen_status = str(health.get("status") or "disabled")
+    if qwen_available:
+        qwen_reason = None
+    elif qwen_status == "disabled" or not health.get("enabled") or not health.get("configured"):
+        qwen_reason = "No live Qwen service detected (QWEN_LIVE_ENABLED / QWEN_MODEL_ENDPOINT not configured)"
+    elif qwen_status == "checking":
+        qwen_reason = "No live Qwen service detected yet (real PlannerAction health check in progress)"
+    else:
+        qwen_reason = (
+            "No live Qwen service detected (health check failed: "
+            + str(health.get("detail") or qwen_status)
+            + ")"
+        )
     return {
         "cpu_live": {
             "available": bool(cpu_live_available),
@@ -172,9 +272,15 @@ def modes_public(*, cpu_live_available: bool) -> dict[str, Any]:
             "badge": "Historical Replay — Not a Live Model Call",
         },
         "qwen_live": {
-            "available": False,
-            "label": "Qwen Live Mode",
-            "disabled_reason": "No live Qwen service detected (P18)",
+            "available": qwen_available,
+            "label": "Qwen Base Live",
+            "detail": (
+                "Real Qwen3.5-9B Base PlannerAction → existing electronics executor → "
+                "Gate/P15/P16"
+            ),
+            "badge": "Live Qwen3.5-9B Base",
+            "disabled_reason": qwen_reason,
+            "planner": "qwen_base" if qwen_available else None,
         },
     }
 
@@ -185,4 +291,5 @@ def limits_public(settings: Settings) -> dict[str, Any]:
         "compare_min": COMPARE_MIN,
         "compare_max": COMPARE_MAX,
         "clarification_ttl_s": settings.clarification_ttl_s,
+        "qwen_live_max_steps": settings.qwen_max_steps,
     }

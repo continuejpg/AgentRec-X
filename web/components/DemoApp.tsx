@@ -4,15 +4,23 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, BFF_BASE, errorPayload, isAbortError } from "@/lib/api";
 import {
+  finaliseStaleToolRows,
+  mergeToolStatus,
   newTurnKey,
   turnFromView,
   type ClarificationReplyState,
   type LocalTurn,
-  type LocalToolStatus,
 } from "@/lib/chat";
+import { resolveQwenLive } from "@/lib/modes";
+import {
+  mergePlanner,
+  plannerFromDone,
+  plannerFromProducts,
+  plannerFromReplyResponse,
+} from "@/lib/planner";
 import type {
   ClarificationPayload,
   ComparisonPayload,
@@ -26,7 +34,6 @@ import type {
   ReplayResponse,
   SessionSummary,
   SessionView,
-  ToolStatus,
 } from "@/lib/types";
 import { useIsDesktop } from "@/lib/useMediaQuery";
 import ChatPanel from "./ChatPanel";
@@ -84,6 +91,7 @@ function emptyLocalTurn(partial: Partial<LocalTurn>): LocalTurn {
     status: partial.status ?? "complete",
     stop_reason: partial.stop_reason ?? null,
     total_ms: partial.total_ms ?? null,
+    planner: partial.planner ?? null,
     startedAt: partial.startedAt ?? 0,
     text_final: partial.text_final ?? true,
     reply: partial.reply ?? null,
@@ -110,21 +118,6 @@ function turnsFromSession(view: SessionView): LocalTurn[] {
 /** Real error → the turn error view model. */
 function toErrorPayload(error: unknown): ErrorPayload {
   return errorPayload(error);
-}
-
-/** Merges a `tool_status` event into the timeline: a final status closes the latest running row. */
-function mergeToolStatus(list: LocalToolStatus[], incoming: ToolStatus): LocalToolStatus[] {
-  if (incoming.status === "running") {
-    return [...list, { ...incoming, receivedAt: performance.now() }];
-  }
-  for (let index = list.length - 1; index >= 0; index -= 1) {
-    if (list[index].tool === incoming.tool && list[index].status === "running") {
-      const next = [...list];
-      next[index] = { ...next[index], ...incoming };
-      return next;
-    }
-  }
-  return [...list, { ...incoming }];
 }
 
 export default function DemoApp() {
@@ -205,6 +198,12 @@ export default function DemoApp() {
   const compareMin = config?.limits.compare_min ?? 2;
   const compareMax = config?.limits.compare_max ?? 5;
   const busy = streamingKey != null;
+
+  // Real Qwen Base Live availability from GET /api/health + GET /api/demo/config. Never inferred.
+  const qwenLive = useMemo(() => resolveQwenLive(health, config), [health, config]);
+  const qwenLiveAvailable = qwenLive.available;
+  const qwenLiveAvailableRef = useRef(qwenLiveAvailable);
+  qwenLiveAvailableRef.current = qwenLiveAvailable;
 
   // ---------------------------------------------------------------------------
   // Health polling (real /api/health; keeps retrying while the BFF starts)
@@ -607,38 +606,53 @@ export default function DemoApp() {
       const sending: ClarificationReplyState = {
         text,
         status: "sending",
+        clarification_id: clarification.clarification_id,
         steps: [],
         memory_update: null,
         preferences: null,
         recommendation: null,
         error: null,
+        planner: null,
       };
       setTurns(prev => prev.map(entry => (entry.key === turn.key ? { ...entry, reply: sending } : entry)));
       try {
         const response = await api.clarificationReply(sessionId, clarification.clarification_id, text);
         if (sessionRef.current?.session_id !== sessionId) return;
         const failed = Boolean(response.error);
+        // A resumed Qwen Live turn reports its real planner metadata in the reply response.
+        const replyPlanner = failed ? null : plannerFromReplyResponse(response);
         setTurns(prev =>
           prev.map(entry =>
             entry.key === turn.key
               ? {
                   ...entry,
+                  clarification: response.clarification ?? entry.clarification,
+                  planner: mergePlanner(entry.planner, replyPlanner),
                   reply: {
                     text,
                     status: failed ? "error" : "done",
+                    clarification_id: clarification.clarification_id,
                     steps: response.steps ?? [],
                     memory_update: response.memory_update ?? null,
                     preferences: response.preferences ?? null,
                     recommendation: response.recommendation ?? null,
                     error: response.error ?? null,
+                    planner: replyPlanner,
                   },
                 }
               : entry,
           ),
         );
         if (!failed) {
-          setPendingClarification(null);
-          setSession(prev => (prev ? { ...prev, pending_clarification: null } : prev));
+          if (response.clarification) {
+            // A real follow-up ASK (for example an unresolved M9 conflict) must stay pending;
+            // never silently finalize and never drop the new server-issued handle.
+            setPendingClarification(response.clarification);
+            setSession(prev => (prev ? { ...prev, pending_clarification: response.clarification ?? null } : prev));
+          } else {
+            setPendingClarification(null);
+            setSession(prev => (prev ? { ...prev, pending_clarification: null } : prev));
+          }
           if (response.preferences) setPreferences(response.preferences);
           void refreshRecent();
           void refreshPreferences();
@@ -666,7 +680,11 @@ export default function DemoApp() {
     async (raw: string, presetSelection?: string[]) => {
       const text = raw.trim();
       const sessionId = sessionRef.current?.session_id;
-      if (!text || !sessionId || streamingRef.current || mode !== "cpu_live") return;
+      if (!text || !sessionId || streamingRef.current) return;
+      // Qwen Replay is historical/read-only; Qwen Live runs only while the backend reports it
+      // available. Neither case ever quietly falls back to the CPU pipeline.
+      if (mode === "qwen_replay") return;
+      if (mode === "qwen_live" && !qwenLiveAvailable) return;
       if (health?.ready !== true) return;
 
       const key = newTurnKey();
@@ -700,6 +718,8 @@ export default function DemoApp() {
             session_id: sessionId,
             message: text,
             selected_product_ids: selectedSnapshot.length ? selectedSnapshot : undefined,
+            // Sent only for the real live Qwen mode; the CPU request shape stays unchanged.
+            mode: mode === "qwen_live" ? "qwen_live" : undefined,
           },
           {
             signal: controller.signal,
@@ -725,7 +745,12 @@ export default function DemoApp() {
             }
             case "products": {
               const payload = event.data;
-              patchTurn(entry => ({ ...entry, products: payload }));
+              patchTurn(entry => ({
+                ...entry,
+                products: payload,
+                // Real planner metadata either on `products` or later on `done`; merged, not invented.
+                planner: mergePlanner(entry.planner, plannerFromProducts(payload)),
+              }));
               const candidate =
                 payload.recommended_product_id ??
                 payload.items.find(item => item.recommended)?.product_id ??
@@ -776,6 +801,7 @@ export default function DemoApp() {
                 turn_id: payload.turn_id,
                 stop_reason: payload.stop_reason,
                 total_ms: payload.total_ms,
+                planner: mergePlanner(entry.planner, plannerFromDone(payload)),
                 pending: false,
                 text_final: true,
                 status: entry.error ? "error" : "complete",
@@ -794,6 +820,9 @@ export default function DemoApp() {
                 stop_reason: "error",
               }));
               setPendingClarification(null);
+              // A real Qwen planner failure can also make the live mode unavailable server-side.
+              // Refresh health so the UI can show the backend's own reason; never retry as CPU.
+              if (payload.code?.startsWith("qwen_")) setHealthNonce(value => value + 1);
               break;
             }
             default:
@@ -813,6 +842,9 @@ export default function DemoApp() {
           }));
         }
       } finally {
+        // The stream is over: any progress row the backend never closed is shown as explicitly
+        // unreported (browser-local) instead of a fake endless spinner or a fabricated success.
+        patchTurn(entry => ({ ...entry, tool_activity: finaliseStaleToolRows(entry.tool_activity) }));
         abortRef.current = null;
         streamingRef.current = false;
         setStreamingKey(null);
@@ -821,7 +853,7 @@ export default function DemoApp() {
         if (sessionRef.current?.session_id) void refreshPreferences();
       }
     },
-    [health?.ready, isDesktop, loadDetailsById, mode, refreshPreferences, refreshRecent, selection],
+    [health?.ready, isDesktop, loadDetailsById, mode, qwenLiveAvailable, refreshPreferences, refreshRecent, selection],
   );
 
   const stopStream = useCallback(() => {
@@ -892,13 +924,19 @@ export default function DemoApp() {
   const changeMode = useCallback(
     (next: UiMode) => {
       if (streamingRef.current) return;
+      // Qwen Live is selectable only while the backend explicitly reports it available.
+      if (next === "qwen_live" && !qwenLiveAvailableRef.current) return;
       setMode(next);
       if (next === "qwen_replay") {
         setReplayOpen(true);
         if (!replay) void loadReplay();
       }
+      if (next === "qwen_live") {
+        // Re-probe health on selection so a stale availability cannot be presented as live.
+        retryHealth();
+      }
     },
-    [loadReplay, replay],
+    [loadReplay, replay, retryHealth],
   );
 
   // Abort any in-flight stream when the page unmounts.
@@ -968,6 +1006,7 @@ export default function DemoApp() {
         config={config}
         mode={mode}
         onModeChange={changeMode}
+        qwenLive={qwenLive}
         onOpenSidebar={() => setSidebarOpen(true)}
         onOpenPanel={() => setPanelSheetOpen(true)}
         onTogglePanel={() => setPanelOpen(value => !value)}
@@ -1010,6 +1049,8 @@ export default function DemoApp() {
             turns={turns}
             busy={streaming}
             mode={mode}
+            qwenLive={qwenLive}
+            onSwitchToCpuLive={() => changeMode("cpu_live")}
             selection={selection}
             compareMin={compareMin}
             compareMax={compareMax}

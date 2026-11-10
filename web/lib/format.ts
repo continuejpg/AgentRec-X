@@ -112,6 +112,18 @@ const TOOL_PHASES: Record<string, string> = {
   get_product_evidence: "Preparing Evidence",
   product_evidence: "Preparing Evidence",
   check_product_type: "Checking Product Type",
+  // Qwen Base Live progress rows (docs/QWEN_LIVE_CONTRACT.md §3): the BFF usually sends its own
+  // descriptive label ("Qwen Planner Request", "Planner Action: RETRIEVE", "Decision Gate", …);
+  // these fallbacks only apply when a label is missing, so real text is preferred whenever sent.
+  qwen_planner: "Qwen Planner Request",
+  planner_action: "Planner Action",
+  run_agent_turn: "Qwen Agent Turn",
+  retrieve: "RETRIEVE",
+  rerank: "RERANK",
+  decision_gate: "Decision Gate",
+  ask: "ASK",
+  finalize: "FINALIZE",
+  evidence_preparation: "Evidence Preparation",
 };
 
 /** Short noun labels the BFF uses; these are replaced by the phase copy above. */

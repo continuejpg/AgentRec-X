@@ -62,14 +62,26 @@ cmd /c "pnpm --dir web start"              :: serve the production build on :300
   the write-enabled Demo profile and retry the same query.
 - **Modes**: CPU Live is the default live pipeline. Qwen Replay opens the saved
   `runs/p18/qwen_replay.json` trajectories through `GET /api/replay`, loudly labelled
-  `Historical Replay — Not a Live Model Call`; Qwen Live is disabled with the backend's reason.
+  `Historical Replay — Not a Live Model Call` and read-only. Qwen Live is an optional **real**
+  mode (`docs/QWEN_LIVE_CONTRACT.md`): it is selectable only while `GET /api/health` /
+  `GET /api/demo/config` report `modes.qwen_live.available === true` (a real PlannerAction health
+  check). While unavailable the backend's `disabled_reason` is shown with an explicit Unavailable
+  notice and there is no silent fallback; if availability disappears while it is selected, the
+  turn is not run, the mode is not auto-switched, and the user must switch back. In Qwen Live the
+  composer sends `mode: "qwen_live"` to `POST /api/chat/stream` (the CPU request shape is
+  unchanged), the turn's real `planner` metadata is shown (`Qwen Base Live · N planner calls`),
+  and the tool timeline renders the real planner/executor progress rows (`Qwen Planner Request`,
+  `Planner Action: RETRIEVE`, `RETRIEVE`, `RERANK`, `Decision Gate`, `FINALIZE`, `Evidence
+  Preparation`). No hidden reasoning is shown, and a progress row the backend never completed is
+  labelled unreported rather than animated.
 - **Readiness**: real `/api/health` polling with per-MCP-server status, startup time, catalogue
   size and memory-write state; the page stays interactive while services start.
 - **Session state**: sessions are backend in-memory; only the session id is persisted in
   `localStorage`, so a refresh restores the conversation. `New conversation` creates a new
   session; `Clear session` resets turns/pending clarification (M9 memory is not cleared).
 
-Out of scope by contract: cart, checkout, payment, auth, public deployment, live Qwen calls.
+Out of scope by contract: cart, checkout, payment, auth and public deployment. Qwen Base Live is
+optional, never downloadable from the page, and only usable when the backend reports it available.
 
 ## Source layout
 

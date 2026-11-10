@@ -25,7 +25,7 @@ import logging
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -47,6 +47,7 @@ from web_demo.config import (
     modes_public,
 )
 from web_demo.mcp_manager import MCPManager, MCPManagerError
+from web_demo.qwen_health import QwenHealthMonitor
 from web_demo.sessions import DEFAULT_TITLE, Session, SessionStore, iso, utc_now
 
 LOGGER = logging.getLogger("agentrecx.web_demo.bff")
@@ -69,6 +70,7 @@ class ChatRequest(BaseModel):
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
     selected_product_ids: list[str] | None = None
+    mode: Literal["cpu_live", "qwen_live"] = "cpu_live"
 
 
 class ProductDetailsRequest(BaseModel):
@@ -219,10 +221,12 @@ def create_app(
     settings: Settings | None = None,
     manager: MCPManager | Any | None = None,
     sessions: SessionStore | None = None,
+    qwen_health: QwenHealthMonitor | Any | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     manager = manager or MCPManager(settings)
     store = sessions or SessionStore()
+    monitor = qwen_health or QwenHealthMonitor(settings)
     meta: dict[str, Any] = {"started_at": iso(utc_now()), "monotonic": time.monotonic()}
     handlers_added: list[logging.Handler] = []
 
@@ -230,14 +234,17 @@ def create_app(
     async def lifespan(app: FastAPI):  # noqa: ARG001
         handlers_added.extend(configure_logging(settings))
         LOGGER.info(
-            "BFF starting host=%s port=%s search_mode=%s writes=%s",
+            "BFF starting host=%s port=%s search_mode=%s writes=%s qwen_configured=%s",
             settings.host, settings.port, settings.search_mode, settings.allow_memory_writes,
+            settings.qwen_live_configured,
         )
         manager.start()
+        monitor.start()
         try:
             yield
         finally:
             LOGGER.info("BFF stopping; closing MCP clients")
+            await monitor.stop()
             await manager.stop()
             _remove_handlers(logging.getLogger("agentrecx.web_demo"), handlers_added)
             handlers_added.clear()
@@ -251,6 +258,7 @@ def create_app(
     app.state.settings = settings
     app.state.manager = manager
     app.state.sessions = store
+    app.state.qwen_health = monitor
     app.state.meta = meta
 
     @app.exception_handler(MCPManagerError)
@@ -307,6 +315,7 @@ def create_app(
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         status, ready, cpu_available = manager.aggregate_status()
+        qwen = monitor.snapshot()
         return {
             "status": status,
             "ready": ready,
@@ -314,19 +323,22 @@ def create_app(
             "uptime_s": round(time.monotonic() - meta["monotonic"], 1),
             "catalogue_size": manager.catalogue_size(),
             "servers": manager.health_servers(),
-            "modes": modes_public(cpu_live_available=cpu_available),
+            "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
+            "qwen_live": qwen,
             "memory_writes_enabled": bool(settings.allow_memory_writes),
         }
 
     @app.get("/api/demo/config")
     async def demo_config() -> dict[str, Any]:
         _status, _ready, cpu_available = manager.aggregate_status()
+        qwen = monitor.snapshot()
         return {
             "profiles": [settings.profile_public(profile_id) for profile_id in PROFILE_BY_ID],
             "default_profile_id": DEFAULT_PROFILE_ID,
             "limits": limits_public(settings),
             "verified_comparison_ids": list(VERIFIED_COMPARISON_IDS),
-            "modes": modes_public(cpu_live_available=cpu_available),
+            "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
+            "qwen_live": qwen,
             "notices": list(NOTICES),
         }
 
@@ -406,12 +418,21 @@ def create_app(
     async def chat_stream(body: ChatRequest) -> StreamingResponse:
         session = get_session(body.session_id)
         require_ready(session)
+        if body.mode == "qwen_live" and not monitor.snapshot()["available"]:
+            raise MCPManagerError(
+                "Qwen Base Live is unavailable: " + str(monitor.snapshot().get("detail") or "health check failed"),
+                code="qwen_unavailable",
+                http_status=409,
+                detail={"mode": "qwen_live", "qwen_status": monitor.snapshot().get("status")},
+            )
         events = demo_flow.chat_events(
             manager=manager,
             session=session,
             settings=settings,
             message=body.message,
             selected_product_ids=list(body.selected_product_ids or []),
+            mode=body.mode,
+            qwen_health=monitor,
         )
         return sse_response(events)
 
@@ -442,6 +463,7 @@ def create_app(
             session=session,
             clarification_id=body.clarification_id,
             message=body.message,
+            qwen_health=monitor,
         )
 
     return app

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,9 @@ class State:
     tokenizer = None
     model = None
     max_new_tokens = 256
+    #: ThreadingHTTPServer is used for the local service.  The model/tokenizer are not safe for
+    #: concurrent generation, so a health probe and a real turn must be serialized.
+    generate_lock = threading.Lock()
 
 
 def _row(payload: dict) -> dict:
@@ -45,8 +49,18 @@ def _parse_planner_text(text: str) -> tuple[dict | None, list[str]]:
         stripped = re.sub(r"```$", "", stripped).strip()
     try:
         payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None, ["invalid planner JSON"]
+    except json.JSONDecodeError as exc:
+        # Qwen Base occasionally omits only the final JSON closing brace.  Complete that
+        # syntax error without changing any model-authored action field, and keep a warning
+        # in the response.  Any other malformation remains a hard parse failure.
+        repaired = stripped + "}" if stripped.startswith("{") and not stripped.endswith("}") else ""
+        if repaired and exc.pos >= len(stripped) - 1:
+            try:
+                payload = json.loads(repaired)
+            except json.JSONDecodeError:
+                return None, ["invalid planner JSON"]
+        else:
+            return None, ["invalid planner JSON"]
     if not isinstance(payload, dict):
         return None, ["planner output is not an object"]
     if "operations" in payload:
@@ -73,34 +87,37 @@ class Handler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0"))
         request = json.loads(self.rfile.read(length).decode("utf-8"))
-        if self.path == "/plan":
-            prompt = planner_prompt(State.tokenizer, request)
-        elif self.path == "/explain":
-            messages = request.get("messages") or []
-            if not isinstance(messages, list) or not messages:
-                self.send_error(400)
-                return
-            prompt = str(State.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True,
-                enable_thinking=False))
-        else:
-            row = _row(request)
-            prompt = prompt_text(State.tokenizer, row)
-        inputs = State.tokenizer(prompt, return_tensors="pt").to(State.model.device)
-        started = time.perf_counter()
-        import torch
+        # A concurrent Qwen health probe must not interleave tokenizer/model state with a real
+        # planning turn; serialize only generation, not the HTTP response write.
+        with State.generate_lock:
+            if self.path == "/plan":
+                prompt = planner_prompt(State.tokenizer, request)
+            elif self.path == "/explain":
+                messages = request.get("messages") or []
+                if not isinstance(messages, list) or not messages:
+                    self.send_error(400)
+                    return
+                prompt = str(State.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True,
+                    enable_thinking=False))
+            else:
+                row = _row(request)
+                prompt = prompt_text(State.tokenizer, row)
+            inputs = State.tokenizer(prompt, return_tensors="pt").to(State.model.device)
+            started = time.perf_counter()
+            import torch
 
-        with torch.no_grad():
-            generated = State.model.generate(
-                **inputs,
-                max_new_tokens=State.max_new_tokens,
-                do_sample=False,
-                num_beams=1,
-            )
-        elapsed = time.perf_counter() - started
-        text = State.tokenizer.decode(
-            generated[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        ).strip()
+            with torch.no_grad():
+                generated = State.model.generate(
+                    **inputs,
+                    max_new_tokens=State.max_new_tokens,
+                    do_sample=False,
+                    num_beams=1,
+                )
+            elapsed = time.perf_counter() - started
+            text = State.tokenizer.decode(
+                generated[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
+            ).strip()
         if self.path == "/plan":
             payload, errors = _parse_planner_text(text)
         elif self.path == "/explain":
