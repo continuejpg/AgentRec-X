@@ -193,8 +193,19 @@ test.describe("Qwen ASK → task constraint → resume (real GPU)", () => {
     expect(gateAction).toBe("ALLOW_FINALIZE");
     const productCards = lastTurn(page).getByTestId("product-card");
     expect(await productCards.count()).toBeGreaterThan(0);
-    const selectedProductId = await productCards.first().getAttribute("data-product-id");
+    // The final Gate-selected item is rendered in the dedicated banner.  Product-card order
+    // still reflects the earlier catalogue result block, so the banner is the authoritative
+    // final-selection UI signal.
+    const gateSelected = lastTurn(page).getByTestId("gate-selected-item").last();
+    await expect(gateSelected).toBeVisible({ timeout: 60_000 });
+    const selectedProductId = await gateSelected.getAttribute("data-product-id");
     expect(selectedProductId, "final selected product id must be present").toBeTruthy();
+    recordCheck(
+      testInfo,
+      "qwen_fix.reevaluation_pool",
+      `Web candidate re-evaluation input=${reevaluation?.input_candidate_count}; eligible=${reevaluation?.eligible_count}; excluded=${JSON.stringify(reevaluation?.excluded_candidate_ids)}; candidate_ids=${JSON.stringify(reevaluation?.candidate_ids)}`,
+      Number(reevaluation?.eligible_count ?? 0) > 0,
+    );
 
     const details = await bffPostJson(request, "/api/products/details", {
       session_id: session.session_id,

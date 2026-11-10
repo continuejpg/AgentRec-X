@@ -140,7 +140,11 @@ export default function ProductsBlock({
       ) : null}
 
       {recommended ? (
-        <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-(--accent)/40 bg-(--accent-soft)/50 px-3 py-2">
+        <div
+          className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-(--accent)/40 bg-(--accent-soft)/50 px-3 py-2"
+          data-testid="gate-selected-item"
+          data-product-id={recommended.product_id}
+        >
           <Icon name="spark" size={15} className="text-(--accent-ink)" />
           <span className="text-[12px] font-semibold text-(--accent-ink)">Gate-selected item</span>
           <span className="min-w-0 flex-1 truncate text-[12px] text-(--ink-2)" title={recommended.title ?? undefined}>

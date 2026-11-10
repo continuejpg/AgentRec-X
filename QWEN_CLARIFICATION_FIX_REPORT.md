@@ -9,11 +9,14 @@ against that constraint, and prevents a final product with trustworthy evidence 
 attribute. Historical M9 memory is not deleted; an explicit `Forget my wired preference.` still
 uses the existing M9 retraction semantics.
 
-**Important limitation:** the final browser-selected product in this run
-`B00NFL0E2A` has **no trustworthy wireless evidence** in the catalogue. It was allowed only as an
-existing Gate "limited recommendation" with `UNKNOWN` wireless evidence; the system does **not**
-claim that this product is verified wireless. It has **no wired evidence**, so it does not violate
-the current `avoid wired` exclusion. This limitation must travel with the GO result.
+**Correction (2026-11-10, candidate-diagnosis pass):** the previous draft reported `B00NFL0E2A`
+as the browser-selected product because the E2E assertion read the first card in the *initial
+candidate block* on the same turn. The actual Gate-selected item in both Web and Direct MCP runs is
+`B00M0KUF44` (`RunPhones Wireless Headphones...`), which has explicit catalogue `wireless` evidence.
+The authoritative UI signal is the `gate-selected-item` banner; the initial candidate cards remain an
+earlier catalogue-result block. No runtime ranking defect or final-product quality difference exists
+in the saved evidence. This correction is recorded in
+`runs/web_demo/final_polish/candidate_diagnosis.json`.
 
 ---
 
@@ -127,9 +130,11 @@ Real browser run `browser/summary.json`:
 - candidate re-evaluation: `input=15, eligible=14, excluded=["B091SF1545"], violations=1`;
 - no second clarification/handle; no `Forget` message required;
 - final Gate: `ALLOW_FINALIZE`;
-- final browser-selected product: `B00NFL0E2A`, title `Philmore Headphones.`;
-  product-details evidence: **no wired evidence rows**; wireless evidence is `UNKNOWN`;
-- final product is **not** an explicit-wired product.
+- final **Gate-selected** browser product: `B00M0KUF44`, title
+  `RunPhones Wireless Headphones...`; catalogue attributes include explicit `wireless`;
+- the initial catalogue-result block also contained `B00NFL0E2A` (`Philmore Headphones.`), but it
+  was not the Gate-selected item. The E2E assertion was corrected to read the dedicated
+  `gate-selected-item` banner instead of the first `product-card`.
 
 Direct real-MCP run (`mcp_direct_cycle.json`):
 
@@ -139,8 +144,12 @@ Direct real-MCP run (`mcp_direct_cycle.json`):
   attributes include explicit `wireless`;
 - Gate `ALLOW_FINALIZE`, P15 evidence bundle present.
 
-The two selected products differ because the browser and direct MCP use independent real search
-paths/rankings; both satisfy the task exclusion. No rank was forced and no ASIN was preferred.
+**Candidate diagnosis:** Web and Direct MCP produced the same valid candidate IDs after
+re-evaluation (`B00M0KUF44, B0BVZKKYBS, B00NFL0E2A, ...`, 14 eligible; `B091SF1545` excluded) and
+the same final selected product `B00M0KUF44`. The earlier apparent difference was therefore a
+**test/reporting artifact**, not a different candidate pool or a scorer defect. `B00M0KUF44`
+(explicit wireless evidence) ranked before `B00NFL0E2A` (wireless UNKNOWN); no Scorer, Gate or V0
+weight change was required.
 
 ### Memory semantics comparison (`memory_semantics_compare.json`)
 
@@ -222,13 +231,14 @@ Performance:
 | `IDEMPOTENCY` | **PASS** | direct duplicate reply → `already_processed=true`, memory unchanged |
 | `CROSS_USER_ISOLATION` | **PASS** | prior real BFF wrong-user handle → HTTP 409; handle-binding path unchanged by this fix |
 | `LEGACY_REGRESSION` | **PASS** | 93 targeted tests; 9/9 Playwright; build |
-| `FINAL_WIRELESS_EVIDENCE` | **UNKNOWN / LIMITED** | browser-selected B00NFL0E2A has no wireless/wired catalogue attribute; no claim of verified wireless |
-| **Overall** | **GO** | no explicit current-exclusion violation in the final product |
+| `FINAL_WIRELESS_EVIDENCE` | **PASS** | final Gate-selected B00M0KUF44 has explicit catalogue wireless evidence; initial card B00NFL0E2A was not the Gate-selected item |
+| **Overall** | **GO** | same valid pool and same final Gate-selected product in Web and Direct MCP; no explicit current-exclusion violation |
 
-**Non-blocking limitation:** `B00NFL0E2A` has `UNKNOWN` wireless evidence. The Gate's existing
-soft-unknown policy allowed a limited recommendation; the UI/evidence must not describe it as
-verified wireless. A future improvement could rank explicitly wireless-evidenced candidates first,
-but that would be a separate ranking policy change, not required for this fix.
+**Post-hoc correction:** the earlier E2E check `final selected=B00NFL0E2A` was a DOM-ordering
+artifact (first initial candidate card), not the Gate-selected item. The corrected E2E now reads
+`data-testid="gate-selected-item"` and confirms `B00M0KUF44` with explicit `wireless` evidence.
+This is a test/reporting correction only; the runtime V0 scorer/Gate/task-constraint code was not
+changed for candidate ordering.
 
 ---
 
