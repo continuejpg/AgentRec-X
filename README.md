@@ -177,6 +177,10 @@ Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍�
 
 完整测试/复现说明见 [`docs/USAGE.md`](docs/USAGE.md) 与 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
 
+真实 Qwen Agent 任务评测（30-task baseline/corrective/shadow、GPU 服务、数据与复现命令）见
+[`docs/REPRODUCE_AGENT_EVAL.md`](docs/REPRODUCE_AGENT_EVAL.md)；对应依赖文件为
+[`requirements-eval.txt`](requirements-eval.txt)。
+
 ---
 
 ## 关键结果（口径必须一起读）

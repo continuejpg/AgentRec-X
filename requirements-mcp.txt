@@ -1,5 +1,8 @@
-﻿# P17 local MCP server dependency (Python 3.10+).
+# P17 local MCP server dependency (Python 3.10+).
 # Install only in the isolated runtime used for the stdio server/client:
 #   .venv/bin/python -m pip install -r requirements-mcp.txt
 # This does not modify the core CUDA/PyTorch or Serving V1 dependency stack.
 mcp==2.3.0
+# Direct import in the MCP client/evaluation scripts; pin it instead of relying on
+# mcp's transitive resolution so task evaluation is reproducible.
+anyio==4.15.1

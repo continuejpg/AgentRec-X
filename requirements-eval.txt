@@ -1,0 +1,21 @@
+# Reproducible dependency set for the P20 real-Agent evaluation / evidence-verifier work.
+#
+# Python: 3.10.x (the accepted development environment uses 3.10.12).
+#
+# Fresh WSL/CPU client environment:
+#   .venv/bin/python -m pip install -r requirements-eval.txt
+#   .venv/bin/python -m pip check
+#
+# This file deliberately uses the accepted CPU PyTorch wheel.  Do NOT install this
+# into the AutoDL Qwen service environment: that environment's CUDA/PyTorch stack must
+# not be replaced.  The Qwen model server is an external GPU service and is not a pip
+# dependency of the client evaluator.
+#
+# Runtime requirements for the existing Agent, MCP client/server and P15/P20 code.
+-r requirements.txt
+-r requirements-mcp.txt
+# Existing test dependencies (needed for the offline regression suite).
+-r requirements-dev.txt
+# Sanctioned CPU-only PyTorch wheel; keeps a fresh checkout able to import the Agent.
+# GPU users must keep their accepted CUDA/PyTorch environment instead of this file.
+-r requirements-cpu.txt
