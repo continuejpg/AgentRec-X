@@ -3,12 +3,14 @@
 ## A. Git State
 
 - Phase 1 started at: `3adc04c` (`docs: add reproducible evaluation requirements`)
-- Phase 1 code/test changes: see the `HEAD` printed by `git log -1` in the final Phase 1
-  session response. This handoff file and the Phase 1 report are part of that Phase 1
-  commit sequence.
-- Worktree expected: clean after the Phase 1 commit.
+- Phase 1 code commit: `21f5bf6` (`feat: advanced retrieval v2 phase1`)
+- The handoff/report documentation commit follows the code commit; use `git log -1` for the
+  final local HEAD after this handoff is committed.
+- Worktree expected: clean after the documentation commit.
 - `runs/` and model/data artifacts are deliberately not committed.
-- P18 Frozen Manifest was not touched.
+- P18 Frozen Manifest was not touched. The existing P18 hash test remains failed because
+  `recommendation/control/catalog_search.py` was intentionally modified; the manifest was
+  not repaired or silently updated.
 
 ## B. Data & Index Manifest
 
@@ -160,7 +162,7 @@ PYTHONPATH=. .venv/bin/python -m pytest -q \
   tests/test_planner_reliability.py tests/test_evidence_verifier.py
 ```
 
-Targeted Phase 1 result: **54 passed**.
+Targeted Phase 1 result: **149 passed**.
 
 The full suite attempt exceeded the Phase 1 time budget and was stopped at ~90%; it
 reported several failures that were not triaged as Phase 1 regressions. Do not claim a

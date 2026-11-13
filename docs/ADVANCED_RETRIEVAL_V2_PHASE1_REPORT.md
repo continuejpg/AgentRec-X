@@ -217,11 +217,13 @@ BM25. They are retained as existing trace assets, not as a current BGE/Agent qua
 Targeted tests passed:
 
 ```text
-54 passed
+149 passed
 ```
 
-Full suite result is recorded in the final Phase 1 response and GPU handoff. P18 Frozen
-Manifest is untouched.
+The full suite was attempted but exceeded the Phase 1 time budget and was stopped at
+~90%; its remaining failures were not triaged as Phase 1 changes and are not claimed as a
+clean full-suite result. P18 Frozen Manifest is untouched; the existing P18 hash test
+remains failed because `catalog_search.py` was intentionally changed.
 
 ## 10. Phase 2 Handoff
 
