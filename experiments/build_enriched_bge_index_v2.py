@@ -107,8 +107,18 @@ def main() -> int:
 
     checkpoint_batches = max(1, int(args.checkpoint_every))
     batches = 0
+    token_lengths: list[int] = []
+    truncated_docs = 0
     for offset in range(start, len(identities), int(args.batch_size)):
         batch_texts = texts[offset:offset + int(args.batch_size)]
+        # Measure effective document length before truncation.  This is recorded in the
+        # manifest so Phase 2 can see whether long enriched documents lose important
+        # specifications at the 512-token BGE limit.
+        raw_tokenized = tokenizer(batch_texts, add_special_tokens=True, truncation=False)
+        for ids in raw_tokenized["input_ids"]:
+            token_lengths.append(len(ids))
+            if len(ids) > model_max_length:
+                truncated_docs += 1
         encoded = tokenizer(
             batch_texts, padding=True, truncation=True, max_length=model_max_length,
             return_tensors="pt",
@@ -130,6 +140,18 @@ def main() -> int:
         raise SystemExit(f"embedding/identity misalignment: {vectors.shape}")
     if not np.allclose(np.linalg.norm(vectors, axis=1), 1.0, atol=1e-3):
         raise SystemExit("embeddings are not L2 normalized")
+    import statistics
+    sorted_lengths = sorted(token_lengths)
+    token_stats = {
+        "documents": len(sorted_lengths),
+        "model_max_length": model_max_length,
+        "mean": round(sum(sorted_lengths) / len(sorted_lengths), 2) if sorted_lengths else 0.0,
+        "p50": int(statistics.median(sorted_lengths)) if sorted_lengths else 0,
+        "p95": sorted_lengths[int(0.95 * (len(sorted_lengths) - 1))] if sorted_lengths else 0,
+        "max": max(sorted_lengths) if sorted_lengths else 0,
+        "truncated_documents": truncated_docs,
+        "truncated_rate": round(truncated_docs / len(sorted_lengths), 6) if sorted_lengths else 0.0,
+    }
     _save_index(args.out, identities, vectors, titles)
     if partial.is_file():
         partial.unlink()
@@ -151,6 +173,7 @@ def main() -> int:
         "max_length": int(args.max_length),
         "normalize_embeddings": True,
         "query_instruction": "Represent this sentence for searching relevant passages: ",
+        "token_stats": token_stats,
         "max_items": args.max_items,
         "resume_used": bool(args.resume),
         "built_at": datetime.now(timezone.utc).isoformat(),
