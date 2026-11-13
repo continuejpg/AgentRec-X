@@ -1,0 +1,16 @@
+# Optional model-facing dependencies for Advanced Retrieval v2.
+#
+# The document builder and D (enriched BM25) need no model packages.  Building the
+# Enriched BGE index and running a real Cross-Encoder need a local model runtime.  Use the
+# accepted CPU/CUDA PyTorch environment for torch; do not replace the AutoDL CUDA stack.
+#
+#   .venv/bin/python -m pip install -r requirements-eval.txt
+#   .venv/bin/python -m pip install -r requirements-advanced-retrieval.txt
+#
+# Observed compatible encoder stack in the accepted local environment:
+#   transformers 4.51.3, torch 2.1.2+cpu, BAAI/bge-base-en-v1.5
+transformers>=4.51,<5
+
+# Optional: only needed by the default sentence-transformers CrossEncoder loader.
+# The reranker interface can also be used with an injected scorer/loader.
+# sentence-transformers>=3.0,<6.0

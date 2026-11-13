@@ -322,6 +322,11 @@ class ElectronicsCatalogue:
         return len(self._products)
 
     @property
+    def products(self) -> tuple[ElectronicsProduct, ...]:
+        """Read-only catalogue products, independent of insertion order."""
+        return tuple(self._products.values())
+
+    @property
     def search_source(self) -> CatalogSearchSource:
         if self._search_source is None:
             self._search_source = CatalogSearchSource(self._view, mode="bm25")

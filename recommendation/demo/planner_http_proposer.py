@@ -26,6 +26,12 @@ ENV_URL = "AGENTRECX_QWEN_PLANNER_URL"
 ENV_MODEL = "AGENTRECX_QWEN_PLANNER_MODEL"
 ENV_TIMEOUT = "AGENTRECX_QWEN_PLANNER_TIMEOUT_S"
 CONTRACT_VERSION = "agentrecx.planner_action.v1"
+#: A malformed action is retried at most once.  Transport failure and unreadable JSON are
+#: not retried here; they remain explicit failures.  There is no Rule Planner fallback.
+MAX_ACTION_ATTEMPTS = 2
+RETRYABLE_ACTION_ERRORS = frozenset({
+    "planner_invalid_action", "planner_invalid_arguments", "planner_payload_not_object",
+})
 
 
 def planner_enabled() -> bool:
@@ -64,6 +70,8 @@ class HttpPlannerProposer:
         self.timeout = timeout
         self.last_raw: str = ""
         self.last_response: dict[str, Any] = {}
+        self.last_attempts: int = 0
+        self.last_parse_errors: list[dict[str, Any]] = []
 
     @classmethod
     def from_env(cls) -> "HttpPlannerProposer":
@@ -112,38 +120,66 @@ class HttpPlannerProposer:
             "reranked": observation.reranked,
         }
         body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            self.url + "/plan",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise HttpPlannerError("planner_unavailable", "the planner model server is unavailable") from exc
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise HttpPlannerError("planner_invalid_json", "the planner model server returned invalid JSON") from exc
-        if isinstance(payload, dict):
-            self.last_response = dict(payload)
-            self.last_raw = str(payload.get("text") or "")
-            # Optional local diagnostic: record the exact planner request/response envelope.
-            trace_path = (os.environ.get("AGENTRECX_QWEN_PLANNER_TRACE") or "").strip()
-            if trace_path:
-                try:
-                    record = {
-                        "request": request_payload,
-                        "response": payload,
-                        "raw_text": self.last_raw,
-                    }
-                    with Path(trace_path).open("a", encoding="utf-8") as handle:
-                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                except OSError:
-                    pass
-            # model_server returns an envelope {payload,text,errors,...}; a Stub server
-            # may return the action object directly.  Unwrap only the envelope form.
-            action_payload = payload.get("payload")
-            if isinstance(action_payload, dict):
-                payload = action_payload
-        return parse_action_payload(payload)
+        self.last_attempts = 0
+        self.last_parse_errors = []
+        last_error: HttpPlannerError | None = None
+        for attempt in range(1, MAX_ACTION_ATTEMPTS + 1):
+            self.last_attempts = attempt
+            request = urllib.request.Request(
+                self.url + "/plan",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                raise HttpPlannerError(
+                    "planner_unavailable", "the planner model server is unavailable"
+                ) from exc
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise HttpPlannerError(
+                    "planner_invalid_json", "the planner model server returned invalid JSON"
+                ) from exc
+            if isinstance(payload, dict):
+                self.last_response = dict(payload)
+                self.last_raw = str(payload.get("text") or "")
+                # Optional local diagnostic: record the exact planner request/response envelope.
+                trace_path = (os.environ.get("AGENTRECX_QWEN_PLANNER_TRACE") or "").strip()
+                if trace_path:
+                    try:
+                        record = {
+                            "request": request_payload,
+                            "response": payload,
+                            "raw_text": self.last_raw,
+                            "attempt": attempt,
+                        }
+                        with Path(trace_path).open("a", encoding="utf-8") as handle:
+                            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    except OSError:
+                        pass
+                # model_server returns an envelope {payload,text,errors,...}; a Stub server
+                # may return the action object directly.  Unwrap only the envelope form.
+                action_payload = payload.get("payload")
+                if isinstance(action_payload, dict):
+                    payload = action_payload
+            try:
+                return parse_action_payload(payload)
+            except HttpPlannerError as exc:
+                last_error = exc
+                self.last_parse_errors.append({"attempt": attempt, "code": exc.code,
+                                               "detail": exc.detail})
+                if exc.code not in RETRYABLE_ACTION_ERRORS or attempt >= MAX_ACTION_ATTEMPTS:
+                    break
+                # Bounded retry only for a structurally invalid action payload.  The
+                # caller still receives an explicit error if the retry also fails; this
+                # never falls back to the Rule Planner and never fabricates an action.
+                continue
+        assert last_error is not None
+        if len(self.last_parse_errors) > 1:
+            raise HttpPlannerError(
+                last_error.code,
+                f"{last_error.detail} (after {len(self.last_parse_errors)} bounded attempts)",
+            )
+        raise last_error

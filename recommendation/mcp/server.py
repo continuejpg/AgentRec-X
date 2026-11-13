@@ -942,7 +942,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AgentRec-X local stdio MCP server")
     parser.add_argument("--user-key", default="p14e2_lite_0049")
     parser.add_argument("--memory-fixture", type=Path, default=DEFAULT_FIXTURE)
-    parser.add_argument("--search-mode", choices=("bge", "bm25"), default="bge")
+    parser.add_argument("--search-mode", choices=("bge", "bm25", "hybrid", "hybrid_rrf"),
+                        default="bge")
+    parser.add_argument("--dense-index", type=Path, default=None,
+                        help="optional versioned NPZ dense index (default: accepted P14-D2 index)")
+    parser.add_argument("--dense-model", type=Path, default=None,
+                        help="optional local BGE model directory matching --dense-index")
     parser.add_argument("--clarification-ttl-seconds", type=float, default=1800.0)
     parser.add_argument("--metadata-mode", choices=("original", "enriched"), default=None,
                         help="original C4 only (default) or C4 + Raw Meta Electronics sidecar")
@@ -968,26 +973,31 @@ def main(argv: list[str] | None = None) -> int:
     warmup_ms: float | None = None
     warmup_payload: dict[str, Any] | None = None
     search_ready = True
-    if args.search_mode == "bge":
+    if args.search_mode in {"bge", "hybrid", "hybrid_rrf"}:
         configure_started = time.perf_counter()
-        config = configure_catalogue(catalogue)
+        dense_kwargs: dict[str, Any] = {}
+        if args.dense_index is not None:
+            dense_kwargs["index_path"] = args.dense_index
+        if args.dense_model is not None:
+            dense_kwargs["model_path"] = args.dense_model
+        config = configure_catalogue(catalogue, mode=args.search_mode, **dense_kwargs)
         configure_ms = round((time.perf_counter() - configure_started) * 1000.0, 2)
         if config["status"] != "active":
-            LOGGER.warning("BGE unavailable; keeping BM25 fallback: %s", config.get("reason"))
+            LOGGER.warning("dense retrieval unavailable; keeping BM25 fallback: %s", config.get("reason"))
             search_mode = "bm25"
         else:
-            search_mode = "bge"
+            search_mode = str(config["mode"])
             if args.warmup:
                 warmup_started = time.perf_counter()
                 try:
                     warmup_payload = catalogue.search_source.warmup()
                 except Exception as exc:  # noqa: BLE001 - fail startup instead of fake readiness
-                    LOGGER.exception("BGE prewarm failed; MCP startup will not advertise Search Ready")
-                    raise RuntimeError(f"BGE prewarm failed: {type(exc).__name__}: {exc}") from exc
+                    LOGGER.exception("dense prewarm failed; MCP startup will not advertise Search Ready")
+                    raise RuntimeError(f"dense prewarm failed: {type(exc).__name__}: {exc}") from exc
                 warmup_ms = round((time.perf_counter() - warmup_started) * 1000.0, 2)
                 search_ready = bool(catalogue.search_source.search_ready)
                 LOGGER.info(
-                    "BGE Search Ready warmup_ms=%s ready=%s encoder=%s",
+                    "Search Ready warmup_ms=%s ready=%s encoder=%s",
                     warmup_ms, search_ready, catalogue.search_source.encoder_status(),
                 )
     else:

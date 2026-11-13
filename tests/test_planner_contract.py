@@ -75,7 +75,8 @@ def test_ask_requires_need_signal() -> None:
 def test_max_steps_terminates() -> None:
     class _LoopExecutor:
         def execute(self, proposal, observation):
-            return PlannerObservation(step=1, query=observation.query, candidate_ids=(), reranked=True), {}, False
+            return PlannerObservation(step=1, query=observation.query,
+                                      candidate_ids=("A",), reranked=False), {}, False
 
     run = run_planner(
         planner=StubPlanner(),
@@ -174,5 +175,63 @@ def test_http_planner_round_trip_protocol() -> None:
         )
         assert proposal.action is PlannerAction.RETRIEVE
         assert proposal.arguments == {"query": "water filter"}
+    finally:
+        server.shutdown()
+
+
+def test_http_planner_retries_one_empty_action_then_succeeds() -> None:
+    responses = iter([
+        {"action": "", "arguments": {}, "rationale": "empty"},
+        {"action": "RETRIEVE", "arguments": {"query": "water filter"}, "rationale": "retry"},
+    ])
+
+    class _RetryHandler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = json.dumps(next(responses)).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RetryHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        proposer = HttpPlannerProposer(f"http://127.0.0.1:{server.server_address[1]}")
+        proposal = proposer.propose(PlannerObservation(step=0, query="water filter"))
+        assert proposal.action is PlannerAction.RETRIEVE
+        assert proposer.last_attempts == 2
+        assert len(proposer.last_parse_errors) == 1
+    finally:
+        server.shutdown()
+
+
+def test_http_planner_stops_after_two_invalid_actions_without_fallback() -> None:
+    class _InvalidHandler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = json.dumps({"action": "", "arguments": {}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _InvalidHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        proposer = HttpPlannerProposer(f"http://127.0.0.1:{server.server_address[1]}")
+        with pytest.raises(HttpPlannerError) as exc:
+            proposer.propose(PlannerObservation(step=0, query="water filter"))
+        assert exc.value.code == "planner_invalid_action"
+        assert "bounded attempts" in exc.value.detail
+        assert proposer.last_attempts == 2
     finally:
         server.shutdown()

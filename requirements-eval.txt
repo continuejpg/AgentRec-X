@@ -19,3 +19,5 @@
 # Sanctioned CPU-only PyTorch wheel; keeps a fresh checkout able to import the Agent.
 # GPU users must keep their accepted CUDA/PyTorch environment instead of this file.
 -r requirements-cpu.txt
+# Optional model runtime for the Advanced Retrieval v2 index/reranker scripts.
+-r requirements-advanced-retrieval.txt

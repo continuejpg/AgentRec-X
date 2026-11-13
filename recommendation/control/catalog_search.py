@@ -39,6 +39,8 @@ __all__ = [
     "CATALOG_SEARCH_MODES",
     "CATALOG_SEARCH_SCORE_KIND",
     "CATALOG_SEARCH_SCORE_KINDS",
+    "RRF_K",
+    "reciprocal_rank_fusion",
     "CatalogSearchHit",
     "CatalogSearchResult",
     "CatalogSearchSource",
@@ -48,8 +50,38 @@ __all__ = [
 #: How this source's scores must be labelled wherever they are recorded.
 CATALOG_SEARCH_SCORE_KIND = "bm25"
 
-#: Explicit opt-in modes.  BM25 remains the default and never loads a dense model.
-CATALOG_SEARCH_MODES = ("bm25", "bge", "hybrid")
+#: Reciprocal Rank Fusion constant.  The catalogue source keeps the accepted k=60
+#: default; no tuned value is used by default.
+RRF_K = 60
+
+
+def reciprocal_rank_fusion(
+    rankings: list[list[str]], *, k: int = RRF_K,
+) -> list[tuple[str, float]]:
+    """Fuse ranked identity lists with deterministic RRF.
+
+    ``rankings`` are 1-based rank lists in source order.  Duplicate identities inside one
+    list are ignored after their first occurrence, and ties are broken by identity so the
+    output is reproducible.  This is deliberately a small function, not a framework.
+    """
+    if k < 1:
+        raise ValueError("RRF k must be >= 1")
+    scores: dict[str, float] = {}
+    seen_in_list: set[str] = set()
+    for ranking in rankings:
+        seen_in_list.clear()
+        for rank, identity in enumerate(ranking, start=1):
+            item = str(identity)
+            if not item or item in seen_in_list:
+                continue
+            seen_in_list.add(item)
+            scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank)
+    return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+
+
+#: Lexical BM25 remains the default.  ``hybrid_rrf`` is accepted as an explicit alias
+#: for ``hybrid`` so callers can name the fusion without changing existing baselines.
+CATALOG_SEARCH_MODES = ("bm25", "bge", "hybrid", "hybrid_rrf")
 CATALOG_SEARCH_SCORE_KINDS = {
     "bm25": "bm25",
     "bge": "bge_dense",
@@ -85,7 +117,8 @@ class CatalogTextLike(Protocol):
 class CatalogSearchHit:
     """One catalogue record matched by a query, with its BM25 score and matched fields."""
 
-    __slots__ = ("parent_asin", "score", "matched_fields", "title")
+    __slots__ = ("parent_asin", "score", "matched_fields", "title",
+                 "bm25_rank", "bm25_score", "bge_rank", "bge_score")
 
     def __init__(
         self,
@@ -94,6 +127,10 @@ class CatalogSearchHit:
         score: float,
         matched_fields: tuple[str, ...],
         title: str | None,
+        bm25_rank: int | None = None,
+        bm25_score: float | None = None,
+        bge_rank: int | None = None,
+        bge_score: float | None = None,
     ) -> None:
         self.parent_asin = parent_asin
         self.score = score
@@ -101,6 +138,12 @@ class CatalogSearchHit:
         #: A display title copied verbatim from the catalogue record, or ``None``.  Never
         #: generated: a record without a title reports ``None``.
         self.title = title
+        #: Per-arm ranks/scores are retained for hybrid audit.  They are never compared
+        #: across score kinds and are ``None`` for the non-fused single-arm modes.
+        self.bm25_rank = bm25_rank
+        self.bm25_score = bm25_score
+        self.bge_rank = bge_rank
+        self.bge_score = bge_score
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view."""
@@ -109,6 +152,10 @@ class CatalogSearchHit:
             "score": self.score,
             "matched_fields": list(self.matched_fields),
             "title": self.title,
+            "bm25_rank": self.bm25_rank,
+            "bm25_score": self.bm25_score,
+            "bge_rank": self.bge_rank,
+            "bge_score": self.bge_score,
         }
 
     def __repr__(self) -> str:  # pragma: no cover - diagnostics only
@@ -193,7 +240,9 @@ class CatalogSearchSource:
         if not isinstance(catalog, CatalogTextLike):
             raise TypeError("catalog must expose a 'records' mapping")
         normalised_mode = str(mode or "").strip().casefold()
-        if normalised_mode not in CATALOG_SEARCH_MODES:
+        if normalised_mode == "hybrid_rrf":
+            normalised_mode = "hybrid"
+        if normalised_mode not in {"bm25", "bge", "hybrid"}:
             raise ValueError(
                 f"catalog search mode must be one of {CATALOG_SEARCH_MODES}, "
                 f"got {mode!r}"
@@ -377,43 +426,39 @@ class CatalogSearchSource:
                         bm25_documents, start=1
                     )
                 }
+                bm25_score = {
+                    parent_asin: score
+                    for score, parent_asin, _fields, _title in bm25_documents
+                }
                 dense_rank = {
                     hit.parent_asin: int(hit.rank) for hit in dense_hits
                 }
-                fused: list[tuple[float, str, tuple[str, ...], str | None]] = []
-                for parent_asin in set(bm25_rank) | set(dense_rank):
-                    # Never let a dense-only identity that is absent from the current
-                    # catalogue enter the source result.
-                    if parent_asin not in records:
-                        continue
-                    hybrid = 0.0
-                    fields: list[str] = []
-                    if parent_asin in bm25_rank:
-                        hybrid += 1.0 / (60 + bm25_rank[parent_asin])
-                        fields.append("bm25")
-                    if parent_asin in dense_rank:
-                        hybrid += 1.0 / (60 + dense_rank[parent_asin])
-                        fields.append("bge_dense")
-                    title = getattr(records.get(parent_asin), "title", None)
-                    if not title:
-                        title = next(
-                            (
-                                hit.title
-                                for hit in dense_hits
-                                if hit.parent_asin == parent_asin
-                            ),
-                            None,
-                        )
-                    fused.append((hybrid, parent_asin, tuple(fields), title))
-                fused.sort(key=lambda entry: (-entry[0], entry[1]))
+                dense_score = {
+                    hit.parent_asin: float(hit.score) for hit in dense_hits
+                }
+                fused = reciprocal_rank_fusion(
+                    [list(bm25_rank), list(dense_rank)], k=RRF_K,
+                )
                 hits = tuple(
                     CatalogSearchHit(
                         parent_asin=parent_asin,
                         score=round(score, 6),
-                        matched_fields=fields,
-                        title=title,
+                        matched_fields=tuple(
+                            field for field, present in (
+                                ("bm25", parent_asin in bm25_rank),
+                                ("bge_dense", parent_asin in dense_rank),
+                            ) if present
+                        ),
+                        title=getattr(records.get(parent_asin), "title", None),
+                        bm25_rank=bm25_rank.get(parent_asin),
+                        bm25_score=bm25_score.get(parent_asin),
+                        bge_rank=dense_rank.get(parent_asin),
+                        bge_score=dense_score.get(parent_asin),
                     )
-                    for score, parent_asin, fields, title in fused[:limit]
+                    for parent_asin, score in fused[:limit]
+                    # Never let a dense-only identity absent from the current catalogue
+                    # enter the source result.
+                    if parent_asin in records
                 )
                 return CatalogSearchResult(
                     hits=hits,

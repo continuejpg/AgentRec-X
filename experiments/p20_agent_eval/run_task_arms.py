@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments.p14c0.run_dev import _evaluate
+from experiments.p14c1.search_backend import configure_catalogue
 from experiments.p14e.catalogue import ElectronicsCatalogue
 from experiments.p20_metadata.corrective_eval import _run_one
 
@@ -62,17 +63,30 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policies", nargs="+", choices=("baseline", "corrective"),
                         default=["baseline", "corrective"])
+    parser.add_argument("--search-mode", choices=("bge", "bm25", "hybrid", "hybrid_rrf"),
+                        default="bge")
+    parser.add_argument("--dense-index", type=Path, default=None)
+    parser.add_argument("--dense-model", type=Path, default=None)
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     suite = json.loads((OUT / "task_suite.json").read_text(encoding="utf-8"))
     tasks = suite["tasks"]
     catalogue = ElectronicsCatalogue.load(metadata_mode="enriched")
+    dense_kwargs: dict[str, Any] = {}
+    if args.dense_index is not None:
+        dense_kwargs["index_path"] = args.dense_index
+    if args.dense_model is not None:
+        dense_kwargs["model_path"] = args.dense_model
+    # Match the existing corrective evaluator and the MCP C arm: both must use the same
+    # accepted retrieval mode.  Loading the catalogue alone leaves BM25 as the default.
+    search_config = configure_catalogue(catalogue, mode=args.search_mode, **dense_kwargs)
     all_payload: dict[str, Any] = {
         "schema": "agentrecx.p20.agent_task_arms.v1",
         "task_set": "30 natural P14-E2/P14-B3 tasks",
         "label_status": suite["label_status"],
         "metadata_mode": "enriched",
         "planner": "qwen",
+        "search": search_config,
         "arms": {},
     }
     for policy in args.policies:

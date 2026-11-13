@@ -210,17 +210,33 @@ class LocalBGEDenseIndex:
                 for rank, position in enumerate(order, start=1)]
 
 
-def configure_catalogue(catalogue: Any, *, index_path: Path = DEFAULT_INDEX,
+def configure_catalogue(catalogue: Any, *, mode: str = "bge",
+                        index_path: Path = DEFAULT_INDEX,
                         model_path: Path = DEFAULT_MODEL) -> dict[str, Any]:
-    """Switch the existing catalogue search source to BGE; BM25 remains fallback."""
+    """Switch the catalogue search source to an explicit retrieval mode.
+
+    ``bge`` and ``hybrid`` need the existing identity-aligned dense index.  ``bm25`` is
+    the accepted lexical fallback and does not load the encoder.  A missing/incompatible
+    dense artifact returns an explicit fallback status; it never fabricates dense hits.
+    """
+    normalised = str(mode or "").strip().casefold()
+    if normalised == "hybrid_rrf":
+        normalised = "hybrid"
+    if normalised not in {"bm25", "bge", "hybrid"}:
+        raise ValueError(f"catalogue mode must be bm25, bge, hybrid or hybrid_rrf, got {mode!r}")
+    if normalised == "bm25":
+        source = CatalogSearchSource(catalogue._view, mode="bm25")
+        catalogue._search_source = source
+        return {"mode": "bm25", "status": "active", "fallback": None,
+                "index": None, "model": None}
     try:
         dense = LocalBGEDenseIndex.load(index_path, model_path)
         catalogue_ids = {product.item_id for product in catalogue._products.values()}
         if set(dense.identities) != catalogue_ids:
             raise ValueError("BGE index identities do not match the Electronics catalogue")
-        source = CatalogSearchSource(catalogue._view, mode="bge", dense_index=dense)
+        source = CatalogSearchSource(catalogue._view, mode=normalised, dense_index=dense)
         catalogue._search_source = source
-        return {"mode": "bge", "status": "active", "index": str(index_path),
+        return {"mode": normalised, "status": "active", "index": str(index_path),
                 "index_size": len(dense.identities), "model": str(model_path),
                 "fallback": "bm25 (unavailable/error)"}
     except Exception as exc:

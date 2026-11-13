@@ -43,7 +43,8 @@ C_IDS = [
 ]
 
 
-def _params(task: dict[str, Any]) -> StdioServerParameters:
+def _params(task: dict[str, Any], *, dense_index: str | None = None,
+            dense_model: str | None = None) -> StdioServerParameters:
     args = [
         "-m", "recommendation.mcp.server",
         "--user-key", task["user_id"],
@@ -53,6 +54,10 @@ def _params(task: dict[str, Any]) -> StdioServerParameters:
         "--corrective-rag",
         "--evidence-verifier",
     ]
+    if dense_index:
+        args.extend(["--dense-index", dense_index])
+    if dense_model:
+        args.extend(["--dense-model", dense_model])
     env = {
         "PYTHONPATH": str(REPO), "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
         "AGENTRECX_METADATA_SIDECAR": str(SIDECAR),
@@ -147,7 +152,9 @@ async def one_task(client: Client, task: dict[str, Any], catalogue: ElectronicsC
 
 async def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.parse_args()
+    parser.add_argument("--dense-index", default=None)
+    parser.add_argument("--dense-model", default=None)
+    args = parser.parse_args()
     RUNS.mkdir(parents=True, exist_ok=True)
     suite = json.loads((RUNS / "task_suite.json").read_text(encoding="utf-8"))
     by_id = {task["task_id"]: task for task in suite["tasks"]}
@@ -157,7 +164,8 @@ async def main() -> int:
         task = by_id[task_id]
         started = time.perf_counter()
         try:
-            async with Client(_params(task)) as client:
+            async with Client(_params(task, dense_index=args.dense_index,
+                                      dense_model=args.dense_model)) as client:
                 record = await one_task(client, task, catalogue)
             record["server_startup_and_call_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
         except Exception as exc:  # noqa: BLE001
@@ -217,7 +225,9 @@ async def main() -> int:
         "task_subset": C_IDS,
         "label_status": suite["label_status"],
         "config": {"metadata_mode": "enriched", "corrective_rag": True,
-                   "verifier": "shadow", "planner": "qwen"},
+                   "verifier": "shadow", "planner": "qwen",
+                   "dense_index": args.dense_index or "default runs/p14d2/bge_index.npz",
+                   "dense_model": args.dense_model or "default models/bge-base-en-v1.5"},
         "tasks": records, "metrics": task_metrics,
     }
     (RUNS / "complete_shadow.json").write_text(

@@ -181,6 +181,10 @@ Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍�
 [`docs/REPRODUCE_AGENT_EVAL.md`](docs/REPRODUCE_AGENT_EVAL.md)；对应依赖文件为
 [`requirements-eval.txt`](requirements-eval.txt)。
 
+Advanced Retrieval v2 的 Phase 1 实现与 Phase 2 GPU 交接见
+[`docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md`](docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md)
+与 [`docs/ADVANCED_RETRIEVAL_V2_GPU_HANDOFF.md`](docs/ADVANCED_RETRIEVAL_V2_GPU_HANDOFF.md)。
+
 ---
 
 ## 关键结果（口径必须一起读）
