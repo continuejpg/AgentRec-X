@@ -703,24 +703,40 @@ async def _run_agent_turn(
                 "raw_excerpt": item.get("source_text") or item.get("value"),
                 "attribute": "preference",
                 "verification_status": item.get("verification_status"),
+                "value": item.get("value"), "polarity": item.get("polarity"),
+                "active": item.get("active"), "user_id": item.get("user_id"),
             })
         try:
-            shadow = verify_claims(
-                client=QwenVerifierClient(str(config["url"]), timeout=float(config["timeout_s"])),
-                product_id=str(selected or ""), claims=claims, evidence=evidence,
-                unknown_fields=[item.get("attribute") for item in bundle_dict.get("unknown_fields") or []],
-                model=str(config["model"]),
-            )
+            client = QwenVerifierClient(str(config["url"]), timeout=float(config["timeout_s"]))
+            verdicts: list[dict[str, Any]] = []
+            errors: list[str] = []
+            model_stats = {"latency_ms": 0.0, "input_tokens": 0, "output_tokens": 0}
+            statuses: list[str] = []
+            unknown_fields = [item.get("attribute") for item in bundle_dict.get("unknown_fields") or []]
+            for claim in claims:
+                shadow = verify_claims(
+                    client=client, product_id=str(selected or ""), claims=[claim],
+                    evidence=evidence, unknown_fields=unknown_fields,
+                    model=str(config["model"]),
+                )
+                statuses.append(shadow.status)
+                verdicts.extend(item.as_dict() for item in shadow.verdicts)
+                errors.extend(shadow.errors)
+                for key in ("latency_ms", "input_tokens", "output_tokens"):
+                    value = (shadow.model_stats or {}).get(key)
+                    if isinstance(value, (int, float)):
+                        model_stats[key] = (model_stats.get(key) or 0) + value
             shadow_verifier = {
-                "enabled": True, "shadow_only": True, "status": shadow.status,
-                "verdicts": [item.as_dict() for item in shadow.verdicts],
-                "model_stats": shadow.model_stats, "errors": shadow.errors,
-                "id_alignment": shadow.id_alignment,
+                "enabled": True, "shadow_only": True,
+                "status": "ok" if statuses and all(item == "ok" for item in statuses) else "invalid_model_payload",
+                "verdicts": verdicts,
+                "model_stats": model_stats, "errors": errors,
+                "id_alignment": "single_claim",
             }
         except Exception as exc:  # a verifier failure must be visible, never block the answer
             shadow_verifier = {"enabled": True, "shadow_only": True, "status": "error",
                                "verdicts": [], "errors": [f"{type(exc).__name__}: {exc}"],
-                               "model_stats": {}}
+                               "model_stats": {}, "id_alignment": "single_claim"}
 
     latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
     await bridge.flush()

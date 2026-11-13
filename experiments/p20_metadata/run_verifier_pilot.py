@@ -20,7 +20,7 @@ from recommendation.control.evidence_verifier import QwenVerifierClient, verify_
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "runs/p20_metadata"
 QWEN_URL = "http://127.0.0.1:18029"
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 
 
 def _load_cases() -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -44,6 +44,10 @@ def _evidence(bundle: Mapping[str, Any]) -> list[dict[str, Any]]:
             "raw_excerpt": item.get("source_text") or item.get("value"),
             "attribute": "preference",
             "verification_status": item.get("verification_status"),
+            "value": item.get("value"),
+            "polarity": item.get("polarity"),
+            "active": item.get("active"),
+            "user_id": item.get("user_id"),
         })
     return evidence
 
@@ -121,6 +125,7 @@ def main() -> int:
                 "bundle_id": bundle_id,
                 "case_ids": [case["case_id"] for case in chunk],
                 "status": result.status,
+                "id_alignment": result.id_alignment,
                 "verdicts": by_id,
                 "errors": result.errors,
                 "latency_ms": stats.get("latency_ms"),
@@ -137,6 +142,17 @@ def main() -> int:
             }, ensure_ascii=False), flush=True)
     baseline = {case["case_id"]: bool(case.get("baseline", {}).get("accepted")) for case in cases}
     all_metrics = _metrics(cases, all_verdicts, baseline)
+    combined_verdicts = {
+        case["case_id"]: (all_verdicts.get(case["case_id"]) if baseline[case["case_id"]]
+                          else "INSUFFICIENT_EVIDENCE")
+        for case in cases
+    }
+    all_combined = _metrics(cases, combined_verdicts, baseline)
+    provenance_categories = {"preference_wrong_source", "preference_missing_ref",
+                             "metadata_source_conflict", "contradicted_form_factor"}
+    provenance_cases = [c for c in cases if c["category"] in provenance_categories]
+    combined_detected = sum(1 for c in provenance_cases
+                            if combined_verdicts[c["case_id"]] != "SUPPORTED")
     dev_cases = [c for c in cases if c["split"] == "dev"]
     holdout_cases = [c for c in cases if c["split"] == "holdout"]
     verdict_detail = []
@@ -144,6 +160,7 @@ def main() -> int:
         verdict_detail.append({
             **case,
             "verifier_verdict": all_verdicts.get(case["case_id"]),
+            "combined_verdict": combined_verdicts.get(case["case_id"]),
             "baseline_accepted": baseline.get(case["case_id"]),
         })
     payload = {
@@ -159,6 +176,15 @@ def main() -> int:
             "all": all_metrics,
             "dev": _metrics(dev_cases, all_verdicts, baseline),
             "holdout": _metrics(holdout_cases, all_verdicts, baseline),
+            "combined": all_combined,
+            "combined_dev": _metrics(dev_cases, combined_verdicts, baseline),
+            "combined_holdout": _metrics(holdout_cases, combined_verdicts, baseline),
+            "citation_or_conflict_cases": len(provenance_cases),
+            "citation_or_conflict_detected_by_combined": combined_detected,
+            "id_alignment_counts": {
+                alignment: sum(1 for batch in batch_records if batch.get("id_alignment") == alignment)
+                for alignment in {batch.get("id_alignment") for batch in batch_records}
+            },
             "total_input_tokens": token_in,
             "total_output_tokens": token_out,
             "total_latency_ms": round(latency, 2),
