@@ -53,6 +53,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     parser.add_argument("--data-dir", type=Path, default=Path("data/planner_sft_v0"))
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the base in NF4 for QLoRA smoke/full run")
+    parser.add_argument("--max-steps", type=int, default=-1, help="override trainer max_steps (debug smoke)")
+    parser.add_argument("--limit-train", type=int, default=None)
+    parser.add_argument("--limit-val", type=int, default=None)
+    parser.add_argument("--save-total-limit", type=int, default=None)
+    parser.add_argument("--run-name", default="planner_lora_v1")
     args = parser.parse_args(argv)
     config = _load_config(args.config)
     seed = int(config.get("seed", 20261107))
@@ -66,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
     set_seed(seed)
     train_rows = load_jsonl(args.data_dir / "chat_train.jsonl")
     val_rows = load_jsonl(args.data_dir / "chat_val.jsonl")
+    if args.limit_train:
+        train_rows = train_rows[:args.limit_train]
+    if args.limit_val:
+        val_rows = val_rows[:args.limit_val]
     if not train_rows or not val_rows:
         raise ValueError("planner chat train/val data is empty")
     model_name = str(args.model or config.get("model_name_or_path", MODEL_ID))
@@ -88,7 +98,20 @@ def main(argv: list[str] | None = None) -> int:
         "chat_template_prefix": _chat_template(tokenizer)[:300],
     }
     dtype = torch.bfloat16 if bool(config.get("bf16", True)) else torch.float16
-    model = load_text_model(model_name, dtype=dtype, device_map=None, trust_remote_code=bool(config.get("trust_remote_code", True)))
+    quantization_config = None
+    if args.load_in_4bit or bool(config.get("load_in_4bit", False)):
+        from transformers import BitsAndBytesConfig
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+    model = load_text_model(
+        model_name, dtype=dtype, device_map=None,
+        trust_remote_code=bool(config.get("trust_remote_code", True)),
+        quantization_config=quantization_config,
+    )
     if torch.cuda.is_available():
         model = model.to("cuda")
     model_info = describe_model(model)
@@ -128,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         "logging_steps": int(config.get("logging_steps", 1)),
         "eval_steps": int(config.get("eval_steps", 10)),
         "save_steps": int(config.get("save_steps", 10)),
-        "save_total_limit": int(config.get("save_total_limit", 2)),
+        "save_total_limit": int(args.save_total_limit if args.save_total_limit is not None else config.get("save_total_limit", 2)),
         "bf16": bool(config.get("bf16", True)),
         "fp16": bool(config.get("fp16", False)),
         "report_to": [],
@@ -137,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         "data_seed": seed,
         "gradient_checkpointing": bool(config.get("gradient_checkpointing", True)),
     }
+    if args.max_steps and args.max_steps > 0:
+        training_kwargs["max_steps"] = args.max_steps
     try:
         training_args = TrainingArguments(**training_kwargs, eval_strategy="steps")
     except TypeError:
@@ -154,7 +179,10 @@ def main(argv: list[str] | None = None) -> int:
     trainer.save_model(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))
     report = {
-        "stage": "P4B-planner-lora-sft-v0",
+        "stage": "P4B-planner-lora-sft-v1",
+        "run_name": args.run_name,
+        "load_in_4bit": bool(quantization_config is not None),
+        "train_file": str(args.data_dir / "chat_train.jsonl"),
         "schema_version": SCHEMA_VERSION,
         "contract_version": CONTRACT_VERSION,
         "model_name_or_path": model_name,

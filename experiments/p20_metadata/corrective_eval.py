@@ -195,6 +195,7 @@ def _run_one(catalogue: ElectronicsCatalogue, task: dict[str, Any], *, planner_k
             "input_tokens": sum(int(c.get("input_tokens") or 0) for c in planner.calls) if isinstance(planner, TracePlanner) else 0,
             "output_tokens": sum(int(c.get("output_tokens") or 0) for c in planner.calls) if isinstance(planner, TracePlanner) else 0,
             "rationales": [c.get("rationale") for c in planner.calls] if isinstance(planner, TracePlanner) else [],
+            "parser_errors": [c.get("parser_errors") for c in planner.calls] if isinstance(planner, TracePlanner) else [],
         },
         "latency_seconds": latency,
         "error": error,

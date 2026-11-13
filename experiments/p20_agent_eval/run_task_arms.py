@@ -55,6 +55,11 @@ def _metrics(records: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> dict
         "tool_steps": sum(len(r.get("steps") or []) for r in records),
         "input_tokens": sum(int((r.get("planner") or {}).get("input_tokens") or 0) for r in records),
         "output_tokens": sum(int((r.get("planner") or {}).get("output_tokens") or 0) for r in records),
+        "planner_calls_with_parser_errors": sum(
+            1 for r in records for errors in ((r.get("planner") or {}).get("parser_errors") or []) if errors),
+        "invalid_action_rate": round(
+            sum(1 for r in records for errors in ((r.get("planner") or {}).get("parser_errors") or []) if errors)
+            / max(1, sum((r.get("planner") or {}).get("calls", 0) for r in records)), 6),
         "latency_seconds": round(sum(float(r.get("latency_seconds") or 0) for r in records), 3),
     }
 
@@ -67,9 +72,12 @@ def main() -> int:
                         default="bge")
     parser.add_argument("--dense-index", type=Path, default=None)
     parser.add_argument("--dense-model", type=Path, default=None)
+    parser.add_argument("--suite", type=Path, default=OUT / "task_suite.json")
+    parser.add_argument("--tag", default=None,
+                        help="write task_arm_<tag>.json / task_arms_<tag>.json instead of default names")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
-    suite = json.loads((OUT / "task_suite.json").read_text(encoding="utf-8"))
+    suite = json.loads(args.suite.read_text(encoding="utf-8"))
     tasks = suite["tasks"]
     catalogue = ElectronicsCatalogue.load(metadata_mode="enriched")
     dense_kwargs: dict[str, Any] = {}
@@ -107,11 +115,11 @@ def main() -> int:
             "policy": policy, "corrective_rag": policy == "corrective",
             "verifier": "disabled", "tasks": records, "metrics": metrics,
         }
-        (OUT / f"task_arm_{policy}.json").write_text(
+        (OUT / f"task_arm_{args.tag or policy}.json").write_text(
             json.dumps(all_payload["arms"][policy], indent=1, ensure_ascii=False) + "\n",
             encoding="utf-8")
         print(json.dumps({"policy": policy, "metrics": metrics}, ensure_ascii=False), flush=True)
-    (OUT / "task_arms.json").write_text(
+    (OUT / f"task_arms_{args.tag}.json" if args.tag else OUT / "task_arms.json").write_text(
         json.dumps(all_payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     return 0
 
