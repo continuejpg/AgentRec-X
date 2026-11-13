@@ -36,6 +36,7 @@ from experiments.p14c0.electronics_executor import MAX_STEPS, ElectronicsPlanner
 from experiments.p14c1.search_backend import configure_catalogue
 from experiments.p14e.catalogue import ElectronicsCatalogue, ElectronicsProduct
 from experiments.p15.explainer import EvidenceExplainer, QwenExplanationClient
+from recommendation.control.evidence_verifier import QwenVerifierClient, verify_claims
 from recommendation.control.rag_evidence import build_bundle, build_product_evidence, validate_claims
 from recommendation.demo.planner_contract import PlannerContractError, PlannerObservation, run_planner
 from recommendation.demo.planner_http_proposer import (
@@ -58,6 +59,7 @@ SERVER_NAME = "agentrecx-mcp"
 SERVER_VERSION = "0.1.0"
 PROTOCOL_TARGET = "2026-07-28"
 ENV_CORRECTIVE_RAG = "AGENTRECX_CORRECTIVE_RAG"
+ENV_EVIDENCE_VERIFIER = "AGENTRECX_EVIDENCE_VERIFIER"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -100,6 +102,7 @@ class AppContext:
     search_mode: str
     writes_enabled: bool
     corrective_rag: bool = False
+    evidence_verifier: bool = False
     clarification_ttl_seconds: float = 1800.0
     # Optional P20 Qwen Base Live: the tool is only registered when both the explicit flag and a
     # model-service URL are configured.  The legacy 7-tool surface stays byte-for-byte the same.
@@ -676,6 +679,49 @@ async def _run_agent_turn(
     elif executor.explanation_error:
         rag = {"status": "error", "final_answer": None, "error": executor.explanation_error}
 
+    shadow_verifier = None
+    if context.evidence_verifier and executor.last_explanation is not None:
+        explanation = executor.last_explanation
+        bundle_dict = explanation.get("bundle") or {}
+        parsed = explanation.get("parsed_output") or {}
+        raw_claims = parsed.get("claims") if isinstance(parsed, dict) else None
+        claims: list[dict[str, Any]] = []
+        if isinstance(raw_claims, list):
+            for index, claim in enumerate(raw_claims):
+                if isinstance(claim, dict):
+                    item = dict(claim)
+                    item["claim_id"] = f"claim_{index + 1}"
+                    claims.append(item)
+        evidence: list[dict[str, Any]] = []
+        for item in bundle_dict.get("product_evidence") or []:
+            evidence.append(dict(item))
+        for item in bundle_dict.get("preference_evidence") or []:
+            evidence.append({
+                "evidence_id": item.get("evidence_id"), "product_id": None,
+                "raw_field": "preference",
+                "span_text": item.get("source_text") or item.get("value"),
+                "raw_excerpt": item.get("source_text") or item.get("value"),
+                "attribute": "preference",
+                "verification_status": item.get("verification_status"),
+            })
+        try:
+            shadow = verify_claims(
+                client=QwenVerifierClient(str(config["url"]), timeout=float(config["timeout_s"])),
+                product_id=str(selected or ""), claims=claims, evidence=evidence,
+                unknown_fields=[item.get("attribute") for item in bundle_dict.get("unknown_fields") or []],
+                model=str(config["model"]),
+            )
+            shadow_verifier = {
+                "enabled": True, "shadow_only": True, "status": shadow.status,
+                "verdicts": [item.as_dict() for item in shadow.verdicts],
+                "model_stats": shadow.model_stats, "errors": shadow.errors,
+                "id_alignment": shadow.id_alignment,
+            }
+        except Exception as exc:  # a verifier failure must be visible, never block the answer
+            shadow_verifier = {"enabled": True, "shadow_only": True, "status": "error",
+                               "verdicts": [], "errors": [f"{type(exc).__name__}: {exc}"],
+                               "model_stats": {}}
+
     latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
     await bridge.flush()
     return {
@@ -717,6 +763,7 @@ async def _run_agent_turn(
             "trace": list(executor.corrective_trace),
         },
         "rag": rag,
+        "shadow_evidence_verifier": shadow_verifier,
         "error": None,
         "latency_ms": latency_ms,
         "notes": [
@@ -891,8 +938,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="enable writes only for a trusted local test client")
     parser.add_argument("--corrective-rag", action="store_true",
                         help="enable one evidence-driven corrective retrieval after a Gate evidence gap")
+    parser.add_argument("--evidence-verifier", action="store_true",
+                        help="run the independent Qwen claim-evidence verifier in shadow mode")
     args = parser.parse_args(argv)
     corrective_rag = bool(args.corrective_rag or _env_bool(ENV_CORRECTIVE_RAG))
+    evidence_verifier = bool(args.evidence_verifier or _env_bool(ENV_EVIDENCE_VERIFIER))
     startup_started = time.perf_counter()
     catalogue_started = time.perf_counter()
     catalogue = ElectronicsCatalogue.load(metadata_mode=args.metadata_mode,
@@ -933,6 +983,7 @@ def main(argv: list[str] | None = None) -> int:
     ctx = AppContext(user_key=args.user_key, catalogue=catalogue, memory=memory, task=task,
                      search_mode=search_mode, writes_enabled=bool(args.allow_memory_writes),
                      corrective_rag=corrective_rag,
+                     evidence_verifier=evidence_verifier,
                      clarification_ttl_seconds=float(args.clarification_ttl_seconds),
                      qwen_configured=qwen_configured, qwen_model=qwen_model)
     server = build_server(ctx)
@@ -943,6 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         "metadata_mode": catalogue.metadata_mode,
         "metadata_stats": catalogue.metadata_stats,
         "corrective_rag": corrective_rag,
+        "evidence_verifier": evidence_verifier,
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
         "search_ready": bool(search_ready),
         "startup_timings": {
