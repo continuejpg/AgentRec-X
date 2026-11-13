@@ -4,8 +4,9 @@
 
 - Phase 1 started at: `3adc04c` (`docs: add reproducible evaluation requirements`)
 - Phase 1 code commit: `21f5bf6` (`feat: advanced retrieval v2 phase1`)
-- The handoff/report documentation commit follows the code commit; use `git log -1` for the
-  final local HEAD after this handoff is committed.
+- Phase 2 experiment drivers commit: `443d605` (`feat: phase2 retrieval and reranker experiment drivers`)
+- Final Phase 2 report/handoff documentation commit follows the code commit; use
+  `git log -1` for the final local HEAD after this handoff is committed.
 - Worktree expected: clean after the documentation commit.
 - `runs/` and model/data artifacts are deliberately not committed.
 - P18 Frozen Manifest was not touched. The existing P18 hash test remains failed because
@@ -23,7 +24,8 @@
 | Original BGE index | `runs/p14d2/bge_index.npz` | `fce84987083452abd84b7fdbf09b1d55e35305e7c4983b03343034dca3f7a69d` |
 | BGE model | `models/bge-base-en-v1.5` | revision `a5beb1e3e68b9ab74eb54cfd186867f64f240e1a` |
 | Enriched BGE smoke index | `runs/advanced_retrieval_v2/bge_enriched_v2_smoke.npz` | 32 docs, SHA `ef167b5aa8685db61f7294305ec0e06a74e5c8a7895ea91de360e9c6de3ac709` |
-| Full enriched BGE index | **NOT BUILT** | expected `runs/advanced_retrieval_v2/bge_enriched_v2.npz` |
+| Enriched BGE full index | `runs/advanced_retrieval_v2/bge_enriched_v2.npz` | 76,263 docs, 215 MB, SHA `0c394f28bb3d87f4baf4cc5ac816d2620275424168c3f347a6cb803e8aee2bd3` |
+| Enriched BGE full manifest | `runs/advanced_retrieval_v2/bge_enriched_v2_manifest.json` | 857.7 s build, 4-bit? no: BF16/FP32 AutoModel, 1.81% docs truncated at 512 |
 | Old C4 BGE retrieval ranks | `runs/p14d2/bge_retrieval.json` | real existing top-100 asset |
 
 The enriched docs are additive. The C4 catalogue and original BGE index were not
@@ -31,17 +33,35 @@ overwritten.
 
 ## C. GPU Tasks Remaining
 
-1. **Enriched BGE embedding** — encode 76,263 enriched documents with the pinned BGE
-   model and produce the full NPZ + manifest.
-2. **Cross-Encoder reranker** — real BGE-Reranker or Qwen3-Reranker inference. No real
-   reranker was run in Phase 1.
-3. **Retrieval A/B with enriched BGE and Hybrid RRF** — compare A C4 BM25, B C4 BGE,
-   C C4 Hybrid RRF, D Enriched BM25, and the new Enriched BGE / Hybrid on the fixed
-   135 P14-D1 queries.
-4. **Real Qwen Agent A/B** — Baseline vs Corrective vs Complete Shadow with the selected
-   retrieval mode. Phase 1 did not run remote Qwen Live. The prior direct A/B artifacts
-   used BM25 by mistake; the Phase 1 runner now calls `configure_catalogue` and accepts
-   `--search-mode`, but the Qwen arm must be rerun in Phase 2.
+Phase 2 has now completed the full Enriched BGE index, CPU/GPU retrieval A/B, one real
+Qwen3-Reranker-4B pass, and the Qwen Agent A/B.
+
+Remaining for the next round is **not another retrieval build**:
+
+1. **QLoRA Planner/Selection SFT preparation** — use the fixed Original-BGE baseline,
+   provisional traces, and the known selection failures (see Phase 2 report).
+2. Optional: integrate Cross-Encoder into the Agent behind an explicit opt-in; this was
+   intentionally not done in Phase 2.
+3. Optional: rerun Enriched BGE only if Planner selection is fixed; its retrieval gain did
+   not translate to Agent success in Phase 2.
+
+## C2. Phase 2 Actual Results (supersedes old “remaining” wording)
+
+- Full Enriched BGE index was built in **857.7 s** on RTX 4090 D.
+- Enriched BGE retrieval improved over Original BGE:
+  - original query Hit@10 14.1% → 24.4%, Hit@20 20.0% → 34.1%, Hit@100 48.9% → 55.6%.
+- Equal-weight hybrid RRF was **not** adopted; it lost Top-10/20/100 versus Enriched BGE.
+- Qwen3-Reranker-4B on a fixed Original-BGE pool:
+  - Hit@1 3.7% → 11.1%, Hit@10 14.1% → 20.0%;
+  - 20 improved / 3 worsened / 112 unchanged;
+  - target-in-pool was only 27/135, so this is a reranking gain, not a recall gain.
+- Real Qwen Agent A/B (30 tasks, corrective/verifier off):
+  - Original BGE: 29/30 success;
+  - Enriched BGE: 27/30 success;
+  - hard-constraint violations 0 in both;
+  - no adoption of Enriched BGE for the Agent baseline.
+- **Adopted SFT baseline: Original BGE.**
+- Full report: `docs/ADVANCED_RETRIEVAL_V2_PHASE2_REPORT.md`.
 
 ## D. Commands
 
@@ -78,27 +98,27 @@ order and is validated before continuing.
 ### 3. Retrieval comparison with the actual dense index
 
 ```bash
-PYTHONPATH=. .venv/bin/python experiments/advanced_retrieval/run_cpu_retrieval_comparison.py \
+PYTHONPATH=. .venv/bin/python experiments/advanced_retrieval/run_phase2_retrieval_comparison.py \
   --bge-index runs/advanced_retrieval_v2/bge_enriched_v2.npz \
-  --bge-model /root/autodl-tmp/models/bge-base-en-v1.5 \
-  --variants original rewritten
+  --bge-model /root/autodl-tmp/models/bge-base-en-v1.5
 ```
 
-Without `--bge-index` it uses the real precomputed C4 BGE top-100 ranks for the Phase 1
-control. `--bge-index` performs actual dense query encoding through
-`LocalBGEDenseIndex`; on a CPU-only host this is slower.
+This is the Phase 2 A/B/C/D comparison (A Original BGE, B Enriched BGE,
+C Enriched BGE+BM25 RRF, D Original BGE+BM25 RRF), with MRR/nDCG and target-loss cases.
 
-### 4. Reranker benchmark (real model is Phase 2)
+### 4. Reranker benchmark (real Qwen3-Reranker-4B run)
+
+Phase 2 ran the real 4-bit Qwen3-Reranker-4B on the fixed Original-BGE Top-20 pool:
 
 ```bash
 PYTHONPATH=. .venv/bin/python experiments/advanced_retrieval/run_reranker_benchmark.py \
-  --mode cross_encoder \
-  --model /root/autodl-tmp/models/bge-reranker-v2-m3 \
-  --device cuda --batch-size 8 --depth 20
+  --mode qwen3_cross_encoder \
+  --model /root/autodl-tmp/models/Qwen3-Reranker-4B \
+  --device cuda --batch-size 4 --depth 20 --quantization 4bit
 ```
 
-The default CrossEncoder loader uses `sentence-transformers`; install the optional
-package or inject a model-specific loader/scorer. A missing model raises an explicit error.
+Result: Hit@1 3.7% → 11.1%, Hit@10 14.1% → 20.0%; 20 improved / 3 worsened;
+target-in-pool 27/135. This is experimental and was not integrated into the Agent.
 
 Existing-order control (already run):
 

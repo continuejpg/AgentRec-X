@@ -14,3 +14,8 @@ transformers>=4.51,<5
 # Optional: only needed by the default sentence-transformers CrossEncoder loader.
 # The reranker interface can also be used with an injected scorer/loader.
 # sentence-transformers>=3.0,<6.0
+
+# Optional for the real Qwen3-Reranker-4B 4-bit benchmark (recorded on the AutoDL env):
+# bitsandbytes>=0.45,<1
+# accelerate>=1.0,<2
+# The 4-bit model path and license are described in the Phase 2 report.

@@ -6,14 +6,15 @@ success is declared expert gold.  P18 Reserved is excluded.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
-ARMS = REPO / "runs/p20_agent_eval/task_arms.json"
-OUT = REPO / "runs/advanced_retrieval_v2/sft_trace_candidates.jsonl"
-MANIFEST = REPO / "runs/advanced_retrieval_v2/sft_trace_manifest.json"
+DEFAULT_ARMS = REPO / "runs/p20_agent_eval/task_arms.json"
+DEFAULT_OUT = REPO / "runs/advanced_retrieval_v2/sft_trace_candidates.jsonl"
+DEFAULT_MANIFEST = REPO / "runs/advanced_retrieval_v2/sft_trace_manifest.json"
 
 
 def _row(arm: str, record: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
@@ -62,13 +63,18 @@ def _row(arm: str, record: dict[str, Any], task: dict[str, Any]) -> dict[str, An
 
 
 def main() -> None:
-    payload = json.loads(ARMS.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--arms", type=Path, default=DEFAULT_ARMS)
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    args = parser.parse_args()
+    payload = json.loads(args.arms.read_text(encoding="utf-8"))
     tasks = {task["task_id"]: task for task in
              json.loads((REPO / "runs/p20_agent_eval/task_suite.json").read_text(
                  encoding="utf-8"))["tasks"]}
-    OUT.parent.mkdir(parents=True, exist_ok=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     count = 0
-    with OUT.open("w", encoding="utf-8") as handle:
+    with args.out.open("w", encoding="utf-8") as handle:
         for arm_name, arm in payload["arms"].items():
             for record in arm.get("tasks") or []:
                 task = tasks.get(record["task_id"])
@@ -79,9 +85,9 @@ def main() -> None:
                 count += 1
     manifest = {
         "schema": "agentrecx.sft.trace_asset_manifest.v1",
-        "output": str(OUT),
+        "output": str(args.out),
         "rows": count,
-        "source": str(ARMS),
+        "source": str(args.arms),
         "label_status": "provisional_not_expert_gold",
         "notes": [
             "reshaped existing traces only; no new generation",
@@ -90,8 +96,9 @@ def main() -> None:
             "allowed_actions were not persisted by the direct arm trace and remain null",
         ],
     }
-    MANIFEST.write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + "\n",
-                        encoding="utf-8")
+    args.manifest.parent.mkdir(parents=True, exist_ok=True)
+    args.manifest.write_text(json.dumps(manifest, indent=1, ensure_ascii=False) + "\n",
+                             encoding="utf-8")
     print(json.dumps(manifest, indent=1))
 
 
