@@ -74,31 +74,39 @@ conflict, IPX alias, transport failure and prompt independence.
 The holdout was not used for prompt tuning, but it remains provisional. All claims are judged
 only against the supplied evidence, not against real-world product truth.
 
-## 5. P15 vs Verifier vs Combined
+## 5. P15 vs Qwen-only vs Combined
 
-Combined = P15 structural rejection + deterministic citation/conflict prechecks + Qwen
-verifier verdict. Same 49 cases, same Qwen checkpoint.
+Three separate arms, same 49 cases and same Qwen checkpoint:
 
-| Metric | P15 A | Verifier B | P15 + Verifier C |
+- **A** = P15 deterministic structural validator;
+- **B** = Qwen-only verifier: no deterministic prechecks, one claim per call;
+- **C** = P15 structural rejection + deterministic citation/conflict prechecks + Qwen verifier.
+
+| Metric | A: P15 | B: Qwen-only | C: P15 + guards + Qwen |
 |---|---:|---:|---:|
-| Unsupported detection recall | 2/30 = 6.7% | **30/30 = 100%** | **30/30 = 100%** |
+| Unsupported detection recall | 2/30 = 6.7% | 27/30 = **90.0%** | **30/30 = 100%** |
 | Unsupported detection precision | — | **100%** | **100%** |
 | Supported accuracy | — | **19/19 = 100%** | **19/19 = 100%** |
 | Supported false rejection | 0% | **0%** | **0%** |
-| INSUFFICIENT correct | — | 19/19 | 19/19 |
-| Baseline accept rate | 95.9% | — | — |
+| INSUFFICIENT correct | — | 16/19 | 19/19 |
+| Citation/conflict cases detected | — | 4/7 | **7/7** |
 | Invalid JSON/verdict | — | **0** | **0** |
-| Citation/conflict cases detected | — | **7/7** | **7/7** |
+| Model calls | 0 | 49 | 34 |
+
+B misses exactly the cases requiring cross-source/attribute guards: `d05`, `d06` (C4 vs
+metadata form-factor conflict) and `x03` (mechanical-switch claim citing a waterproof field).
+C catches those three deterministically and remains supported-claim safe.
+
+**C vs A:** 6.7% → 100% unsupported recall on this provisional pilot.
+**C vs B:** C adds the three guard-required cases; it is also cheaper (34 vs 49 model calls,
+36.8k vs 64.1k input tokens) because deterministic checks skip calls.
+B is not a superset of C, and C is not claimed to be a production-grade replacement for
+human semantic review.
 
 Dev: supported 16/16, unsupported 25/25.
 Holdout: supported 3/3, unsupported 5/5 (only 8 cases).
 
-**C vs A:** C clearly improves over A on this pilot: 6.7% → 100% unsupported recall.
-**C vs B:** C equals B here; P15's structural rejections are not adding independent detection
-on these 49 cases. The value of C is defense-in-depth and preservation of P15's structural
-authority, not a higher metric than B in this sample.
-
-The perfect pilot score must not be read as general production accuracy: labels are
+The perfect C pilot score must not be read as general production accuracy: labels are
 provisional, the set is small, and no human gold exists.
 
 ## 6. GPU Execution Evidence
@@ -107,19 +115,21 @@ provisional, the set is small, and no human gold exists.
 - existing checkpoint: Qwen3.5-9B-ms, same `/explain` service
 - no second 9B model, no retraining, no new dependency
 - service baseline VRAM: 17,549 MiB
-- observed verifier peak: **21,975 MiB**
+- observed global verifier peak: **21,975 MiB**
 - total VRAM: 24,564 MiB; peak free: **2,118 MiB**
+- B Qwen-only peak during its 49-call run: 19,335 MiB
 - no OOM; the margin is still modest
 
 ### Pilot
 
-- 49 cases; 34 model calls; 15 deterministic precheck-only cases
-- input: **36,821 tokens**
-- output: **2,100 tokens**
-- verifier call latency: P50 **2,697 ms**, P95 **3,428 ms**
-- total verifier call latency: **91,922 ms**
-- ID alignment: 34 `single_claim`, 15 precheck-only; no positional fallback
-- invalid JSON/verdict: **0**
+- C: 49 cases; 34 model calls; 15 deterministic precheck-only cases
+- C input: **36,821 tokens**; output: **2,100 tokens**
+- C verifier call latency: P50 **2,697 ms**, P95 **3,428 ms**
+- C total verifier call latency: **91,922 ms**
+- B Qwen-only: 49 calls, **64,140 input / 3,136 output tokens**, total 118,591 ms;
+  P50 2,382 ms, P95 3,538 ms
+- ID alignment: C 34 `single_claim`, 15 precheck-only; B 49 `single_claim`; no positional fallback
+- invalid JSON/verdict: **0** in both B and C
 
 ### Shadow E2E
 
@@ -131,6 +141,11 @@ provisional, the set is small, and no human gold exists.
 - E2E total: 261.6 s including main Qwen Planner/Explain
 - Gate and final answers unchanged; no unsupported claim occurred
 
+A previous run produced one natural `INSUFFICIENT_EVIDENCE` for the claim
+“These earbuds are IPX5 sweatproof” because the first attribute guard did not recognize IPX
+as a waterproof alias; that was a verifier false positive and was fixed with a generic IPX /
+water-resistance alias. It was not counted as a success.
+
 No opt-in interception was enabled, so there is no interception trace. The reason is in
 Section 8.
 
@@ -139,7 +154,7 @@ Section 8.
 Relevant suite:
 
 ```text
-145 passed, 1 skipped
+149 passed, 1 skipped
 ```
 
 P18 remains the known pre-existing issue:

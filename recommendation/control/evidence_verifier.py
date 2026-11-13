@@ -400,14 +400,14 @@ def parse_verifier_response(text: str, claim_ids: Iterable[str], *, model: str =
 def verify_claims(
     *, client: Any, product_id: str, claims: list[Mapping[str, Any]],
     evidence: Iterable[Mapping[str, Any]], unknown_fields: Iterable[str] = (),
-    model: str = "Qwen3.5-9B-Base",
+    model: str = "Qwen3.5-9B-Base", use_prechecks: bool = True,
 ) -> VerifierResult:
     evidence_list = [dict(item) for item in evidence]
     prechecked: dict[str, VerifierVerdict] = {}
     model_claims: list[Mapping[str, Any]] = []
     for claim in claims:
         claim_id = str(claim.get("claim_id") or f"claim_{len(model_claims) + 1}")
-        verdict = _precheck_claim(claim, evidence_list, unknown_fields)
+        verdict = _precheck_claim(claim, evidence_list, unknown_fields) if use_prechecks else None
         if verdict is not None:
             prechecked[claim_id] = verdict
         else:
