@@ -15,11 +15,19 @@ are **UNKNOWN** in this catalogue because the source file does not contain them.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from recommendation.catalog.enrichment import (
+    DEFAULT_SIDECAR,
+    ENV_SIDECAR,
+    MetadataSidecar,
+    attach_metadata,
+    read_metadata_mode,
+)
 from recommendation.catalog.schemas import ProductMetadata
 from recommendation.control.catalog_search import CatalogSearchSource, CatalogSearchResult
 
@@ -93,9 +101,14 @@ class ElectronicsProduct:
     attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
     form_factor: str | None = None
     record: ProductMetadata | None = None
+    #: Optional Raw Meta Electronics sidecar.  It is deliberately separate from the C4
+    #: search record and never changes the BM25/BGE document text.
+    metadata: Any | None = None
+    metadata_facts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    metadata_conflicts: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "item_id": self.item_id,
             "namespaced_id": self.namespaced_id,
             "title": self.title,
@@ -105,6 +118,13 @@ class ElectronicsProduct:
             "text_chars": len(self.text),
             "source": CATALOG_SOURCE,
         }
+        if self.metadata is not None:
+            payload["metadata"] = self.metadata.summary()
+            payload["metadata_source"] = self.metadata.source
+            payload["metadata_attributes"] = sorted(self.metadata_facts)
+            if self.metadata_conflicts:
+                payload["metadata_conflicts"] = self.metadata_conflicts
+        return payload
 
 
 def _first_sentence(text: str, limit: int = 220) -> str:
@@ -166,11 +186,20 @@ class ElectronicsCatalogue:
         self._stats = dict(stats)
         self._view = _View({product.namespaced_id: product.record for product in self._products.values()})
         self._search_source: CatalogSearchSource | None = None
+        self._metadata_mode = "original"
+        self._metadata_stats: dict[str, Any] = {}
 
     # -- construction ------------------------------------------------------ #
     @classmethod
-    def load(cls, path: str | Path = CATALOG_SOURCE) -> "ElectronicsCatalogue":
+    def load(
+        cls,
+        path: str | Path = CATALOG_SOURCE,
+        *,
+        metadata_mode: str | None = None,
+        metadata_sidecar: str | Path | None = None,
+    ) -> "ElectronicsCatalogue":
         path = Path(path)
+        mode = read_metadata_mode(metadata_mode)
         stats: dict[str, Any] = {
             "source": CATALOG_SOURCE,
             "rows": 0,
@@ -255,12 +284,30 @@ class ElectronicsCatalogue:
         stats["quarantined"] = quarantined
         stats["type_counts"] = dict(sorted(stats["type_counts"].items()))
         stats["attribute_presence"] = dict(sorted(stats["attribute_presence"].items()))
-        return cls(products, stats)
+        catalogue = cls(products, stats)
+        catalogue._metadata_mode = mode
+        stats["metadata_mode"] = mode
+        if mode == "enriched":
+            sidecar_path = Path(metadata_sidecar or os.environ.get(ENV_SIDECAR) or DEFAULT_SIDECAR)
+            sidecar = MetadataSidecar.load(sidecar_path)
+            catalogue._metadata = sidecar
+            catalogue._metadata_stats = attach_metadata(catalogue, sidecar)
+            catalogue._metadata_stats["coverage"] = sidecar.coverage(products)
+            stats["enrichment"] = catalogue._metadata_stats
+        return catalogue
 
     # -- metadata ---------------------------------------------------------- #
     @property
     def stats(self) -> dict[str, Any]:
         return dict(self._stats)
+
+    @property
+    def metadata_mode(self) -> str:
+        return self._metadata_mode
+
+    @property
+    def metadata_stats(self) -> dict[str, Any]:
+        return dict(self._metadata_stats)
 
     @property
     def records(self) -> Mapping[str, ProductMetadata]:
@@ -315,10 +362,52 @@ class ElectronicsCatalogue:
         facts: dict[str, dict[str, Any]] = {}
         unknown: list[str] = []
         unsupported: list[str] = []
+        meta = product.metadata
         for name in requested_names:
+            if name == "title":
+                facts[name] = {
+                    "status": "present", "value": product.title, "source": CATALOG_SOURCE,
+                    "verification": "c4_title",
+                }
+                if meta and meta.title:
+                    facts[name]["metadata_value"] = meta.title
+                    facts[name]["metadata_source"] = meta.source
+                continue
+            if name == "price" and meta and meta.price is not None:
+                facts[name] = {
+                    "status": "historical_metadata",
+                    "value": meta.price,
+                    "currency": "USD",
+                    "price_kind": "historical_crawl_time",
+                    "source": meta.source,
+                    "verification": "upstream_metadata",
+                    "reason": "historical crawl-time price, not a live price or availability",
+                }
+                unknown.append(name)
+                continue
+            if name == "brand" and meta and meta.brand:
+                facts[name] = {
+                    "status": "present", "value": meta.brand, "source": meta.source,
+                    "verification": "structured_metadata",
+                }
+                continue
+            if name == "material" and meta and meta.material:
+                facts[name] = {
+                    "status": "present", "value": meta.material, "source": meta.source,
+                    "verification": "structured_metadata",
+                }
+                continue
+            if name == "size" and meta and meta.size:
+                facts[name] = {
+                    "status": "present", "value": meta.size, "source": meta.source,
+                    "verification": "structured_metadata",
+                }
+                continue
             if name in product.attributes:
                 fact = dict(product.attributes[name])
-                fact.update({"value": True, "value_type": "boolean", "verification": "text_evidence"})
+                if fact.get("value_type") != "string" and name not in {"brand", "material"}:
+                    fact.update({"value": True, "value_type": "boolean"})
+                fact.setdefault("verification", fact.get("verification") or "text_evidence")
                 facts[name] = fact
             elif name in ATTR_NAMES or name in FORM_ATTRS:
                 facts[name] = {
@@ -341,7 +430,7 @@ class ElectronicsCatalogue:
             else:
                 facts[name] = {"status": "unsupported", "value": None}
                 unsupported.append(name)
-        return {
+        result = {
             "status": "ok",
             "product_id": product.item_id,
             "namespaced_id": product.namespaced_id,
@@ -352,7 +441,14 @@ class ElectronicsCatalogue:
             "unknown_fields": unknown,
             "unsupported_fields": unsupported,
             "source": CATALOG_SOURCE,
+            "metadata_mode": self._metadata_mode,
         }
+        if meta is not None:
+            result["metadata"] = meta.summary()
+            result["metadata_attributes"] = sorted(product.metadata_facts)
+            if product.metadata_conflicts:
+                result["metadata_conflicts"] = product.metadata_conflicts
+        return result
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -360,5 +456,7 @@ class ElectronicsCatalogue:
             "catalogue_size": self.catalogue_size,
             "source": CATALOG_SOURCE,
             "limited_catalogue": True,
+            "metadata_mode": self._metadata_mode,
+            "metadata": self._metadata_stats,
             "stats": self.stats,
         }

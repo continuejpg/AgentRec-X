@@ -178,10 +178,13 @@ def _search_products(query: Annotated[str, Field(min_length=1, description="Natu
     hits = []
     for hit in result.hits:
         item_id = hit.parent_asin.split(":", 1)[-1]
+        product = ctx.catalogue.get(item_id)
+        metadata = getattr(product, "metadata", None)
         hits.append({
             "item_id": item_id,
             "namespaced_id": hit.parent_asin,
             "title": hit.title,
+            "metadata_title": metadata.title if metadata is not None else None,
             "score": float(hit.score),
             "source": "catalog_search",
             "namespace": "amazon_electronics_c4",
@@ -856,6 +859,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--memory-fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--search-mode", choices=("bge", "bm25"), default="bge")
     parser.add_argument("--clarification-ttl-seconds", type=float, default=1800.0)
+    parser.add_argument("--metadata-mode", choices=("original", "enriched"), default=None,
+                        help="original C4 only (default) or C4 + Raw Meta Electronics sidecar")
+    parser.add_argument("--metadata-sidecar", type=Path, default=None,
+                        help="optional sidecar path; env AGENTRECX_METADATA_SIDECAR otherwise")
     parser.add_argument("--warmup", action="store_true",
                         help="load and exercise the BGE encoder before advertising MCP readiness")
     parser.add_argument("--allow-memory-writes", action="store_true",
@@ -863,7 +870,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     startup_started = time.perf_counter()
     catalogue_started = time.perf_counter()
-    catalogue = ElectronicsCatalogue.load()
+    catalogue = ElectronicsCatalogue.load(metadata_mode=args.metadata_mode,
+                                          metadata_sidecar=args.metadata_sidecar)
     catalogue_ms = round((time.perf_counter() - catalogue_started) * 1000.0, 2)
     configure_ms: float | None = None
     warmup_ms: float | None = None
@@ -906,6 +914,8 @@ def main(argv: list[str] | None = None) -> int:
         "server": SERVER_NAME, "version": SERVER_VERSION, "protocol_target": PROTOCOL_TARGET,
         "transport": "stdio", "user_key": args.user_key, "search_mode": search_mode,
         "memory_fixture": str(args.memory_fixture), "writes_enabled": bool(args.allow_memory_writes),
+        "metadata_mode": catalogue.metadata_mode,
+        "metadata_stats": catalogue.metadata_stats,
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
         "search_ready": bool(search_ready),
         "startup_timings": {

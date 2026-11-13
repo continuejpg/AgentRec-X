@@ -64,9 +64,18 @@ class PlannerContractError(RuntimeError):
 def allowed_planner_actions(observation: PlannerObservation) -> tuple[str, ...]:
     if observation.terminal:
         return ()
-    actions = [PlannerAction.ASK.value, PlannerAction.RETRIEVE.value]
+    # ASK is only legal when there is no candidate set yet or the Gate/user has signalled
+    # a clarification need.  Do not advertise actions that ``validate_action`` rejects.
+    actions = [] if (observation.candidate_ids and not observation.needs_user_input) else [PlannerAction.ASK.value]
+    # RERANK is a one-shot inspection step: after it completes, repeating it cannot add
+    # evidence, and RETRIEVE is illegal by the contract.  Keep the advertised action set
+    # aligned with validate_action so a model is never told an illegal action is allowed.
+    if not observation.reranked:
+        actions.append(PlannerAction.RETRIEVE.value)
     if observation.candidate_ids:
-        actions.extend((PlannerAction.RERANK.value, PlannerAction.FINALIZE.value))
+        actions.append(PlannerAction.FINALIZE.value)
+        if not observation.reranked:
+            actions.append(PlannerAction.RERANK.value)
     return tuple(actions)
 
 

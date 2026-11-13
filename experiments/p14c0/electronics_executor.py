@@ -122,6 +122,42 @@ class ElectronicsPlannerExecutor:
     def _log(self, tool: str, inputs: dict[str, Any], output: dict[str, Any]) -> None:
         self.tool_calls.append({"tool": tool, "inputs": inputs, "output": output})
 
+    def _candidate_evidence(self, ids: list[str]) -> tuple[dict[str, Any], ...]:
+        """Small, read-only planner evidence for the current candidate set.
+
+        This is a projection of already-inspected catalogue rows; it is not a second
+        ranker and cannot add candidates.  Keeping it bounded avoids turning the planner
+        observation into a second product-view tool result.
+        """
+        entries: list[dict[str, Any]] = []
+        for item_id in ids[:INSPECT_TOP_K]:
+            row = self._rows_by_rank.get(item_id) or {}
+            product = self.catalogue.get(item_id)
+            attributes = row.get("attributes") or (product.attributes if product else {}) or {}
+            entry = {
+                "item_id": item_id,
+                "rank": row.get("rank"),
+                "product_type": row.get("product_type") or (product.product_type if product else None),
+                "form_factor": row.get("form_factor") if row else (product.form_factor if product else None),
+                "role_status": row.get("role_status"),
+                "hard_status": dict(row.get("hard_status") or {}),
+                "matched_preferences": [
+                    str(item.get("value")) for item in (row.get("matched_preferences") or ())
+                ],
+                "conflicting_preferences": [
+                    str(item.get("value")) for item in (row.get("conflicting_preferences") or ())
+                ],
+                "unknown_preferences": [
+                    str(item.get("value")) for item in (row.get("unknown_preferences") or ())
+                ],
+                "present_attributes": sorted(
+                    name for name, fact in attributes.items()
+                    if isinstance(fact, dict) and fact.get("status") == "present"
+                )[:10],
+            }
+            entries.append(entry)
+        return tuple(entries)
+
     def _search(self, query: str) -> list[str]:
         if self.retrievals >= 1 + GATE_RETRIEVAL_ROUNDS:
             raise PlannerContractError("tool_budget_exhausted", "search budget exhausted")
@@ -224,6 +260,14 @@ class ElectronicsPlannerExecutor:
             "task_constraint_unknown": sum(
                 1 for row in eligible if (row.get("task_constraint_status") or {}).get("status") == "unknown"
             ),
+            # The CandidateEligibilityEvaluator above checks only the catalogue-category
+            # requirement used for this projection.  It is NOT the Gate's hard-constraint
+            # verification.  Keep the scope explicit so "verified=5" cannot be mistaken
+            # for "five candidates satisfy every hard requirement".
+            "scope": "category_eligibility_only",
+            "hard_constraint_verified": sum(1 for row in eligible if row.get("hard_tier") == 0),
+            "hard_constraint_unknown": sum(1 for row in eligible if row.get("hard_tier") == 1),
+            "hard_constraint_ineligible": sum(1 for row in eligible if (row.get("hard_tier") or 0) >= 2),
         }
         self._log("product_view", {"product_ids": top}, {"inspected": inspected})
         self._log("eligibility", {"candidates": len(namespaced)}, self.last_eligibility)
@@ -317,11 +361,34 @@ class ElectronicsPlannerExecutor:
                                 m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
                                           "status": self.terminal_status}),
                         {"status": self.terminal_status, "reason": "search budget exhausted"}, True)
+            previous = self.last_search
+            previous_ids = set(previous.get("hit_ids") or ()) if previous else set()
+            previous_query = str(previous.get("query") or "") if previous else ""
             ids = self._search(query)
+            new_ids = [item_id for item_id in ids if item_id not in previous_ids]
+            retrievals_remaining = max(0, 1 + GATE_RETRIEVAL_ROUNDS - self.retrievals)
+            feedback = {
+                "last_query": query,
+                "same_query": bool(previous_query and previous_query == query),
+                "new_candidate_count": len(new_ids),
+                "candidate_set_changed": bool(new_ids),
+                "retrievals_used": self.retrievals,
+                "retrievals_remaining": retrievals_remaining,
+            }
             return (replace(observation, query=query, candidate_ids=tuple(ids), reranked=False,
+                            candidate_evidence=self._candidate_evidence(ids),
+                            last_retrieve_query=query,
+                            retrieval_feedback=feedback,
                             m5_state={**observation.m5_state, "phase": PHASE_INSPECT,
-                                      "last_search_query": query}),
-                    {"status": "retrieved", "candidate_count": len(ids), "query": query}, False)
+                                      "last_search_query": query,
+                                      "candidate_count": len(ids),
+                                      "last_retrieval_new_candidates": len(new_ids),
+                                      "search_retrievals_used": self.retrievals,
+                                      "search_retrievals_remaining": retrievals_remaining}),
+                    {"status": "retrieved", "candidate_count": len(ids), "query": query,
+                     "new_candidate_count": len(new_ids),
+                     "candidate_set_changed": bool(new_ids),
+                     "retrievals_remaining": retrievals_remaining}, False)
 
         if action is PlannerAction.RERANK:
             ids = list(observation.candidate_ids)
@@ -348,8 +415,17 @@ class ElectronicsPlannerExecutor:
                          "role_filter": "exhausted", "examined": len(rows)}, True)
             ranked_ids = [row["product_ref"]["item_id"] for row in compatible]
             return (replace(observation, candidate_ids=tuple(ranked_ids), reranked=True,
+                            candidate_evidence=self._candidate_evidence(ranked_ids),
+                            last_retrieve_query=observation.last_retrieve_query,
+                            retrieval_feedback=dict(observation.retrieval_feedback or {}),
+                            eligibility=dict(self.last_eligibility or {}),
                             m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
-                                      "eligibility": self.last_eligibility}),
+                                      "candidate_count": len(ranked_ids),
+                                      "eligibility": self.last_eligibility,
+                                      # The evidence-inspection hint has been consumed.
+                                      # Do not leave a stale RERANK hint that contradicts
+                                      # allowed_actions after the rerank completes.
+                                      "gate_next_step": "FINALIZE"}),
                     {"status": "reranked", "candidate_count": len(ranked_ids),
                      "eligibility": self.last_eligibility}, False)
 
@@ -448,20 +524,27 @@ class ElectronicsPlannerExecutor:
                                           "gate_action": decision.action, "ask_question": decision.ask_question,
                                           "status": self.terminal_status}),
                         {"status": self.terminal_status, "gate": decision.as_dict()}, False)
-            retryable = decision.action in {NEED_MORE_PRODUCT_EVIDENCE, NEED_MORE_CANDIDATES} and (
-                self.gate_budget.product_evidence_remaining > 0 or self.gate_budget.retrievals_remaining > 0
-            )
+            if decision.action == NEED_MORE_PRODUCT_EVIDENCE:
+                retryable = self.gate_budget.product_evidence_remaining > 0
+            elif decision.action == NEED_MORE_CANDIDATES:
+                retryable = self.gate_budget.retrievals_remaining > 0
+            else:
+                retryable = False
             if retryable:
                 next_phase = PHASE_INSPECT if decision.action == NEED_MORE_PRODUCT_EVIDENCE else PHASE_PRODUCT_RETRIEVE
+                next_step = "RERANK" if decision.action == NEED_MORE_PRODUCT_EVIDENCE else "RETRIEVE"
                 return (replace(observation, reranked=False, needs_user_input=False,
                                 m5_state={**observation.m5_state, "phase": next_phase,
-                                          "gate_action": decision.action, "status": "gate_more_evidence"}),
+                                          "gate_action": decision.action,
+                                          "gate_next_step": next_step,
+                                          "candidate_count": len(observation.candidate_ids),
+                                          "status": "gate_more_evidence"}),
                         {"status": "gate_more_evidence", "gate": decision.as_dict()}, False)
             if decision.action in {NEED_MORE_PRODUCT_EVIDENCE, NEED_MORE_CANDIDATES}:
-                self.terminal_status = (
-                    "no_verified_candidate_in_scope"
-                    if decision.action == NEED_MORE_CANDIDATES else "budget_exhausted"
-                )
+                # The Gate has exhausted the matching evidence/search allowance.  Do
+                # not turn this into another search: the task is bounded with no
+                # verified candidate in scope.  This is not a recommendation success.
+                self.terminal_status = "no_verified_candidate_in_scope"
             else:
                 self.terminal_status = decision.action.lower()
             return (replace(observation, terminal=True, candidate_ids=(),

@@ -150,6 +150,16 @@ def _raw_fields(product: ElectronicsProduct) -> dict[str, str]:
     add("features", getattr(record, "features", None))
     add("description", getattr(record, "description", None))
     add("price_text", getattr(record, "price_text", None))
+    # Additive Raw Meta sidecar fields.  They are separate raw fields so an evidence span
+    # still points at the exact upstream value and never silently rewrites C4 text.
+    meta = getattr(product, "metadata", None)
+    if meta is not None:
+        add("metadata_title", meta.title)
+        add("metadata_features", "\n".join(meta.features))
+        add("metadata_description", "\n".join(meta.description))
+        add("metadata_categories", " > ".join(meta.categories))
+        add("metadata_store", meta.store)
+        add("metadata_details", "\n".join(f"{key}: {value}" for key, value in meta.details.items()))
     return fields
 
 
@@ -160,7 +170,10 @@ def build_product_evidence(
     if product is None:
         return None, [], [UnknownFact("product", "product is not present in the current catalogue")]
     raw = _raw_fields(product)
+    meta = getattr(product, "metadata", None)
     source_record = (getattr(product.record, "source", None) or "catalogue") + f":{product.namespaced_id}"
+    if meta is not None:
+        source_record += f"|metadata:{meta.dataset_version or meta.source}"
     evidence: list[ProductEvidence] = []
 
     def add(field_name: str, attribute: str | None = None) -> None:
@@ -189,7 +202,9 @@ def build_product_evidence(
             evidence_id=evidence_id, namespace=namespace, product_id=item_id,
             source_record=source_record, raw_field=field_name,
             span_start=span[0], span_end=span[1], span_text=chosen,
-            raw_excerpt=raw_text[:1200], attribute=attribute,
+            # Keep the excerpt long enough that the exact span remains addressable; the
+            # model prompt is separately capped in experiments/p15/explainer.py.
+            raw_excerpt=raw_text[:max(1200, span[1])], attribute=attribute,
         ))
 
     add("title")
@@ -198,7 +213,8 @@ def build_product_evidence(
     for attribute, fact in product.attributes.items():
         if not isinstance(fact, dict) or fact.get("status") != "present":
             continue
-        for field_name in ("title", "description", "features"):
+        for field_name in ("title", "description", "features", "metadata_title",
+                           "metadata_description", "metadata_features", "metadata_details"):
             if raw.get(field_name) and _find_span(raw[field_name], attribute.replace("_", " ")) or (
                 raw.get(field_name) and _find_span(raw[field_name], attribute)
             ):
@@ -207,6 +223,13 @@ def build_product_evidence(
     add("features")
     add("description")
     add("price_text")
+    if meta is not None:
+        add("metadata_title")
+        add("metadata_features")
+        add("metadata_description")
+        add("metadata_categories")
+        add("metadata_store")
+        add("metadata_details")
 
     unknown: dict[str, UnknownFact] = {}
 
@@ -214,16 +237,18 @@ def build_product_evidence(
         unknown.setdefault(attribute, UnknownFact(attribute, reason))
 
     if not raw.get("price_text"):
-        mark("price", "no reliable numeric price in the catalogue record")
-    if not getattr(product.record, "store", None):
+        reason = ("metadata has only a historical crawl-time price; it is not a live price"
+                  if meta is not None and meta.price is not None
+                  else "no reliable numeric price in the catalogue record")
+        mark("price", reason)
+    if not getattr(product.record, "store", None) and not (meta is not None and meta.brand):
         mark("brand", "the catalogue record has no trusted brand/store field")
-    for attribute, reason in (
-        ("stock", "the catalogue snapshot is not a live availability feed"),
-        ("material", "no trusted material field in the catalogue record"),
-        ("size", "no trusted size field in the catalogue record"),
-        ("warranty", "the catalogue record carries no warranty statement"),
-    ):
-        mark(attribute, reason)
+    if not (meta is not None and meta.material):
+        mark("material", "no trusted material field in the catalogue record")
+    if not (meta is not None and meta.size):
+        mark("size", "no trusted size field in the catalogue record")
+    mark("stock", "the catalogue snapshot is not a live availability feed")
+    mark("warranty", "the catalogue record carries no warranty statement")
     return (product.as_dict() | {"source_record": source_record}), evidence, list(unknown.values())
 
 
@@ -425,7 +450,9 @@ def render_final_answer(bundle: EvidenceBundle, validation: Mapping[str, Any]) -
     recommendations = [claim for claim in valid if claim.get("claim_type") == "recommendation"]
     if not bundle.selected_product:
         return "I can't verify a product recommendation because no selected product is available."
-    lines = [f"Recommended product: {bundle.selected_product.get('title')} ({bundle.selected_product.get('item_id')})."]
+    selected_meta = bundle.selected_product.get("metadata") or {}
+    display_title = selected_meta.get("title") or bundle.selected_product.get("title")
+    lines = [f"Recommended product: {display_title} ({bundle.selected_product.get('item_id')})."]
     if product_facts:
         lines.append("Catalogue facts:")
         for claim in product_facts:
