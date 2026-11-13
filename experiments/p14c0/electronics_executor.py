@@ -23,6 +23,7 @@ from experiments.p14e.catalogue import ELECTRONICS_NAMESPACE, ElectronicsCatalog
 from recommendation.control.arguments import CandidateSource
 from recommendation.control.candidate_ledger import CandidateLedger
 from recommendation.control.constraint_eligibility import CandidateEligibilityEvaluator, ConstraintRequirement
+from recommendation.control.corrective_rag import RETRIEVAL_GAP, classify_evidence_gap
 from recommendation.control.grounded_reasoning import ConstraintKind, GroundedReasoner
 from recommendation.demo.planner_contract import (
     ActionProposal,
@@ -75,6 +76,8 @@ class ElectronicsPlannerExecutor:
         task_context: dict[str, Any] | None = None,
         memory_history: dict[str, Any] | None = None,
         task_constraints: CurrentTaskConstraints | None = None,
+        corrective_rag: bool = False,
+        corrective_max_attempts: int = 1,
     ) -> None:
         self.catalogue = catalogue
         self.current_query = current_query
@@ -117,6 +120,15 @@ class ElectronicsPlannerExecutor:
         self.explanation_error: str | None = None
         self.last_task_constraint_summary: dict[str, Any] = {}
         self.last_reevaluation: dict[str, Any] | None = None
+        # Evidence-aware recovery is opt-in; the default path remains byte-for-byte the
+        # baseline.  The Executor owns one bounded corrective search; the Gate still
+        # decides whether the new candidate pool may be recommended.
+        self.corrective_rag = bool(corrective_rag)
+        self.corrective_max_attempts = max(0, int(corrective_max_attempts))
+        self.corrective_attempts = 0
+        self.corrective_trace: list[dict[str, Any]] = []
+        self.last_corrective: dict[str, Any] | None = None
+        self.search_queries: list[str] = []
 
     # -- helpers ------------------------------------------------------------ #
     def _log(self, tool: str, inputs: dict[str, Any], output: dict[str, Any]) -> None:
@@ -161,8 +173,19 @@ class ElectronicsPlannerExecutor:
     def _search(self, query: str) -> list[str]:
         if self.retrievals >= 1 + GATE_RETRIEVAL_ROUNDS:
             raise PlannerContractError("tool_budget_exhausted", "search budget exhausted")
+        # A new retrieval produces a new candidate set.  Scorer rows / eligibility /
+        # Gate state from the previous pool are stale and must not be reused by a later
+        # FINALIZE; otherwise a corrective search can add candidates that the Gate never
+        # sees.  The ledger itself is intentionally preserved.
+        self.last_rows = []
+        self.last_eligibility = None
+        self._rows_by_rank = {}
+        self.last_decision = None
+        self.last_task_constraint_summary = {}
+        self.last_inspection = []
         result = self.search_source.search(query, limit=TOPK)
         self.retrievals += 1
+        self.search_queries.append(query)
         ids = [hit.parent_asin.split(":", 1)[-1] for hit in result.hits]
         self.ledger.record_from_source(
             source=CandidateSource.CATALOG_SEARCH,
@@ -335,6 +358,135 @@ class ElectronicsPlannerExecutor:
         if self.memory_history is not None:
             arguments.setdefault("history", self.memory_history)
         return dict(registry.invoke(name, **arguments))
+
+    def _catalogue_can_supply_missing_facts(self, missing: list[str]) -> bool:
+        """Whether the requested product type has any product with all missing facts.
+
+        This is a source-coverage check, not a ranking/provenance shortcut.  If the fixed
+        catalogue has no product of the requested type with the missing attributes, a
+        query rewrite cannot create that evidence; do not spend a corrective search.
+        """
+        product_type = self.product_target.product_type
+        if not product_type:
+            return True
+        missing_set = {str(value) for value in missing if str(value)}
+        if not missing_set:
+            return True
+        for product in self.catalogue.by_type(product_type):
+            facts = set((product.attributes or {}).keys())
+            if product.form_factor:
+                facts.add(product.form_factor)
+            if missing_set.issubset(facts):
+                return True
+        return False
+
+    def _try_corrective_retrieval(
+        self,
+        observation: PlannerObservation,
+        decision: Any,
+        check: Any,
+    ) -> tuple[PlannerObservation, dict[str, Any], bool] | None:
+        """Execute at most one evidence-driven corrective search.
+
+        The Planner is not asked to invent a query here.  The existing executor consumes
+        one Gate failure, builds a focused query from missing hard facts, merges the new
+        ledger rows into the current candidate set, re-scores them and returns a normal
+        observation.  The next Planner/Gate pass still decides whether to recommend.
+        """
+        if not self.corrective_rag or self.corrective_attempts >= self.corrective_max_attempts:
+            return None
+        if check.kind != RETRIEVAL_GAP or not check.recoverable or not check.suggested_query:
+            return None
+        if not self._catalogue_can_supply_missing_facts(list(check.missing_facts)):
+            return None
+        if self.retrievals >= 1 + GATE_RETRIEVAL_ROUNDS:
+            return None
+        query = str(check.suggested_query)
+        if query in self.search_queries:
+            return None
+        before = list(observation.candidate_ids)
+        before_set = set(before)
+        try:
+            ids = self._search(query)
+        except PlannerContractError:
+            return None
+        self.corrective_attempts += 1
+        merged = list(dict.fromkeys(before + ids))
+        rows = self._score_and_inspect(merged)
+        new_ids = [item_id for item_id in ids if item_id not in before_set]
+        hard_verified = sum(1 for row in self.last_rows if row.get("hard_tier") == 0)
+        trace = {
+            "schema": "agentrecx.p20.corrective_retrieval.v1",
+            "trigger_gate": decision.action,
+            "reason_code": decision.reason_code,
+            "evidence_check": check.as_dict(),
+            "original_query": observation.last_retrieve_query or observation.query,
+            "corrected_query": query,
+            "missing_facts": list(check.missing_facts),
+            "candidate_ids_before": before,
+            "new_candidate_ids": new_ids,
+            "new_candidate_count": len(new_ids),
+            "candidate_count_after": len(merged),
+            "new_hard_verified_count": hard_verified,
+            "retrievals_used": self.retrievals,
+            "retrievals_remaining": max(0, 1 + GATE_RETRIEVAL_ROUNDS - self.retrievals),
+        }
+        self.corrective_trace.append(trace)
+        self.last_corrective = trace
+        feedback = dict(observation.retrieval_feedback or {})
+        feedback.update({
+            "last_query": query,
+            "corrective": trace,
+            "new_candidate_count": len(new_ids),
+            "candidate_set_changed": bool(new_ids),
+            "retrievals_used": self.retrievals,
+            "retrievals_remaining": max(0, 1 + GATE_RETRIEVAL_ROUNDS - self.retrievals),
+        })
+        new_observation = replace(
+            observation,
+            candidate_ids=tuple(merged),
+            reranked=False,
+            needs_user_input=False,
+            candidate_evidence=self._candidate_evidence(merged),
+            last_retrieve_query=query,
+            retrieval_feedback=feedback,
+            m5_state={
+                **observation.m5_state,
+                "phase": PHASE_FINALIZE,
+                "candidate_count": len(merged),
+                "gate_action": decision.action,
+                "gate_next_step": "FINALIZE",
+                "corrective_retrieval": trace,
+                "last_search_query": query,
+            },
+        )
+        # Revalidate the newly merged pool inside the same FINALIZE call.  This is the
+        # key safety property: the corrective search is never presented as a successful
+        # recommendation without a fresh Gate check; the Qwen Planner does not get an
+        # illegal RETRIEVE action after the search budget is exhausted.
+        final_observation, final_tool, final_terminal = self.execute(
+            ActionProposal(PlannerAction.FINALIZE, {}, "corrective revalidation"), new_observation
+        )
+        tool = {
+            "status": "corrective_retrieval_revalidated" if final_terminal else "corrective_retrieval",
+            "corrective": trace,
+            "revalidation": final_tool,
+            "candidate_count": len(merged),
+            "new_candidate_count": len(new_ids),
+            "examined": len(rows),
+        }
+        if final_terminal:
+            return final_observation, tool, True
+        if final_observation.needs_user_input:
+            return final_observation, tool, False
+        self.terminal_status = "no_verified_candidate_in_scope"
+        return (replace(
+            final_observation,
+            terminal=True,
+            candidate_ids=(),
+            m5_state={**final_observation.m5_state, "phase": PHASE_FINALIZE,
+                      "status": self.terminal_status},
+        ), {**tool, "status": "corrective_retrieval_no_verified"}, True)
 
     def execute(
         self,
@@ -524,6 +676,19 @@ class ElectronicsPlannerExecutor:
                                           "gate_action": decision.action, "ask_question": decision.ask_question,
                                           "status": self.terminal_status}),
                         {"status": self.terminal_status, "gate": decision.as_dict()}, False)
+            if self.corrective_rag and self.corrective_attempts < self.corrective_max_attempts:
+                check = classify_evidence_gap(
+                    gate_action=decision.action,
+                    hard_requirements=self.hard,
+                    query=self.current_query,
+                    product_type=self.product_target.product_type,
+                    search_history=self.search_queries,
+                    metadata_mode=self.catalogue.metadata_mode,
+                )
+                if check.kind == RETRIEVAL_GAP and check.recoverable:
+                    corrective = self._try_corrective_retrieval(observation, decision, check)
+                    if corrective is not None:
+                        return corrective
             if decision.action == NEED_MORE_PRODUCT_EVIDENCE:
                 retryable = self.gate_budget.product_evidence_remaining > 0
             elif decision.action == NEED_MORE_CANDIDATES:

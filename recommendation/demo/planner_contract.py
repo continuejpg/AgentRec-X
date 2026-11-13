@@ -67,13 +67,15 @@ def allowed_planner_actions(observation: PlannerObservation) -> tuple[str, ...]:
     # ASK is only legal when there is no candidate set yet or the Gate/user has signalled
     # a clarification need.  Do not advertise actions that ``validate_action`` rejects.
     actions = [] if (observation.candidate_ids and not observation.needs_user_input) else [PlannerAction.ASK.value]
-    # RERANK is a one-shot inspection step: after it completes, repeating it cannot add
-    # evidence, and RETRIEVE is illegal by the contract.  Keep the advertised action set
-    # aligned with validate_action so a model is never told an illegal action is allowed.
-    if not observation.reranked:
+    retrieval_remaining = (observation.retrieval_feedback or {}).get("retrievals_remaining")
+    # Do not advertise RETRIEVE after the bounded search budget is exhausted; the
+    # executor raises tool_budget_exhausted for that action.
+    if not observation.reranked and retrieval_remaining != 0:
         actions.append(PlannerAction.RETRIEVE.value)
     if observation.candidate_ids:
         actions.append(PlannerAction.FINALIZE.value)
+        # RERANK is a one-shot inspection step: after it completes, repeating it cannot
+        # add evidence, and RETRIEVE is illegal by the contract.
         if not observation.reranked:
             actions.append(PlannerAction.RERANK.value)
     return tuple(actions)

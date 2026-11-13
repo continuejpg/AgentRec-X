@@ -49,7 +49,8 @@ ATTR_CANON = {
     "earbud": "in_ear", "on-ear": "on_ear", "on ear": "on_ear",
     "noise cancelling": "noise_cancelling", "noise canceling": "noise_cancelling",
     "wireless": "wireless", "wired": "wired", "microphone": "microphone",
-    "waterproof": "waterproof", "water resistant": "waterproof", "sweatproof": "waterproof",
+    "waterproof": "waterproof", "water resistant": "waterproof", "water resistance": "waterproof",
+    "water-resistant": "waterproof", "sweatproof": "waterproof", "sweat resistant": "waterproof",
     "foldable": "foldable", "mechanical": "mechanical", "rgb": "rgb", "backlit": "rgb",
     "rechargeable": "rechargeable", "multidevice": "multidevice", "usb": "usb",
     "silent": "silent", "quiet": "silent", "ergonomic": "ergonomic", "gaming": "gaming",
@@ -57,6 +58,66 @@ ATTR_CANON = {
 FORM_ATTRS = ("over_ear", "on_ear", "in_ear")
 CONFLICT_PAIRS = (("wireless", "wired"), ("over_ear", "in_ear"), ("on_ear", "in_ear"))
 QUERY_TOKENS = tuple(name for name in ATTR_CANON if name not in {"earbud"})
+PRODUCT_NOUNS = r"(?:headphones?|earbuds?|keyboard|mouse|speaker)s?"
+# Explicit natural-language requirement frames.  A bare adjective is not a hard
+# constraint unless it sits in one of these requirement phrases.
+_NATURAL_ATTR_PATTERNS = (
+    re.compile(rf"\b(?P<attrs>[a-z][a-z -]{{0,80}}?)\s+(?P<noun>{PRODUCT_NOUNS})\b", re.I),
+    re.compile(r"\b(?:with|featuring|including|that has|which has)\s+(?P<attrs>[^.;!?]+)", re.I),
+    re.compile(r"\b(?:it\s+)?(?:should|must|needs? to|has to)\s+(?:be|have)\s+(?P<attrs>[^.;!?]+)", re.I),
+    re.compile(r"\b(?:that|which)\s+(?:is|has)\s+(?P<attrs>[^.;!?]+)", re.I),
+)
+_NATURAL_HARD_ATTRS = {
+    attr for needle, attr in ATTR_CANON.items()
+    if needle not in {"earbud", "gaming"}
+}
+_NEGATION_BEFORE = re.compile(r"\b(?:no|not|without|avoid|don't|doesn't)\b", re.I)
+
+
+def _canonical_all(value: str) -> list[tuple[str, str]]:
+    """Return (canonical attribute, matched source token) pairs, longest needle first."""
+    text = str(value or "").lower().replace("_", "-")
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for needle, attr in sorted(ATTR_CANON.items(), key=lambda item: len(item[0]), reverse=True):
+        if attr in seen or attr not in _NATURAL_HARD_ATTRS:
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", text):
+            found.append((attr, needle))
+            seen.add(attr)
+    return found
+
+
+def _natural_hard_requirements(query: str) -> list[dict[str, Any]]:
+    """Parse explicit natural requirement phrases and preserve source spans.
+
+    Handles "I need a wireless mechanical keyboard" and "keyboard with mechanical
+    switches and wireless connectivity".  It does not turn a bare preference sentence
+    into a hard constraint.
+    """
+    out: list[dict[str, Any]] = []
+    for pattern in _NATURAL_ATTR_PATTERNS:
+        for match in pattern.finditer(query):
+            before = query[max(0, match.start() - 30):match.start()]
+            if _NEGATION_BEFORE.search(before):
+                continue
+            phrase = match.group("attrs")
+            if _NEGATION_BEFORE.search(phrase):
+                continue
+            for attr, needle in _canonical_all(phrase):
+                start = match.start("attrs")
+                relative = phrase.lower().find(needle)
+                if relative >= 0:
+                    start += relative
+                end = start + len(needle)
+                out.append({
+                    "key": attr,
+                    "kind": "form_factor" if attr in FORM_ATTRS else "attribute",
+                    "value": attr,
+                    "source_text": query[start:end],
+                    "source_span": [start, end],
+                })
+    return out
 
 
 def _load(path: Path) -> list[dict[str, Any]]:
@@ -104,22 +165,32 @@ def conflicts(prefs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def hard_requirements(query: str) -> list[dict[str, Any]]:
-    import re
-
     reqs: list[dict[str, Any]] = []
     if re.search(r"\$\s?\d+", query) and re.search(r"budget|price|under\s+\$", query, re.I):
-        reqs.append({"key": "price", "kind": "unverifiable", "value": "price"})
+        reqs.append({"key": "price", "kind": "unverifiable", "value": "price",
+                     "source_text": "price/budget phrase"})
     if re.search(r"warranty", query, re.I):
-        reqs.append({"key": "warranty", "kind": "unverifiable", "value": "warranty"})
+        reqs.append({"key": "warranty", "kind": "unverifiable", "value": "warranty",
+                     "source_text": "warranty phrase"})
     for match in re.finditer(r"(?:it\s+(?:needs|has|must)\s+to\s+be|it\s+must\s+be|must\s+be)\s+([^.!]+)", query, re.I):
-        attr = canonical(match.group(1))
-        if attr:
-            reqs.append({"key": attr, "kind": "form_factor" if attr in FORM_ATTRS else "attribute", "value": attr})
+        phrase = match.group(1)
+        for attr, needle in _canonical_all(phrase):
+            start = match.start(1) + max(0, phrase.lower().find(needle))
+            end = start + len(needle)
+            reqs.append({
+                "key": attr,
+                "kind": "form_factor" if attr in FORM_ATTRS else "attribute",
+                "value": attr,
+                "source_text": query[start:end],
+                "source_span": [start, end],
+            })
+    reqs.extend(_natural_hard_requirements(query))
     seen, unique = set(), []
     for req in reqs:
-        if req["key"] not in seen:
-            seen.add(req["key"])
-            unique.append(req)
+        if req["key"] in seen:
+            continue
+        seen.add(req["key"])
+        unique.append(req)
     return unique
 
 

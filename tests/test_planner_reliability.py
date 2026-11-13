@@ -70,6 +70,8 @@ def test_advertised_actions_are_accepted_by_the_validator() -> None:
         PlannerObservation(step=1, query="q", candidate_ids=("a",), reranked=True),
         PlannerObservation(step=1, query="q", candidate_ids=("a",), reranked=True,
                            needs_user_input=True),
+        PlannerObservation(step=1, query="q", candidate_ids=("a",),
+                           retrieval_feedback={"retrievals_remaining": 0}),
     ]
     argument_for = {
         "ASK": {"question": "Which feature matters?"},
@@ -126,6 +128,9 @@ def test_retrieval_exposes_candidate_delta_and_bounded_evidence(catalogue) -> No
     assert "RETRIEVE" not in allowed_planner_actions(after_rerank)
     assert "FINALIZE" in allowed_planner_actions(after_rerank)
     assert "ASK" not in allowed_planner_actions(after_rerank)
+    exhausted = replace(after, retrieval_feedback={"retrievals_remaining": 0})
+    assert "RETRIEVE" not in allowed_planner_actions(exhausted)
+    assert "FINALIZE" in allowed_planner_actions(exhausted)
 
 
 def test_evidence_budget_exhaustion_is_bounded_not_budget_exhausted(catalogue) -> None:

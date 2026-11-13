@@ -85,11 +85,13 @@ def _load(split: str, kind: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _run_one(catalogue: ElectronicsCatalogue, task: dict[str, Any], evaluator: dict[str, Any]) -> dict[str, Any]:
+def _run_one(catalogue: ElectronicsCatalogue, task: dict[str, Any], evaluator: dict[str, Any],
+             *, corrective_rag: bool = False) -> dict[str, Any]:
     preferences, _history = _memory_read(catalogue, task)
     executor = ElectronicsPlannerExecutor(
         catalogue=catalogue, current_query=task["current_query"], preferences=preferences,
         hard=prepare_hard(task["current_query"]),
+        corrective_rag=corrective_rag,
     )
     proposer = HttpPlannerProposer.from_env()
     planner = TracePlanner(proposer)
@@ -131,6 +133,11 @@ def _run_one(catalogue: ElectronicsCatalogue, task: dict[str, Any], evaluator: d
         "preferences": preferences,
         "terminal": {"status": status, "selected_candidate_id": executor.selected_candidate_id,
                      "ask_question": executor.ask_question},
+        "corrective_retrieval": {
+            "enabled": bool(corrective_rag),
+            "attempts": executor.corrective_attempts,
+            "trace": list(executor.corrective_trace),
+        },
         "planner_actions": planner.actions,
         "planner_run": steps,
         "tool_calls": executor.tool_calls,
@@ -164,6 +171,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=OUT / "planner_before.json")
     parser.add_argument("--max-tasks", type=int, default=len(TASK_IDS))
+    parser.add_argument("--corrective-rag", action="store_true")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     agents = {r["task_id"]: r for r in _load("dev", "agent")}
@@ -174,7 +182,8 @@ def main() -> int:
     records = []
     started = time.perf_counter()
     for task_id in TASK_IDS[:args.max_tasks]:
-        record = _run_one(catalogue, agents[task_id], evaluators[task_id])
+        record = _run_one(catalogue, agents[task_id], evaluators[task_id],
+                          corrective_rag=args.corrective_rag)
         record["redundant_retrieve"] = _redundant_retrieves(record)
         records.append(record)
         print(json.dumps({
@@ -187,9 +196,10 @@ def main() -> int:
             "latency_s": record["latency_seconds"],
         }, ensure_ascii=False), flush=True)
     summary = {
-        "schema": "agentrecx.p20.planner_diagnose.v1",
+        "schema": "agentrecx.p20.planner_diagnose.v2",
         "tasks": len(records),
         "planner": "qwen",
+        "corrective_rag": bool(args.corrective_rag),
         "qwen_url": os.environ.get("AGENTRECX_QWEN_PLANNER_URL"),
         "model": os.environ.get("AGENTRECX_QWEN_PLANNER_MODEL"),
         "elapsed_seconds": round(time.perf_counter() - started, 3),

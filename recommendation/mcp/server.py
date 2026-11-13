@@ -57,6 +57,14 @@ DEFAULT_FIXTURE = REPO / "data/p14e2/benchmark/dev.agent.jsonl"
 SERVER_NAME = "agentrecx-mcp"
 SERVER_VERSION = "0.1.0"
 PROTOCOL_TARGET = "2026-07-28"
+ENV_CORRECTIVE_RAG = "AGENTRECX_CORRECTIVE_RAG"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = (os.environ.get(name) or "").strip().casefold()
+    if not value:
+        return default
+    return value in {"1", "true", "on", "yes", "enabled"}
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO,
                     format="%(asctime)s %(levelname)s mcp %(message)s")
@@ -91,6 +99,7 @@ class AppContext:
     task: dict[str, Any]
     search_mode: str
     writes_enabled: bool
+    corrective_rag: bool = False
     clarification_ttl_seconds: float = 1800.0
     # Optional P20 Qwen Base Live: the tool is only registered when both the explicit flag and a
     # model-service URL are configured.  The legacy 7-tool surface stays byte-for-byte the same.
@@ -234,6 +243,7 @@ def _recommend_products(query: Annotated[str, Field(min_length=1, description="C
         catalogue=ctx.catalogue, current_query=query,
         preferences=prepare_preferences(history), hard=prepare_hard(query),
         task_context=task, memory_history=history,
+        corrective_rag=ctx.corrective_rag,
     )
     observation = PlannerObservation(
         step=0, query=query,
@@ -271,6 +281,11 @@ def _recommend_products(query: Annotated[str, Field(min_length=1, description="C
         "evidence_bundle": bundle,
         "planner_steps": steps,
         "search_mode": ctx.search_mode,
+        "corrective_retrieval": {
+            "enabled": bool(ctx.corrective_rag),
+            "attempts": executor.corrective_attempts,
+            "trace": list(executor.corrective_trace),
+        },
         "error": error,
         "latency_ms": round((time.perf_counter() - started) * 1000.0, 2),
         "notes": ["Gate remains authoritative; awaiting_clarification/no_verified_candidate_in_scope is not a successful recommendation",
@@ -550,6 +565,7 @@ async def _run_agent_turn(
             catalogue=context.catalogue, current_query=query,
             preferences=prepare_preferences(history), hard=prepare_hard(query),
             task_context=task, memory_history=history, explainer=explainer,
+            corrective_rag=context.corrective_rag,
         )
         observation = PlannerObservation(
             step=0, query=query,
@@ -685,6 +701,7 @@ async def _run_agent_turn(
         },
         "selected_product_id": selected,
         "candidate_ids": candidate_ids,
+        "parsed_hard_constraints": list(executor.hard),
         "gate": gate,
         "evidence_bundle": bundle,
         "planner_steps": run.as_dict(),
@@ -693,6 +710,11 @@ async def _run_agent_turn(
             "search_mode": context.search_mode,
             "score_kind": (executor.last_search or {}).get("score_kind"),
             "catalogue_size": (executor.last_search or {}).get("catalogue_size"),
+        },
+        "corrective_retrieval": {
+            "enabled": bool(context.corrective_rag),
+            "attempts": executor.corrective_attempts,
+            "trace": list(executor.corrective_trace),
         },
         "rag": rag,
         "error": None,
@@ -867,7 +889,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="load and exercise the BGE encoder before advertising MCP readiness")
     parser.add_argument("--allow-memory-writes", action="store_true",
                         help="enable writes only for a trusted local test client")
+    parser.add_argument("--corrective-rag", action="store_true",
+                        help="enable one evidence-driven corrective retrieval after a Gate evidence gap")
     args = parser.parse_args(argv)
+    corrective_rag = bool(args.corrective_rag or _env_bool(ENV_CORRECTIVE_RAG))
     startup_started = time.perf_counter()
     catalogue_started = time.perf_counter()
     catalogue = ElectronicsCatalogue.load(metadata_mode=args.metadata_mode,
@@ -907,6 +932,7 @@ def main(argv: list[str] | None = None) -> int:
     qwen_model = (os.environ.get(ENV_MODEL) or "").strip() or "Qwen3.5-9B-Base"
     ctx = AppContext(user_key=args.user_key, catalogue=catalogue, memory=memory, task=task,
                      search_mode=search_mode, writes_enabled=bool(args.allow_memory_writes),
+                     corrective_rag=corrective_rag,
                      clarification_ttl_seconds=float(args.clarification_ttl_seconds),
                      qwen_configured=qwen_configured, qwen_model=qwen_model)
     server = build_server(ctx)
@@ -916,6 +942,7 @@ def main(argv: list[str] | None = None) -> int:
         "memory_fixture": str(args.memory_fixture), "writes_enabled": bool(args.allow_memory_writes),
         "metadata_mode": catalogue.metadata_mode,
         "metadata_stats": catalogue.metadata_stats,
+        "corrective_rag": corrective_rag,
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
         "search_ready": bool(search_ready),
         "startup_timings": {

@@ -32,7 +32,7 @@ TASKS = [
 ]
 
 
-def _params(mode: str) -> StdioServerParameters:
+def _params(mode: str, policy: str = "baseline") -> StdioServerParameters:
     args = [
         "-m", "recommendation.mcp.server",
         "--user-key", "p14e2_lite_0049",
@@ -40,6 +40,8 @@ def _params(mode: str) -> StdioServerParameters:
         "--search-mode", "bge",
         "--metadata-mode", mode,
     ]
+    if policy == "corrective":
+        args.append("--corrective-rag")
     env = {"PYTHONPATH": str(REPO), "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
            "AGENTRECX_METADATA_SIDECAR": str(SIDECAR)}
     return StdioServerParameters(command=PYTHON, args=args, cwd=str(REPO), env=env)
@@ -66,18 +68,19 @@ async def _call(client: Client, name: str, arguments: dict[str, Any]) -> dict[st
         }
 
 
-async def run(mode: str) -> dict[str, Any]:
+async def run(mode: str, policy: str = "baseline") -> dict[str, Any]:
     started = time.perf_counter()
     payload: dict[str, Any] = {
-        "schema": "agentrecx.p20.metadata_cpu_before_after.v1",
+        "schema": "agentrecx.p20.metadata_cpu_before_after.v2",
         "mode": mode,
+        "policy": policy,
         "planner": "rule",
         "qwen_used": False,
         "metadata_sidecar": str(SIDECAR),
         "server_startup_and_connect_ms": None,
         "calls": [],
     }
-    async with Client(_params(mode)) as client:
+    async with Client(_params(mode, policy)) as client:
         payload["server_startup_and_connect_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
         payload["protocol_version"] = client.protocol_version
         payload["tools"] = [tool.name for tool in (await client.list_tools()).tools]
@@ -96,11 +99,12 @@ async def run(mode: str) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("original", "enriched"), required=True)
+    parser.add_argument("--policy", choices=("baseline", "corrective"), default="baseline")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
-    out = args.out or OUT / f"cpu_{args.mode}.json"
-    payload = anyio.run(run, args.mode)
+    out = args.out or OUT / f"cpu_{args.mode}_{args.policy}.json"
+    payload = anyio.run(run, args.mode, args.policy)
     out.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({
         "mode": args.mode,
