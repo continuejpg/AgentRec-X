@@ -31,6 +31,29 @@ retrieval, Rule Planner, Decision Gate, P15 evidence, P16 Skills and M9 preferen
 | Mobile (390×844) | Qwen Replay (historical only) |
 | ![Web Demo — mobile layout](docs/assets/web_demo/mobile-search.png) | ![Web Demo — Qwen Replay label](docs/assets/web_demo/replay-mode.png) |
 
+**V2.1 live verification**
+
+| Qwen Live (real browser trace) | Memory Timeline + Memory Lab |
+|---|---|
+| ![Qwen Live: real PlannerActions, Top-K and UNKNOWN evidence](docs/assets/web_demo/qwen-live.png) | ![M9 event timeline and explicit Memory Lab](docs/assets/web_demo/memory-timeline-memory-lab.png) |
+| **Ranker Comparison (recorded replay)** | **V2.1 home / session state** |
+| ![P100 ranker and Memory OFF/ON replay, explicitly labelled as replay](docs/assets/web_demo/ranker-replay.png) | ![V2.1 home, Active Memory and scenario entry points](docs/assets/web_demo/desktop-home-v21.png) |
+
+Ranker Comparison is **recorded P100 replay**, not live ShopRanker/Hybrid inference.
+
+### V2.1 additions
+
+- **Qwen Live is verified**, not merely available: Browser → Next.js → FastAPI BFF → MCP →
+  Qwen3.5-9B → `RETRIEVE → RERANK → FINALIZE` → `ALLOW_FINALIZE`.
+  One real browser turn: 20.58 s, 3 planner calls, 17,551 MiB GPU, selected `B08D32JM5F`,
+  no Rule fallback.
+- **Session Memory Isolation:** each browser session gets an independent existing M9 namespace.
+  A cannot read B; A's withdrawal does not modify B; Reset A does not touch B; read-only writes
+  return HTTP 400. Session memory is process-local and is lost when the BFF restarts.
+- See [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md),
+  [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md), and
+  [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md).
+
 ### Run it
 
 ```powershell
@@ -75,15 +98,10 @@ initialization banner; the startup cost is not hidden.
   `/plan` health check returns a valid PlannerAction, the browser can select Qwen Base Live. The real
   Qwen3.5-9B Base PlannerActions are executed by the **existing** electronics executor — same
   catalogue/search/Scorer/CandidateLedger/Eligibility/Gate/P15/M9. No Rule→Qwen rewriting and no
-  Qwen→Rule fallback. On 2026-11-09 this was validated on an RTX 4090 with real `/plan` inference,
-  real MCP executor runs and two real browser turns; the temporary service/tunnel are stopped now,
-  so a rerun requires starting them. On 2026-11-10 the real **Qwen ASK → M9 → resume** branch was
-  exercised on an isolated conflict profile. A follow-up consistency fix now gives the current
-  clarification reply task-scoped priority, re-evaluates the preserved candidate pool and prevents
-  an explicit-wired final product without deleting historical M9 preferences; see
-  [`QWEN_CLARIFICATION_FIX_REPORT.md`](docs/qwen/QWEN_CLARIFICATION_FIX_REPORT.md). The one-reply Qwen fix is
-  **GO** for that scope, with the final product's wireless evidence reported as UNKNOWN where the
-  catalogue provides none. No fake ASK or Rule substitute was used.
+  Qwen→Rule fallback. **V2.1** completed a real browser turn with `RETRIEVE → RERANK → FINALIZE`
+  and `ALLOW_FINALIZE`; it used a WSL-local loopback tunnel (`127.0.0.1:18029`) shared by the BFF
+  and MCP child. Earlier 2026-11-09/10 Qwen evidence remains historical. Rerun requires starting
+  the model service and tunnel; see [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md).
 * **Qwen Replay (historical only):** saved P18 trajectories from `runs/p18/qwen_replay.json`,
   visibly labelled **Historical Replay — Not a Live Model Call**; read-only.
 * **Qwen Live unavailable / failures:** CPU Live and Replay remain available; no fake Qwen
@@ -98,8 +116,12 @@ initialization banner; the startup cost is not hidden.
 | BGE candidate reachability | Recall@100 **20/135 → 66/135** (P14-D2; retrieval layer, not final quality) |
 | P18 Reserved Test | recommendation Top-1 **11/12** — **simulated rule labels**, not real users |
 | Web E2E | **9/9 regression passed** (7 CPU/Replay + 2 real Qwen Live) **+ 1/1 real one-reply ASK→task-constraint→resume test** (isolated profile; see fix report) |
-| MCP tools / P16 Skills | **7** default tools (+ optional 8th `run_agent_turn` when Qwen Live is configured) / **2** Skills |
+| MCP tools / P16 Skills | **7** default tools (+ optional 8th Qwen entry point; write-enabled Demo also exposes one thin `remember_preference` adapter) / **2** Skills |
 | Web Demo answer quality | **NOT ESTABLISHED** (no online A/B, clicks, conversion or satisfaction) |
+| V2.1 Qwen Live (single browser run) | **20.58 s**, 3 planner calls, `RETRIEVE → RERANK → FINALIZE`, `ALLOW_FINALIZE`, GPU 17,551 MiB |
+| First user BGE query after warmup | **0.552 s** on the verified CPU host; ~**16.28 s** before warmup; not a Qwen latency |
+| V2.1 Session isolation | **PASS** A/B write/withdraw/reset; read-only profile write returns HTTP 400 |
+| V2.1 tests | WSL **38 passed**; local **20 passed**; TypeScript PASS |
 
 Limits that must travel with these numbers: the Reserved Test uses simulated rule labels; real
 long-term-history personalization gain is **not established**; Planner SFT did not beat Base;
@@ -120,7 +142,10 @@ UNKNOWN and a neutral placeholder instead of inventing facts.
 * **Dependencies/resources:** [`docs/ARCHIVE_MANIFEST.md`](docs/ARCHIVE_MANIFEST.md) records Python/
   Node versions, the external catalogue/BGE-model/index/memory-fixture SHA-256 values, and
   reproduction steps.
-* **Detailed docs:** [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) ·
+* **Detailed docs:** [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) ·
+  [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) ·
+  [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md) ·
+  [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) ·
   [`WEB_DEMO_REPORT.md`](docs/web-demo/WEB_DEMO_REPORT.md) · [`docs/WEB_DEMO_CONTRACT.md`](docs/WEB_DEMO_CONTRACT.md) ·
   [`GIT_ARCHIVE_REPORT.md`](docs/handoff/GIT_ARCHIVE_REPORT.md).
 

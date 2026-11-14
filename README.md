@@ -2,7 +2,7 @@
 
 # AgentRec-X
 
-> **一个面向电子产品购物的 LLM Shopping Agent 工程原型。**  
+> **一个面向电子产品购物的 LLM Shopping Agent 工程原型。**
 > 用真实商品检索、可追溯证据、长期偏好记忆和 Decision Gate，演示一个“能被验证、知道边界”的购物 Agent，而不是一个只会生成文本的聊天壳。
 
 ![Status: Engineering Prototype](https://img.shields.io/badge/status-engineering%20prototype-orange)
@@ -57,12 +57,12 @@
 |---|---|
 | 商品与检索 | 76,263 件真实 Electronics 商品；BM25 + 768 维 BGE dense index；catalogue grounding |
 | 推荐 | Serving V1（SASRec / Two-Tower / BM25 + RRF）；V0 Preference Scorer；Student/规则基线 |
-| Agent | ShoppingIntent、CandidatePlane、候选审计、Product Research、Clarification、恢复 |
-| 长期记忆 | M5 event-sourced state、M9 preference memory、更新 / 撤回 / audit trail |
+| Agent | ShoppingIntent、CandidatePlane、候选审计、Product Research、Clarification、恢复；Qwen3.5-9B Base Live PlannerAction（可选） |
+| 长期记忆 | M5 event-sourced state、M9 preference memory、更新 / 撤回 / audit trail；**浏览器 Session 独立 M9 namespace** |
 | 证据 | P15 Evidence Bundle；raw field / span / source record；UNKNOWN；Claim 自动验证 |
 | 技能 | P16 `shopping-comparison`、`preference-clarification` |
-| 协议 | P17 官方 MCP Python SDK v2；本地 stdio；7 个工具 |
-| 界面 | P19 Next.js Web Shopping Assistant + FastAPI BFF + MCP；本地 CPU 可运行 |
+| 协议 | P17 官方 MCP Python SDK v2；本地 stdio；默认 7 个工具；write-enabled Demo 额外 1 个显式 `remember_preference` 适配器 |
+| 界面 | P19 Next.js Web Shopping Assistant + FastAPI BFF + MCP；本地 CPU Live；真实 Qwen Live；Qwen Replay；Session Memory / Memory Timeline / Ranker Replay |
 | 外部评测 | ESCI 真实 query 的 judged-candidate reranking；C4 proxy 检索评测 |
 
 ---
@@ -75,7 +75,16 @@
 | **证据详情** | **移动端（390×844）** |
 | ![Evidence 原始字段与 span](docs/assets/web_demo/desktop-evidence.png) | ![移动端布局](docs/assets/web_demo/mobile-search.png) |
 
-截图来自真实本地运行，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
+**V2.1 实况：Qwen Live、Memory 生命周期与 Ranker Replay**
+
+| Qwen Live（真实浏览器轨迹） | Memory Timeline + Memory Lab |
+|---|---|
+| ![Qwen Live 真实 PlannerAction、Top-K 与 UNKNOWN evidence](docs/assets/web_demo/qwen-live.png) | ![M9 事件时间线与显式 Memory Lab](docs/assets/web_demo/memory-timeline-memory-lab.png) |
+| **Ranker Comparison（Recorded Replay）** | **V2.1 首页 / Session 状态** |
+| ![P100 Ranker 与 Memory OFF/ON Replay，明确标注 Replay](docs/assets/web_demo/ranker-replay.png) | ![V2.1 首页、Active Memory 与 Scenario 入口](docs/assets/web_demo/desktop-home-v21.png) |
+
+截图来自真实本地运行与真实浏览器调用，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
+Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
 
 ---
 
@@ -85,18 +94,34 @@
 Browser / MCP Client
         |
         v
-FastAPI BFF / AgentRec-X MCP Server (local stdio)
-        |
-        +-- ElectronicsCatalogue + BGE / BM25
-        +-- Rule Planner + CandidateLedger + V0 Scorer
-        +-- Product Type/Role + Eligibility + Decision Gate
-        +-- P15 Evidence Bundle + Claim Validation
-        +-- P16 Shopping Skills
-        +-- M5/M9 Memory + HistoryStateReader
-        |
-        v
-User-readable answer + machine-readable trace/evidence
+Next.js Web UI  ->  FastAPI BFF  ->  AgentRec-X MCP Server (local stdio)
+                                      |
+                                      +-- ElectronicsCatalogue + BGE / BM25
+                                      +-- Planner
+                                      |     +-- CPU default: Rule Planner
+                                      |     +-- optional: Qwen3.5-9B Base -> PlannerAction
+                                      +-- CandidateLedger + V0 Scorer
+                                      +-- Product Type/Role + Eligibility + Decision Gate
+                                      +-- P15 Evidence Bundle + Claim Validation
+                                      +-- P16 Shopping Skills
+                                      +-- M5/M9 Memory + HistoryStateReader
+                                      |     +-- browser Session namespace (A/B isolated)
+                                      |
+                                      v
+                          User-readable answer + machine-readable trace/evidence
 ```
+
+V2.1 真实浏览器 Qwen Live 轨迹：
+
+```text
+Browser -> Next.js -> FastAPI BFF -> MCP stdio -> Qwen3.5-9B
+  -> RETRIEVE -> RERANK -> FINALIZE
+  -> DecisionGate: ALLOW_FINALIZE (evidence_sufficient)
+```
+
+更完整的组件、信任边界和时序见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、
+[`docs/AGENTREC_X_DEMO_ARCHITECTURE.md`](docs/AGENTREC_X_DEMO_ARCHITECTURE.md) 与
+[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
 
 关键原则：
 
@@ -114,10 +139,12 @@ User-readable answer + machine-readable trace/evidence
 | 模式 | 运行条件 | 是否真实调用 Qwen | 用途 |
 |---|---|---|---|
 | **CPU Live（默认）** | 本地 CPU；无 GPU 也可 | 否 | 本地 Web Demo、MCP、P15/P16、Rule Planner + Gate |
-| **Qwen Base Live（可选）** | 需要现有 Qwen3.5-9B Base 服务 + GPU / tunnel | 是，真实 `/plan` | 真实模型规划；服务不可用时明确显示 unavailable，不静默降级 |
+| **Qwen Base Live（已验证）** | 现有 Qwen3.5-9B Base 服务 + GPU + WSL-local tunnel | 是，真实 `/plan` | 真实模型规划；V2.1 真实浏览器调用已通过；服务不可用时明确显示 unavailable，不静默降级 |
 | **Qwen Replay（历史）** | 读取已保存轨迹 | 否，`live_call=false` | 展示历史真实 Qwen 验收，不冒充当前实时调用 |
 
-**CPU 路径不需要 GPU。** Qwen Live 的模型服务/tunnel 默认已停止；需要时再按既有 Agent 入口启动，不要新建第二套 Runtime。
+**CPU 路径不需要 GPU。** Qwen Live 的模型服务/tunnel 默认停止；需要时按
+[`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) 启动，不要新建第二套 Runtime。
+Qwen Live 的 BFF health 是真实 PlannerAction 校验，不是端口探测；失败不会回退 Rule 并冒充 Qwen。
 
 ---
 
@@ -137,6 +164,11 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
 - E2E：`powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
 
 详细步骤、资产路径和已知问题见 [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) 与 [`DEMO_GUIDE.md`](DEMO_GUIDE.md)。
+
+面向 V2.1 的完整操作/截图说明：[`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md)。
+本地 CPU 与远程 Qwen Live 的完整启动、SSH tunnel、环境变量和故障排查：
+[`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md)。
+架构与时序：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ### Legacy Serving Demo 的主要 HTTP 接口
 
@@ -203,8 +235,31 @@ Advanced Retrieval v2 的 Phase 1 实现与 Phase 2 GPU 交接见
 
 这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见 [`AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) 和 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
 
-已确认的成功是：真实 catalogue、BGE 候选可达性提升、工具链/协议/记忆闭环可运行。  
-未证明/失败的部分同样重要：真实长期历史没有超过 shuffled 负对照；Planner SFT 未超过 Base；SFT Adapter 不采用；解释语义真实性没有人工审核；ESCI 不是全库 Recall。
+已确认的成功是：真实 catalogue、BGE 候选可达性提升、工具链/协议/记忆闭环可运行。
+未证明/失败的部分同样重要：真实长期历史没有超过 shuffled 负对照；Planner SFT 未超过 Base；
+SFT Adapter 不采用；解释语义真实性没有人工审核；ESCI 不是全库 Recall。
+
+### V2.1 Demo Verification（单次真实运行 / 测试，不是离线平均指标）
+
+| 项目 | 结果 |
+|---|---:|
+| Qwen Live 真实浏览器 turn | **20.58 s**（单次；3 planner calls，不是平均值） |
+| Qwen Planner latency sum | 10,229.11 ms |
+| Qwen Agent E2E | 19,760.87 ms |
+| GPU resident | 17,551 MiB |
+| First user BGE query after warmup | **0.552 s**（同机实测；warmup 前约 **16.28 s**；不是 Qwen 延迟） |
+| Qwen actions | `RETRIEVE → RERANK → FINALIZE` |
+| Final Gate | `ALLOW_FINALIZE / evidence_sufficient` |
+| Selected product | `B08D32JM5F` |
+| Rule fallback | **none** |
+| Session A/B isolation | **PASS**（A 写入/B 不可见、A 撤回/B 不变、Reset A/B 保持、read-only 写入 HTTP 400） |
+| WSL tests | **38 passed** |
+| Local tests | **20 passed** |
+| TypeScript | `pnpm exec tsc --noEmit` **PASS** |
+
+Qwen Live 的单次延迟来自 **一次真实浏览器运行**，不能写成平均 E2E 延迟。Session Memory
+当前是 **BFF 进程内状态**，BFF 重启会丢失；不是持久化多租户 Memory。完整证据见
+[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
 
 ---
 
@@ -235,6 +290,11 @@ third_party/        第三方来源、licence 与 provenance
 | [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md) | 更短的项目实验总结 |
 | [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md) | 当前架构与两种运行模式 |
 | [`DEMO_GUIDE.md`](DEMO_GUIDE.md) | P18 三场景 Demo 与 MCP 启动 |
+| [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | **V2.1 当前 Web Demo 操作说明、截图与功能验证** |
+| [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) | **Local CPU / 远程 Qwen Live 完整启动与部署** |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 当前架构、Qwen Live / Memory / Session 隔离时序 |
+| [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md) | **V2.1 Qwen Live 与 Session Isolation 验收证据** |
+| [`docs/README_REVIEW_REPORT.md`](docs/README_REVIEW_REPORT.md) | 本次 README 增量审查记录 |
 | [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
 | [`P15_REPORT.md`](docs/milestones/P15-P17/P15_REPORT.md) | Evidence Bundle、Claim Validation |
 | [`P16_REPORT.md`](docs/milestones/P15-P17/P16_REPORT.md) | 两个 Shopping Skills |
@@ -257,7 +317,9 @@ third_party/        第三方来源、licence 与 provenance
 - 商品 price / brand / stock / material 等缺失字段必须保持 UNKNOWN；不得用模型参数知识补齐。
 - ItemCF 只有工程基线，**no same-artifact** 全量数据基准；不能与其他模型做不可比的横向排名。
 - 本地 Web Demo 没有 auth/TLS；Memory 写入默认关闭；MCP 默认只允许启动时绑定的单一可信用户，不允许调用方传任意 user id。
-- Qwen Live 需要 GPU 服务/tunnel，当前默认停止；Qwen Replay 只是历史回放，不是实时调用。
+- V2.1 起浏览器 Session 拥有独立 M9 namespace（A/B 不互读、不互相撤回）；但 Session Memory 仍是 **BFF 进程内状态，BFF 重启会丢失**，不是持久化多租户 Memory。
+- Qwen Live 已在 V2.1 用真实浏览器完成一次 `RETRIEVE → RERANK → FINALIZE` 调用；它需要 GPU 服务 + **WSL-local loopback tunnel**，tunnel/模型停止时 UI 明确显示 unavailable，不能声称 Qwen 成功。
+- Ranker Comparison 当前是 **P100 recorded Replay**，页面明确标注；不是实时 ShopRanker/Hybrid 推理。
 - 未运行 Reserved Test 的二次调参，也未基于最终指标修改模型或规则。
 
 > **工程质量与质量结论是两件事。** 工程边界可以被测试；真实推荐效果、解释语义和用户满意度仍为 **NOT ESTABLISHED**。

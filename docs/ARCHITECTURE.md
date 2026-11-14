@@ -12,6 +12,82 @@ metrics.
 
 ---
 
+## 0. Current Web Demo V2.1 (this is the display layer, not a second runtime)
+
+The current browser demo keeps the existing recommendation/Agent code unchanged and adds only a
+thin display/BFF/MCP adapter:
+
+```text
+Next.js 16 UI (web/)
+   │  chat, SSE, product cards, evidence, Memory Timeline, Ranker Replay
+   ▼
+FastAPI BFF (web_demo/, 127.0.0.1:8787)
+   │  opaque session_id; view models; no re-ranking
+   ▼
+AgentRec-X MCP Server (recommendation.mcp.server, local stdio)
+   │
+   ├─ ElectronicsCatalogue + BGE/BM25
+   ├─ Rule Planner (CPU default)
+   ├─ Qwen3.5-9B Base Planner (optional; real /plan)
+   ├─ CandidateLedger + Scorer + Eligibility
+   ├─ DecisionGate
+   ├─ P15 Evidence Bundle / P16 Skills
+   └─ M5/M9 Event-Sourced Memory
+        └─ per-browser-session namespace (Demo V2.1)
+```
+
+### Qwen Live sequence
+
+```text
+Browser
+  -> Next.js POST /api/chat/stream {mode: qwen_live}
+  -> FastAPI BFF
+  -> MCP run_agent_turn
+  -> Qwen POST /plan
+  -> PlannerAction RETRIEVE
+  -> existing Executor RETRIEVE
+  -> Qwen PlannerAction RERANK
+  -> existing Executor RERANK
+  -> Qwen PlannerAction FINALIZE
+  -> DecisionGate ALLOW_FINALIZE
+  -> P15 product cards / answer
+```
+
+The BFF health monitor performs a real `/plan` + PlannerAction check. There is no Rule fallback
+under a Qwen label; failure is surfaced as a real error.
+
+### Memory update sequence
+
+```text
+user-authored text
+  -> BFF session_id
+  -> MCP memory tool
+  -> existing M9 PreferenceMemoryService.process_turn
+  -> active/inactive audit rows
+  -> HistoryStateReader
+  -> existing Scorer
+  -> DecisionGate / recommendation
+```
+
+A withdrawal is represented by an inactive/removed audit row; the event is not deleted. The
+Memory Timeline renders the event state, while Active Memory shows only the current active state.
+
+### Session isolation
+
+Each browser session has an opaque `session_id`; MCP `AppContext.memory_for(session_id)` creates
+or reuses an **existing** `ShoppingCompanionMemory` per session. The default/no-session MCP path is
+unchanged for tests and other clients. Session memory is process-local in the BFF; it is not
+persistent multi-tenant storage.
+
+Detailed current demo architecture, screenshots and limits:
+
+- [`AGENTREC_X_DEMO_ARCHITECTURE.md`](AGENTREC_X_DEMO_ARCHITECTURE.md)
+- [`DEMO_GUIDE.md`](DEMO_GUIDE.md)
+- [`SETUP_AND_DEPLOYMENT.md`](SETUP_AND_DEPLOYMENT.md)
+- [`AGENTREC_X_DEMO_V21_VERIFICATION.md`](AGENTREC_X_DEMO_V21_VERIFICATION.md)
+
+---
+
 ## 1. Architectural goals
 
 1. **Truth stays in deterministic code.** Identity, retrieval order, fusion, catalogue
