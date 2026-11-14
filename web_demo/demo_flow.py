@@ -260,7 +260,7 @@ async def _search_and_recommend_turn(
     yield event("tool_status", recommend_entry)
     started = time.perf_counter()
     recommendation = await manager.call_tool(
-        profile_id, "recommend_products", {"query": message}
+        profile_id, "recommend_products", {"query": message, "session_id": session.session_id}
     )
     recorder.ok(recommend_entry, latency_ms=_ms(started))
     yield event("tool_status", recommend_entry)
@@ -301,7 +301,8 @@ async def _search_and_recommend_turn(
         yield event("tool_status", clarification_entry)
         started = time.perf_counter()
         clarification_raw = await manager.call_tool(
-            profile_id, "request_preference_clarification", {"query": message}
+            profile_id, "request_preference_clarification",
+            {"query": message, "session_id": session.session_id},
         )
         recorder.ok(clarification_entry, latency_ms=_ms(started))
         yield event("tool_status", clarification_entry)
@@ -442,7 +443,7 @@ async def _qwen_live_turn(
     started = time.perf_counter()
     task = asyncio.create_task(
         manager.call_tool(
-            profile_id, "run_agent_turn", {"query": message},
+            profile_id, "run_agent_turn", {"query": message, "session_id": session.session_id},
             timeout_s=settings.qwen_turn_timeout_s,
             progress_callback=progress_callback,
         ),
@@ -603,7 +604,8 @@ async def _comparison_turn(
     yield event("tool_status", compare_entry)
     started = time.perf_counter()
     comparison_raw = await manager.call_tool(
-        session.profile_id, "compare_products", {"product_refs": list(product_refs)}
+        session.profile_id, "compare_products",
+        {"product_refs": list(product_refs), "session_id": session.session_id},
     )
     recorder.ok(compare_entry, latency_ms=_ms(started))
     yield event("tool_status", compare_entry)
@@ -659,7 +661,8 @@ async def compare_products(
     *, manager: MCPManager, session: Session, product_refs: list[str]
 ) -> dict[str, Any]:
     raw = await manager.call_tool(
-        session.profile_id, "compare_products", {"product_refs": list(product_refs)}
+        session.profile_id, "compare_products",
+        {"product_refs": list(product_refs), "session_id": session.session_id},
     )
     _raise_for_comparison_failure(raw)
     return vm.comparison_payload(raw)
@@ -724,6 +727,7 @@ async def clarification_reply(
                 "turn_id": pending.reply_turn_id,
                 "confirmed_by_user": True,
                 "confirmation_source": "web_ui_explicit_user_reply",
+                "session_id": session.session_id,
             },
         )
     except MCPManagerError as exc:
@@ -739,7 +743,8 @@ async def clarification_reply(
     # 2. Refresh the real active/inactive preferences from M9.
     prefs_entry = recorder.start("get_active_preferences", label="Memory")
     started = time.perf_counter()
-    pref_payload = await manager.call_tool(profile_id, "get_active_preferences", {})
+    pref_payload = await manager.call_tool(profile_id, "get_active_preferences",
+                                           {"session_id": session.session_id})
     recorder.ok(prefs_entry, latency_ms=_ms(started))
     steps.append(_step("get_active_preferences", started))
     preferences = vm.preference_state(pref_payload, profile_id=profile_id)
@@ -761,7 +766,8 @@ async def clarification_reply(
             try:
                 rec_payload = await manager.call_tool(
                     profile_id, "run_agent_turn",
-                    {"query": pending.query, "clarification_id": clarification_id},
+                    {"query": pending.query, "clarification_id": clarification_id,
+                     "session_id": session.session_id},
                     timeout_s=timeout_s,
                 )
             except MCPManagerError as exc:
@@ -830,7 +836,8 @@ async def clarification_reply(
             rec_entry = recorder.start("recommend_products", label="Recommend")
             started = time.perf_counter()
             rec_payload = await manager.call_tool(
-                profile_id, "recommend_products", {"query": pending.query}
+                profile_id, "recommend_products",
+                {"query": pending.query, "session_id": session.session_id},
             )
             recorder.ok(rec_entry, latency_ms=_ms(started))
             steps.append(_step("recommend_products", started))

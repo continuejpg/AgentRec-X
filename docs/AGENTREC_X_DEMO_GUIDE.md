@@ -112,10 +112,33 @@ badge **Recorded Experiment Replay — Not a Live Model Call**. It never reranks
 
 ### Qwen Replay / Live
 
-Existing Qwen Replay remains historical and read-only. Qwen Live is shown only when the BFF's real
-health probe reports it available. In this session the local BFF was run with Qwen Live disabled
-because the AutoDL model server is not exposed to the local BFF; the UI accurately shows Qwen Live
-as unavailable and keeps CPU Live + Replay usable.
+Qwen Replay is historical and read-only. Qwen Live is available only when the BFF's real
+`POST /plan` health probe returns a valid PlannerAction.
+
+To use Qwen Live with the existing AutoDL server, start the model server, keep a **WSL-local**
+loopback tunnel on `127.0.0.1:18029`, then start the BFF with:
+
+```bash
+export QWEN_LIVE_ENABLED=1
+export QWEN_MODEL_ENDPOINT=http://127.0.0.1:18029
+bash scripts/run_web_demo_bff.sh
+```
+
+The UI then exposes **Qwen Live** with a live badge. If the tunnel/model is unavailable the UI
+shows Unavailable and never silently falls back to Rule.
+
+Verified in V2.1: Browser → BFF → MCP → Qwen → RETRIEVE/RERANK/FINALIZE → Gate, E2E 20.58s,
+GPU 17,551 MiB.
+
+### Session Memory Isolation
+
+Each browser session is passed as an opaque `session_id` to the existing M9 tools. The MCP server
+creates a separate existing `ShoppingCompanionMemory` namespace per session. No new store or rules
+were added. Session A/B cannot read or withdraw each other's preferences; read-only profile writes
+return HTTP 400.
+
+Memory is process-local and resets when the BFF restarts; the UI and test evidence say this
+explicitly. Reset Session clears turns only and never another session's memory.
 
 ## Environment variables
 
@@ -132,10 +155,10 @@ as unavailable and keeps CPU Live + Replay usable.
 - BGE/catalogue cold start is ~2 minutes.
 - HTTP browser interaction is local-only; no public deployment/auth.
 - M9 memory writes are process-local and reset when the BFF restarts.
-- The two fixed MCP profiles are namespaces; browser sessions are **not** isolated M9 namespaces.
-  This is a real demo limitation, documented rather than hidden.
+- Session memory is isolated per browser session through the existing M9 service, but is
+  process-local and resets when the BFF restarts.
 - The ranker panel is recorded P100 replay; no live ShopRanker/Hybrid inference is claimed.
-- Qwen Live is unavailable in this session; Qwen Replay is historical only.
+- Qwen Live requires the local tunnel/model service; it is verified in V2.1 but not auto-started.
 - Product images/prices/ratings/stock are absent/UNKNOWN because the catalogue has no trusted
   source for those fields.
 

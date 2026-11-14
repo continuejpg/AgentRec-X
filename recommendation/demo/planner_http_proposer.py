@@ -135,8 +135,10 @@ class HttpPlannerProposer:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                reason = getattr(exc, "reason", exc)
                 raise HttpPlannerError(
-                    "planner_unavailable", "the planner model server is unavailable"
+                    "planner_unavailable",
+                    f"the planner model server is unavailable ({type(exc).__name__}: {reason})",
                 ) from exc
             except (ValueError, UnicodeDecodeError) as exc:
                 raise HttpPlannerError(

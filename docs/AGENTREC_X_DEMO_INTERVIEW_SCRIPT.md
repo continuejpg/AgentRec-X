@@ -96,9 +96,14 @@
 
 ### 6. Evaluation honesty (30 s)
 
-> “P100 has 1,971 public ESCI judged products, but 99.3% of Agent candidates are unjudged. The
-> public judged track shows Original BGE stronger than ShopRanker Query Only on nDCG, so we did not
-> replace the production Scorer. HUMAN memory preference Gold is still 0.”
+- **Qwen Live is verified** through Browser → BFF → MCP → Qwen → RETRIEVE/RERANK/FINALIZE; show the
+  `Live Qwen3.5-9B Base` badge and tool trace.
+- Session A and Session B have independent M9 memory namespaces: A's preference never appears in B,
+  and B's withdrawal never modifies A.
+- P100 has 1,971 public ESCI judged products, but 99.3% of Agent candidates are unjudged. The public
+  judged track shows Original BGE stronger than ShopRanker Query Only on nDCG, so we did not replace
+  the production Scorer. HUMAN memory preference Gold is still 0.
+- Ranker Comparison is recorded Replay and is explicitly labelled.
 
 ### 7. Close
 
@@ -115,5 +120,6 @@
 - [ ] Active Memory and timeline reflect the write.
 - [ ] Replay badge visible on ranker panel.
 - [ ] No price/rating/stock/image invented.
-- [ ] Qwen Live unavailable is shown honestly; no silent fallback.
+- [ ] Qwen Live badge and real planner tool rows visible (or Unavailable honestly shown).
+- [ ] Session A/B memory isolation demonstrated.
 - [ ] “Clear session” does not claim to erase M9.

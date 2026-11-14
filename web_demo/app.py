@@ -434,7 +434,10 @@ def create_app(
     async def preferences(session_id: str = Query(min_length=1)) -> dict[str, Any]:
         session = get_session(session_id)
         require_ready(session)
-        payload = await manager.call_tool(session.profile_id, "get_active_preferences", {})
+        payload = await manager.call_tool(
+            session.profile_id, "get_active_preferences",
+            {"session_id": session.session_id},
+        )
         return vm.preference_state(payload, profile_id=session.profile_id)
 
     @app.post("/api/memory/remember")
@@ -445,9 +448,12 @@ def create_app(
         turn_id = f"web-memory-{uuid.uuid4().hex[:12]}"
         payload = await manager.call_tool(
             session.profile_id, "remember_preference",
-            {"user_message": body.message, "turn_id": turn_id},
+            {"user_message": body.message, "turn_id": turn_id, "session_id": session.session_id},
         )
-        preferences_payload = await manager.call_tool(session.profile_id, "get_active_preferences", {})
+        preferences_payload = await manager.call_tool(
+            session.profile_id, "get_active_preferences",
+            {"session_id": session.session_id},
+        )
         return {
             "turn_id": turn_id,
             "update": payload.get("update") or {},

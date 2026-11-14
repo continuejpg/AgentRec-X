@@ -12,7 +12,7 @@
 - 现有 Next.js UI 已具备聊天、SSE、商品卡、Evidence、Comparison、Trace、Replay；
 - 新 Demo 的主要工作是补齐 Memory Timeline、Memory Lab、P100 Ranker Replay 和三个 Scenario 入口。
 
-详见 [DEMO_TECH_SELECTION.md](DEMO_TECH_SELECTION.md) 与 [AGENTREC_X_DEMO_ARCHITECTURE.md](AGENTREC_X_DEMO_ARCHITECTURE.md)。
+详见 [DEMO_TECH_SELECTION.md](DEMO_TECH_SELECTION.md)。V2.1 的 Qwen Live 与 Session Isolation 验收见 [AGENTREC_X_DEMO_V21_VERIFICATION.md](AGENTREC_X_DEMO_V21_VERIFICATION.md)。 与 [AGENTREC_X_DEMO_ARCHITECTURE.md](AGENTREC_X_DEMO_ARCHITECTURE.md)。
 
 ## 2. 实际运行路径
 
@@ -102,7 +102,7 @@ Checked:
 - Active Memory + timeline;
 - ranker replay panel;
 - read-only/write profile distinction;
-- Qwen Live unavailable notice (no silent fallback);
+- Qwen Live real turn evidence and no silent fallback;
 - empty and readiness states.
 
 `pnpm exec tsc --noEmit` passes for the demo frontend.
@@ -126,28 +126,46 @@ Recorded Experiment Replay — Not a Live Model Call
 
 No live ShopRanker/Hybrid inference is fabricated. Recorded Memory OFF/ON is not a live memory toggle.
 
-## 7. Live GPU vs Replay — honest status
+## 7. Live GPU vs Replay — V2.1
+
+### Qwen Live — PASS
+
+A real browser Qwen Live turn completed:
+
+```text
+Browser → BFF → MCP → Qwen3.5-9B
+→ RETRIEVE → RERANK → FINALIZE
+→ ALLOW_FINALIZE (evidence_sufficient)
+→ selected B08D32JM5F
+```
+
+- planner calls: 3; planner latency sum: 10,229.11 ms;
+- Qwen Agent E2E: 19,760.87 ms; full turn 20.58 s;
+- GPU resident: 17,551 MiB;
+- endpoint: WSL-local `127.0.0.1:18029` via an existing tunnel;
+- no silent Rule fallback, no faked action.
+
+Root cause of the earlier failure: the Windows host-IP tunnel was reachable by the BFF health path
+but the MCP child Planner request failed. Switching BFF and MCP child to the WSL-local loopback
+tunnel fixed the real PlannerAction path. The health monitor already performs a real
+`POST /plan` + PlannerAction validation.
+
+Records: [qwen_live_turn_v21.json](../runs/final_demo/qwen_live_turn_v21.json),
+[qwen_raw_planner_action.json](../runs/final_demo/qwen_raw_planner_action.json),
+[ui_qwen_live.png](../runs/final_demo/ui_qwen_live.png).
 
 ### CPU Live (actual)
 
-Real BFF → real MCP → real BGE/rule planner/Gate/M9/P15; scenario A/B/C ran through this path. This is the working default.
+Real BFF → real MCP → real BGE/rule planner/Gate/M9/P15; scenario A/B/C ran through this path.
+This remains the stable default.
 
 ### Qwen Replay
 
 Existing read-only historical Qwen trajectories remain available and labeled historical.
 
-### Qwen Live attempt
+### Ranker Replay
 
-A remote Qwen3.5-9B model server and SSH tunnel were started for this session. The BFF health probe reported Qwen Live available at one moment, but the actual MCP planner call returned:
-
-```text
-qwen_planner_error: planner_unavailable: the planner model server is unavailable
-```
-
-The UI correctly showed Qwen Live as unavailable; it did not fall back silently or claim a Qwen call.
-**Therefore this demo report does not claim a successful Live GPU Qwen turn.** The CPU Live + Qwen Replay paths are the verified working modes.
-
-Record: [qwen_live_turn.json](../runs/final_demo/qwen_live_turn.json).
+P100 ranker/Memory OFF–ON remains recorded replay; it does not claim live ShopRanker/Hybrid inference.
 
 ## 8. Framework reuse QA
 
@@ -168,13 +186,17 @@ Record: [qwen_live_turn.json](../runs/final_demo/qwen_live_turn.json).
 
 No duplicate chat framework, no duplicate memory DB, no duplicate ranking implementation.
 
-## 9. Known limitations
+## 9. Known limitations — V2.1
 
-1. **Session-level M9 isolation is not implemented.** The two fixed MCP profiles are memory namespaces; two browser sessions on the same profile share M9 state. The UI states memory is local process memory and resets on BFF restart. This is a real remaining gap, not hidden.
-2. **Qwen Live was not successfully exercised** despite an attempted remote GPU/tunnel setup; Qwen Replay remains historical.
-3. Memory Lab is an explicit demo-only write adapter; normal user preference writes still go through the real clarification flow.
+1. **Session isolation is implemented for the local demo.** Each browser session gets its own
+   existing `ShoppingCompanionMemory` namespace; A/B tests pass. The state is still process-local:
+   restarting the BFF loses all session memory. It is not a durable multi-tenant production store.
+2. **Qwen Live requires a running local tunnel** to the AutoDL model server. The demo does not
+   start AutoDL or tunnels automatically.
+3. Memory Lab is an explicit demo-only write adapter; normal user preference writes still go through
+   the real clarification flow.
 4. The ranker panel is recorded P100 replay, not live ShopRanker/Hybrid inference.
-5. Browser QA was headless screenshot/HTTP-based, not a full multi-user browser automation suite.
+5. Browser QA was headless screenshot/HTTP/SSE based, not a full multi-user auth deployment.
 6. Catalogue has no trusted price/image/rating/stock fields; cards correctly show UNKNOWN/placeholder.
 
 ## 10. Start commands
@@ -212,8 +234,9 @@ Open `http://127.0.0.1:3000`.
 | Memory Timeline | PASS |
 | Real Agent trace / tool rows | PASS |
 | Ranker / Memory OFF–ON replay | PASS (recorded, labeled) |
-| Qwen Live | NOT VERIFIED (health transient, actual planner unavailable) |
+| Qwen Live | PASS (real browser turn) |
 | Qwen Replay | available (historical) |
+| Session Isolation | PASS (A/B write/withdraw/reset; read-only write refused) |
 | Fake price/rating/image | none |
 | Production Scorer/Gate/Planner/P18 modified | no |
 | New model training | no |
@@ -225,4 +248,5 @@ The demo is suitable for a local interview walkthrough as:
 
 > “A real shopping Agent with event-sourced long-term memory, real catalogue evidence, real Gate decisions, and an honest separation between live execution and recorded ranker experiments.”
 
-It is **not** claimed to be multi-tenant production software; session isolation and live Qwen GPU operation remain the next engineering items.
+It is **not** claimed to be multi-tenant production software: Qwen Live depends on a local tunnel,
+session memory is process-local, and Ranker Comparison remains recorded replay.

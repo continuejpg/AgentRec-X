@@ -84,6 +84,7 @@ class ClarificationState:
     expires_at: float
     status: str = "pending"
     last_turn_id: str | None = None
+    session_id: str | None = None
     #: Task-scoped constraints recovered from the real reply.  They are separate from
     #: M9's permanent memory and are applied only to the resumed current task.
     task_constraints: CurrentTaskConstraints = field(default_factory=CurrentTaskConstraints)
@@ -104,6 +105,9 @@ class AppContext:
     corrective_rag: bool = False
     evidence_verifier: bool = False
     clarification_ttl_seconds: float = 1800.0
+    # Optional browser-session namespace for the local demo.  None preserves the original bound
+    # fixture behavior for tests/production MCP clients.
+    session_id: str | None = None
     # Optional P20 Qwen Base Live: the tool is only registered when both the explicit flag and a
     # model-service URL are configured.  The legacy 7-tool surface stays byte-for-byte the same.
     qwen_configured: bool = False
@@ -111,10 +115,23 @@ class AppContext:
     skill_registry: Any = field(default_factory=build_registry)
     handles: dict[str, ClarificationState] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Local Web Demo session namespaces. Each session gets its own existing
+    # ShoppingCompanionMemory/M9 service; no second store or copied memory rules.
+    session_memories: dict[str, ShoppingCompanionMemory] = field(default_factory=dict)
 
-    def read_history(self) -> dict[str, Any]:
-        return HistoryStateReader(self.memory.preference_service).read(
-            self.user_key, conversation_id=self.user_key,
+    def memory_for(self, session_id: str | None = None) -> ShoppingCompanionMemory:
+        if not session_id:
+            return self.memory
+        key = str(session_id)
+        if key not in self.session_memories:
+            self.session_memories[key] = ShoppingCompanionMemory()
+        return self.session_memories[key]
+
+    def read_history(self, session_id: str | None = None) -> dict[str, Any]:
+        memory = self.memory_for(session_id)
+        user_key = str(session_id) if session_id else self.user_key
+        return HistoryStateReader(memory.preference_service).read(
+            user_key, conversation_id=user_key,
             current_query=str(self.task.get("current_query") or ""),
         )
 
@@ -236,12 +253,18 @@ def _get_product_info(product_ref: Annotated[str, Field(min_length=1, descriptio
     }
 
 
-def _recommend_products(query: Annotated[str, Field(min_length=1, description="Current shopping query")]) -> dict[str, Any]:
+def _recommend_products(
+    query: Annotated[str, Field(min_length=1, description="Current shopping query")],
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
+) -> dict[str, Any]:
     """Run the existing Rule Planner + shared tools + V0/Role/Eligibility/Gate; never fake a FINALIZE."""
     started = time.perf_counter()
     ctx = _context()
-    history = ctx.read_history()
+    history = ctx.read_history(session_id)
     task = ctx.current_task(query)
+    if session_id:
+        task["task_id"] = str(session_id)
+        task["user_id"] = str(session_id)
     executor = ElectronicsPlannerExecutor(
         catalogue=ctx.catalogue, current_query=query,
         preferences=prepare_preferences(history), hard=prepare_hard(query),
@@ -465,6 +488,7 @@ async def _run_agent_turn(
         str | None,
         Field(description="Set only when resuming the same Qwen task after a real user clarification reply"),
     ] = None,
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
 ) -> dict[str, Any]:
     """Run the existing electronics executor with the real Qwen3.5-9B Base planner.
 
@@ -485,8 +509,11 @@ async def _run_agent_turn(
             "must both be configured"
         )
     context = _context()
-    history = context.read_history()
+    history = context.read_history(session_id)
     task = context.current_task(query)
+    if session_id:
+        task["task_id"] = str(session_id)
+        task["user_id"] = str(session_id)
     continuation: dict[str, Any] | None = None
     resume_task_constraints = CurrentTaskConstraints()
     if clarification_id is not None:
@@ -510,7 +537,7 @@ async def _run_agent_turn(
             state.continuation = None
             state.status = "resumed"
         task = dict(continuation["task"])
-        history = context.read_history()
+        history = context.read_history(session_id)
     proposer = HttpPlannerProposer(
         str(config["url"]), model=str(config["model"]), timeout=float(config["timeout_s"])
     )
@@ -793,6 +820,7 @@ async def _run_agent_turn(
 def _remember_preference(
     user_message: Annotated[str, Field(min_length=1, description="Explicit user-authored preference text")],
     turn_id: Annotated[str, Field(min_length=1, description="Stable id for this user-authored memory turn")],
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
 ) -> dict[str, Any]:
     """Demo-only explicit M9 write over the existing PreferenceMemoryService.
 
@@ -803,13 +831,15 @@ def _remember_preference(
     ctx = _context()
     if not ctx.writes_enabled:
         raise ToolError("memory_writes_disabled: this server is read-only")
+    memory = ctx.memory_for(session_id)
+    namespace = str(session_id) if session_id else ctx.user_key
     try:
-        result = ctx.memory.preference_service.process_turn(
-            user_key=ctx.user_key, user_message=user_message, turn_id=turn_id,
+        result = memory.preference_service.process_turn(
+            user_key=namespace, user_message=user_message, turn_id=turn_id,
         )
     except Exception as exc:  # noqa: BLE001
         raise ToolError(f"memory_write_failed: {type(exc).__name__}: {exc}") from exc
-    history = ctx.read_history()
+    history = ctx.read_history(session_id)
     return {
         "schema": "agentrecx.p52.remember_preference.v1",
         "status": "ok",
@@ -822,10 +852,12 @@ def _remember_preference(
     }
 
 
-def _get_active_preferences() -> dict[str, Any]:
+def _get_active_preferences(
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
+) -> dict[str, Any]:
     """Read only this server's trusted local user's active/inactive M9 preferences and audit trail."""
     ctx = _context()
-    history = ctx.read_history()
+    history = ctx.read_history(session_id)
     return {
         "schema": "agentrecx.p17.get_active_preferences.v1",
         "status": "ok",
@@ -838,12 +870,15 @@ def _get_active_preferences() -> dict[str, Any]:
     }
 
 
-def _compare_products(product_refs: Annotated[list[str], Field(min_length=2, max_length=5,
-                                                              description="2-5 real product references")]) -> dict[str, Any]:
+def _compare_products(
+    product_refs: Annotated[list[str], Field(min_length=2, max_length=5,
+                                              description="2-5 real product references")],
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
+) -> dict[str, Any]:
     """Invoke the existing P16 Shopping Comparison Skill over real products."""
     started = time.perf_counter()
     ctx = _context()
-    history = ctx.read_history()
+    history = ctx.read_history(session_id)
     task = ctx.current_task()
     try:
         result = ctx.skill_registry.invoke(
@@ -860,17 +895,19 @@ def _compare_products(product_refs: Annotated[list[str], Field(min_length=2, max
 
 def _request_preference_clarification(
     query: Annotated[str | None, Field(description="Optional current query; defaults to the bound user task query")] = None,
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
 ) -> dict[str, Any]:
     """Create a user-bound clarification handle using the existing P16 Clarification Skill."""
     ctx = _context()
     task = ctx.current_task(query)
-    history = ctx.read_history()
+    history = ctx.read_history(session_id)
     result = ask_clarification(task=task, preferences=prepare_preferences(history), gate=None)
     clarification_id = "clar_" + uuid.uuid4().hex
     now = time.time()
     state = ClarificationState(clarification_id=clarification_id, user_key=ctx.user_key,
                                question=str(result["question"]), current_query=str(task["current_query"]),
-                               task=task, created_at=now, expires_at=now + ctx.clarification_ttl_seconds)
+                               task=task, created_at=now, expires_at=now + ctx.clarification_ttl_seconds,
+                               session_id=session_id)
     with ctx.lock:
         ctx.handles[clarification_id] = state
     result = dict(result)
@@ -893,6 +930,7 @@ def _submit_clarification_reply(
     confirmation_source: Annotated[Literal["explicit_test_user_reply", "trusted_local_client", "web_ui_explicit_user_reply"] | None,
                                    Field(description="Explicit confirmation channel; tests use explicit_test_user_reply, "
                                                      "the local Web BFF uses web_ui_explicit_user_reply")] = None,
+    session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
 ) -> dict[str, Any]:
     """Persist a real user reply through M9 after explicit local confirmation; never fabricate a reply."""
     ctx = _context()
@@ -914,8 +952,8 @@ def _submit_clarification_reply(
         }:
             raise ToolError("user_confirmation_required: provide explicit local test-user confirmation; "
                             "model-generated text is not a user reply")
-    result = resume_with_user_reply(memory=ctx.memory, task=state.task, user_message=user_message,
-                                    turn_id=turn_id)
+    result = resume_with_user_reply(memory=ctx.memory_for(state.session_id or session_id),
+                                    task=state.task, user_message=user_message, turn_id=turn_id)
     extraction_payload = result.get("reply_extraction") or {}
     reply_constraints = CurrentTaskConstraints.from_payload(
         extraction_payload, source_turn_id=str(turn_id)
