@@ -20,7 +20,8 @@ def test_hybrid_budget_fix():
 
 def test_complete_cf_matrices():
     rule = _json("cf_matrix_rule.json")
-    qwen = _json("cf_matrix_qwen.json")
+    qwen_name = "cf_matrix_qwen_full.json" if (R / "cf_matrix_qwen_full.json").exists() else "cf_matrix_qwen.json"
+    qwen = _json(qwen_name)
     assert rule["trajectories"] == 96 and len(rule["records"]) == 96
     assert qwen["trajectories"] == 96 and len(qwen["records"]) == 96
     for data in (rule, qwen):

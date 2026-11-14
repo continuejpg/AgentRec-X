@@ -43,7 +43,7 @@ def summarize(data):
 
 def main():
     rule = load("cf_matrix_rule.json")
-    qwen = load("cf_matrix_qwen.json") if (R / "cf_matrix_qwen.json").exists() else None
+    qwen = load("cf_matrix_qwen_full.json") if (R / "cf_matrix_qwen_full.json").exists() else (load("cf_matrix_qwen.json") if (R / "cf_matrix_qwen.json").exists() else None)
     ranking = load("cf_ranking_metrics.json")
     fix = load("hybrid_budget_fix.json")
     p20 = json.loads((P43 / "e2e_summary.json").read_text(encoding="utf-8"))

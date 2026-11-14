@@ -141,7 +141,7 @@ def run_case_state(catalogue, case, state_name, shop_scores, adapter, planner_ki
             "planner": planner_kind, "status": status, "requires_clarification": bool(case.get("requires_clarification")),
             "hard_constraint_violation": bool((gate.get("hard_constraint_status") or {}).get("hard_constraints") == "violated"),
             "selected_product_id": selected, "selected_in_eligible": selected in set(ids) if selected else None,
-            "gate_action": gate.get("action"), "actions": [step.get("action") for step in steps],
+            "gate_action": gate.get("action"), "gate": gate, "actions": [step.get("action") for step in steps],
             "tool_calls": [call.get("tool") for call in executor.tool_calls],
             "ranker_calls": sum(1 for call in executor.tool_calls if call.get("tool") == "rerank"),
             "memory_active_preferences": preferences,
@@ -156,10 +156,14 @@ def run_case_state(catalogue, case, state_name, shop_scores, adapter, planner_ki
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--planner", choices=("rule", "qwen"), default="rule")
+    parser.add_argument("--case", default=None, help="optional single case id")
+    parser.add_argument("--out", default=None, help="optional output filename")
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     catalogue = ElectronicsCatalogue.load(metadata_mode="enriched")
     cases = read_jsonl(CASES)
+    if args.case:
+        cases = [case for case in cases if case["case_id"] == args.case]
     shop_scores = {row["case_id"]: row for row in json.loads(SHOP_SCORES.read_text(encoding="utf-8"))["rows"]}
     adapter = load_adapter()
     if args.planner == "qwen":
@@ -191,7 +195,8 @@ def main():
         "trajectories": len(records),
         "records": records,
     }
-    (OUT / f"cf_matrix_{args.planner}.json").write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    output_name = args.out or f"cf_matrix_{args.planner}.json"
+    (OUT / output_name).write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"planner": args.planner, "records": len(records)}, indent=1))
 
 
