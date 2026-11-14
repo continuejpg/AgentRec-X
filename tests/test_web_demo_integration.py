@@ -137,7 +137,10 @@ async def _scenario(tmp_path: Path) -> dict[str, Any]:
         for server in servers:
             assert server["status"] == "ready", server
             assert server["startup_ms"] and server["startup_ms"] > 0
-            assert set(server["tools"] or []) == EXPECTED_TOOLS, server["tools"]
+            expected_tools = set(EXPECTED_TOOLS)
+            if server["writes_enabled"]:
+                expected_tools.add("remember_preference")
+            assert set(server["tools"] or []) == expected_tools, server["tools"]
         assert manager.ready() is True
         assert manager.aggregate_status()[2] is True  # at least one server ready -> cpu_live
         writes = {server["profile_id"]: server["writes_enabled"] for server in servers}

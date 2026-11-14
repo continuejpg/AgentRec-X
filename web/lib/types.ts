@@ -173,6 +173,10 @@ export interface PreferenceItem {
   source_text: string | null;
   source_turn_id: string | null;
   last_updated: string | null;
+  logical_seq?: number | null;
+  supersedes?: string | null;
+  superseded_by?: string | null;
+  created_at?: number | null;
 }
 
 export interface PreferenceState {
@@ -183,6 +187,14 @@ export interface PreferenceState {
   inactive: PreferenceItem[];
   audit_source: string | null;
   fetched_at: string;
+}
+
+export interface MemoryRememberResponse {
+  turn_id: string;
+  update: Record<string, unknown>;
+  preferences: PreferenceState;
+  message: string;
+  error: ErrorPayload | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +520,50 @@ export interface ReplayResponse {
   source?: string;
   note?: string;
   examples: ReplayExample[];
+}
+
+export interface RankerReplayItem {
+  product_id: string;
+  title: string;
+  rank: number;
+  score: number;
+  attributes: string[];
+  evidence_count: number;
+  memory_matches: string[];
+  memory_conflicts: string[];
+  memory_unknown: string[];
+  off_rank?: number | null;
+  rank_movement?: number | null;
+}
+
+export interface RankerReplayArm {
+  off: RankerReplayItem[];
+  on: RankerReplayItem[];
+  top1_changed: boolean;
+}
+
+export interface RankerReplayTaskRef {
+  task_id: string;
+  query: string;
+  scenario_type?: string | null;
+}
+
+export interface RankerReplayResponse {
+  mode: string;
+  replay: boolean;
+  live_call: boolean;
+  available: boolean;
+  badge: string;
+  source?: string;
+  detail?: string;
+  task_id?: string;
+  query?: string;
+  scenario_type?: string | null;
+  memory_snapshot_id?: string | null;
+  active_preferences_on?: PreferenceItem[];
+  arms?: Record<"existing" | "natural" | "hybrid", RankerReplayArm>;
+  tasks: RankerReplayTaskRef[];
+  notes?: string[];
 }
 
 // ---------------------------------------------------------------------------

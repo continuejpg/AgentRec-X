@@ -339,6 +339,24 @@ function EmptyConversation({
   const prompts = useMemo(() => {
     const list: { key: string; label: string; text: string; hint: string; selectedIds?: string[] }[] = [
       {
+        key: "scenario-a",
+        label: "A · Remember my preference",
+        text: "I need some new headphones. Not sure what matters yet.",
+        hint: "Ask → reply “I prefer a microphone.” → recommend again → inspect Active Memory and Memory timeline.",
+      },
+      {
+        key: "scenario-b",
+        label: "B · Update / negative preference",
+        text: "I need some new headphones. Help me narrow it down.",
+        hint: "Ask → reply “I prefer a microphone.” then “I don't want over-ear headphones.” → compare the next recommendation.",
+      },
+      {
+        key: "scenario-c",
+        label: "C · Withdraw a preference",
+        text: "I'm looking for headphones and want to set a preference first.",
+        hint: "Ask → reply “I prefer a microphone.” → “Forget my microphone preference.” → inspect the withdrawal event and re-run.",
+      },
+      {
         key: "search",
         label: "Search with evidence",
         text: "I need earbuds I can use while working out. It needs to be wireless.",

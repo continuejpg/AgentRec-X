@@ -25,6 +25,9 @@ REPO = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO / "runs/web_demo"
 LOG_DIR = RUNS_DIR / "logs"
 REPLAY_PATH = REPO / "runs/p18/qwen_replay.json"
+RANKER_REPLAY_PATH = REPO / "runs/p100_extended_evaluation/p100_ranker_gpu_predictions.jsonl"
+P100_TASKS_PATH = REPO / "data/p100_extended_benchmark/p100_agent_tasks_memory_on.jsonl"
+P100_METADATA_PATH = REPO / "data/p100_extended_benchmark/p100_candidate_metadata.jsonl"
 MEMORY_FIXTURE = REPO / "data/p14e2/benchmark/dev.agent.jsonl"
 MCP_SERVER_MODULE = "recommendation.mcp.server"
 
@@ -142,6 +145,7 @@ class Settings:
     port: int = DEFAULT_PORT
     search_mode: str = "bge"
     allow_memory_writes: bool = False
+    default_profile_id: str = DEFAULT_PROFILE_ID
     mcp_timeout_s: float = DEFAULT_MCP_TIMEOUT_S
     clarification_ttl_s: float = DEFAULT_CLARIFICATION_TTL_S
     console_only_log: bool = False
@@ -158,6 +162,9 @@ class Settings:
     repo: Path = REPO
     log_dir: Path = LOG_DIR
     replay_path: Path = REPLAY_PATH
+    ranker_replay_path: Path = RANKER_REPLAY_PATH
+    p100_tasks_path: Path = P100_TASKS_PATH
+    p100_metadata_path: Path = P100_METADATA_PATH
     memory_fixture: Path = MEMORY_FIXTURE
     python_executable: str = field(default_factory=lambda: sys.executable)
 
@@ -216,6 +223,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         port=port,
         search_mode=mode,
         allow_memory_writes=_env_bool(want.get("AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES")),
+        default_profile_id=(
+            str(want.get("AGENTRECX_WEB_DEMO_DEFAULT_PROFILE") or DEFAULT_PROFILE_ID).strip()
+            if str(want.get("AGENTRECX_WEB_DEMO_DEFAULT_PROFILE") or DEFAULT_PROFILE_ID).strip()
+            in PROFILE_BY_ID else DEFAULT_PROFILE_ID
+        ),
         mcp_timeout_s=timeout,
         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
         qwen_live_enabled=qwen_enabled,

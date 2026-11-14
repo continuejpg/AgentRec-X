@@ -19,7 +19,9 @@ re-ranks/reorders/filters tool results, and never invents price/rating/stock/bra
 **CPU default; optional Qwen Base Live.** CPU mode makes no LLM call. P20 can optionally connect to
 an **existing** Qwen3.5-9B Base model service when explicitly configured and healthy; a missing
 service leaves Qwen Live Unavailable and never falls back to Rule while claiming Qwen. Qwen Agent
-Replay (`GET /api/replay`, `live_call=false`) remains historical only. Local demo only: binds
+Replay (`GET /api/replay`, `live_call=false`) remains historical only. The write-enabled demo
+profile also exposes the thin `remember_preference` tool used by the explicit Memory Lab; it calls
+the existing M9 `PreferenceMemoryService.process_turn`, not a second store. Local demo only: binds
 `127.0.0.1`.
 
 ## Run
@@ -95,6 +97,8 @@ identity or confirmation (`user_id`, `user_key`, `confirmed_by_user`, `confirmat
 | POST | `/api/products/compare` | `{"session_id","product_refs":[...2-5]}` → real P16 comparison |
 | POST | `/api/clarification/reply` | persists a real user reply through M9, refreshes prefs, resumes query |
 | GET | `/api/replay` | real saved P18 Qwen trajectories, clearly labelled historical replay |
+| GET | `/api/replay/rankers` | recorded P100 GPU ranker predictions; Memory OFF/ON replay; no live model call |
+| POST | `/api/memory/remember` | explicit local demo-only M9 write through the existing Writer; write profile only |
 
 SSE event names (exact): `tool_status`, `text`, `products`, `evidence`, `comparison`,
 `clarification`, `memory_update`, `done`, `error`. While a tool runs, a `: keep-alive` comment is

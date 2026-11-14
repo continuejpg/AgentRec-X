@@ -17,7 +17,9 @@ Payload sources (all real, from the P17 MCP tools):
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 PRICE_UNKNOWN_DISPLAY = "Price unavailable / UNKNOWN"
@@ -504,6 +506,10 @@ def _preference_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
         "source_text": entry.get("source_text"),
         "source_turn_id": entry.get("source_turn_id"),
         "last_updated": iso_from_epoch(entry.get("created_at")),
+        "logical_seq": entry.get("logical_seq"),
+        "supersedes": entry.get("supersedes"),
+        "superseded_by": entry.get("superseded_by"),
+        "created_at": entry.get("created_at"),
     }
 
 
@@ -672,3 +678,115 @@ def narrative_memory(
         "Catalogue evidence only; this is not a claim about real-world quality, price, stock or ratings."
     )
     return "\n".join(lines)
+
+def ranker_replay_payload(
+    *, rankers_path: Path, tasks_path: Path, metadata_path: Path, task_id: str | None = None
+) -> dict[str, Any]:
+    """Expose recorded P100 GPU ranker predictions; this is replay, never a live call."""
+    tasks: dict[str, dict[str, Any]] = {}
+    if tasks_path.is_file():
+        for line in tasks_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                tasks[str(row.get("base_query_id"))] = row
+    meta: dict[str, dict[str, Any]] = {}
+    if metadata_path.is_file():
+        for line in metadata_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                row = json.loads(line)
+                meta[str(row.get("item_id"))] = row
+    predictions: list[dict[str, Any]] = []
+    if rankers_path.is_file():
+        for line in rankers_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                predictions.append(json.loads(line))
+    if not predictions:
+        return {"mode": "P100_Ranker_Replay", "replay": True, "live_call": False,
+                "badge": "Recorded Experiment Replay - Not a Live Model Call",
+                "available": False, "detail": "P100 ranker replay artifact is unavailable.",
+                "tasks": [], "selected": None}
+    if task_id is None or task_id not in {str(row.get("base_query_id")) for row in predictions}:
+        preferred = next(
+            (str(row.get("base_query_id")) for row in predictions
+             if any(word in str((tasks.get(str(row.get("base_query_id"))) or {}).get("current_query")
+                                or row.get("query") or "").lower()
+                    for word in ("headphone", "earbud", "speaker"))),
+            str(predictions[0].get("base_query_id")),
+        )
+        task_id = preferred
+    row = next(item for item in predictions if str(item.get("base_query_id")) == task_id)
+    modes = row.get("modes") or {}
+    on_prefs = list((modes.get("ON") or {}).get("preferences") or [])
+
+    def entry(item_id: str, score: float, rank: int, prefs: list[dict[str, Any]]) -> dict[str, Any]:
+        info = dict(meta.get(item_id) or {})
+        attrs = set(info.get("attributes") or [])
+        matches: list[str] = []
+        conflicts: list[str] = []
+        unknowns: list[str] = []
+        for preference in prefs:
+            value = str(preference.get("value")) if preference.get("value") else ""
+            if not value:
+                continue
+            polarity = str(preference.get("polarity") or "positive").lower()
+            if value not in attrs:
+                unknowns.append(value)
+            elif polarity in {"avoid", "negative", "dislike"}:
+                conflicts.append(value)
+            else:
+                matches.append(value)
+        return {
+            "product_id": item_id,
+            "title": info.get("title") or "Title unavailable / UNKNOWN",
+            "rank": rank,
+            "score": round(float(score), 6),
+            "attributes": sorted(attrs),
+            "evidence_count": len(info.get("evidence") or []),
+            "memory_matches": sorted(set(matches)),
+            "memory_conflicts": sorted(set(conflicts)),
+            "memory_unknown": sorted(set(unknowns)),
+        }
+
+    def top(mode: str, arm: str, prefs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        scores = (modes.get(mode) or {}).get(arm) or {}
+        ordered = sorted(scores, key=lambda key: (-float(scores[key]), key))[:5]
+        return [entry(item_id, float(scores[item_id]), index + 1, prefs) for index, item_id in enumerate(ordered)]
+
+    arms: dict[str, Any] = {}
+    for arm in ("existing", "natural", "hybrid"):
+        off = top("OFF", arm, [])
+        on = top("ON", arm, on_prefs)
+        off_rank = {item["product_id"]: item["rank"] for item in off}
+        for item in on:
+            item["off_rank"] = off_rank.get(item["product_id"])
+            item["rank_movement"] = (off_rank.get(item["product_id"]) - item["rank"]) if item["product_id"] in off_rank else None
+        arms[arm] = {"off": off, "on": on,
+                     "top1_changed": bool(off and on and off[0]["product_id"] != on[0]["product_id"])}
+    task = tasks.get(task_id) or {}
+    return {
+        "mode": "P100_Ranker_Replay",
+        "replay": True,
+        "live_call": False,
+        "available": True,
+        "badge": "Recorded Experiment Replay - Not a Live Model Call",
+        "source": "runs/p100_extended_evaluation/p100_ranker_gpu_predictions.jsonl",
+        "candidate_source": "P100 fixed Original BGE Top-20; recorded GPU scores",
+        "task_id": task_id,
+        "query": task.get("current_query") or row.get("query"),
+        "scenario_type": task.get("scenario_type"),
+        "memory_snapshot_id": task.get("memory_snapshot_id"),
+        "active_preferences_on": on_prefs,
+        "arms": arms,
+        "tasks": [
+            {"task_id": str(p.get("base_query_id")),
+             "query": (tasks.get(str(p.get("base_query_id"))) or {}).get("current_query") or p.get("query"),
+             "scenario_type": (tasks.get(str(p.get("base_query_id"))) or {}).get("scenario_type")}
+            for p in sorted(predictions, key=lambda item: (str(item.get("base_query_id")) != task_id,
+                                                           str(item.get("base_query_id"))))
+        ],
+        "notes": [
+            "Ranker scores are recorded Phase 5.1 GPU predictions over a fixed candidate pool.",
+            "This panel is Replay only; it never re-ranks and never calls a model.",
+            "Memory OFF/ON is a recorded score comparison, not a new live inference.",
+        ],
+    }

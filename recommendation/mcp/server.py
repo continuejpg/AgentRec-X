@@ -790,6 +790,38 @@ async def _run_agent_turn(
     }
 
 
+def _remember_preference(
+    user_message: Annotated[str, Field(min_length=1, description="Explicit user-authored preference text")],
+    turn_id: Annotated[str, Field(min_length=1, description="Stable id for this user-authored memory turn")],
+) -> dict[str, Any]:
+    """Demo-only explicit M9 write over the existing PreferenceMemoryService.
+
+    This is the same writer/validation/audit path used by clarification replies; it does not
+    create a second memory store and it does not touch ranking.  It is enabled only on a
+    write-enabled local demo server.
+    """
+    ctx = _context()
+    if not ctx.writes_enabled:
+        raise ToolError("memory_writes_disabled: this server is read-only")
+    try:
+        result = ctx.memory.preference_service.process_turn(
+            user_key=ctx.user_key, user_message=user_message, turn_id=turn_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise ToolError(f"memory_write_failed: {type(exc).__name__}: {exc}") from exc
+    history = ctx.read_history()
+    return {
+        "schema": "agentrecx.p52.remember_preference.v1",
+        "status": "ok",
+        "authorized_user_key": ctx.user_key,
+        "update": result.update.as_dict(),
+        "active": history.get("active_preferences") or [],
+        "inactive": history.get("inactive_preferences") or [],
+        "audit_source": "M9 PreferenceMemoryService.process_turn",
+        "notes": ["explicit local demo write; no ranking mutation"],
+    }
+
+
 def _get_active_preferences() -> dict[str, Any]:
     """Read only this server's trusted local user's active/inactive M9 preferences and audit trail."""
     ctx = _context()
@@ -928,6 +960,7 @@ def build_server(ctx: AppContext) -> MCPServer:
     server.add_tool(_get_product_info, name="get_product_info")
     server.add_tool(_recommend_products, name="recommend_products")
     server.add_tool(_get_active_preferences, name="get_active_preferences")
+    server.add_tool(_remember_preference, name="remember_preference")
     server.add_tool(_compare_products, name="compare_products")
     server.add_tool(_request_preference_clarification, name="request_preference_clarification")
     server.add_tool(_submit_clarification_reply, name="submit_clarification_reply")

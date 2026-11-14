@@ -17,6 +17,8 @@ import { formatRelativeTime, plural, statusLabel } from "@/lib/format";
 import { Icon } from "./icons";
 import { Wordmark } from "./Header";
 import PreferencesList from "./PreferencesList";
+import MemoryTimeline from "./MemoryTimeline";
+import MemoryLab from "./MemoryLab";
 import { Button, IconButton, Pill, Skeleton } from "./ui";
 
 export default function Sidebar({
@@ -196,6 +198,14 @@ export default function Sidebar({
           error={prefsError}
           onRefresh={onRefreshPreferences}
           className="border-t border-(--line) pt-3"
+        />
+
+        <MemoryTimeline state={preferences} />
+
+        <MemoryLab
+          sessionId={session?.session_id ?? null}
+          writeEnabled={Boolean(profiles.find((profile) => profile.profile_id === activeProfileId)?.memory_writes)}
+          onUpdated={() => onRefreshPreferences()}
         />
 
         <section className="border-t border-(--line) pt-3">

@@ -18,15 +18,17 @@ import { Button, EmptyState, IconButton, Pill, SectionTitle, type Tone } from ".
 import ComparisonView from "./ComparisonView";
 import EvidenceList from "./EvidenceList";
 import ProductDetails from "./ProductDetails";
+import RankerReplayPanel from "./RankerReplayPanel";
 import { ErrorBubble } from "./MessageBubble";
 import { ProductImage } from "./ProductImage";
 
-export type PanelTab = "details" | "evidence" | "comparison";
+export type PanelTab = "details" | "evidence" | "comparison" | "rankers";
 
 const TABS: { id: PanelTab; label: string; icon: "box" | "search" | "compare" }[] = [
   { id: "details", label: "Details", icon: "box" },
   { id: "evidence", label: "Evidence", icon: "search" },
   { id: "comparison", label: "Comparison", icon: "compare" },
+  { id: "rankers", label: "Rankers", icon: "compare" },
 ];
 
 function selectionTone(count: number, min: number, max: number): Tone {
@@ -300,6 +302,8 @@ export default function RightPanel(props: RightPanelProps) {
               hint="Evidence spans appear after a search/recommendation response or when you open “View evidence” on a product card."
             />
           )
+        ) : tab === "rankers" ? (
+          <RankerReplayPanel />
         ) : (
           <CompareTab {...props} />
         )}

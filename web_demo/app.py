@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal
@@ -89,6 +90,12 @@ class ClarificationReplyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1)
     clarification_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+
+
+class MemoryRememberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
 
 
@@ -334,7 +341,7 @@ def create_app(
         qwen = monitor.snapshot()
         return {
             "profiles": [settings.profile_public(profile_id) for profile_id in PROFILE_BY_ID],
-            "default_profile_id": DEFAULT_PROFILE_ID,
+            "default_profile_id": settings.default_profile_id,
             "limits": limits_public(settings),
             "verified_comparison_ids": list(VERIFIED_COMPARISON_IDS),
             "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
@@ -376,6 +383,23 @@ def create_app(
             "examples": data.get("examples") or [],
         }
 
+    @app.get("/api/replay/rankers")
+    async def replay_rankers(task_id: str | None = Query(default=None)) -> dict[str, Any]:
+        """P100 recorded GPU ranker predictions (Replay only; no model call)."""
+        try:
+            return vm.ranker_replay_payload(
+                rankers_path=settings.ranker_replay_path,
+                tasks_path=settings.p100_tasks_path,
+                metadata_path=settings.p100_metadata_path,
+                task_id=task_id,
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise MCPManagerError(
+                f"P100 ranker replay artifact could not be read: {exc}",
+                code="ranker_replay_unavailable",
+                http_status=503,
+            ) from exc
+
     # -- sessions ------------------------------------------------------------
     @app.post("/api/sessions")
     async def create_session(body: SessionCreateRequest) -> dict[str, Any]:
@@ -412,6 +436,25 @@ def create_app(
         require_ready(session)
         payload = await manager.call_tool(session.profile_id, "get_active_preferences", {})
         return vm.preference_state(payload, profile_id=session.profile_id)
+
+    @app.post("/api/memory/remember")
+    async def remember_preference(body: MemoryRememberRequest) -> dict[str, Any]:
+        """Explicit local demo-only M9 write through the existing memory service."""
+        session = get_session(body.session_id)
+        require_ready(session)
+        turn_id = f"web-memory-{uuid.uuid4().hex[:12]}"
+        payload = await manager.call_tool(
+            session.profile_id, "remember_preference",
+            {"user_message": body.message, "turn_id": turn_id},
+        )
+        preferences_payload = await manager.call_tool(session.profile_id, "get_active_preferences", {})
+        return {
+            "turn_id": turn_id,
+            "update": payload.get("update") or {},
+            "preferences": vm.preference_state(preferences_payload, profile_id=session.profile_id),
+            "message": "Explicit M9 preference write; ranking is recomputed only by a subsequent recommendation turn.",
+            "error": None,
+        }
 
     # -- chat ----------------------------------------------------------------
     @app.post("/api/chat/stream")

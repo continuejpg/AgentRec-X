@@ -20,10 +20,12 @@ import type {
   ProductDetailPayload,
   ProductsPayload,
   ReplayResponse,
+  RankerReplayResponse,
   ServerEvent,
   SessionSummary,
   SessionView,
   PreferenceState,
+  MemoryRememberResponse,
 } from "./types";
 
 /** BFF base URL; override with NEXT_PUBLIC_BFF_URL for a non-default port. */
@@ -353,6 +355,23 @@ export class BffClient {
 
   replay(signal?: AbortSignal): Promise<ReplayResponse> {
     return request<ReplayResponse>("GET", "/api/replay", undefined, { signal, timeoutMs: 10_000 });
+  }
+
+  replayRankers(taskId?: string | null, signal?: AbortSignal): Promise<RankerReplayResponse> {
+    const query = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
+    return request<RankerReplayResponse>("GET", `/api/replay/rankers${query}`, undefined, {
+      signal,
+      timeoutMs: 10_000,
+    });
+  }
+
+  rememberMemory(sessionId: string, message: string, signal?: AbortSignal): Promise<MemoryRememberResponse> {
+    return request<MemoryRememberResponse>(
+      "POST",
+      "/api/memory/remember",
+      { session_id: sessionId, message },
+      { signal, timeoutMs: TOOL_TIMEOUT_MS },
+    );
   }
 }
 
