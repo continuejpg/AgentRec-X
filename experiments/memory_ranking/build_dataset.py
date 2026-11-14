@@ -96,6 +96,26 @@ def _target_row(
         "history_item_ids": [str(item["item_id"]) for item in history],
         "history_ratings": [float(item["rating"]) for item in history],
         "history_timestamps": [int(item["timestamp"]) for item in history],
+        "history_metadata_json": [
+            json.dumps(
+                {
+                    "item_id": str(item["item_id"]),
+                    "title": (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("title"),
+                    "main_category": (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("main_category"),
+                    "leaf_category": (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("leaf_category"),
+                    "attributes": list(
+                        (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("attributes") or ()
+                    ),
+                    "attribute_coverage": float(
+                        (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("attribute_coverage") or 0.0
+                    ),
+                    "price": (metadata_lookup.get(item["item_id"]) or features.empty_item_metadata()).get("price"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            for item in history
+        ],
         "target_title": meta.get("title"),
         "target_main_category": target_main,
         "target_leaf_category": target_leaf,
@@ -295,7 +315,7 @@ def build(ratings_path: Path = features.RATINGS_PATH) -> dict[str, Any]:
         "forbidden_features": [
             "user_id", "target_item_id", "target_rating", "target_high",
             "history_ratings", "history_item_ids", "history_timestamps",
-            "source_file_split", "target_title",
+            "history_metadata_json", "source_file_split", "target_title",
         ],
         "leakage_controls": features.leakage_controls(),
     }

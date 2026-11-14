@@ -40,13 +40,16 @@ def splits():
 def test_history_is_strictly_before_target_and_never_contains_target(splits):
     for name, frame in splits.items():
         for row in frame[
-            ["target_item_id", "target_timestamp", "history_item_ids", "history_timestamps", "history_length"]
+            ["target_item_id", "target_timestamp", "history_item_ids", "history_timestamps",
+             "history_length", "history_metadata_json"]
         ].itertuples(index=False):
             ids = list(row.history_item_ids) if row.history_item_ids is not None else []
             times = list(row.history_timestamps) if row.history_timestamps is not None else []
+            metadata = list(row.history_metadata_json) if row.history_metadata_json is not None else []
             assert row.target_item_id not in ids, name
             assert len(ids) == int(row.history_length), name
             assert len(times) == int(row.history_length), name
+            assert len(metadata) == int(row.history_length), name
             assert all(int(value) < int(row.target_timestamp) for value in times), name
 
 

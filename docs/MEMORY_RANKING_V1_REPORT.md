@@ -84,6 +84,17 @@ history_length >= 1: 8,270 rows
 cold-start target（history 为空），因此 train 比之前的 8,270 更大。Val/test 每个用户各一条，
 分别对应倒数第二条和最后一条真实评分。
 
+每个 target 同时保存：
+
+- `history_item_ids` / `history_ratings` / `history_timestamps`；
+- `history_metadata_json`：历史商品 title、main/leaf category、canonical attributes、
+  attribute coverage、price 的逐项 metadata；
+- target 商品 metadata 字段：title、main/leaf category、attributes、attribute count/coverage、price；
+- `item_features.parquet`：全部 7,147 个商品的可复用 metadata 特征表。
+
+因此历史商品 metadata 既逐 row 保存在 `history_metadata_json`，也能通过
+`item_features.parquet` join 还原。
+
 Ranking pair 评测集（不是训练集）：
 
 ```text

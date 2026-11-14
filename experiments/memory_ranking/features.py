@@ -97,13 +97,13 @@ DETAIL_KEYS: tuple[str, ...] = (
 LABEL_COLUMNS: tuple[str, ...] = ("target_rating", "target_high")
 ID_COLUMNS: tuple[str, ...] = (
     "user_id", "target_item_id", "target_timestamp", "split", "history_length",
-    "history_item_ids", "history_ratings", "history_timestamps",
+    "history_item_ids", "history_ratings", "history_timestamps", "history_metadata_json",
     "target_title", "target_main_category", "target_leaf_category",
     "target_attributes", "target_attribute_count", "target_attribute_coverage",
     "target_price", "target_rating", "target_high", "label_source", "data_source",
 )
 HISTORY_COLUMNS: tuple[str, ...] = (
-    "history_item_ids", "history_ratings", "history_timestamps",
+    "history_item_ids", "history_ratings", "history_timestamps", "history_metadata_json",
 )
 
 
