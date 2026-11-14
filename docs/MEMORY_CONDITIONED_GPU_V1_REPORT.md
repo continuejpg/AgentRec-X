@@ -279,6 +279,8 @@ LightGBM v1 Memory ON:  MAE 0.756594, AUC 0.749143, pair 0.586711
 
 本轮额外训练的 **LightGBM expanded** 使用完整历史 + catalog metadata + rating pointwise，再在相同 candidate arrays 上按预测 rating 排序；结果如 5.1/5.2。它 pairwise 高于 neural，但 Top-K 明显差于 neural/popularity。因此不能混合两组数字。
 
+**ItemCF / SASRec：本轮未运行。** 仓库中已有的 SASRec/Two-Tower 实现与当前 full-history + 76,918 catalog sampled-candidate 协议没有现成对齐，ItemCF 在 552,872 个全交互商品上的 item-item 矩阵也无法在剩余预算内做一个可信的、同协议的同口径基线。本轮不把未对齐的旧 SASRec/ItemCF 数字塞进表中；这是明确的未覆盖项，不是 PASS。
+
 ### 5.5 Pairwise Task
 
 Common held-out user pairs：14,157 groups，两个真实已评分商品，共享同一 history cutoff。
