@@ -116,16 +116,32 @@ class BehaviorEventMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
     feedback: Literal["like", "dislike"] | None = None
     compared_product_ids: list[str] | None = Field(default=None, max_length=5)
+    action_status: Literal["attempted", "succeeded", "failed"] | None = None
+    compare_id: str | None = Field(default=None, min_length=1, max_length=80)
+    failure_code: str | None = Field(default=None, max_length=120)
+    failure_message: str | None = Field(default=None, max_length=400)
 
     @model_validator(mode="after")
     def _one_kind(self) -> "BehaviorEventMetadata":
-        if self.feedback is not None and self.compared_product_ids:
-            raise ValueError("feedback and compared_product_ids are mutually exclusive")
+        if self.feedback is not None and (
+            self.compared_product_ids
+            or self.action_status
+            or self.compare_id
+            or self.failure_code
+            or self.failure_message
+        ):
+            raise ValueError("feedback cannot be combined with compare metadata")
         if self.compared_product_ids is not None:
             if not 2 <= len(self.compared_product_ids) <= 5:
                 raise ValueError("compared_product_ids must contain 2-5 product ids")
             if any(not str(item or "").strip() for item in self.compared_product_ids):
                 raise ValueError("compared_product_ids must be non-empty strings")
+        if self.action_status == "failed" and not self.failure_code:
+            raise ValueError("failed compare requires failure_code")
+        if self.action_status in {"attempted", "succeeded"} and (
+            self.failure_code or self.failure_message
+        ):
+            raise ValueError("failure fields are only valid for failed compare")
         return self
 
 
@@ -154,6 +170,8 @@ class BehaviorEventIn(BaseModel):
                 raise ValueError("product_compare requires compared_product_ids")
             if self.product_id not in metadata.compared_product_ids:
                 raise ValueError("product_id must be in compared_product_ids")
+            if metadata.action_status in {"succeeded", "failed"} and not metadata.compare_id:
+                raise ValueError("a compare result requires compare_id")
         elif self.event_type == "explicit_item_feedback":
             if metadata is None or metadata.feedback is None:
                 raise ValueError("explicit_item_feedback requires feedback")
@@ -589,7 +607,8 @@ def create_app(
         session = get_session(body.session_id)
         require_ready(session)
         return await demo_flow.compare_products(
-            manager=manager, session=session, product_refs=list(body.product_refs)
+            manager=manager, session=session, product_refs=list(body.product_refs),
+            query=session.last_query or None,
         )
 
     # -- clarification -------------------------------------------------------
@@ -616,7 +635,7 @@ def create_app(
         session = get_session(body.session_id)
         return behavior_store.record(
             session.session_id,
-            [event.model_dump() for event in body.events],
+            [event.model_dump(exclude_none=True) for event in body.events],
             contexts=session.recommendations,
             enabled=bool(session.behavior_enabled and settings.behavior_enabled),
         )

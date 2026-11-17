@@ -33,6 +33,14 @@ export interface BehaviorFlushInfo {
   rejected: number;
 }
 
+export interface CompareHandle {
+  compare_id: string;
+  recommendation_id: string;
+  product_id: string;
+  position: number;
+  compared_product_ids: string[];
+}
+
 type BehaviorListener = (info: BehaviorFlushInfo) => void;
 
 function newEventId(): string {
@@ -40,6 +48,13 @@ function newEventId(): string {
     return `evt-${crypto.randomUUID()}`;
   }
   return `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function newCompareId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `cmp-${crypto.randomUUID()}`;
+  }
+  return `cmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function eventBase(
@@ -202,20 +217,56 @@ class BehaviorTracker {
     return this.enqueue(eventBase("product_click", rec, product.product_id, position));
   }
 
-  compare(
+  compareAttempt(
     payload: ProductsPayload,
     products: { product: ProductCard; position: number }[],
-  ): boolean {
+  ): CompareHandle | null {
     const rec = String(payload.recommendation_id ?? "").trim();
-    if (!this.enabled || !rec || products.length < 2) return false;
+    if (!this.enabled || !rec || products.length < 2) return null;
     const ids = products.map((entry) => entry.product.product_id).filter(Boolean);
-    if (new Set(ids).size < 2 || !products[0]?.position) return false;
+    if (new Set(ids).size < 2 || !products[0]?.position) return null;
     const key = `${rec}|${[...ids].sort().join("|")}`;
     const now = Date.now();
-    if (now - (this.lastCompareAt.get(key) ?? 0) < COMPARE_DEDUPE_MS) return false;
+    if (now - (this.lastCompareAt.get(key) ?? 0) < COMPARE_DEDUPE_MS) return null;
     this.lastCompareAt.set(key, now);
+    const compareId = newCompareId();
     const event = eventBase("product_compare", rec, products[0].product.product_id, products[0].position);
-    event.metadata = { compared_product_ids: ids };
+    event.metadata = {
+      compared_product_ids: ids,
+      action_status: "attempted",
+      compare_id: compareId,
+    };
+    if (!this.enqueue(event)) return null;
+    return {
+      compare_id: compareId,
+      recommendation_id: rec,
+      product_id: products[0].product.product_id,
+      position: products[0].position,
+      compared_product_ids: ids,
+    };
+  }
+
+  compareResult(
+    handle: CompareHandle,
+    status: "succeeded" | "failed",
+    failure?: { code?: string | null; message?: string | null },
+  ): boolean {
+    if (!this.enabled || !this.sessionId) return false;
+    const event = eventBase(
+      "product_compare",
+      handle.recommendation_id,
+      handle.product_id,
+      handle.position,
+    );
+    event.metadata = {
+      compared_product_ids: handle.compared_product_ids,
+      action_status: status,
+      compare_id: handle.compare_id,
+    };
+    if (status === "failed") {
+      event.metadata.failure_code = String(failure?.code || "compare_failed").slice(0, 120);
+      event.metadata.failure_message = String(failure?.message || "comparison failed").slice(0, 400);
+    }
     return this.enqueue(event);
   }
 
@@ -333,13 +384,19 @@ export function useProductImpression({
   return ref;
 }
 
-export function behaviorEventLabel(type: BehaviorEventType): string {
+export function behaviorEventLabel(
+  type: BehaviorEventType,
+  status?: "attempted" | "succeeded" | "failed" | null,
+): string {
   switch (type) {
     case "product_impression":
       return "Impression";
     case "product_click":
       return "Click";
     case "product_compare":
+      if (status === "attempted") return "Compare attempt";
+      if (status === "succeeded") return "Compare completed";
+      if (status === "failed") return "Compare failed";
       return "Compare";
     case "explicit_item_feedback":
       return "Like / dislike";

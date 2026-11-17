@@ -161,3 +161,21 @@ Controls:
 
 The recommendation-quality status stays **NOT ESTABLISHED**.  V1 demonstrates a real event chain and
 an explainable shadow, not an online CTR or conversion lift.
+
+## 8. V1.1 addendum (signal correction and eligibility boundary)
+
+The original V1 selection above remains valid.  V1.1 changes three semantics, not the platform
+selection:
+
+1. **Impression is exposure context only.**  It has zero interest weight; it is retained for
+   visibility, click association and future exposure-bias work.  It is not negative feedback.
+2. **Compare is an operation lifecycle**, not a preference: `attempted → succeeded|failed`, with
+   `compare_id` and real failure provenance.  A completed compare does not imply liking every
+   compared product.
+3. **Formal shadow ranking is eligible-only.**  `gate_eligible` means “in Gate ALLOW_FINALIZE and
+   in `candidate_presentable_ids`”; ineligible products appear only in a clearly labelled
+   diagnostic ranking and can never enter the eligible Top-K.
+
+A minimal adapter fix now passes the session's current query into the existing P16 comparison tool;
+this corrects target/role inference without relaxing any P16 role rule.  See
+`AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`.

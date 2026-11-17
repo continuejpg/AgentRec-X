@@ -138,6 +138,7 @@ async def chat_events(
 ) -> AsyncIterator[dict[str, Any]]:
     """Full chat turn as contract-ordered SSE events (including ``done``)."""
     turn = Turn(turn_id=session.next_turn_id(), user_text=message)
+    session.last_query = message
     session.set_title_from(message)
     recorder = TurnRecorder(turn)
     state: dict[str, Any] = {"stop_reason": "finalized", "turn_id": turn.turn_id}
@@ -642,7 +643,11 @@ async def _comparison_turn(
     started = time.perf_counter()
     comparison_raw = await manager.call_tool(
         session.profile_id, "compare_products",
-        {"product_refs": list(product_refs), "session_id": session.session_id},
+        {
+            "product_refs": list(product_refs),
+            "session_id": session.session_id,
+            "query": session.last_query or None,
+        },
     )
     recorder.ok(compare_entry, latency_ms=_ms(started))
     yield event("tool_status", compare_entry)
@@ -695,11 +700,15 @@ async def product_details(
 
 
 async def compare_products(
-    *, manager: MCPManager, session: Session, product_refs: list[str]
+    *, manager: MCPManager, session: Session, product_refs: list[str], query: str | None = None
 ) -> dict[str, Any]:
     raw = await manager.call_tool(
         session.profile_id, "compare_products",
-        {"product_refs": list(product_refs), "session_id": session.session_id},
+        {
+            "product_refs": list(product_refs),
+            "session_id": session.session_id,
+            "query": query or session.last_query or None,
+        },
     )
     _raise_for_comparison_failure(raw)
     return vm.comparison_payload(raw)
@@ -745,6 +754,8 @@ async def clarification_reply(
             http_status=409,
             detail={"profile_id": profile_id},
         )
+
+    session.last_query = pending.query
 
     turn = Turn(turn_id=pending.reply_turn_id, user_text=message)
     recorder = TurnRecorder(turn)

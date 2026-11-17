@@ -98,6 +98,7 @@ export interface DemoConfig {
 export interface BehaviorConfig {
   enabled: boolean;
   master_enabled: boolean;
+  semantics_version?: string;
   storage: string;
   impression_min_visible_ms: number;
   impression_visibility_threshold: number;
@@ -105,8 +106,11 @@ export interface BehaviorConfig {
   half_life_seconds: number;
   event_types: string[];
   event_sources: string[];
+  compare_action_statuses?: string[];
   live_source: string;
   profile_uses_live_only: boolean;
+  impression_interest_weight?: number;
+  compare_interest_weight?: number;
   retention_days: number;
   external_analytics: string | null;
   notes: string[];
@@ -619,6 +623,10 @@ export interface BehaviorEventInput {
   metadata?: {
     feedback?: "like" | "dislike";
     compared_product_ids?: string[];
+    action_status?: "attempted" | "succeeded" | "failed";
+    compare_id?: string;
+    failure_code?: string;
+    failure_message?: string;
   };
 }
 
@@ -637,6 +645,10 @@ export interface BehaviorEventView {
   metadata: {
     feedback?: "like" | "dislike";
     compared_product_ids?: string[];
+    action_status?: "attempted" | "succeeded" | "failed";
+    compare_id?: string;
+    failure_code?: string;
+    failure_message?: string;
   };
   enters_profile: boolean;
 }
@@ -646,9 +658,15 @@ export interface BehaviorCounts {
   product_impression: number;
   product_click: number;
   product_compare: number;
+  product_compare_events?: number;
+  product_compare_attempted: number;
+  product_compare_completed: number;
+  product_compare_failed: number;
   explicit_feedback: number;
   explicit_like: number;
   explicit_dislike: number;
+  click_after_impression: number;
+  impressions_with_click: number;
   stored_total: number;
   recorded_replay: number;
   synthetic_test: number;
@@ -659,6 +677,7 @@ export interface BehaviorAttributeEvidence {
   product_id: string;
   evidence_id: string;
   occurred_at: string;
+  event_type?: string;
 }
 
 export interface BehaviorAttributeInterest {
@@ -667,6 +686,7 @@ export interface BehaviorAttributeInterest {
   score: number;
   distinct_products: number;
   evidence_count: number;
+  source_event_types?: string[];
   evidence: BehaviorAttributeEvidence[];
 }
 
@@ -688,11 +708,39 @@ export interface BehaviorRecentProduct {
 }
 
 export interface BehaviorComparedProduct {
-  event_id: string;
+  compare_id: string;
   product_id: string;
   product_title: string | null;
   compared_product_ids: string[];
+  status: "attempted" | "succeeded" | "failed" | string;
+  attempt_event_id: string | null;
+  result_event_id: string | null;
+  attempted_at: string | null;
+  result_at: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
   occurred_at: string;
+}
+
+export interface BehaviorCompareAttempt {
+  compare_id: string;
+  attempt_event_id: string | null;
+  product_id: string;
+  product_title: string | null;
+  compared_product_ids: string[];
+  status: string;
+  attempted_at: string | null;
+  failure_code: string | null;
+}
+
+export interface BehaviorRecentImpression {
+  event_id: string;
+  recommendation_id: string;
+  product_id: string;
+  product_title: string | null;
+  displayed_position: number;
+  occurred_at: string;
+  clicked: boolean;
 }
 
 export interface BehaviorExplicitFeedback {
@@ -719,6 +767,7 @@ export interface BehaviorSuggestion {
 
 export interface BehaviorProfile {
   schema: string;
+  semantics_version?: string;
   session_id: string;
   enabled: boolean;
   generated_at: string;
@@ -732,8 +781,11 @@ export interface BehaviorProfile {
     recorded_replay: number;
     synthetic_test: number;
   };
+  signal_semantics?: Record<string, unknown>;
+  recent_impressions: BehaviorRecentImpression[];
   recent_viewed: BehaviorRecentProduct[];
   recent_compared: BehaviorComparedProduct[];
+  recent_compare_attempts: BehaviorCompareAttempt[];
   recent_explicit_feedback: BehaviorExplicitFeedback[];
   recent_categories: { category: string; score: number }[];
   attribute_interests: BehaviorAttributeInterest[];
@@ -761,20 +813,27 @@ export interface BehaviorShadowMatchedAttribute {
 export interface BehaviorShadowRow {
   product_id: string;
   product_title: string | null;
-  base_rank: number;
-  shadow_rank: number;
-  base_score: number;
+  displayed_position: number;
+  diagnostic_base_rank: number;
+  diagnostic_base_score: number;
+  diagnostic_rank: number;
+  diagnostic_on_score: number;
   behavior_contribution: number;
-  final_shadow_score: number;
   product_interest_signal: number;
   attribute_interest_signal: number;
   matched_attribute_interests: BehaviorShadowMatchedAttribute[];
   ignored_common_attributes?: { attribute: string; score: number; coverage: number }[];
+  verified_attributes?: { attribute: string; value?: unknown; evidence_id?: string; span_text?: string | null }[];
   explicit_preference_conflict: boolean;
   suppressed_reason: string | null;
   recommended: boolean;
   gate_eligible: boolean;
   gate_selected: boolean;
+  eligible_base_rank: number | null;
+  eligible_base_score: number | null;
+  eligible_behavior_contribution: number;
+  eligible_on_score: number | null;
+  eligible_rank: number | null;
 }
 
 export interface BehaviorShadowRankingRow {
@@ -784,40 +843,83 @@ export interface BehaviorShadowRankingRow {
   base_score?: number;
   final_shadow_score?: number;
   behavior_contribution?: number;
+  displayed_position?: number;
+}
+
+export interface BehaviorDiagnosticRankingRow {
+  rank: number;
+  diagnostic_base_rank: number;
+  product_id: string;
+  product_title: string | null;
+  gate_eligible: boolean;
+  diagnostic_base_score: number;
+  behavior_contribution: number;
+  diagnostic_on_score: number;
+}
+
+export interface BehaviorGateContext {
+  action: string | null;
+  allow_finalize: boolean;
+  selected_candidate_id: string | null;
+  candidate_presentable_ids: string[];
+  eligible_candidate_ids: string[];
+  eligible_candidate_count: number;
+  eligibility_source: string;
+  eligible_recommendation_available: boolean;
+  no_eligible_reason: string | null;
+  interpretation: string;
+}
+
+export interface BehaviorShadowChange {
+  product_id: string;
+  product_title: string | null;
+  base_rank: number;
+  shadow_rank: number;
+  behavior_contribution: number;
+  matched_attribute_interests: BehaviorShadowMatchedAttribute[];
+  suppressed_reason: string | null;
+  gate_eligible: boolean;
 }
 
 export interface BehaviorShadow {
   schema: string;
+  semantics_version?: string;
   recommendation_id: string;
   request_id: string | null;
   query: string;
   created_at: string;
   generated_at: string;
   enabled: boolean;
-  applied: boolean;
   top_k: number;
   base_ranker_version: string;
   shadow_version: string;
   behavior_weight: number;
   explicit_preference_scale: number;
-  gate: GateDecision | null;
-  /** The shadow never adds/removes eligibility or changes the Gate; this must stay 0/true. */
+  gate: Partial<GateDecision> | null;
+  gate_context: BehaviorGateContext;
+  eligible_candidate_ids: string[];
+  eligible_candidate_count: number;
+  eligible_recommendation_available: boolean;
+  no_eligible_reason: string | null;
   hard_constraint_violations: number;
   eligibility_unchanged: boolean;
-  base_ranking: BehaviorShadowRankingRow[];
-  behavior_ranking: BehaviorShadowRankingRow[];
-  rows: BehaviorShadowRow[];
-  changes: {
-    product_id: string;
-    product_title: string | null;
-    base_rank: number;
-    shadow_rank: number;
-    behavior_contribution: number;
-    matched_attribute_interests: BehaviorShadowMatchedAttribute[];
-    suppressed_reason: string | null;
-    gate_eligible?: boolean;
-  }[];
+  behavior_signal_present: boolean;
+  eligible_behavior_applied: boolean;
+  diagnostic_behavior_applied: boolean;
+  applied: boolean;
+  eligible_ranking_changed: boolean;
+  diagnostic_ranking_changed: boolean;
   order_changed: boolean;
+  eligible_base_ranking: BehaviorShadowRankingRow[];
+  eligible_behavior_ranking: BehaviorShadowRankingRow[];
+  diagnostic_ranking: BehaviorDiagnosticRankingRow[];
+  diagnostic_candidates: BehaviorShadowRow[];
+  eligible_changes: BehaviorShadowChange[];
+  diagnostic_changes: BehaviorShadowChange[];
+  ineligible_candidates_with_behavior_signal: BehaviorShadowChange[];
+  eligible_ranking_ids: string[];
+  eligible_base_ranking_ids: string[];
+  diagnostic_ranking_ids: string[];
   active_preferences: { value: string; polarity: string; kind: string | null }[];
   inactive_preference_count: number;
   notes: string[];
@@ -833,6 +935,11 @@ export interface BehaviorShadow {
     attribute_interests: BehaviorAttributeInterest[];
     product_interests: BehaviorProductInterest[];
   };
+  // V1 compatibility aliases; V1.1 makes these the eligible-only ranking.
+  base_ranking: BehaviorShadowRankingRow[];
+  behavior_ranking: BehaviorShadowRankingRow[];
+  rows: BehaviorShadowRow[];
+  changes: BehaviorShadowChange[];
 }
 
 export interface BehaviorEventsResponse {

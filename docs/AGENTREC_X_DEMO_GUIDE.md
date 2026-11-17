@@ -140,17 +140,19 @@ return HTTP 400.
 Memory is process-local and resets when the BFF restarts; the UI and test evidence say this
 explicitly. Reset Session clears turns only and never another session's memory.
 
-### Behavior Inspector (Behavior Feedback V1)
+### Behavior Inspector (Behavior Feedback V1.1)
 
 Open the header **Behavior** button or right panel → **Behavior**.  The panel shows:
 
-- real browser events: impressions (visible card ≥60% for 1000 ms), clicks, compare actions and
-  short-term Like/Dislike;
-- the first-party short-term profile: verified attribute interests with product/evidence refs;
+- real browser events: impressions (visible card ≥60% for 1000 ms), clicks, compare
+  attempt/completed/failed and short-term Like/Dislike;
+- the first-party short-term profile: verified attribute interests with product/evidence refs,
+  source event types and the 30-minute decay half-life;
 - the difference between **explicit M9 memory** (long-term, user-confirmed writes only) and
   **short-term behavior**;
-- **Behavior OFF / ON shadow** over the last issued recommendation, with rank movement, behavior
-  contribution and evidence;
+- **Eligible OFF / ON** only for Gate `ALLOW_FINALIZE` candidates in
+  `candidate_presentable_ids`, plus a separate, clearly-labelled **Diagnostic Ranking — Not Final
+  Recommendations** for every displayed candidate;
 - a behavior-inferred preference suggestion that is **never written automatically**; the existing
   M9 writer runs only after **Remember this preference**, and the button is disabled on the
   read-only Demo A profile;
@@ -159,20 +161,33 @@ Open the header **Behavior** button or right panel → **Behavior**.  The panel 
 A quick demo:
 
 ```text
-1. Search "I need wireless earbuds for the gym."
-2. Scroll a few cards into view (impressions), open one card, click its Like button.
-3. Select two cards and click Compare (the user action is recorded even if P16 reports an error).
-4. Open Behavior and inspect counts, short-term interests and the suggestion.
-5. Search again; reopen Behavior and compare the Behavior OFF / ON top-5 shadow.
+A. Search "I need wireless headphones for the gym.", scroll cards only:
+   impressions appear, but short-term interests stay at zero.
+B. Click a card and Like it; search again:
+   click/Like produce weak interests and the next Eligible Behavior Shadow may move a rank.
+C. Search "I need wireless earbuds for the gym." and compare two cards:
+   Compare failed is recorded separately from Compare attempted; no success is fabricated.
+D. Open Behavior on that earbuds recommendation:
+   the Gate has one eligible candidate; ineligible search cards appear only in the diagnostic list.
+E. Start a new conversation: zero click/Like events from the previous session.
+F. Turn Personalization OFF: no behavior contribution, normal recommendations continue,
+   and M9 explicit preferences are untouched.
 ```
 
-The shadow is a **preview only**: it uses the same query/candidates/metadata/positions/eligibility,
-Active M9 memory and Gate.  The production product list above the panel is not re-ranked, and the
-Gate-selected product/action is shown unchanged.  Only `LIVE_USER_INTERACTION` enters the profile;
-Replay/synthetic events are tagged and excluded.  Event storage is a local SQLite file under
-`runs/web_demo/behavior/`; no external analytics SDK is used.  See
+The formal shadow is **eligible-only**: it uses the same query/candidates/metadata/positions/
+eligibility, Active M9 memory and Gate; ineligible products cannot enter the eligible Top-K.  The
+production product list above the panel is not re-ranked.  Only `LIVE_USER_INTERACTION` enters the
+profile; Replay/synthetic events are tagged and excluded.  Impressions are exposure context only;
+compare attempts/completed/failed are operation provenance, not preferences.  Event storage is a
+local SQLite file under `runs/web_demo/behavior/`; no external analytics SDK is used.  See
+[`AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md),
 [`AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md) and
 [`BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
+
+The V1.1 package also includes a real-data blind-review package under
+`runs/behavior_feedback_v11/` (`blind_review_tool.html`, `human_review_tasks.jsonl`,
+`human_review_template.csv`).  No human labels were auto-generated; without real labels the result
+file reports `preference_lift = unavailable_no_human_labels`.
 
 ## Environment variables
 

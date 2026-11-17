@@ -874,12 +874,13 @@ def _compare_products(
     product_refs: Annotated[list[str], Field(min_length=2, max_length=5,
                                               description="2-5 real product references")],
     session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
+    query: Annotated[str | None, Field(description="Optional current user query for product-role inference")] = None,
 ) -> dict[str, Any]:
     """Invoke the existing P16 Shopping Comparison Skill over real products."""
     started = time.perf_counter()
     ctx = _context()
     history = ctx.read_history(session_id)
-    task = ctx.current_task()
+    task = ctx.current_task(query)
     try:
         result = ctx.skill_registry.invoke(
             "shopping-comparison", catalogue=ctx.catalogue, task=task, history=history,

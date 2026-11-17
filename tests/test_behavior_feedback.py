@@ -16,7 +16,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from web_demo.app import create_app
-from web_demo.behavior import BehaviorStore
+from web_demo.behavior import (
+    BehaviorStore,
+    build_behavior_profile,
+    build_recommendation_snapshot,
+    build_shadow,
+)
 from web_demo.config import PROFILE_BY_ID, REPLAY_PATH, Settings
 from web_demo.mcp_manager import MCPManagerError
 from web_demo.sessions import SessionStore
@@ -512,4 +517,293 @@ def test_hard_constraint_presentable_set_is_never_changed(tmp_path):
         assert shadow["eligibility_unchanged"] is True
         assert row10["gate_eligible"] is False
         assert row10["recommended"] is False
-        assert row10["behavior_contribution"] > 0  # presentation-only shadow, not a Gate change
+        assert row10["behavior_contribution"] > 0  # diagnostic only
+        assert row10["eligible_behavior_contribution"] == 0
+        assert shadow["eligible_candidate_count"] == 1
+        assert [row["product_id"] for row in shadow["eligible_base_ranking"]] == ["P01"]
+        assert "P10" not in shadow["eligible_ranking_ids"]
+
+def test_impression_is_exposure_context_with_zero_interest(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        post_events(client, session["session_id"], [
+            event("evt-ctx-0001", "product_impression", rec, "P01", pos["P01"]),
+            event("evt-ctx-0002", "product_impression", rec, "P02", pos["P02"]),
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        assert profile["counts"]["product_impression"] == 2
+        assert profile["counts"]["product_click"] == 0
+        assert profile["product_interests"] == []
+        assert profile["attribute_interests"] == []
+        assert profile["recent_impressions"][0]["clicked"] is False
+        shadow = client.get(
+            f"/api/behavior/shadow?session_id={session['session_id']}&recommendation_id={rec}"
+        ).json()
+        assert shadow["behavior_signal_present"] is False
+        assert shadow["eligible_behavior_applied"] is False
+        assert shadow["diagnostic_behavior_applied"] is False
+        assert [row["product_id"] for row in shadow["eligible_base_ranking"]] == [
+            row["product_id"] for row in shadow["eligible_behavior_ranking"]
+        ]
+
+
+def test_click_weak_interest_like_and_dislike_are_item_level(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        post_events(client, session["session_id"], [
+            event("evt-click-1001", "product_click", rec, "P01", pos["P01"]),
+            event("evt-like-1002", "explicit_item_feedback", rec, "P02", pos["P02"], metadata={"feedback": "like"}),
+            event("evt-dislike-1003", "explicit_item_feedback", rec, "P03", pos["P03"], metadata={"feedback": "dislike"}),
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        assert profile["counts"]["product_click"] == 1
+        assert profile["counts"]["explicit_like"] == 1
+        assert profile["counts"]["explicit_dislike"] == 1
+        scores = {item["product_id"]: item["score"] for item in profile["product_interests"]}
+        assert scores["P01"] > 0
+        assert scores["P02"] > scores["P01"]
+        assert scores["P03"] < 0
+        assert profile["recent_viewed"][0]["product_id"] == "P01"
+        # Attribute interests are positive only and carry source/provenance.
+        assert profile["attribute_interests"]
+        assert "product_click" in profile["attribute_interests"][0]["source_event_types"]
+        assert profile["attribute_interests"][0]["evidence"][0]["event_type"] in {"product_click", "explicit_item_feedback"}
+
+
+def test_compare_lifecycle_attempt_completed_failed_are_distinct(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        base = {"compared_product_ids": ["P01", "P02"], "compare_id": "cmp-v11-001", "action_status": "attempted"}
+        post_events(client, session["session_id"], [
+            event("evt-cmp-1001", "product_compare", rec, "P01", pos["P01"], metadata=base),
+        ])
+        post_events(client, session["session_id"], [
+            event("evt-cmp-1002", "product_compare", rec, "P01", pos["P01"], metadata={**base, "action_status": "succeeded"}),
+            event("evt-cmp-1003", "product_compare", rec, "P02", pos["P02"],
+                  metadata={"compared_product_ids": ["P02", "P03"], "compare_id": "cmp-v11-002",
+                            "action_status": "failed", "failure_code": "role_mismatch",
+                            "failure_message": "accessory cannot be compared as main product"}),
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        counts = profile["counts"]
+        assert counts["product_compare_attempted"] == 1
+        assert counts["product_compare_completed"] == 1
+        assert counts["product_compare_failed"] == 1
+        assert profile["product_interests"] == []
+        assert profile["attribute_interests"] == []
+        assert {item["status"] for item in profile["recent_compared"]} == {"failed", "succeeded"}
+        failure = next(item for item in profile["recent_compared"] if item["status"] == "failed")
+        assert failure["failure_code"] == "role_mismatch"
+        assert failure["failure_message"]
+        events = {item["event_id"]: item for item in profile["recent_events"]}
+        assert events["evt-cmp-1002"]["metadata"]["action_status"] == "succeeded"
+        assert events["evt-cmp-1003"]["metadata"]["failure_code"] == "role_mismatch"
+
+
+def test_compare_attempt_does_not_create_interest(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        post_events(client, session["session_id"], [
+            event("evt-cmp-2001", "product_compare", rec, "P01", pos["P01"],
+                  metadata={"compared_product_ids": ["P01", "P02"], "compare_id": "cmp-attempt-1",
+                            "action_status": "attempted"}),
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        assert profile["counts"]["product_compare_attempted"] == 1
+        assert profile["product_interests"] == []
+        assert profile["attribute_interests"] == []
+        assert profile["recent_compared"][0]["status"] == "attempted"
+
+
+def test_repeated_clicks_are_capped(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        post_events(client, session["session_id"], [
+            event(f"evt-loop-{index:04d}", "product_click", rec, "P01", pos["P01"])
+            for index in range(5)
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        assert profile["counts"]["product_click"] == 5
+        assert profile["product_interests"][0]["counted_events"] == 2
+        assert profile["product_interests"][0]["score"] <= 2.0
+
+
+def test_eligible_ranking_excludes_ineligible_and_diagnostic_shows_signal(tmp_path):
+    item_ids = tuple(f"P{index:02d}" for index in range(1, 11))
+    manager = setup_manager(item_ids)
+    manager.responses["recommend_products"] = lambda _profile, _args: {
+        **_recommend(item_ids), "gate": _gate(("P01", "P02"))
+    }
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events1, products1 = send_query(client, session["session_id"])
+        rec1 = products1["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products1["items"]}
+        post_events(client, session["session_id"], [
+            event("evt-inelig-0001", "product_click", rec1, "P10", pos["P10"]),
+            event("evt-inelig-0002", "product_click", rec1, "P10", pos["P10"]),
+            event("evt-inelig-0003", "explicit_item_feedback", rec1, "P10", pos["P10"], metadata={"feedback": "like"}),
+        ])
+        _events2, products2 = send_query(client, session["session_id"], "more")
+        shadow = client.get(
+            f"/api/behavior/shadow?session_id={session['session_id']}&recommendation_id={products2['recommendation_id']}"
+        ).json()
+        assert shadow["eligible_candidate_count"] == 2
+        assert shadow["eligible_candidate_ids"] == ["P01", "P02"]
+        assert [row["product_id"] for row in shadow["eligible_base_ranking"]] == ["P01", "P02"]
+        assert all(row["product_id"] not in {"P03", "P10"} for row in shadow["eligible_behavior_ranking"])
+        row10 = next(row for row in shadow["diagnostic_candidates"] if row["product_id"] == "P10")
+        assert row10["gate_eligible"] is False
+        assert row10["behavior_contribution"] > 0
+        assert any(item["product_id"] == "P10" for item in shadow["ineligible_candidates_with_behavior_signal"])
+        assert shadow["eligible_ranking_changed"] is False
+        assert shadow["diagnostic_behavior_applied"] is True
+        assert shadow["gate_context"]["eligible_candidate_count"] == 2
+
+
+def test_gate_not_finalizable_has_no_eligible_ranking(tmp_path):
+    item_ids = tuple(f"P{index:02d}" for index in range(1, 4))
+    payload = {
+        "recommendation_id": "rec-unit-001",
+        "ranker_version": "existing_ranking_v1",
+        "query": "unit",
+        "items": [
+            {"product_id": item_id, "displayed_position": index, "title": item_id, "position": index,
+             "verified_attributes": [{"attribute": f"attr_{item_id}", "value": "true", "evidence_id": f"pev_{item_id}"}]}
+            for index, item_id in enumerate(item_ids, start=1)
+        ],
+        "gate": {"action": "ASK_CLARIFICATION", "allow_finalize": False,
+                 "selected_candidate_id": None, "candidate_presentable_ids": ["P01", "P02"]},
+    }
+    snapshot = build_recommendation_snapshot(payload)
+    profile = build_behavior_profile([], session_id="web-unit", enabled=True, now_ts=1000.0,
+                                     reference_ts=1000.0, window_s=3600, half_life_s=1800)
+    shadow = build_shadow(snapshot=snapshot, profile=profile, enabled=True)
+    assert shadow["eligible_candidate_count"] == 0
+    assert shadow["eligible_recommendation_available"] is False
+    assert shadow["eligible_base_ranking"] == []
+    assert shadow["eligible_behavior_ranking"] == []
+    assert shadow["gate_context"]["no_eligible_reason"] == "gate_action_does_not_allow_finalize"
+    assert shadow["diagnostic_ranking"]
+
+
+def test_time_decay_halves_a_click_score(tmp_path):
+    store = BehaviorStore(tmp_path / "behavior.sqlite3", clock=lambda: 1000.0)
+    try:
+        payload = {
+            "recommendation_id": "rec-decay-001",
+            "ranker_version": "existing_ranking_v1",
+            "query": "unit",
+            "items": [{"product_id": "P01", "displayed_position": 1, "title": "P01", "position": 1,
+                       "verified_attributes": [{"attribute": "attr", "value": "true", "evidence_id": "pev_1"}]}],
+            "gate": {"action": "ALLOW_FINALIZE", "allow_finalize": True,
+                     "selected_candidate_id": "P01", "candidate_presentable_ids": ["P01"]},
+        }
+        snapshot = build_recommendation_snapshot(payload, now_ts=1000.0)
+        store.record("web-decay", [
+            {"event_id": "evt-decay-0001", "event_type": "product_click", "event_source": "LIVE_USER_INTERACTION",
+             "recommendation_id": "rec-decay-001", "product_id": "P01", "displayed_position": 1,
+             "metadata": {}},
+        ], contexts={"rec-decay-001": snapshot}, enabled=True)
+        immediate = store.profile("web-decay", now=1000.0)
+        after_half_life = store.profile("web-decay", now=1000.0 + 1800.0)
+        assert immediate["product_interests"][0]["score"] == 1.0
+        assert after_half_life["product_interests"][0]["score"] == 0.5
+    finally:
+        store.close()
+
+
+def test_withdrawn_preference_is_not_resurrected_by_clicks(tmp_path):
+    item_ids = tuple(f"P{index:02d}" for index in range(1, 11))
+    manager = setup_manager(item_ids)
+    inactive = [{
+        "memory_id": "m_withdrawn", "kind": "feature", "value": "special_p10",
+        "polarity": "prefer", "status": "removed", "logical_seq": 1,
+        "source_turn_id": "t1", "source_text": "withdrawn", "created_at": 1.0,
+    }]
+    manager.responses["get_active_preferences"] = _preferences(inactive=inactive)
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events1, products1 = send_query(client, session["session_id"])
+        rec1 = products1["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products1["items"]}
+        post_events(client, session["session_id"], [
+            event("evt-wd-0001", "product_click", rec1, "P10", pos["P10"]),
+            event("evt-wd-0002", "product_click", rec1, "P10", pos["P10"]),
+        ])
+        _events2, products2 = send_query(client, session["session_id"], "more")
+        shadow = client.get(
+            f"/api/behavior/shadow?session_id={session['session_id']}&recommendation_id={products2['recommendation_id']}"
+        ).json()
+        row10 = next(row for row in shadow["diagnostic_candidates"] if row["product_id"] == "P10")
+        assert row10["gate_eligible"] is True
+        assert row10["eligible_behavior_contribution"] == 0
+        assert row10["suppressed_reason"] == "withdrawn_preference_not_restored"
+        assert shadow["eligible_ranking_changed"] is False
+
+def test_compare_passes_session_query_to_adapter(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    manager.responses["compare_products"] = {
+        "schema": "agentrecx.p16.shopping_comparison.v1",
+        "status": "invalid_product_reference",
+        "current_query": "wireless earbuds",
+        "products": [],
+        "errors": [{"code": "role_mismatch", "item_id": "P01", "message": "role mismatch"}],
+        "conditional_best_supported": None,
+        "final_answer": "cannot compare",
+        "qwen_used": False,
+        "tool_calls": [], "claims_valid": 0, "claims_rejected": 0,
+        "unknown_count": 0, "latency_ms": 0.1, "notes": [],
+    }
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        send_query(client, session["session_id"], "I need wireless earbuds for the gym.")
+        client.post("/api/products/compare", json={
+            "session_id": session["session_id"], "product_refs": ["P01", "P02"],
+        })
+    calls = [call for call in manager.calls if call[1] == "compare_products"]
+    assert calls
+    assert calls[-1][2]["query"] == "I need wireless earbuds for the gym."
+
+def test_compare_result_is_not_downgraded_by_late_attempt(tmp_path):
+    manager = setup_manager(("P01", "P02", "P03"))
+    with TestClient(make_app(tmp_path, manager)) as client:
+        session = create_session(client)
+        _events, products = send_query(client, session["session_id"])
+        rec = products["recommendation_id"]
+        pos = {item["product_id"]: item["displayed_position"] for item in products["items"]}
+        # The result event id sorts before the attempt id at the same server timestamp.
+        post_events(client, session["session_id"], [
+            event("evt-cmp-0001", "product_compare", rec, "P01", pos["P01"],
+                  metadata={"compared_product_ids": ["P01", "P02"], "compare_id": "cmp-order-1",
+                            "action_status": "succeeded"}),
+            event("evt-cmp-9999", "product_compare", rec, "P01", pos["P01"],
+                  metadata={"compared_product_ids": ["P01", "P02"], "compare_id": "cmp-order-1",
+                            "action_status": "attempted"}),
+        ])
+        profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
+        compared = profile["recent_compared"][0]
+        assert compared["compare_id"] == "cmp-order-1"
+        assert compared["status"] == "succeeded"
+        assert profile["counts"]["product_compare_attempted"] == 1
+        assert profile["counts"]["product_compare_completed"] == 1

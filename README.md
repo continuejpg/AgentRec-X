@@ -87,11 +87,17 @@
 截图来自真实本地运行与真实浏览器调用，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
 Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
 
-**Behavior Feedback V1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
+**Behavior Feedback V1.1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
 BFF 事件链路进入 SQLite；只有 `LIVE_USER_INTERACTION` 进入短期画像，Replay/Synthetic 只保留来源
-但不参与统计。Behavior Inspector 展示短期兴趣、Evidence、显式 M9 与行为画像区别，以及固定
-candidate/query/Gate 下的 Behavior OFF/ON Shadow。点击不等于长期偏好，行为建议必须用户确认后才
-调用现有 M9 writer。真实浏览器验证（13 live events；点击商品 OFF #5 → ON #4；Gate 不变）见
+但不参与统计。V1.1 明确 **Impression 只做曝光上下文、零正向兴趣**；Compare 区分
+attempted / succeeded / failed 且不自动变成偏好；Behavior Shadow 只对 Gate
+`ALLOW_FINALIZE + candidate_presentable_ids` 的 Eligible 候选做正式 OFF/ON，Ineligible 候选只出现在
+“Diagnostic Ranking — Not Final Recommendations”。浏览器验证：10 次 impression → 0 兴趣；
+点击/Like 后 Eligible OFF #5 → ON #4；单 Eligible 场景 Ineligible 只进入诊断；Session A/B 隔离；
+Personalization OFF 返回 409 且正常推荐继续。真实人工偏好标签未采集，`preference_lift` 标记为
+unavailable。报告见
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md)，
+V1 记录见
 [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md)，
 技术选型见 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md)。
 

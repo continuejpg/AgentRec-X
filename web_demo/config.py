@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from web_demo.behavior import (
+    BEHAVIOR_SEMANTICS_VERSION,
+    COMPARE_ACTION_STATUSES,
     DEFAULT_HALF_LIFE_S,
     DEFAULT_RETENTION_DAYS,
     DEFAULT_WINDOW_S,
@@ -352,6 +354,7 @@ def behavior_public(settings: Settings, *, session_enabled: bool | None = None) 
     return {
         "enabled": bool(settings.behavior_enabled if session_enabled is None else session_enabled),
         "master_enabled": bool(settings.behavior_enabled),
+        "semantics_version": BEHAVIOR_SEMANTICS_VERSION,
         "storage": "sqlite",
         "impression_min_visible_ms": IMPRESSION_MIN_VISIBLE_MS,
         "impression_visibility_threshold": IMPRESSION_VISIBILITY_THRESHOLD,
@@ -359,13 +362,19 @@ def behavior_public(settings: Settings, *, session_enabled: bool | None = None) 
         "half_life_seconds": settings.behavior_half_life_s,
         "event_types": list(EVENT_TYPES),
         "event_sources": list(EVENT_SOURCES),
+        "compare_action_statuses": list(COMPARE_ACTION_STATUSES),
         "live_source": "LIVE_USER_INTERACTION",
         "profile_uses_live_only": True,
+        "impression_interest_weight": 0.0,
+        "compare_interest_weight": 0.0,
         "retention_days": settings.behavior_retention_days,
         "external_analytics": None,
         "notes": [
             "First-party BFF events; no PostHog/Snowplow SDK and no autocapture.",
             "The browser never sends user_id, raw chat text or memory text.",
             "Impressions require browser visibility, not the backend Top-K list.",
+            "Impressions are exposure context only and carry zero interest weight.",
+            "Compare attempt/completed/failed is operation provenance, not a preference.",
+            "Formal shadow comparison is eligible-only; diagnostic ranking is never final.",
         ],
     }

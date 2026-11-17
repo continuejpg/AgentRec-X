@@ -18,9 +18,10 @@
 - **No re-ranking of the production payload.** The BFF formats payloads; it must not reorder, score,
   filter or "improve" recommendation/comparison results. Gate action/status is passed through
   verbatim. The one exception is the explicitly labelled **Behavior Shadow**
-  (`GET /api/behavior/shadow`): a separate preview over the exact frozen candidate pool, with the
-  production `ProductsPayload.items` order untouched. It never changes the Gate or the list the
-  user sees in the main transcript.
+  (`GET /api/behavior/shadow`): a separate **eligible-only** OFF/ON preview over the exact frozen
+  candidate pool, with the production `ProductsPayload.items` order untouched.  A diagnostic list
+  of all displayed candidates is explicitly not a recommendation list.  The shadow never changes
+  the Gate or the list the user sees in the main transcript.
 - **Identity is server-bound.** Two demo profiles:
   - `profile_0049` → MCP server `--user-key p14e2_lite_0049`, read-only.
   - `profile_0057` → MCP server `--user-key p14e2_lite_0057`, write-enabled only when
@@ -112,12 +113,15 @@ the profile selector; it must not invent a profile.
   "modes": { "...": "same as /health" },
   "notices": ["Local CPU demo; catalogue facts only; no live price/stock/ratings."],
   "behavior": {
-    "enabled": true, "master_enabled": true, "storage": "sqlite",
+    "enabled": true, "master_enabled": true, "semantics_version": "behavior_semantics_v1.1",
+    "storage": "sqlite",
     "impression_min_visible_ms": 1000, "impression_visibility_threshold": 0.6,
     "window_seconds": 21600, "half_life_seconds": 1800,
     "event_types": ["product_impression","product_click","product_compare","explicit_item_feedback"],
     "event_sources": ["LIVE_USER_INTERACTION","RECORDED_REPLAY","SYNTHETIC_TEST"],
+    "compare_action_statuses": ["attempted","succeeded","failed"],
     "live_source": "LIVE_USER_INTERACTION", "profile_uses_live_only": true,
+    "impression_interest_weight": 0.0, "compare_interest_weight": 0.0,
     "retention_days": 7, "external_analytics": null, "notes": ["..."]
   }
 }
@@ -239,13 +243,22 @@ Rules:
   then continue the pending query through `recommend_products` and return the real products.
 - `turn_id` must be stable per reply attempt (idempotency); reuse on retry.
 
-### Behavior Feedback V1 (first-party local events)
+### Behavior Feedback V1.1 (first-party local events)
 
 The browser posts only whitelisted structured events to the local BFF.  There is no PostHog /
 Snowplow SDK, no autocapture and no session recording.  The BFF stores events in a local SQLite
 database (`runs/web_demo/behavior/events.sqlite3` by default; `AGENTRECX_BEHAVIOR_DB` overrides)
 and builds a short-term profile.  Only `LIVE_USER_INTERACTION` enters the profile; recorded replay
 and synthetic test events are stored with provenance and excluded.
+
+V1.1 signal semantics:
+
+- `product_impression` is exposure context only: **zero interest weight**; not a negative signal.
+- `product_click` is weak interest.
+- `product_compare` is operation provenance, not a preference; its lifecycle is
+  `attempted → succeeded|failed`.  Completed compare is not automatically a positive preference.
+- `explicit_item_feedback` is item-level Like/Dislike and is **not** an M9 preference.
+- Only `product_click` and `explicit_item_feedback` produce short-term product/attribute interest.
 
 #### POST /api/behavior/events
 ```json
@@ -264,8 +277,12 @@ and synthetic test events are stored with provenance and excluded.
   ]
 }
 ```
-- `product_compare` metadata: `{"compared_product_ids":[...2-5]}`; the primary `product_id` must be
-  one of them and all ids must belong to the same issued recommendation.
+- `product_compare` metadata:
+  `{"compared_product_ids":[...2-5], "compare_id":"cmp-...", "action_status":"attempted|succeeded|failed",
+  "failure_code":"...", "failure_message":"..."}`.  The primary `product_id` must be one of the
+  compared ids and all ids must belong to the same issued recommendation.  `attempted` is queued
+  before the P16 call; `succeeded`/`failed` are queued after the real P16 result.  A failed compare
+  is never counted as completed; failure fields are required only for `failed`.
 - `explicit_item_feedback` metadata: `{"feedback":"like"|"dislike"}`.  This is **not** an M9
   preference and never becomes an active long-term preference by itself.
 - The BFF verifies that `recommendation_id` was issued to the same session and that
@@ -281,22 +298,40 @@ and synthetic test events are stored with provenance and excluded.
   `{code:"behavior_disabled"}` and stores nothing.
 
 #### GET /api/behavior/profile?session_id=...
-Returns counts (only live), source counts (including excluded replay/synthetic), recent viewed/
-compared/explicit-feedback items, weighted attribute interests with evidence refs, per-product
-interests, recent events (with `enters_profile`), the `explicit_memory` status, and an optional
-behavior-derived `suggestion`.  A suggestion is an inference (`requires_confirmation=true`); it is
-never written to M9 automatically.  Verified attributes require a P15 evidence id; a present
-catalogue flag without evidence contributes no attribute interest.
+Returns counts (only live, including separate compare attempted/completed/failed counts), source
+counts (including excluded replay/synthetic), `recent_impressions` (with `clicked` context),
+recent viewed/compared/explicit-feedback items, weighted attribute interests with evidence refs and
+source event types, per-product interests, recent events (with `enters_profile`), the
+`explicit_memory` status, and an optional behavior-derived `suggestion`.  A suggestion is an
+inference (`requires_confirmation=true`); it is never written to M9 automatically.  Verified
+attributes require a P15 evidence id; a present catalogue flag without evidence contributes no
+attribute interest.  Impressions never create product/attribute interest.
 
 #### GET /api/behavior/shadow?session_id=...&recommendation_id=...
-Computes the fixed-pool Behavior OFF/ON preview.  Inputs that must be identical in both modes:
-query, candidates, product metadata, displayed positions, eligibility flags, Active M9 memory and
-the Decision Gate.  Only the bounded behavior contribution differs (fixed weight, per-product caps,
-time decay, common-attribute specificity guard).  The response includes `base_ranking`,
-`behavior_ranking`, per-row `base_score`, `behavior_contribution`, `matched_attribute_interests`,
-`suppressed_reason`, `gate_eligible`, `gate_selected`, `changes` and the unchanged Gate.
-Behavior events with `occurred_at > recommendation.created_at` are excluded (point-in-time
-profile), so a later click cannot leak into an earlier ranking.
+Computes two explicitly separated spaces:
+
+- **Eligible Recommendation Ranking (formal OFF/ON):** only products for which the Gate action is
+  `ALLOW_FINALIZE` and the product is in `gate.candidate_presentable_ids`.  `eligible_candidate_ids`,
+  `eligible_base_ranking`, `eligible_behavior_ranking`, `eligible_changes` and
+  `eligible_ranking_changed` are the only formal comparison.  Ineligible products can never enter
+  this Top-K.
+- **Diagnostic Candidate Ranking:** all displayed candidates with base/ON scores, eligibility flags,
+  hypothetical `behavior_contribution` and ineligible reasons known at this layer.  It is labelled
+  `Diagnostic Ranking — Not Final Recommendations` and never becomes the recommendation list.
+
+The response includes `gate_context` with `action`, `allow_finalize`, `selected_candidate_id`,
+`candidate_presentable_ids`, `eligible_candidate_count`, `eligibility_source`,
+`eligible_recommendation_available` and `no_eligible_reason`; `diagnostic_candidates`;
+`diagnostic_ranking`; `ineligible_candidates_with_behavior_signal`;
+`hard_constraint_violations` (must stay 0) and `eligibility_unchanged` (must stay true).
+Inputs that are identical in both formal modes: query, candidates, product metadata, displayed
+positions, eligibility, Active M9 memory and the Decision Gate.  Only the bounded behavior
+contribution changes.  Behavior events with `occurred_at > recommendation.created_at` are excluded
+(point-in-time profile), so a later click cannot leak into an earlier ranking.
+
+`gate_eligible=false` means only that the product is not in the Gate-issued
+`candidate_presentable_ids` on an `ALLOW_FINALIZE` decision.  The BFF payload does not encode a
+per-item reason, so the UI must not claim a specific hard-constraint violation.
 
 #### POST /api/behavior/enabled
 Body `{"session_id":"web-...","enabled":true|false}`.  Turning it off stops collection and hides the
@@ -309,7 +344,8 @@ conversation, and never affects another session.
 Data retention: `AGENTRECX_BEHAVIOR_RETENTION_DAYS` (default 7).  Window and decay:
 `AGENTRECX_BEHAVIOR_WINDOW_S` (default 21600) and `AGENTRECX_BEHAVIOR_HALF_LIFE_S` (default 1800).
 Event source labels and browser visibility rules are in
-`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`.
+`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`; V1.1 evidence is in
+`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`.
 
 ### GET /api/replay
 Reads `runs/p18/qwen_replay.json` (existing real saved Qwen trajectories) and returns

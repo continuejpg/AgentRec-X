@@ -41,18 +41,23 @@ retrieval, Rule Planner, Decision Gate, P15 evidence, P16 Skills and M9 preferen
 
 Ranker Comparison is **recorded P100 replay**, not live ShopRanker/Hybrid inference.
 
-### Behavior Feedback V1 (new)
+### Behavior Feedback V1.1 (new)
 
 Real browser-visible impressions, clicks, comparisons and short-term Like/Dislike travel through a
 first-party BFF event chain into local SQLite. Only `LIVE_USER_INTERACTION` enters the short-term
-profile; recorded-replay and synthetic events keep their provenance but are excluded. The Behavior
-Inspector shows short-term interests with P15 evidence, the difference between explicit M9 memory
-and behavior, and a Behavior OFF/ON shadow over a fixed query/candidate/Gate set. A click is never a
-long-term preference: a behavior suggestion requires explicit user confirmation before the existing
-M9 writer is called. Browser verification (13 live events; clicked item OFF #5 → ON #4; Gate
-unchanged) is in
-[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md);
-the reuse-first selection is in
+profile; recorded-replay and synthetic events keep their provenance but are excluded. V1.1 makes
+**impressions exposure context only (zero interest)**; compare distinguishes attempted / succeeded /
+failed and never becomes a preference; the formal Behavior OFF/ON shadow is **eligible-only** over
+Gate `ALLOW_FINALIZE` + `candidate_presentable_ids`, while ineligible products appear only in the
+labelled **Diagnostic Ranking — Not Final Recommendations**. Browser verification: 10 impressions →
+0 interests; click/Like moved an eligible item OFF #5 → ON #4; a single-eligible case kept all
+ineligible cards out of the eligible Top-K; Session A/B stayed isolated; Personalization OFF returned
+409 while normal recommendations continued. No human labels were collected, so `preference_lift`
+is unavailable. See
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md),
+the V1 record in
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md),
+and the reuse-first selection in
 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
 
 ### V2.1 additions

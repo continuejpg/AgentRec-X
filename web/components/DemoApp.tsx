@@ -658,9 +658,9 @@ export default function DemoApp() {
         return;
       }
       const context = findComparisonContext(productIds);
-      if (context) {
-        behaviorTracker.compare(context.payload, context.products);
-      }
+      const compareHandle = context
+        ? behaviorTracker.compareAttempt(context.payload, context.products)
+        : null;
       compareBusyRef.current = true;
       setComparisonLoading(true);
       setComparisonError(null);
@@ -671,11 +671,19 @@ export default function DemoApp() {
       try {
         const payload = await api.compare(sessionId, productIds);
         if (sessionRef.current?.session_id !== sessionId) return;
+        if (compareHandle) behaviorTracker.compareResult(compareHandle, "succeeded");
         setComparison(payload);
         setComparisonLatency(performance.now() - startedAt);
       } catch (error) {
+        const payload = toErrorPayload(error);
+        if (compareHandle) {
+          behaviorTracker.compareResult(compareHandle, "failed", {
+            code: payload.code,
+            message: payload.message,
+          });
+        }
         setComparison(null);
-        setComparisonError(toErrorPayload(error));
+        setComparisonError(payload);
       } finally {
         setComparisonLoading(false);
         compareBusyRef.current = false;

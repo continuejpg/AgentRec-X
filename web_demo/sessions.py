@@ -96,6 +96,7 @@ class Session:
     turns: list[Turn] = field(default_factory=list)
     pending_clarification: PendingClarification | None = None
     behavior_enabled: bool = True
+    last_query: str = ""
     recommendations: dict[str, dict[str, Any]] = field(default_factory=dict)
     _recommendation_order: list[str] = field(default_factory=list)
     _turn_counter: int = 0
@@ -168,6 +169,7 @@ class Session:
         # to an invisible recommendation.  Stored events keep their own product snapshots.
         self.recommendations = {}
         self._recommendation_order = []
+        self.last_query = ""
         self._turn_counter = 0
         self._reply_counter = 0
         self.touch()

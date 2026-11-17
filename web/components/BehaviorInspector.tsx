@@ -99,6 +99,18 @@ function Counts({ profile }: { profile: BehaviorProfile }) {
           <div className="text-[9.5px] leading-tight text-(--ink-soft)">{item.label}</div>
         </div>
       ))}
+      {counts.product_compare ? (
+        <p className="col-span-4 text-[10px] leading-snug text-(--ink-soft)">
+          Compare lifecycle: {counts.product_compare_attempted} attempted ·{" "}
+          {counts.product_compare_completed} completed · {counts.product_compare_failed} failed
+        </p>
+      ) : null}
+      {counts.click_after_impression ? (
+        <p className="col-span-4 text-[10px] leading-snug text-(--ink-faint)">
+          {counts.click_after_impression} click(s) had a matching visible impression; impressions stay
+          exposure context only.
+        </p>
+      ) : null}
       {counts.recorded_replay || counts.synthetic_test ? (
         <p className="col-span-4 text-[10px] leading-snug text-(--ink-faint)">
           Excluded from profile: {counts.recorded_replay} recorded replay · {counts.synthetic_test} synthetic test.
@@ -112,8 +124,9 @@ function InterestList({ profile }: { profile: BehaviorProfile }) {
   if (!profile.attribute_interests.length) {
     return (
       <p className="text-[11.5px] leading-snug text-(--ink-soft)">
-        No verified attribute interest yet. Impressions alone are weak; clicks, comparisons and item
-        feedback with a P15 evidence span are required.
+        No verified attribute interest yet. An impression is exposure context and contributes zero
+        interest; a weak interest requires a click, and an explicit item feedback requires Like/Dislike.
+        Comparisons are operation provenance, not preferences.
       </p>
     );
   }
@@ -133,6 +146,10 @@ function InterestList({ profile }: { profile: BehaviorProfile }) {
               evidence: {interest.evidence.slice(0, 3).map((entry) => entry.product_id).join(", ")}
             </div>
           ) : null}
+          <div className="mt-0.5 text-[9.5px] leading-snug text-(--ink-faint)">
+            source: {(interest.source_event_types ?? []).map(humanize).join(", ") || "—"} · decay
+            half-life {Math.round(profile.half_life_seconds / 60)} min
+          </div>
         </li>
       ))}
     </ul>
@@ -148,24 +165,45 @@ function EventList({ profile }: { profile: BehaviorProfile }) {
       {profile.recent_events.slice(0, 10).map((event) => (
         <li key={event.event_id} className="rounded-lg border border-(--line) bg-(--ground)/40 px-2 py-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-(--ink-2)">{behaviorEventLabel(event.event_type)}</span>
+            <span className="text-[11px] font-semibold text-(--ink-2)">
+              {behaviorEventLabel(event.event_type, event.metadata.action_status)}
+            </span>
             <span className="truncate font-mono text-[10px] text-(--ink-soft)" title={event.product_id}>
               {event.product_id}
             </span>
             <span className="ml-auto text-[9.5px] text-(--ink-faint)">pos {event.displayed_position}</span>
           </div>
-          <div className="flex items-center gap-1 text-[9.5px] text-(--ink-faint)">
+          <div className="flex flex-wrap items-center gap-1 text-[9.5px] text-(--ink-faint)">
             <span className="truncate">rec {event.recommendation_id}</span>
             <span aria-hidden>·</span>
             <span>{formatRelativeTime(event.occurred_at)}</span>
             {event.event_source !== "LIVE_USER_INTERACTION" ? (
-              <Pill tone="warn" className="ml-auto">
-                {event.event_source}
-              </Pill>
+              <Pill tone="warn">{event.event_source}</Pill>
             ) : null}
             {event.metadata.feedback ? <Pill tone="muted">{event.metadata.feedback}</Pill> : null}
+            {event.metadata.action_status ? (
+              <Pill
+                tone={
+                  event.metadata.action_status === "succeeded"
+                    ? "ok"
+                    : event.metadata.action_status === "failed"
+                      ? "danger"
+                      : "warn"
+                }
+              >
+                {event.metadata.action_status}
+              </Pill>
+            ) : null}
             {event.metadata.compared_product_ids?.length ? (
               <Pill tone="muted">{event.metadata.compared_product_ids.length} compared</Pill>
+            ) : null}
+            {event.metadata.failure_code ? (
+              <span className="text-(--danger)" title={event.metadata.failure_message ?? undefined}>
+                {event.metadata.failure_code}
+              </span>
+            ) : null}
+            {event.event_type === "product_impression" ? (
+              <span className="text-(--ink-faint)">exposure only · no interest</span>
             ) : null}
           </div>
         </li>
@@ -178,10 +216,12 @@ function RankingColumn({
   title,
   tone,
   rows,
+  emptyHint,
 }: {
   title: string;
   tone: "muted" | "accent";
-  rows: BehaviorShadow["base_ranking"];
+  rows: BehaviorShadow["eligible_base_ranking"];
+  emptyHint: string;
 }) {
   return (
     <div className="min-w-0 rounded-lg border border-(--line) bg-(--ground)/40 p-1.5">
@@ -189,12 +229,53 @@ function RankingColumn({
         <Pill tone={tone}>{title}</Pill>
         <span className="ml-auto text-[9.5px] text-(--ink-faint)">top {rows.length}</span>
       </div>
-      <ol className="space-y-0.5">
-        {rows.map((row) => (
-          <li key={`${title}-${row.product_id}`} className="flex items-center gap-1 text-[10.5px]">
-            <span className="w-3 shrink-0 text-right font-mono text-(--ink-faint)">{row.rank}</span>
-            <span className="min-w-0 truncate text-(--ink-2)" title={row.product_title ?? row.product_id}>
+      {rows.length ? (
+        <ol className="space-y-0.5">
+          {rows.map((row) => (
+            <li key={`${title}-${row.product_id}`} className="flex items-center gap-1 text-[10.5px]">
+              <span className="w-3 shrink-0 text-right font-mono text-(--ink-faint)">{row.rank}</span>
+              <span className="min-w-0 truncate text-(--ink-2)" title={row.product_title ?? row.product_id}>
+                {row.product_title ?? row.product_id}
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-[10px] leading-snug text-(--ink-soft)">{emptyHint}</p>
+      )}
+    </div>
+  );
+}
+
+function DiagnosticRanking({ shadow }: { shadow: BehaviorShadow }) {
+  return (
+    <div className="rounded-lg border border-dashed border-(--line-strong) bg-(--ground)/40 p-2" data-testid="behavior-diagnostic-ranking">
+      <div className="flex flex-wrap items-center gap-1">
+        <Pill tone="warn">Diagnostic Ranking — Not Final Recommendations</Pill>
+        <span className="ml-auto text-[9.5px] text-(--ink-faint)">
+          {shadow.diagnostic_ranking.length} shown · all displayed candidates
+        </span>
+      </div>
+      <p className="mt-1 text-[9.5px] leading-snug text-(--ink-soft)">
+        This is a developer diagnostic over every displayed candidate. Cards marked “ineligible” can
+        show a hypothetical behavior contribution but can never enter the eligible Top-K.
+      </p>
+      <ol className="mt-1.5 space-y-1">
+        {shadow.diagnostic_ranking.map((row) => (
+          <li key={row.product_id} className="flex items-center gap-1.5 rounded-md border border-(--line) bg-(--card) px-1.5 py-1">
+            <span className="w-4 shrink-0 text-right font-mono text-[10px] text-(--ink-faint)">{row.rank}</span>
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-(--ink-2)" title={row.product_title ?? row.product_id}>
               {row.product_title ?? row.product_id}
+            </span>
+            <Pill tone={row.gate_eligible ? "ok" : "warn"}>
+              {row.gate_eligible ? "eligible" : "ineligible"}
+            </Pill>
+            <span className="shrink-0 font-mono text-[9.5px] text-(--ink-faint)">
+              #{row.diagnostic_base_rank}→#{row.rank}
+            </span>
+            <span className={`shrink-0 font-mono text-[9.5px] ${row.behavior_contribution ? "text-(--accent-ink)" : "text-(--ink-faint)"}`}>
+              {row.behavior_contribution >= 0 ? "+" : ""}
+              {row.behavior_contribution.toFixed(3)}
             </span>
           </li>
         ))}
@@ -238,72 +319,121 @@ function ShadowBlock({
     );
   }
   if (!shadow) return <p className="text-[11.5px] text-(--ink-soft)">Shadow not loaded yet.</p>;
+  const gate = shadow.gate_context;
+  const hasEligible = shadow.eligible_candidate_count > 0;
   return (
     <div className="space-y-2" data-testid="behavior-shadow">
       <div className="flex flex-wrap items-center gap-1">
-        <Pill tone={shadow.applied ? "accent" : "muted"} dot>
-          {shadow.applied ? "Behavior applied" : "No behavior adjustment"}
+        <Pill tone={shadow.eligible_behavior_applied ? "accent" : "muted"} dot>
+          {shadow.eligible_behavior_applied
+            ? "Eligible behavior applied"
+            : hasEligible
+              ? "No eligible behavior adjustment"
+              : "No eligible ranking"}
         </Pill>
-        <Pill tone={shadow.order_changed ? "violet" : "muted"}>
-          {shadow.order_changed ? "order changed" : "same order"}
+        <Pill tone={shadow.eligible_ranking_changed ? "violet" : "muted"}>
+          {shadow.eligible_ranking_changed ? "eligible order changed" : "eligible order same"}
         </Pill>
+        {shadow.diagnostic_behavior_applied ? (
+          <Pill tone="warn">diagnostic signal</Pill>
+        ) : null}
         <span className="ml-auto font-mono text-[9.5px] text-(--ink-faint)" title={shadow.recommendation_id}>
           {shadow.recommendation_id}
         </span>
       </div>
-      {shadow.gate?.selected_candidate_id ? (
-        <p className="rounded-md border border-(--line) bg-(--ground)/50 px-1.5 py-1 text-[9.5px] leading-snug text-(--ink-soft)">
-          Gate unchanged: <span className="font-mono text-(--ink-2)">{shadow.gate.action}</span> · selected{" "}
-          <span className="font-mono text-(--ink-2)">{shadow.gate.selected_candidate_id}</span>. The shadow
-          only previews presentation order over the displayed pool.
+
+      <div className="rounded-md border border-(--line) bg-(--ground)/50 px-1.5 py-1 text-[9.5px] leading-snug text-(--ink-soft)">
+        <div>
+          Gate: <span className="font-mono text-(--ink-2)">{gate.action ?? "—"}</span> · allow_finalize{" "}
+          <span className="font-mono text-(--ink-2)">{String(gate.allow_finalize)}</span> · selected{" "}
+          <span className="font-mono text-(--ink-2)">{gate.selected_candidate_id ?? "none"}</span>
+        </div>
+        <div>
+          Eligible candidates: <span className="font-mono text-(--ink-2)">{gate.eligible_candidate_count}</span> ·
+          source <span className="font-mono text-(--ink-2)">{gate.eligibility_source}</span>
+        </div>
+        <div className="mt-0.5 text-(--ink-faint)">{gate.interpretation}</div>
+        {gate.no_eligible_reason ? (
+          <div className="mt-0.5 text-(--warn)">No eligible reason: {humanize(gate.no_eligible_reason)}</div>
+        ) : null}
+      </div>
+
+      {hasEligible ? (
+        <>
+          <div className="grid grid-cols-2 gap-1.5">
+            <RankingColumn
+              title="Eligible OFF"
+              tone="muted"
+              rows={shadow.eligible_base_ranking}
+              emptyHint="No eligible candidates."
+            />
+            <RankingColumn
+              title="Eligible ON"
+              tone="accent"
+              rows={shadow.eligible_behavior_ranking}
+              emptyHint="No eligible candidates."
+            />
+          </div>
+          {shadow.eligible_changes.length ? (
+            <div className="space-y-1">
+              {shadow.eligible_changes.slice(0, 5).map((change) => (
+                <div key={change.product_id} className="rounded-lg border border-(--line) bg-(--card) px-2 py-1">
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="font-mono text-(--ink-faint)">
+                      #{change.base_rank} → #{change.shadow_rank}
+                    </span>
+                    <span className="min-w-0 truncate font-semibold text-(--ink-2)" title={change.product_title ?? change.product_id}>
+                      {change.product_title ?? change.product_id}
+                    </span>
+                    <span className="ml-auto shrink-0 font-mono text-[10px] text-(--accent-ink)">
+                      {change.behavior_contribution >= 0 ? "+" : ""}
+                      {change.behavior_contribution.toFixed(3)}
+                    </span>
+                  </div>
+                  {change.matched_attribute_interests.length ? (
+                    <div className="mt-0.5 flex flex-wrap gap-1">
+                      {change.matched_attribute_interests.map((match) => (
+                        <Pill key={match.attribute} tone="info" title={`verified evidence: ${match.evidence.map((entry) => entry.evidence_id).join(", ")}`}>
+                          {humanize(match.attribute)} · {match.score.toFixed(2)}
+                        </Pill>
+                      ))}
+                    </div>
+                  ) : null}
+                  {change.suppressed_reason ? (
+                    <div className="mt-0.5 text-[10px] text-(--warn)">
+                      suppressed: {humanize(change.suppressed_reason)}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] leading-snug text-(--ink-soft)">
+              No eligible ranking change. {shadow.eligible_behavior_applied
+                ? "Behavior signal changed scores but not the eligible order."
+                : "The current behavior profile has no admissible signal for eligible candidates."}
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="rounded-lg border border-(--warn)/30 bg-(--warn-soft)/40 px-2 py-1.5 text-[11px] leading-snug text-(--warn)">
+          No eligible recommendation ranking exists for this Gate state. The diagnostic list below is
+          not a final recommendation list; the original Gate/ASK outcome remains authoritative.
+        </div>
+      )}
+
+      <DiagnosticRanking shadow={shadow} />
+
+      {shadow.ineligible_candidates_with_behavior_signal.length ? (
+        <p className="text-[9.5px] leading-snug text-(--warn)">
+          {shadow.ineligible_candidates_with_behavior_signal.length} ineligible candidate(s) show a
+          diagnostic behavior contribution and are excluded from the eligible ranking by construction.
         </p>
       ) : null}
-      <div className="grid grid-cols-2 gap-1.5">
-        <RankingColumn title="Behavior OFF" tone="muted" rows={shadow.base_ranking} />
-        <RankingColumn title="Behavior ON" tone="accent" rows={shadow.behavior_ranking} />
-      </div>
-      {shadow.changes.length ? (
-        <div className="space-y-1">
-          {shadow.changes.slice(0, 5).map((change) => (
-            <div key={change.product_id} className="rounded-lg border border-(--line) bg-(--card) px-2 py-1">
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="font-mono text-(--ink-faint)">
-                  #{change.base_rank} → #{change.shadow_rank}
-                </span>
-                <span className="min-w-0 truncate font-semibold text-(--ink-2)" title={change.product_title ?? change.product_id}>
-                  {change.product_title ?? change.product_id}
-                </span>
-                <span className="ml-auto shrink-0 font-mono text-[10px] text-(--accent-ink)">
-                  {change.behavior_contribution >= 0 ? "+" : ""}
-                  {change.behavior_contribution.toFixed(3)}
-                </span>
-              </div>
-              {change.matched_attribute_interests.length ? (
-                <div className="mt-0.5 flex flex-wrap gap-1">
-                  {change.matched_attribute_interests.map((match) => (
-                    <Pill key={match.attribute} tone="info" title={`verified evidence: ${match.evidence.map((entry) => entry.evidence_id).join(", ")}`}>
-                      {humanize(match.attribute)} · {match.score.toFixed(2)}
-                    </Pill>
-                  ))}
-                </div>
-              ) : null}
-              {change.suppressed_reason ? (
-                <div className="mt-0.5 text-[10px] text-(--warn)">
-                  suppressed: {humanize(change.suppressed_reason)}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[11px] leading-snug text-(--ink-soft)">
-          ON equals OFF for this recommendation. This is expected when the behavior profile has no
-          signal for these products.
-        </p>
-      )}
       <p className="text-[9.5px] leading-snug text-(--ink-faint)">
-        Shadow only: query, candidates, metadata, eligibility, Active M9 memory and the Decision Gate
-        are fixed. The normal product list above is not re-ranked by this panel.
+        Formal comparison is eligible-only: fixed query, candidates, metadata, positions, Active M9
+        memory, eligibility and Gate. Diagnostic rows never become recommendations, and the normal
+        product list above is not re-ranked.
       </p>
     </div>
   );
@@ -453,7 +583,7 @@ export default function BehaviorInspector({
     setShadowLoading(true);
     setShadowError(null);
     api
-      .behaviorShadow(sessionId, latestRecommendationId, 5)
+      .behaviorShadow(sessionId, latestRecommendationId, 10)
       .then((next) => {
         if (!cancelled) setShadow(next);
       })
@@ -633,6 +763,11 @@ export default function BehaviorInspector({
                   </div>
                 </div>
               </div>
+              <p className="text-[9.5px] leading-snug text-(--ink-faint)">
+                Behavior interests are weak signals and are not permanent memory. Impressions are
+                exposure context only; compare attempt/completed/failed is operation provenance, not a
+                preference. Only a verified click or explicit Like/Dislike contributes short-term interest.
+              </p>
               {visibleSuggestion ? (
                 <SuggestionCard
                   suggestion={visibleSuggestion}
@@ -649,7 +784,7 @@ export default function BehaviorInspector({
               <Section title="Recent behavior events" aside={`${profile.counts.live_events} live`}>
                 <EventList profile={profile} />
               </Section>
-              <Section title="Behavior OFF / ON shadow" aside={shadow?.order_changed ? "diff" : "same"} open>
+              <Section title="Eligible OFF / ON + diagnostic" aside={shadow?.eligible_ranking_changed ? "eligible diff" : "no eligible diff"} open>
                 <ShadowBlock
                   shadow={shadow}
                   loading={shadowLoading}
