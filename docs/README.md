@@ -23,6 +23,7 @@
 | [ONBOARDING.md](ONBOARDING.md) | current coordinates, reading order, hard rules and a short self-check |
 | [USAGE.md](USAGE.md) | install, run the demo, call the API, run tests/smokes, troubleshoot |
 | [EXPERIMENTS.md](EXPERIMENTS.md) | the formal evaluation protocol, accepted metrics and threats to validity |
+| [BEHAVIOR_FEEDBACK_TECH_SELECTION.md](BEHAVIOR_FEEDBACK_TECH_SELECTION.md) | Behavior Feedback V1 reference review, reuse-first selection and privacy boundaries |
 
 ## Current evidence — frozen acceptance and evaluation records
 
@@ -31,6 +32,8 @@
 | [V2_FINAL_ACCEPTANCE.md](V2_FINAL_ACCEPTANCE.md) | the frozen engineering/quality/completeness/delivery verdicts |
 | [V2_KNOWN_LIMITATIONS.md](V2_KNOWN_LIMITATIONS.md) | what is explicitly **not** proven |
 | [V2_REPRODUCE.md](V2_REPRODUCE.md) | reproduce the environment, artifact checks and regression commands |
+| [AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md](AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md) | Behavior Feedback V1: real browser event chain, short-term profile and Behavior OFF/ON shadow evidence |
+| [AGENTREC_X_DEMO_GUIDE.md](AGENTREC_X_DEMO_GUIDE.md) | the current Web Demo walkthrough (chat, Memory, Behavior Inspector, Rankers) |
 | [B1_PREREGISTRATION.md](B1_PREREGISTRATION.md) | the frozen paired-evidence protocol for the Two-Tower/fusion study |
 | [M3_PREREGISTRATION.md](M3_PREREGISTRATION.md) / [M4_RESULT.md](M4_RESULT.md) | the bounded LLM policy experiment and its formal result |
 | [V2_ROADMAP_COVERAGE.md](V2_ROADMAP_COVERAGE.md) | roadmap item status (PASS / PARTIAL / UNKNOWN) |

@@ -261,14 +261,25 @@ def products_payload(
     recommended_product_id: str | None,
     gate: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    # ``displayed_position`` is assigned by the server exactly once, in the order the
+    # browser will render.  Behavior events are validated against this value, never
+    # against a position the browser chose for itself.
+    positioned = [
+        {**item, "displayed_position": index}
+        for index, item in enumerate(items, start=1)
+    ]
     return {
         "query": query,
         "search_mode": search_mode,
         "score_kind": score_kind,
         "catalogue_size": catalogue_size,
-        "items": items,
+        "items": positioned,
         "recommended_product_id": recommended_product_id,
         "gate": gate_view(gate),
+        # Filled by the BFF when the payload is emitted (one new id per display):
+        "recommendation_id": None,
+        "request_id": None,
+        "ranker_version": None,
     }
 
 

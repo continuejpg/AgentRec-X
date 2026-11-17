@@ -11,10 +11,12 @@ import asyncio
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Iterable, Mapping
 
 from web_demo import viewmodels as vm
+from web_demo.behavior import EXISTING_RANKER_VERSION
 from web_demo.config import COMPARE_MAX, COMPARE_MIN, SEARCH_TOP_K, Settings
 from web_demo.mcp_manager import MCPManager, MCPManagerError
 from web_demo.sessions import PendingClarification, Session, Turn
@@ -89,6 +91,29 @@ def _mark_running_tool_error(turn: Turn, message: str) -> dict[str, Any] | None:
             entry["detail"] = message
             return entry
     return None
+
+
+def _attach_recommendation(
+    session: Session,
+    products: dict[str, Any],
+    *,
+    turn_id: str,
+    ranking_source: str,
+) -> dict[str, Any]:
+    """Give this displayed list its own opaque recommendation id and freeze its snapshot.
+
+    A new id is generated for every order the browser can see, so an impression from an
+    earlier list can never be attributed to a later one.  The production order is copied
+    unchanged; only the behavior shadow (a separate preview) may reorder it.
+    """
+    recommendation_id = f"rec-{uuid.uuid4().hex[:12]}"
+    products["recommendation_id"] = recommendation_id
+    products["request_id"] = turn_id
+    products["ranker_version"] = EXISTING_RANKER_VERSION
+    session.record_recommendation(
+        products, turn_id=turn_id, ranking_source=ranking_source
+    )
+    return products
 
 
 def is_comparison_request(message: str, selected_product_ids: Iterable[str]) -> bool:
@@ -292,6 +317,10 @@ async def _search_and_recommend_turn(
             recommended_product_id=None,
             gate=gate,
         )
+        _attach_recommendation(
+            session, products, turn_id=turn.turn_id,
+            ranking_source="cpu_live:search_products+recommend_products+gate",
+        )
         turn.products = products
         yield event("products", products)
 
@@ -378,6 +407,10 @@ async def _search_and_recommend_turn(
         items=items,
         recommended_product_id=str(selected_id) if selected_id else None,
         gate=gate,
+    )
+    _attach_recommendation(
+        session, products, turn_id=turn.turn_id,
+        ranking_source="cpu_live:search_products+recommend_products+gate",
     )
     turn.products = products
     yield event("products", products)
@@ -534,6 +567,10 @@ async def _qwen_live_turn(
         items=items,
         recommended_product_id=str(selected_id) if selected_id else None,
         gate=gate,
+    )
+    _attach_recommendation(
+        session, products, turn_id=turn.turn_id,
+        ranking_source="qwen_live:run_agent_turn+gate",
     )
     turn.products = products
     yield event("products", products)
@@ -815,6 +852,10 @@ async def clarification_reply(
                 recommended_product_id=str(selected_id) if selected_id else None,
                 gate=rec_payload.get("gate"),
             )
+            _attach_recommendation(
+                session, recommendation, turn_id=turn.turn_id,
+                ranking_source="qwen_live:clarification_resume+gate",
+            )
             if rec_payload.get("status") == "awaiting_clarification" and rec_payload.get("clarification"):
                 # The real model asked a follow-up because M9 still contains an unresolved conflict
                 # (e.g. "avoid wired" is an AVOID entry, not an explicit retraction).  Expose the
@@ -849,6 +890,7 @@ async def clarification_reply(
                 recommendation=rec_payload,
                 recorder=recorder,
                 steps=steps,
+                turn_id=turn.turn_id,
             )
     else:
         rec_payload = None
@@ -916,6 +958,7 @@ async def _recommendation_view(
     recommendation: Mapping[str, Any],
     recorder: TurnRecorder,
     steps: list[dict[str, Any]],
+    turn_id: str,
 ) -> dict[str, Any]:
     gate = recommendation.get("gate") or {}
     selected_id = recommendation.get("selected_product_id")
@@ -938,7 +981,7 @@ async def _recommendation_view(
                 product_role=gate.get("product_role"),
             )
         )
-    return vm.products_payload(
+    products = vm.products_payload(
         query=query,
         search_mode=recommendation.get("search_mode"),
         score_kind=None,
@@ -946,4 +989,8 @@ async def _recommendation_view(
         items=items,
         recommended_product_id=str(selected_id) if selected_id else None,
         gate=gate,
+    )
+    return _attach_recommendation(
+        session, products, turn_id=turn_id,
+        ranking_source="cpu_live:clarification_resume+recommend_products+gate",
     )

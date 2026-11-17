@@ -12,6 +12,9 @@ Endpoints (see ``docs/WEB_DEMO_CONTRACT.md``):
     POST /api/products/compare
     POST /api/clarification/reply
     GET  /api/replay
+    POST /api/behavior/events              GET /api/behavior/profile
+    GET  /api/behavior/shadow              POST /api/behavior/enabled
+    DELETE /api/behavior
 
 The BFF binds 127.0.0.1 and is a local demo only.  It never imports recommendation core modules
 directly: every product/preference/gate value comes from one of the seven P17 MCP tools.
@@ -26,23 +29,31 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator, Literal, Mapping
 
 from fastapi import FastAPI, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from web_demo import demo_flow
 from web_demo import viewmodels as vm
+from web_demo.behavior import (
+    BehaviorError,
+    BehaviorStore,
+    MAX_BATCH_EVENTS,
+    build_shadow,
+    build_suggestion,
+)
 from web_demo.config import (
     DEFAULT_PROFILE_ID,
     NOTICES,
     PROFILE_BY_ID,
     VERIFIED_COMPARISON_IDS,
     Settings,
+    behavior_public,
     limits_public,
     load_settings,
     modes_public,
@@ -97,6 +108,70 @@ class MemoryRememberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
+
+
+class BehaviorEventMetadata(BaseModel):
+    """Whitelisted event metadata only; no chat/memory text can travel through here."""
+
+    model_config = ConfigDict(extra="forbid")
+    feedback: Literal["like", "dislike"] | None = None
+    compared_product_ids: list[str] | None = Field(default=None, max_length=5)
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "BehaviorEventMetadata":
+        if self.feedback is not None and self.compared_product_ids:
+            raise ValueError("feedback and compared_product_ids are mutually exclusive")
+        if self.compared_product_ids is not None:
+            if not 2 <= len(self.compared_product_ids) <= 5:
+                raise ValueError("compared_product_ids must contain 2-5 product ids")
+            if any(not str(item or "").strip() for item in self.compared_product_ids):
+                raise ValueError("compared_product_ids must be non-empty strings")
+        return self
+
+
+class BehaviorEventIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9._:-]+$")
+    event_type: Literal[
+        "product_impression",
+        "product_click",
+        "product_compare",
+        "explicit_item_feedback",
+    ]
+    recommendation_id: str = Field(min_length=1)
+    product_id: str = Field(min_length=1)
+    displayed_position: int = Field(ge=1, le=100)
+    event_source: Literal[
+        "LIVE_USER_INTERACTION", "RECORDED_REPLAY", "SYNTHETIC_TEST"
+    ] = "LIVE_USER_INTERACTION"
+    metadata: BehaviorEventMetadata | None = None
+
+    @model_validator(mode="after")
+    def _metadata_matches_type(self) -> "BehaviorEventIn":
+        metadata = self.metadata
+        if self.event_type == "product_compare":
+            if metadata is None or not metadata.compared_product_ids:
+                raise ValueError("product_compare requires compared_product_ids")
+            if self.product_id not in metadata.compared_product_ids:
+                raise ValueError("product_id must be in compared_product_ids")
+        elif self.event_type == "explicit_item_feedback":
+            if metadata is None or metadata.feedback is None:
+                raise ValueError("explicit_item_feedback requires feedback")
+        elif metadata is not None:
+            raise ValueError(f"{self.event_type} does not accept metadata")
+        return self
+
+
+class BehaviorEventsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1)
+    events: list[BehaviorEventIn] = Field(min_length=1, max_length=MAX_BATCH_EVENTS)
+
+
+class BehaviorEnabledRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1)
+    enabled: bool
 
 
 class RestartRequest(BaseModel):
@@ -229,11 +304,16 @@ def create_app(
     manager: MCPManager | Any | None = None,
     sessions: SessionStore | None = None,
     qwen_health: QwenHealthMonitor | Any | None = None,
+    behavior: BehaviorStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     manager = manager or MCPManager(settings)
     store = sessions or SessionStore()
     monitor = qwen_health or QwenHealthMonitor(settings)
+    behavior_store = behavior or BehaviorStore(
+        settings.behavior_store_path,
+        retention_days=settings.behavior_retention_days,
+    )
     meta: dict[str, Any] = {"started_at": iso(utc_now()), "monotonic": time.monotonic()}
     handlers_added: list[logging.Handler] = []
 
@@ -253,6 +333,8 @@ def create_app(
             LOGGER.info("BFF stopping; closing MCP clients")
             await monitor.stop()
             await manager.stop()
+            with suppress(Exception):
+                behavior_store.close()
             _remove_handlers(logging.getLogger("agentrecx.web_demo"), handlers_added)
             handlers_added.clear()
 
@@ -267,9 +349,14 @@ def create_app(
     app.state.sessions = store
     app.state.qwen_health = monitor
     app.state.meta = meta
+    app.state.behavior = behavior_store
 
     @app.exception_handler(MCPManagerError)
     async def mcp_error_handler(request: Request, exc: MCPManagerError) -> JSONResponse:  # noqa: ARG001
+        return JSONResponse(status_code=exc.http_status, content=exc.as_payload())
+
+    @app.exception_handler(BehaviorError)
+    async def behavior_error_handler(request: Request, exc: BehaviorError) -> JSONResponse:  # noqa: ARG001
         return JSONResponse(status_code=exc.http_status, content=exc.as_payload())
 
     @app.exception_handler(RequestValidationError)
@@ -347,6 +434,7 @@ def create_app(
             "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
             "qwen_live": qwen,
             "notices": list(NOTICES),
+            "behavior": behavior_public(settings),
         }
 
     @app.post("/api/demo/restart")
@@ -409,7 +497,9 @@ def create_app(
                 code="unknown_profile_id",
                 http_status=400,
             )
-        session = store.create(body.profile_id)
+        session = store.create(
+            body.profile_id, behavior_enabled=settings.behavior_enabled
+        )
         LOGGER.info("session created id=%s profile=%s", session.session_id, session.profile_id)
         return session.view()
 
@@ -514,5 +604,146 @@ def create_app(
             message=body.message,
             qwen_health=monitor,
         )
+
+    # -- behavior feedback V1 ------------------------------------------------
+    def _active_rows(payload: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        active = [dict(item) for item in payload.get("active_preferences") or () if isinstance(item, Mapping)]
+        inactive = [dict(item) for item in payload.get("inactive_preferences") or () if isinstance(item, Mapping)]
+        return active, inactive
+
+    @app.post("/api/behavior/events")
+    async def behavior_events(body: BehaviorEventsRequest) -> dict[str, Any]:
+        session = get_session(body.session_id)
+        return behavior_store.record(
+            session.session_id,
+            [event.model_dump() for event in body.events],
+            contexts=session.recommendations,
+            enabled=bool(session.behavior_enabled and settings.behavior_enabled),
+        )
+
+    @app.get("/api/behavior/profile")
+    async def behavior_profile(session_id: str = Query(min_length=1)) -> dict[str, Any]:
+        session = get_session(session_id)
+        enabled = bool(session.behavior_enabled and settings.behavior_enabled)
+        profile = behavior_store.profile(
+            session.session_id,
+            enabled=enabled,
+            window_s=settings.behavior_window_s,
+            half_life_s=settings.behavior_half_life_s,
+        )
+        active: list[dict[str, Any]] = []
+        inactive: list[dict[str, Any]] = []
+        memory_status = "disabled" if not enabled else "unavailable"
+        memory_error: str | None = None
+        if enabled:
+            try:
+                pref_payload = await manager.call_tool(
+                    session.profile_id, "get_active_preferences",
+                    {"session_id": session.session_id},
+                )
+            except MCPManagerError as exc:
+                memory_error = exc.message
+            else:
+                active, inactive = _active_rows(pref_payload)
+                memory_status = "ok"
+        profile["explicit_memory"] = {
+            "status": memory_status,
+            "active_count": len(active),
+            "inactive_count": len(inactive),
+            "error": memory_error,
+            "audit_source": "M9 PreferenceMemoryService via get_active_preferences",
+        }
+        profile["suggestion"] = (
+            build_suggestion(profile, active_preferences=active, inactive_preferences=inactive)
+            if enabled and memory_status == "ok" else None
+        )
+        profile["latest_recommendation_id"] = session.latest_recommendation_id
+        profile["behavior"] = behavior_public(settings, session_enabled=enabled)
+        return profile
+
+    @app.get("/api/behavior/shadow")
+    async def behavior_shadow(
+        session_id: str = Query(min_length=1),
+        recommendation_id: str | None = Query(default=None),
+        top_k: int = Query(default=5, ge=1, le=20),
+    ) -> dict[str, Any]:
+        session = get_session(session_id)
+        snapshot = session.recommendation(recommendation_id)
+        if snapshot is None:
+            raise BehaviorError(
+                "no issued recommendation matches this session"
+                + (f" and recommendation_id {recommendation_id!r}" if recommendation_id else ""),
+                code="no_recommendation",
+                http_status=404,
+            )
+        enabled = bool(session.behavior_enabled and settings.behavior_enabled)
+        profile = behavior_store.profile(
+            session.session_id,
+            enabled=enabled,
+            as_of=float(snapshot.get("created_ts") or time.time()),
+            window_s=settings.behavior_window_s,
+            half_life_s=settings.behavior_half_life_s,
+        )
+        active: list[dict[str, Any]] = []
+        inactive: list[dict[str, Any]] = []
+        memory_status = "disabled" if not enabled else "ok"
+        if enabled:
+            try:
+                pref_payload = await manager.call_tool(
+                    session.profile_id, "get_active_preferences",
+                    {"session_id": session.session_id},
+                )
+            except MCPManagerError as exc:
+                raise MCPManagerError(
+                    "behavior shadow cannot be computed while explicit M9 preferences are unavailable",
+                    code="explicit_memory_unavailable",
+                    http_status=503,
+                    detail={"reason": exc.message},
+                ) from exc
+            active, inactive = _active_rows(pref_payload)
+        shadow = build_shadow(
+            snapshot=snapshot,
+            profile=profile,
+            active_preferences=active,
+            inactive_preferences=inactive,
+            enabled=enabled,
+            top_k=top_k,
+        )
+        shadow["explicit_memory"] = {
+            "status": memory_status,
+            "active_count": len(active),
+            "inactive_count": len(inactive),
+        }
+        shadow["behavior_profile"] = {
+            "generated_at": profile.get("generated_at"),
+            "as_of": profile.get("as_of"),
+            "counts": profile.get("counts"),
+            "attribute_interests": list(profile.get("attribute_interests") or [])[:5],
+            "product_interests": list(profile.get("product_interests") or [])[:5],
+        }
+        return shadow
+
+    @app.post("/api/behavior/enabled")
+    async def behavior_set_enabled(body: BehaviorEnabledRequest) -> dict[str, Any]:
+        session = get_session(body.session_id)
+        session.behavior_enabled = bool(body.enabled and settings.behavior_enabled)
+        behavior_store.set_enabled(session.session_id, session.behavior_enabled)
+        session.touch()
+        return {
+            "session_id": session.session_id,
+            "enabled": session.behavior_enabled,
+            "behavior": behavior_public(settings, session_enabled=session.behavior_enabled),
+        }
+
+    @app.delete("/api/behavior")
+    async def behavior_delete(session_id: str = Query(min_length=1)) -> dict[str, Any]:
+        session = get_session(session_id)
+        deleted = behavior_store.delete_session(session.session_id)
+        return {
+            "session_id": session.session_id,
+            "deleted_events": deleted,
+            "enabled": session.behavior_enabled,
+            "message": "behavior events for this session were deleted; M9 preferences were not touched",
+        }
 
     return app

@@ -12,8 +12,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from web_demo.behavior import build_recommendation_snapshot
+
 DEFAULT_TITLE = "New shopping session"
 TITLE_MAX_CHARS = 60
+MAX_RECOMMENDATION_CONTEXTS = 30
 
 
 def utc_now() -> datetime:
@@ -92,6 +95,9 @@ class Session:
     updated_at: str = field(default_factory=iso)
     turns: list[Turn] = field(default_factory=list)
     pending_clarification: PendingClarification | None = None
+    behavior_enabled: bool = True
+    recommendations: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _recommendation_order: list[str] = field(default_factory=list)
     _turn_counter: int = 0
     _reply_counter: int = 0
 
@@ -120,9 +126,48 @@ class Session:
         self.turns.append(turn)
         self.touch()
 
+    # -- behavior recommendation context ------------------------------------
+    def record_recommendation(
+        self, payload: dict[str, Any], *, turn_id: str, ranking_source: str
+    ) -> dict[str, Any]:
+        """Freeze the exact recommendation the browser is about to receive.
+
+        The snapshot is the server-owned candidate/position/verified-attribute truth used
+        to validate later impressions, clicks, comparisons and explicit feedback, and the
+        fixed candidate pool for the behavior shadow.  It is process-local like the session
+        itself; the event log (and its product snapshots) is the durable part.
+        """
+        snapshot = build_recommendation_snapshot(payload, request_id=turn_id, turn_id=turn_id)
+        snapshot["ranking_source"] = ranking_source
+        recommendation_id = str(snapshot.get("recommendation_id") or "")
+        if not recommendation_id:
+            raise ValueError("products payload has no recommendation_id")
+        self.recommendations[recommendation_id] = snapshot
+        self._recommendation_order.append(recommendation_id)
+        while len(self._recommendation_order) > MAX_RECOMMENDATION_CONTEXTS:
+            expired = self._recommendation_order.pop(0)
+            self.recommendations.pop(expired, None)
+        self.touch()
+        return snapshot
+
+    def recommendation(self, recommendation_id: str | None = None) -> dict[str, Any] | None:
+        if recommendation_id:
+            return self.recommendations.get(recommendation_id)
+        if not self._recommendation_order:
+            return None
+        return self.recommendations.get(self._recommendation_order[-1])
+
+    @property
+    def latest_recommendation_id(self) -> str | None:
+        return self._recommendation_order[-1] if self._recommendation_order else None
+
     def reset_turns(self) -> None:
         self.turns = []
         self.pending_clarification = None
+        # The cards from the old turns are no longer displayed; late events must not attach
+        # to an invisible recommendation.  Stored events keep their own product snapshots.
+        self.recommendations = {}
+        self._recommendation_order = []
         self._turn_counter = 0
         self._reply_counter = 0
         self.touch()
@@ -139,6 +184,8 @@ class Session:
             "pending_clarification": (
                 self.pending_clarification.view() if self.pending_clarification else None
             ),
+            "behavior_enabled": self.behavior_enabled,
+            "latest_recommendation_id": self.latest_recommendation_id,
         }
 
     def summary(self) -> dict[str, Any]:
@@ -149,6 +196,7 @@ class Session:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "turn_count": len(self.turns),
+            "behavior_enabled": self.behavior_enabled,
         }
 
 
@@ -159,7 +207,7 @@ class SessionStore:
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
-    def create(self, profile_id: str) -> Session:
+    def create(self, profile_id: str, *, behavior_enabled: bool = True) -> Session:
         with self._lock:
             for _ in range(32):
                 session_id = "web-" + secrets.token_hex(4)
@@ -167,7 +215,11 @@ class SessionStore:
                     break
             else:  # pragma: no cover - collision loop is practically unreachable
                 raise RuntimeError("could not allocate a unique session id")
-            session = Session(session_id=session_id, profile_id=profile_id)
+            session = Session(
+                session_id=session_id,
+                profile_id=profile_id,
+                behavior_enabled=behavior_enabled,
+            )
             self._sessions[session_id] = session
             return session
 

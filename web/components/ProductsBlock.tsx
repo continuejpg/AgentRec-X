@@ -8,6 +8,7 @@
 
 import type { GateDecision, ProductCard as ProductCardModel, ProductsPayload } from "@/lib/types";
 import { attributeLabel, formatNumber, humanize, plural, statusLabel } from "@/lib/format";
+import { useProductImpression } from "@/lib/behavior";
 import { Icon } from "./icons";
 import { Button, Pill, type Tone } from "./ui";
 import ProductCard from "./ProductCard";
@@ -76,6 +77,52 @@ function GateCard({ gate }: { gate: GateDecision }) {
       <p className="mt-1.5 text-[10.5px] leading-snug text-(--ink-faint)">
         Passed through verbatim from the P16 Decision Gate; this UI does not recompute the action.
       </p>
+    </div>
+  );
+}
+
+function ObservedProductCard({
+  product,
+  payload,
+  selection,
+  compareMax,
+  onToggleSelect,
+  onViewDetails,
+  onViewEvidence,
+}: {
+  product: ProductCardModel;
+  payload: ProductsPayload;
+  selection: string[];
+  compareMax: number;
+  onToggleSelect: (product: ProductCardModel) => void;
+  onViewDetails: (product: ProductCardModel) => void;
+  onViewEvidence: (product: ProductCardModel) => void;
+}) {
+  const position =
+    product.displayed_position ??
+    payload.items.findIndex((item) => item.product_id === product.product_id) + 1;
+  const impressionRef = useProductImpression({
+    productId: product.product_id,
+    recommendationId: payload.recommendation_id,
+    position,
+  });
+  const selected = selection.includes(product.product_id);
+  return (
+    <div
+      ref={impressionRef}
+      className="w-[286px] max-w-[85vw] shrink-0 snap-start sm:w-auto sm:max-w-none"
+    >
+      <ProductCard
+        product={product}
+        recommendationId={payload.recommendation_id ?? null}
+        selected={selected}
+        selectionOrder={selected ? selection.indexOf(product.product_id) + 1 : null}
+        selectedCount={selection.length}
+        compareMax={compareMax}
+        onToggleSelect={onToggleSelect}
+        onViewDetails={onViewDetails}
+        onViewEvidence={onViewEvidence}
+      />
     </div>
   );
 }
@@ -167,23 +214,18 @@ export default function ProductsBlock({
 
       {payload.items.length ? (
         <div className="mt-3 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 sm:grid sm:snap-none sm:grid-cols-2 sm:overflow-visible">
-          {payload.items.map((product) => {
-            const selected = selection.includes(product.product_id);
-            return (
-              <div key={product.product_id} className="w-[286px] max-w-[85vw] shrink-0 snap-start sm:w-auto sm:max-w-none">
-                <ProductCard
-                  product={product}
-                  selected={selected}
-                  selectionOrder={selected ? selection.indexOf(product.product_id) + 1 : null}
-                  selectedCount={selection.length}
-                  compareMax={compareMax}
-                  onToggleSelect={onToggleSelect}
-                  onViewDetails={onViewDetails}
-                  onViewEvidence={onViewEvidence}
-                />
-              </div>
-            );
-          })}
+          {payload.items.map((product) => (
+            <ObservedProductCard
+              key={product.product_id}
+              product={product}
+              payload={payload}
+              selection={selection}
+              compareMax={compareMax}
+              onToggleSelect={onToggleSelect}
+              onViewDetails={onViewDetails}
+              onViewEvidence={onViewEvidence}
+            />
+          ))}
         </div>
       ) : (
         <p className="mt-3 rounded-xl border border-dashed border-(--line-strong) px-3 py-4 text-[12.5px] text-(--ink-soft)">

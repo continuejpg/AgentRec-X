@@ -190,6 +190,7 @@ export default function Header({
   onTogglePanel,
   panelOpen,
   onOpenReplay,
+  onOpenBehavior,
   onRetryHealth,
   sessionTitle,
   profileLabel,
@@ -206,6 +207,7 @@ export default function Header({
   onTogglePanel: () => void;
   panelOpen: boolean;
   onOpenReplay: () => void;
+  onOpenBehavior: () => void;
   onRetryHealth: () => void;
   sessionTitle: string | null;
   profileLabel: string | null;
@@ -267,6 +269,16 @@ export default function Header({
           <span className="hidden sm:inline">{status.label}</span>
         </button>
         <IconButton icon="play" label="Open Qwen Replay (historical trajectories)" onClick={onOpenReplay} />
+        <button
+          type="button"
+          onClick={onOpenBehavior}
+          data-testid="open-behavior"
+          title="Behavior Inspector: real browser events, short-term profile and Behavior OFF/ON shadow"
+          className="flex h-[30px] items-center gap-1 rounded-lg border border-(--line) bg-(--card) px-1.5 text-[11px] font-semibold text-(--ink-2) transition-colors hover:border-(--accent) hover:text-(--accent-ink)"
+        >
+          <Icon name="info" size={13} />
+          <span className="hidden sm:inline">Behavior</span>
+        </button>
         <button
           type="button"
           onClick={onOpenPanel}

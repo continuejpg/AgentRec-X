@@ -7,7 +7,9 @@
 
 "use client";
 
+import { useState } from "react";
 import type { ProductAttribute, ProductCard as ProductCardModel, UnknownField } from "@/lib/types";
+import { behaviorTracker } from "@/lib/behavior";
 import { attributeLabel, humanize, namespaceOf, shorten, statusLabel } from "@/lib/format";
 import { Icon } from "./icons";
 import { Pill, type Tone } from "./ui";
@@ -117,6 +119,7 @@ export function PriceBlock({ price }: { price: ProductCardModel["price"] }) {
 
 export default function ProductCard({
   product,
+  recommendationId,
   selected,
   selectionOrder,
   selectedCount,
@@ -126,6 +129,7 @@ export default function ProductCard({
   onViewEvidence,
 }: {
   product: ProductCardModel;
+  recommendationId?: string | null;
   selected: boolean;
   selectionOrder: number | null;
   selectedCount: number;
@@ -134,9 +138,19 @@ export default function ProductCard({
   onViewDetails: (product: ProductCardModel) => void;
   onViewEvidence: (product: ProductCardModel) => void;
 }) {
+  const [itemFeedback, setItemFeedback] = useState<"like" | "dislike" | null>(null);
   const namespace = namespaceOf(product.namespaced_id);
   const title = product.title ?? product.product_id;
   const selectBlocked = !selected && selectedCount >= compareMax;
+  const sendItemFeedback = (feedback: "like" | "dislike") => {
+    setItemFeedback(feedback);
+    behaviorTracker.feedback(
+      product,
+      recommendationId,
+      product.displayed_position,
+      feedback,
+    );
+  };
   return (
     <article
       data-testid="product-card"
@@ -234,6 +248,42 @@ export default function ProductCard({
 
         <UnknownChips unknown={product.unknown_fields} />
         <PriceBlock price={product.price} />
+
+        <div className="flex items-center gap-1 text-[10.5px] text-(--ink-faint)">
+          <span className="mr-auto">Short-term item feedback</span>
+          <button
+            type="button"
+            aria-pressed={itemFeedback === "like"}
+            title="Like this item for this session's behavior profile (not an M9 preference)"
+            onClick={() => sendItemFeedback("like")}
+            className={`grid h-6 w-6 place-items-center rounded-md border transition-colors ${
+              itemFeedback === "like"
+                ? "border-(--ok) bg-(--ok-soft) text-(--ok)"
+                : "border-(--line-strong) text-(--ink-soft) hover:border-(--accent) hover:text-(--accent-ink)"
+            }`}
+          >
+            <Icon name="thumb-up" size={12} />
+          </button>
+          <button
+            type="button"
+            aria-pressed={itemFeedback === "dislike"}
+            title="Dislike this item for this session's behavior profile (not an M9 preference)"
+            onClick={() => sendItemFeedback("dislike")}
+            className={`grid h-6 w-6 place-items-center rounded-md border transition-colors ${
+              itemFeedback === "dislike"
+                ? "border-(--danger) bg-(--danger-soft) text-(--danger)"
+                : "border-(--line-strong) text-(--ink-soft) hover:border-(--danger) hover:text-(--danger)"
+            }`}
+          >
+            <Icon name="thumb-down" size={12} />
+          </button>
+        </div>
+        {itemFeedback ? (
+          <p className="text-[10px] leading-snug text-(--ink-faint)">
+            Recorded in this session&apos;s behavior profile only. It is not an M9 preference and does not change the
+            Gate.
+          </p>
+        ) : null}
 
         <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
           <button

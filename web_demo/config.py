@@ -11,6 +11,12 @@ Environment variables (all optional):
     AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG      "1" lets the one-command launcher own bff.log via tee
                                              (the launcher sets it; a direct BFF run keeps the
                                              file handler and writes bff.log itself)
+    AGENTRECX_BEHAVIOR_ENABLED               "1"/"0" master switch for first-party behavior
+                                             tracking; default 1
+    AGENTRECX_BEHAVIOR_DB                    SQLite path; default runs/web_demo/behavior/events.sqlite3
+    AGENTRECX_BEHAVIOR_WINDOW_S              short-term profile window, default 21600 s (6 h)
+    AGENTRECX_BEHAVIOR_HALF_LIFE_S           decay half-life, default 1800 s
+    AGENTRECX_BEHAVIOR_RETENTION_DAYS        event retention, default 7 days
 """
 
 from __future__ import annotations
@@ -20,6 +26,16 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+
+from web_demo.behavior import (
+    DEFAULT_HALF_LIFE_S,
+    DEFAULT_RETENTION_DAYS,
+    DEFAULT_WINDOW_S,
+    EVENT_SOURCES,
+    EVENT_TYPES,
+    IMPRESSION_MIN_VISIBLE_MS,
+    IMPRESSION_VISIBILITY_THRESHOLD,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO / "runs/web_demo"
@@ -149,6 +165,12 @@ class Settings:
     mcp_timeout_s: float = DEFAULT_MCP_TIMEOUT_S
     clarification_ttl_s: float = DEFAULT_CLARIFICATION_TTL_S
     console_only_log: bool = False
+    # Behavior Feedback V1: first-party local events, short-term profile, shadow ranking.
+    behavior_enabled: bool = True
+    behavior_db_path: Path | None = None
+    behavior_window_s: float = DEFAULT_WINDOW_S
+    behavior_half_life_s: float = DEFAULT_HALF_LIFE_S
+    behavior_retention_days: float = DEFAULT_RETENTION_DAYS
     # Optional real Qwen3.5-9B Base Live.  The endpoint is deliberately never exposed publicly.
     qwen_live_enabled: bool = False
     qwen_model_endpoint: str = ""
@@ -171,6 +193,13 @@ class Settings:
     @property
     def qwen_live_configured(self) -> bool:
         return bool(self.qwen_live_enabled and self.qwen_model_endpoint)
+
+    @property
+    def behavior_store_path(self) -> Path:
+        """SQLite event store; never inside the git tree's tracked data directory."""
+        if self.behavior_db_path is not None:
+            return Path(self.behavior_db_path)
+        return self.log_dir.parent / "behavior" / "events.sqlite3"
 
     def writes_enabled_for(self, profile_id: str) -> bool:
         profile = PROFILE_BY_ID[profile_id]
@@ -219,6 +248,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         str(want.get("QWEN_MODEL_NAME") or "Qwen3.5-9B-Base").strip()
         or "Qwen3.5-9B-Base"
     )
+    behavior_db_raw = str(want.get("AGENTRECX_BEHAVIOR_DB") or "").strip()
+    behavior_db = Path(behavior_db_raw) if behavior_db_raw else None
     return Settings(
         port=port,
         search_mode=mode,
@@ -230,6 +261,15 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         mcp_timeout_s=timeout,
         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
+        behavior_enabled=_env_bool(want.get("AGENTRECX_BEHAVIOR_ENABLED", "1")),
+        behavior_db_path=behavior_db,
+        behavior_window_s=_env_float(want, "AGENTRECX_BEHAVIOR_WINDOW_S", DEFAULT_WINDOW_S),
+        behavior_half_life_s=_env_float(
+            want, "AGENTRECX_BEHAVIOR_HALF_LIFE_S", DEFAULT_HALF_LIFE_S
+        ),
+        behavior_retention_days=_env_float(
+            want, "AGENTRECX_BEHAVIOR_RETENTION_DAYS", DEFAULT_RETENTION_DAYS
+        ),
         qwen_live_enabled=qwen_enabled,
         qwen_model_endpoint=qwen_endpoint,
         qwen_model_name=qwen_model,
@@ -304,4 +344,28 @@ def limits_public(settings: Settings) -> dict[str, Any]:
         "compare_max": COMPARE_MAX,
         "clarification_ttl_s": settings.clarification_ttl_s,
         "qwen_live_max_steps": settings.qwen_max_steps,
+    }
+
+
+def behavior_public(settings: Settings, *, session_enabled: bool | None = None) -> dict[str, Any]:
+    """Public, non-sensitive description of the local behavior collector."""
+    return {
+        "enabled": bool(settings.behavior_enabled if session_enabled is None else session_enabled),
+        "master_enabled": bool(settings.behavior_enabled),
+        "storage": "sqlite",
+        "impression_min_visible_ms": IMPRESSION_MIN_VISIBLE_MS,
+        "impression_visibility_threshold": IMPRESSION_VISIBILITY_THRESHOLD,
+        "window_seconds": settings.behavior_window_s,
+        "half_life_seconds": settings.behavior_half_life_s,
+        "event_types": list(EVENT_TYPES),
+        "event_sources": list(EVENT_SOURCES),
+        "live_source": "LIVE_USER_INTERACTION",
+        "profile_uses_live_only": True,
+        "retention_days": settings.behavior_retention_days,
+        "external_analytics": None,
+        "notes": [
+            "First-party BFF events; no PostHog/Snowplow SDK and no autocapture.",
+            "The browser never sends user_id, raw chat text or memory text.",
+            "Impressions require browser visibility, not the backend Top-K list.",
+        ],
     }

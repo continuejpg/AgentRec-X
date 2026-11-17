@@ -41,6 +41,20 @@ retrieval, Rule Planner, Decision Gate, P15 evidence, P16 Skills and M9 preferen
 
 Ranker Comparison is **recorded P100 replay**, not live ShopRanker/Hybrid inference.
 
+### Behavior Feedback V1 (new)
+
+Real browser-visible impressions, clicks, comparisons and short-term Like/Dislike travel through a
+first-party BFF event chain into local SQLite. Only `LIVE_USER_INTERACTION` enters the short-term
+profile; recorded-replay and synthetic events keep their provenance but are excluded. The Behavior
+Inspector shows short-term interests with P15 evidence, the difference between explicit M9 memory
+and behavior, and a Behavior OFF/ON shadow over a fixed query/candidate/Gate set. A click is never a
+long-term preference: a behavior suggestion requires explicit user confirmation before the existing
+M9 writer is called. Browser verification (13 live events; clicked item OFF #5 → ON #4; Gate
+unchanged) is in
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md);
+the reuse-first selection is in
+[`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
+
 ### V2.1 additions
 
 - **Qwen Live is verified**, not merely available: Browser → Next.js → FastAPI BFF → MCP →

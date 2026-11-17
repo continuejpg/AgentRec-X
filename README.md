@@ -62,7 +62,8 @@
 | 证据 | P15 Evidence Bundle；raw field / span / source record；UNKNOWN；Claim 自动验证 |
 | 技能 | P16 `shopping-comparison`、`preference-clarification` |
 | 协议 | P17 官方 MCP Python SDK v2；本地 stdio；默认 7 个工具；write-enabled Demo 额外 1 个显式 `remember_preference` 适配器 |
-| 界面 | P19 Next.js Web Shopping Assistant + FastAPI BFF + MCP；本地 CPU Live；真实 Qwen Live；Qwen Replay；Session Memory / Memory Timeline / Ranker Replay |
+| 行为反馈 | 真实浏览器可见曝光 / 点击 / 比较 / 短时 Like-Dislike；第一方 SQLite 事件；短期兴趣 → Behavior OFF/ON Shadow；**不自动写 M9** |
+| 界面 | P19 Next.js Web Shopping Assistant + FastAPI BFF + MCP；本地 CPU Live；真实 Qwen Live；Qwen Replay；Session Memory / Memory Timeline / Ranker Replay；Behavior Inspector |
 | 外部评测 | ESCI 真实 query 的 judged-candidate reranking；C4 proxy 检索评测 |
 
 ---
@@ -85,6 +86,14 @@
 
 截图来自真实本地运行与真实浏览器调用，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
 Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
+
+**Behavior Feedback V1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
+BFF 事件链路进入 SQLite；只有 `LIVE_USER_INTERACTION` 进入短期画像，Replay/Synthetic 只保留来源
+但不参与统计。Behavior Inspector 展示短期兴趣、Evidence、显式 M9 与行为画像区别，以及固定
+candidate/query/Gate 下的 Behavior OFF/ON Shadow。点击不等于长期偏好，行为建议必须用户确认后才
+调用现有 M9 writer。真实浏览器验证（13 live events；点击商品 OFF #5 → ON #4；Gate 不变）见
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md)，
+技术选型见 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md)。
 
 ---
 

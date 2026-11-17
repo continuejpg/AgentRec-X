@@ -91,6 +91,25 @@ export interface DemoConfig {
   verified_comparison_ids: string[];
   modes: Partial<Record<ModeKey, ModeInfo>>;
   notices: string[];
+  behavior?: BehaviorConfig | null;
+}
+
+/** First-party local behavior collector configuration (no external analytics SDK). */
+export interface BehaviorConfig {
+  enabled: boolean;
+  master_enabled: boolean;
+  storage: string;
+  impression_min_visible_ms: number;
+  impression_visibility_threshold: number;
+  window_seconds: number;
+  half_life_seconds: number;
+  event_types: string[];
+  event_sources: string[];
+  live_source: string;
+  profile_uses_live_only: boolean;
+  retention_days: number;
+  external_analytics: string | null;
+  notes: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +147,7 @@ export interface SessionSummary {
   created_at: string;
   updated_at: string;
   turn_count: number;
+  behavior_enabled?: boolean;
 }
 
 export interface SessionView {
@@ -138,6 +158,8 @@ export interface SessionView {
   updated_at: string;
   turns: TurnView[];
   pending_clarification: ClarificationPayload | null;
+  behavior_enabled?: boolean;
+  latest_recommendation_id?: string | null;
 }
 
 /** A persisted turn as returned by GET /api/sessions/{id} (and POST /api/sessions/{id}/reset). */
@@ -265,6 +287,8 @@ export interface ProductCard {
   evidence_available: boolean;
   image_url: string | null;
   source_record: string | null;
+  /** Server-assigned 1-based display position; never inferred by the browser. */
+  displayed_position?: number;
 }
 
 export interface GateDecision {
@@ -285,6 +309,10 @@ export interface ProductsPayload {
   items: ProductCard[];
   recommended_product_id: string | null;
   gate: GateDecision | null;
+  /** One new server-issued id for every displayed order; events are validated against it. */
+  recommendation_id?: string | null;
+  request_id?: string | null;
+  ranker_version?: string | null;
   /** Optional real planner metadata; product/evidence shapes are otherwise unchanged. */
   planner?: PlannerMetaWire;
   planner_model?: string | null;
@@ -564,6 +592,270 @@ export interface RankerReplayResponse {
   arms?: Record<"existing" | "natural" | "hybrid", RankerReplayArm>;
   tasks: RankerReplayTaskRef[];
   notes?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Behavior Feedback V1 (first-party local events; no external analytics)
+// ---------------------------------------------------------------------------
+
+export type BehaviorEventType =
+  | "product_impression"
+  | "product_click"
+  | "product_compare"
+  | "explicit_item_feedback";
+
+export type BehaviorEventSource =
+  | "LIVE_USER_INTERACTION"
+  | "RECORDED_REPLAY"
+  | "SYNTHETIC_TEST";
+
+export interface BehaviorEventInput {
+  event_id: string;
+  event_type: BehaviorEventType;
+  recommendation_id: string;
+  product_id: string;
+  displayed_position: number;
+  event_source: BehaviorEventSource;
+  metadata?: {
+    feedback?: "like" | "dislike";
+    compared_product_ids?: string[];
+  };
+}
+
+export interface BehaviorEventView {
+  event_id: string;
+  event_type: BehaviorEventType;
+  event_source: BehaviorEventSource;
+  recommendation_id: string;
+  request_id: string | null;
+  turn_id: string | null;
+  product_id: string;
+  product_title: string | null;
+  displayed_position: number;
+  ranker_version: string | null;
+  occurred_at: string;
+  metadata: {
+    feedback?: "like" | "dislike";
+    compared_product_ids?: string[];
+  };
+  enters_profile: boolean;
+}
+
+export interface BehaviorCounts {
+  live_events: number;
+  product_impression: number;
+  product_click: number;
+  product_compare: number;
+  explicit_feedback: number;
+  explicit_like: number;
+  explicit_dislike: number;
+  stored_total: number;
+  recorded_replay: number;
+  synthetic_test: number;
+}
+
+export interface BehaviorAttributeEvidence {
+  event_id: string;
+  product_id: string;
+  evidence_id: string;
+  occurred_at: string;
+}
+
+export interface BehaviorAttributeInterest {
+  attribute: string;
+  label: string;
+  score: number;
+  distinct_products: number;
+  evidence_count: number;
+  evidence: BehaviorAttributeEvidence[];
+}
+
+export interface BehaviorProductInterest {
+  product_id: string;
+  product_title: string | null;
+  score: number;
+  positive_score: number;
+  negative_score: number;
+  counted_events: number;
+  last_event_at: string | null;
+}
+
+export interface BehaviorRecentProduct {
+  product_id: string;
+  product_title: string | null;
+  occurred_at: string;
+  event_id: string;
+}
+
+export interface BehaviorComparedProduct {
+  event_id: string;
+  product_id: string;
+  product_title: string | null;
+  compared_product_ids: string[];
+  occurred_at: string;
+}
+
+export interface BehaviorExplicitFeedback {
+  event_id: string;
+  product_id: string;
+  product_title: string | null;
+  feedback: "like" | "dislike" | string;
+  occurred_at: string;
+}
+
+export interface BehaviorSuggestion {
+  suggestion_id: string;
+  attribute: string;
+  label: string;
+  score: number;
+  distinct_products: number;
+  evidence_count: number;
+  evidence: BehaviorAttributeEvidence[];
+  message: string;
+  inferred_from_behavior: boolean;
+  requires_confirmation: boolean;
+  note: string;
+}
+
+export interface BehaviorProfile {
+  schema: string;
+  session_id: string;
+  enabled: boolean;
+  generated_at: string;
+  as_of?: string;
+  window_seconds: number;
+  half_life_seconds: number;
+  counts: BehaviorCounts;
+  source_counts: {
+    stored_total: number;
+    live_user_interaction: number;
+    recorded_replay: number;
+    synthetic_test: number;
+  };
+  recent_viewed: BehaviorRecentProduct[];
+  recent_compared: BehaviorComparedProduct[];
+  recent_explicit_feedback: BehaviorExplicitFeedback[];
+  recent_categories: { category: string; score: number }[];
+  attribute_interests: BehaviorAttributeInterest[];
+  product_interests: BehaviorProductInterest[];
+  recent_events: BehaviorEventView[];
+  notes: string[];
+  explicit_memory?: {
+    status: "ok" | "disabled" | "unavailable" | string;
+    active_count: number;
+    inactive_count: number;
+    error?: string | null;
+    audit_source?: string | null;
+  };
+  suggestion?: BehaviorSuggestion | null;
+  latest_recommendation_id?: string | null;
+  behavior?: BehaviorConfig | null;
+}
+
+export interface BehaviorShadowMatchedAttribute {
+  attribute: string;
+  score: number;
+  evidence: BehaviorAttributeEvidence[];
+}
+
+export interface BehaviorShadowRow {
+  product_id: string;
+  product_title: string | null;
+  base_rank: number;
+  shadow_rank: number;
+  base_score: number;
+  behavior_contribution: number;
+  final_shadow_score: number;
+  product_interest_signal: number;
+  attribute_interest_signal: number;
+  matched_attribute_interests: BehaviorShadowMatchedAttribute[];
+  ignored_common_attributes?: { attribute: string; score: number; coverage: number }[];
+  explicit_preference_conflict: boolean;
+  suppressed_reason: string | null;
+  recommended: boolean;
+  gate_eligible: boolean;
+  gate_selected: boolean;
+}
+
+export interface BehaviorShadowRankingRow {
+  rank: number;
+  product_id: string;
+  product_title: string | null;
+  base_score?: number;
+  final_shadow_score?: number;
+  behavior_contribution?: number;
+}
+
+export interface BehaviorShadow {
+  schema: string;
+  recommendation_id: string;
+  request_id: string | null;
+  query: string;
+  created_at: string;
+  generated_at: string;
+  enabled: boolean;
+  applied: boolean;
+  top_k: number;
+  base_ranker_version: string;
+  shadow_version: string;
+  behavior_weight: number;
+  explicit_preference_scale: number;
+  gate: GateDecision | null;
+  /** The shadow never adds/removes eligibility or changes the Gate; this must stay 0/true. */
+  hard_constraint_violations: number;
+  eligibility_unchanged: boolean;
+  base_ranking: BehaviorShadowRankingRow[];
+  behavior_ranking: BehaviorShadowRankingRow[];
+  rows: BehaviorShadowRow[];
+  changes: {
+    product_id: string;
+    product_title: string | null;
+    base_rank: number;
+    shadow_rank: number;
+    behavior_contribution: number;
+    matched_attribute_interests: BehaviorShadowMatchedAttribute[];
+    suppressed_reason: string | null;
+    gate_eligible?: boolean;
+  }[];
+  order_changed: boolean;
+  active_preferences: { value: string; polarity: string; kind: string | null }[];
+  inactive_preference_count: number;
+  notes: string[];
+  explicit_memory?: {
+    status: "ok" | "disabled" | string;
+    active_count: number;
+    inactive_count: number;
+  };
+  behavior_profile?: {
+    generated_at: string | null;
+    as_of: string | null;
+    counts: BehaviorCounts;
+    attribute_interests: BehaviorAttributeInterest[];
+    product_interests: BehaviorProductInterest[];
+  };
+}
+
+export interface BehaviorEventsResponse {
+  session_id: string;
+  accepted: BehaviorEventView[];
+  duplicates: string[];
+  rejected: { event_id: string | null; code: string; message: string; detail?: unknown }[];
+  accepted_count: number;
+  duplicate_count: number;
+  rejected_count: number;
+}
+
+export interface BehaviorEnabledResponse {
+  session_id: string;
+  enabled: boolean;
+  behavior: BehaviorConfig;
+}
+
+export interface BehaviorDeleteResponse {
+  session_id: string;
+  deleted_events: number;
+  enabled: boolean;
+  message: string;
 }
 
 // ---------------------------------------------------------------------------

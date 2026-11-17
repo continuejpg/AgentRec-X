@@ -15,8 +15,12 @@
 - **No fake data.** Every product, evidence span, preference and gate decision must come from a
   real MCP tool result. No mock products, no invented price/rating/stock/brand, no fabricated
   success text. UNKNOWN stays UNKNOWN.
-- **No re-ranking.** The BFF formats payloads; it must not reorder, score, filter or "improve"
-  recommendation/comparison results. Gate action/status is passed through verbatim.
+- **No re-ranking of the production payload.** The BFF formats payloads; it must not reorder, score,
+  filter or "improve" recommendation/comparison results. Gate action/status is passed through
+  verbatim. The one exception is the explicitly labelled **Behavior Shadow**
+  (`GET /api/behavior/shadow`): a separate preview over the exact frozen candidate pool, with the
+  production `ProductsPayload.items` order untouched. It never changes the Gate or the list the
+  user sees in the main transcript.
 - **Identity is server-bound.** Two demo profiles:
   - `profile_0049` → MCP server `--user-key p14e2_lite_0049`, read-only.
   - `profile_0057` → MCP server `--user-key p14e2_lite_0057`, write-enabled only when
@@ -106,7 +110,16 @@ the profile selector; it must not invent a profile.
   "limits": {"search_top_k": 10, "compare_min": 2, "compare_max": 5, "clarification_ttl_s": 1800},
   "verified_comparison_ids": ["B004K6R43G", "B00008VF63"],
   "modes": { "...": "same as /health" },
-  "notices": ["Local CPU demo; catalogue facts only; no live price/stock/ratings."]
+  "notices": ["Local CPU demo; catalogue facts only; no live price/stock/ratings."],
+  "behavior": {
+    "enabled": true, "master_enabled": true, "storage": "sqlite",
+    "impression_min_visible_ms": 1000, "impression_visibility_threshold": 0.6,
+    "window_seconds": 21600, "half_life_seconds": 1800,
+    "event_types": ["product_impression","product_click","product_compare","explicit_item_feedback"],
+    "event_sources": ["LIVE_USER_INTERACTION","RECORDED_REPLAY","SYNTHETIC_TEST"],
+    "live_source": "LIVE_USER_INTERACTION", "profile_uses_live_only": true,
+    "retention_days": 7, "external_analytics": null, "notes": ["..."]
+  }
 }
 ```
 
@@ -126,10 +139,12 @@ the profile selector; it must not invent a profile.
   "title": "New shopping session",
   "created_at": "...", "updated_at": "...",
   "turns": [TurnView],
-  "pending_clarification": null
+  "pending_clarification": null,
+  "behavior_enabled": true,
+  "latest_recommendation_id": "rec-..." | null
 }
 ```
-`SessionSummary` = session_id/profile_id/title/created_at/updated_at/turn_count.
+`SessionSummary` = session_id/profile_id/title/created_at/updated_at/turn_count/behavior_enabled.
 `TurnView` fields: `turn_id`, `user_text`, `assistant_text`, `tool_activity` (ToolStatus[]),
 `products` (ProductsPayload|null), `comparison` (ComparisonPayload|null),
 `clarification` (ClarificationPayload|null), `memory_update` (MemoryUpdatePayload|null),
@@ -224,6 +239,78 @@ Rules:
   then continue the pending query through `recommend_products` and return the real products.
 - `turn_id` must be stable per reply attempt (idempotency); reuse on retry.
 
+### Behavior Feedback V1 (first-party local events)
+
+The browser posts only whitelisted structured events to the local BFF.  There is no PostHog /
+Snowplow SDK, no autocapture and no session recording.  The BFF stores events in a local SQLite
+database (`runs/web_demo/behavior/events.sqlite3` by default; `AGENTRECX_BEHAVIOR_DB` overrides)
+and builds a short-term profile.  Only `LIVE_USER_INTERACTION` enters the profile; recorded replay
+and synthetic test events are stored with provenance and excluded.
+
+#### POST /api/behavior/events
+```json
+{
+  "session_id": "web-...",
+  "events": [
+    {
+      "event_id": "evt-<uuid>",
+      "event_type": "product_impression|product_click|product_compare|explicit_item_feedback",
+      "recommendation_id": "rec-...",
+      "product_id": "B08GM5K9TD",
+      "displayed_position": 1,
+      "event_source": "LIVE_USER_INTERACTION|RECORDED_REPLAY|SYNTHETIC_TEST",
+      "metadata": {"feedback": "like|dislike"}
+    }
+  ]
+}
+```
+- `product_compare` metadata: `{"compared_product_ids":[...2-5]}`; the primary `product_id` must be
+  one of them and all ids must belong to the same issued recommendation.
+- `explicit_item_feedback` metadata: `{"feedback":"like"|"dislike"}`.  This is **not** an M9
+  preference and never becomes an active long-term preference by itself.
+- The BFF verifies that `recommendation_id` was issued to the same session and that
+  `product_id`/`displayed_position` match that frozen snapshot.  Unknown ids/positions are
+  rejected per event, not silently repaired.
+- Idempotency: `event_id` is unique; the dedupe key for `product_impression` is
+  `(session_id, recommendation_id, product_id)`.  Duplicates are reported, not stored twice.
+- Max 50 events per batch; extra fields are forbidden, so the browser cannot inject `user_id`,
+  raw chat text or memory text.
+- Response: `{session_id, accepted:[BehaviorEventView], duplicates:[event_id], rejected:[{event_id,
+  code, message, detail?}], accepted_count, duplicate_count, rejected_count}`.
+- When personalization is off for the session, the endpoint returns HTTP 409
+  `{code:"behavior_disabled"}` and stores nothing.
+
+#### GET /api/behavior/profile?session_id=...
+Returns counts (only live), source counts (including excluded replay/synthetic), recent viewed/
+compared/explicit-feedback items, weighted attribute interests with evidence refs, per-product
+interests, recent events (with `enters_profile`), the `explicit_memory` status, and an optional
+behavior-derived `suggestion`.  A suggestion is an inference (`requires_confirmation=true`); it is
+never written to M9 automatically.  Verified attributes require a P15 evidence id; a present
+catalogue flag without evidence contributes no attribute interest.
+
+#### GET /api/behavior/shadow?session_id=...&recommendation_id=...
+Computes the fixed-pool Behavior OFF/ON preview.  Inputs that must be identical in both modes:
+query, candidates, product metadata, displayed positions, eligibility flags, Active M9 memory and
+the Decision Gate.  Only the bounded behavior contribution differs (fixed weight, per-product caps,
+time decay, common-attribute specificity guard).  The response includes `base_ranking`,
+`behavior_ranking`, per-row `base_score`, `behavior_contribution`, `matched_attribute_interests`,
+`suppressed_reason`, `gate_eligible`, `gate_selected`, `changes` and the unchanged Gate.
+Behavior events with `occurred_at > recommendation.created_at` are excluded (point-in-time
+profile), so a later click cannot leak into an earlier ranking.
+
+#### POST /api/behavior/enabled
+Body `{"session_id":"web-...","enabled":true|false}`.  Turning it off stops collection and hides the
+profile for that session; it does not delete stored events and does not touch M9 memory.
+
+#### DELETE /api/behavior?session_id=...
+Deletes only that session's behavior events and setting.  It never touches M9 preferences or the
+conversation, and never affects another session.
+
+Data retention: `AGENTRECX_BEHAVIOR_RETENTION_DAYS` (default 7).  Window and decay:
+`AGENTRECX_BEHAVIOR_WINDOW_S` (default 21600) and `AGENTRECX_BEHAVIOR_HALF_LIFE_S` (default 1800).
+Event source labels and browser visibility rules are in
+`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`.
+
 ### GET /api/replay
 Reads `runs/p18/qwen_replay.json` (existing real saved Qwen trajectories) and returns
 `{"mode":"Qwen_Agent_Replay","replay":true,"live_call":false,
@@ -249,9 +336,13 @@ attribute, verification_status, source_record}`.
   "items":[ProductCard], "recommended_product_id":"B004K6R43G"|null,
   "gate": {"action":"ALLOW_FINALIZE","reason_code":"evidence_sufficient","reason":"...",
            "selected_candidate_id":"...","unknown_fields":["over_ear"],"product_role":"main",
-           "candidate_presentable_ids":["..."]} | null
+           "candidate_presentable_ids":["..."]} | null,
+  "recommendation_id":"rec-...", "request_id":"web-...-t1",
+  "ranker_version":"existing_ranking_v1"
 }
 ```
+`recommendation_id` is server-issued, one per displayed order.  The browser must send it back with
+behavior events; it is never inferred from the query or from the product list.
 `ProductCard`
 ```json
 {
@@ -268,7 +359,8 @@ attribute, verification_status, source_record}`.
   "unknown_fields":[{"attribute":"brand","reason":"..."}],
   "evidence_available": true,
   "image_url": null,
-  "source_record":"data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B004K6R43G"
+  "source_record":"data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B004K6R43G",
+  "displayed_position": 1
 }
 ```
 - `image_url` stays null: the MCP catalogue snapshot exposes no image URL; the UI must render a

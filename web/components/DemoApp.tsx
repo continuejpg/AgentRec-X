@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, BFF_BASE, errorPayload, isAbortError } from "@/lib/api";
+import { behaviorTracker } from "@/lib/behavior";
 import {
   finaliseStaleToolRows,
   mergeToolStatus,
@@ -31,6 +32,7 @@ import type {
   PreferenceState,
   ProductCard,
   ProductDetailPayload,
+  ProductsPayload,
   ReplayResponse,
   SessionSummary,
   SessionView,
@@ -149,6 +151,9 @@ export default function DemoApp() {
   const [preferences, setPreferences] = useState<PreferenceState | null>(null);
   const [prefsLoading, setPrefsLoading] = useState(false);
   const [prefsError, setPrefsError] = useState<ErrorPayload | null>(null);
+
+  // ---- behavior feedback (first-party local events) -------------------------
+  const [behaviorEnabled, setBehaviorEnabled] = useState(true);
 
   // ---- streaming ------------------------------------------------------------
   const [streamingKey, setStreamingKey] = useState<string | null>(null);
@@ -269,6 +274,38 @@ export default function DemoApp() {
     };
   }, [reachable, config]);
 
+  // The server config is the only source for the visibility contract and the master switch.
+  useEffect(() => {
+    const behavior = config?.behavior;
+    if (!behavior) return;
+    if (behavior.master_enabled === false) setBehaviorEnabled(false);
+  }, [config]);
+
+  useEffect(() => {
+    const behavior = config?.behavior;
+    const enabled =
+      Boolean(session?.session_id) &&
+      behaviorEnabled &&
+      (behavior?.master_enabled ?? true);
+    behaviorTracker.configure({
+      sessionId: session?.session_id ?? null,
+      enabled,
+      minVisibleMs: behavior?.impression_min_visible_ms,
+      visibilityThreshold: behavior?.impression_visibility_threshold,
+    });
+  }, [
+    session?.session_id,
+    behaviorEnabled,
+    config?.behavior?.impression_min_visible_ms,
+    config?.behavior?.impression_visibility_threshold,
+    config?.behavior?.master_enabled,
+  ]);
+
+  const changeBehaviorEnabled = useCallback((enabled: boolean) => {
+    setBehaviorEnabled(enabled);
+    behaviorTracker.setEnabled(enabled);
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Recent sessions
   // ---------------------------------------------------------------------------
@@ -339,6 +376,7 @@ export default function DemoApp() {
     compareBusyRef.current = false;
     setPreferences(null);
     setPrefsError(null);
+    setBehaviorEnabled(view.behavior_enabled ?? true);
   }, []);
 
   const bootSession = useCallback(async () => {
@@ -512,19 +550,49 @@ export default function DemoApp() {
     [loadDetailsById, openPanelTab],
   );
 
-  const openDetailsFor = useCallback((product: ProductCard) => openDetailsById(product.product_id), [openDetailsById]);
+  const findRecommendationContext = useCallback(
+    (productId: string): { payload: ProductsPayload; product: ProductCard; position: number } | null => {
+      for (let index = turns.length - 1; index >= 0; index -= 1) {
+        const payload = turns[index].products ?? turns[index].reply?.recommendation ?? null;
+        if (!payload?.recommendation_id) continue;
+        const item = payload.items.find((candidate) => candidate.product_id === productId);
+        if (!item) continue;
+        const position =
+          item.displayed_position ?? payload.items.findIndex((candidate) => candidate.product_id === productId) + 1;
+        return { payload, product: item, position };
+      }
+      return null;
+    },
+    [turns],
+  );
+
+  const openDetailsFor = useCallback(
+    (product: ProductCard) => {
+      const context = findRecommendationContext(product.product_id);
+      if (context) {
+        behaviorTracker.click(context.product, context.payload.recommendation_id, context.position);
+      }
+      openDetailsById(product.product_id);
+    },
+    [findRecommendationContext, openDetailsById],
+  );
 
   const openEvidenceFor = useCallback(
     (product: ProductCard) => {
+      const context = findRecommendationContext(product.product_id);
+      if (context) {
+        behaviorTracker.click(context.product, context.payload.recommendation_id, context.position);
+      }
       setSelectedProductId(product.product_id);
       const hasEvidence = Boolean(evidenceRef.current[product.product_id]) || Boolean(detailsRef.current[product.product_id]);
       if (!hasEvidence) void loadDetailsById(product.product_id);
       openPanelTab("evidence");
     },
-    [loadDetailsById, openPanelTab],
+    [findRecommendationContext, loadDetailsById, openPanelTab],
   );
 
   const openComparisonPanel = useCallback(() => openPanelTab("comparison"), [openPanelTab]);
+  const openBehaviorPanel = useCallback(() => openPanelTab("behavior"), [openPanelTab]);
 
   // ---------------------------------------------------------------------------
   // Comparison selection & request
@@ -556,6 +624,30 @@ export default function DemoApp() {
     setSelection([]);
   }, []);
 
+  const findComparisonContext = useCallback(
+    (productIds: string[]): { payload: ProductsPayload; products: { product: ProductCard; position: number }[] } | null => {
+      const wanted = new Set(productIds);
+      if (wanted.size < 2) return null;
+      for (let index = turns.length - 1; index >= 0; index -= 1) {
+        const payload = turns[index].products ?? turns[index].reply?.recommendation ?? null;
+        if (!payload?.recommendation_id) continue;
+        const products = productIds.map((productId) => {
+          const product = payload.items.find((candidate) => candidate.product_id === productId);
+          if (!product) return null;
+          const position =
+            product.displayed_position ??
+            payload.items.findIndex((candidate) => candidate.product_id === productId) + 1;
+          return { product, position };
+        });
+        if (products.every(Boolean)) {
+          return { payload, products: products.filter((entry): entry is { product: ProductCard; position: number } => Boolean(entry)) };
+        }
+      }
+      return null;
+    },
+    [turns],
+  );
+
   const runCompare = useCallback(
     async (productIds: string[]) => {
       const sessionId = sessionRef.current?.session_id;
@@ -564,6 +656,10 @@ export default function DemoApp() {
         setSelectionError(`Select ${compareMin}–${compareMax} products to compare (BFF comparison limits).`);
         openPanelTab("comparison");
         return;
+      }
+      const context = findComparisonContext(productIds);
+      if (context) {
+        behaviorTracker.compare(context.payload, context.products);
       }
       compareBusyRef.current = true;
       setComparisonLoading(true);
@@ -585,7 +681,7 @@ export default function DemoApp() {
         compareBusyRef.current = false;
       }
     },
-    [compareMax, compareMin, openPanelTab],
+    [compareMax, compareMin, findComparisonContext, openPanelTab],
   );
 
   const compareVerified = useCallback(() => {
@@ -945,6 +1041,13 @@ export default function DemoApp() {
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
+  const latestRecommendationId = (() => {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const payload = turns[index].products ?? turns[index].reply?.recommendation ?? null;
+      if (payload?.recommendation_id) return payload.recommendation_id;
+    }
+    return session?.latest_recommendation_id ?? null;
+  })();
   const selectedProduct: ProductCard | null = (() => {
     if (!selectedProductId) return null;
     for (const turn of turns) {
@@ -961,6 +1064,8 @@ export default function DemoApp() {
   const selectedEvidence = selectedProductId ? evidenceByProduct[selectedProductId] ?? null : null;
   const profileLabel =
     config?.profiles.find(profile => profile.profile_id === session?.profile_id)?.label ?? session?.profile_id ?? null;
+  const currentProfile = config?.profiles.find(profile => profile.profile_id === session?.profile_id) ?? null;
+  const memoryWritesEnabled = Boolean(currentProfile?.memory_writes);
   const writeProfile = config?.profiles.find(profile => profile.memory_writes) ?? null;
   const readinessElapsed = Math.max(health?.uptime_s ?? 0, clock);
   const streaming = streamingKey != null;
@@ -996,6 +1101,14 @@ export default function DemoApp() {
     onCompareVerified: compareVerified,
     preferences,
     onOpenProductDetails: openDetailsById,
+    sessionId: session?.session_id ?? null,
+    latestRecommendationId,
+    memoryWritesEnabled,
+    onBehaviorEnabledChange: changeBehaviorEnabled,
+    onMemoryWritten: () => {
+      void refreshPreferences();
+      void refreshRecent();
+    },
   };
 
   return (
@@ -1012,6 +1125,7 @@ export default function DemoApp() {
         onTogglePanel={() => setPanelOpen(value => !value)}
         panelOpen={panelOpen}
         onOpenReplay={openReplay}
+        onOpenBehavior={openBehaviorPanel}
         onRetryHealth={retryHealth}
         sessionTitle={session?.title ?? null}
         profileLabel={profileLabel}

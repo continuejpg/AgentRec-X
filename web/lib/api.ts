@@ -13,6 +13,12 @@
  */
 
 import type {
+  BehaviorDeleteResponse,
+  BehaviorEnabledResponse,
+  BehaviorEventInput,
+  BehaviorEventsResponse,
+  BehaviorProfile,
+  BehaviorShadow,
   ClarificationReplyResponse,
   ComparisonPayload,
   DemoConfig,
@@ -112,7 +118,7 @@ async function toBffError(response: Response): Promise<BffError> {
 }
 
 async function request<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: unknown,
   options: RequestOptions = {},
@@ -371,6 +377,85 @@ export class BffClient {
       "/api/memory/remember",
       { session_id: sessionId, message },
       { signal, timeoutMs: TOOL_TIMEOUT_MS },
+    );
+  }
+
+  // -- Behavior Feedback V1 -------------------------------------------------
+  behaviorEvents(
+    sessionId: string,
+    events: BehaviorEventInput[],
+    options: { signal?: AbortSignal; keepalive?: boolean } = {},
+  ): Promise<BehaviorEventsResponse> {
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort(options.signal?.reason);
+    if (options.signal) {
+      if (options.signal.aborted) forwardAbort();
+      else options.signal.addEventListener("abort", forwardAbort, { once: true });
+    }
+    const timer = setTimeout(() => controller.abort(new DOMException("The request timed out.", "TimeoutError")), 10_000);
+    return fetch(`${BFF_BASE}/api/behavior/events`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ session_id: sessionId, events }),
+      signal: controller.signal,
+      keepalive: options.keepalive === true,
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw await toBffError(response);
+        return (await response.json()) as BehaviorEventsResponse;
+      })
+      .catch((error) => {
+        if (error instanceof BffError) throw error;
+        if (isAbortError(error) && !options.signal?.aborted) {
+          throw new DOMException("The request timed out.", "TimeoutError");
+        }
+        throw new BffError("behavior_unreachable", "Cannot reach the local behavior endpoint.", {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", forwardAbort);
+      });
+  }
+
+  behaviorProfile(sessionId: string, signal?: AbortSignal): Promise<BehaviorProfile> {
+    return request<BehaviorProfile>(
+      "GET",
+      `/api/behavior/profile?session_id=${encodeURIComponent(sessionId)}`,
+      undefined,
+      { signal, timeoutMs: 20_000 },
+    );
+  }
+
+  behaviorShadow(
+    sessionId: string,
+    recommendationId?: string | null,
+    topK = 5,
+    signal?: AbortSignal,
+  ): Promise<BehaviorShadow> {
+    const params = new URLSearchParams({ session_id: sessionId, top_k: String(topK) });
+    if (recommendationId) params.set("recommendation_id", recommendationId);
+    return request<BehaviorShadow>("GET", `/api/behavior/shadow?${params.toString()}`, undefined, {
+      signal,
+      timeoutMs: 20_000,
+    });
+  }
+
+  setBehaviorEnabled(sessionId: string, enabled: boolean): Promise<BehaviorEnabledResponse> {
+    return request<BehaviorEnabledResponse>("POST", "/api/behavior/enabled", {
+      session_id: sessionId,
+      enabled,
+    });
+  }
+
+  deleteBehavior(sessionId: string): Promise<BehaviorDeleteResponse> {
+    return request<BehaviorDeleteResponse>(
+      "DELETE",
+      `/api/behavior?session_id=${encodeURIComponent(sessionId)}`,
+      undefined,
+      { timeoutMs: 10_000 },
     );
   }
 }

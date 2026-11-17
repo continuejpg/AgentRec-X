@@ -19,15 +19,17 @@ import ComparisonView from "./ComparisonView";
 import EvidenceList from "./EvidenceList";
 import ProductDetails from "./ProductDetails";
 import RankerReplayPanel from "./RankerReplayPanel";
+import BehaviorInspector from "./BehaviorInspector";
 import { ErrorBubble } from "./MessageBubble";
 import { ProductImage } from "./ProductImage";
 
-export type PanelTab = "details" | "evidence" | "comparison" | "rankers";
+export type PanelTab = "details" | "evidence" | "comparison" | "behavior" | "rankers";
 
-const TABS: { id: PanelTab; label: string; icon: "box" | "search" | "compare" }[] = [
+const TABS: { id: PanelTab; label: string; icon: "box" | "search" | "compare" | "info" }[] = [
   { id: "details", label: "Details", icon: "box" },
   { id: "evidence", label: "Evidence", icon: "search" },
   { id: "comparison", label: "Comparison", icon: "compare" },
+  { id: "behavior", label: "Behavior", icon: "info" },
   { id: "rankers", label: "Rankers", icon: "compare" },
 ];
 
@@ -71,6 +73,13 @@ export interface RightPanelProps {
 
   preferences: PreferenceState | null;
   onOpenProductDetails: (productId: string) => void;
+
+  // Behavior Feedback V1
+  sessionId: string | null;
+  latestRecommendationId: string | null;
+  memoryWritesEnabled: boolean;
+  onBehaviorEnabledChange: (enabled: boolean) => void;
+  onMemoryWritten: () => void;
 }
 
 function CompareTab(props: RightPanelProps) {
@@ -237,7 +246,7 @@ export default function RightPanel(props: RightPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="right-panel">
       <div className="flex items-center gap-1 border-b border-(--line) px-2 py-1.5">
-        <div role="tablist" aria-label="Contextual panel" className="flex min-w-0 gap-0.5 rounded-lg bg-(--ground) p-[3px]">
+        <div role="tablist" aria-label="Contextual panel" className="flex min-w-0 flex-wrap gap-0.5 rounded-lg bg-(--ground) p-[3px]">
           {TABS.map((entry) => {
             const active = entry.id === tab;
             return (
@@ -248,11 +257,11 @@ export default function RightPanel(props: RightPanelProps) {
                 aria-selected={active}
                 data-testid={`panel-tab-${entry.id}`}
                 onClick={() => onTabChange(entry.id)}
-                className={`flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+                className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[11.5px] transition-colors ${
                   active ? "bg-(--card) font-semibold text-(--ink) shadow-(--shadow-sm)" : "font-medium text-(--ink-soft) hover:text-(--ink)"
                 }`}
               >
-                <Icon name={entry.icon} size={13} />
+                <Icon name={entry.icon} size={12} />
                 {entry.label}
               </button>
             );
@@ -302,6 +311,14 @@ export default function RightPanel(props: RightPanelProps) {
               hint="Evidence spans appear after a search/recommendation response or when you open “View evidence” on a product card."
             />
           )
+        ) : tab === "behavior" ? (
+          <BehaviorInspector
+            sessionId={props.sessionId}
+            latestRecommendationId={props.latestRecommendationId}
+            memoryWritesEnabled={props.memoryWritesEnabled}
+            onBehaviorEnabledChange={props.onBehaviorEnabledChange}
+            onMemoryWritten={props.onMemoryWritten}
+          />
         ) : tab === "rankers" ? (
           <RankerReplayPanel />
         ) : (

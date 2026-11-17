@@ -140,6 +140,40 @@ return HTTP 400.
 Memory is process-local and resets when the BFF restarts; the UI and test evidence say this
 explicitly. Reset Session clears turns only and never another session's memory.
 
+### Behavior Inspector (Behavior Feedback V1)
+
+Open the header **Behavior** button or right panel → **Behavior**.  The panel shows:
+
+- real browser events: impressions (visible card ≥60% for 1000 ms), clicks, compare actions and
+  short-term Like/Dislike;
+- the first-party short-term profile: verified attribute interests with product/evidence refs;
+- the difference between **explicit M9 memory** (long-term, user-confirmed writes only) and
+  **short-term behavior**;
+- **Behavior OFF / ON shadow** over the last issued recommendation, with rank movement, behavior
+  contribution and evidence;
+- a behavior-inferred preference suggestion that is **never written automatically**; the existing
+  M9 writer runs only after **Remember this preference**, and the button is disabled on the
+  read-only Demo A profile;
+- a **Personalization ON/OFF** switch and **Delete session events**.
+
+A quick demo:
+
+```text
+1. Search "I need wireless earbuds for the gym."
+2. Scroll a few cards into view (impressions), open one card, click its Like button.
+3. Select two cards and click Compare (the user action is recorded even if P16 reports an error).
+4. Open Behavior and inspect counts, short-term interests and the suggestion.
+5. Search again; reopen Behavior and compare the Behavior OFF / ON top-5 shadow.
+```
+
+The shadow is a **preview only**: it uses the same query/candidates/metadata/positions/eligibility,
+Active M9 memory and Gate.  The production product list above the panel is not re-ranked, and the
+Gate-selected product/action is shown unchanged.  Only `LIVE_USER_INTERACTION` enters the profile;
+Replay/synthetic events are tagged and excluded.  Event storage is a local SQLite file under
+`runs/web_demo/behavior/`; no external analytics SDK is used.  See
+[`AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md) and
+[`BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
+
 ## Environment variables
 
 | Variable | Purpose | Default |
@@ -149,6 +183,11 @@ explicitly. Reset Session clears turns only and never another session's memory.
 | `AGENTRECX_WEB_DEMO_PORT` | BFF port | `8787` |
 | `QWEN_LIVE_ENABLED` / `QWEN_MODEL_ENDPOINT` | optional real Qwen Live; never silently faked | disabled |
 | `AGENTRECX_WEB_DEMO_ASK_TEST_PROFILE` | optional isolated ASK test profile | disabled |
+| `AGENTRECX_BEHAVIOR_ENABLED` | master switch for first-party behavior tracking | `1` |
+| `AGENTRECX_BEHAVIOR_DB` | SQLite path for behavior events | `runs/web_demo/behavior/events.sqlite3` |
+| `AGENTRECX_BEHAVIOR_WINDOW_S` | short-term profile window | `21600` (6 h) |
+| `AGENTRECX_BEHAVIOR_HALF_LIFE_S` | decay half-life | `1800` (30 min) |
+| `AGENTRECX_BEHAVIOR_RETENTION_DAYS` | event retention / cleanup | `7` |
 
 ## Known limitations
 
@@ -161,6 +200,9 @@ explicitly. Reset Session clears turns only and never another session's memory.
 - Qwen Live requires the local tunnel/model service; it is verified in V2.1 but not auto-started.
 - Product images/prices/ratings/stock are absent/UNKNOWN because the catalogue has no trusted
   source for those fields.
+- Behavior Feedback V1 records only local impressions/clicks/compares/Like-Dislike; it has no
+  purchase/conversion event, no propensity log, and no CTR/IPS/quality-lift claim.  The Behavior
+  shadow is experimental and never the production default.
 
 ## Common failures
 
