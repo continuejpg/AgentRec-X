@@ -158,7 +158,7 @@ class BehaviorEventIn(BaseModel):
     product_id: str = Field(min_length=1)
     displayed_position: int = Field(ge=1, le=100)
     event_source: Literal[
-        "LIVE_USER_INTERACTION", "RECORDED_REPLAY", "SYNTHETIC_TEST"
+        "LIVE_USER_INTERACTION", "AUTOMATED_BROWSER_E2E", "RECORDED_REPLAY", "SYNTHETIC_TEST"
     ] = "LIVE_USER_INTERACTION"
     metadata: BehaviorEventMetadata | None = None
 

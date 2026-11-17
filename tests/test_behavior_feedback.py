@@ -315,7 +315,7 @@ def test_session_isolation_and_delete(tmp_path):
         assert client.get(f"/api/behavior/profile?session_id={second['session_id']}").json()["counts"]["product_click"] == 1
 
 
-def test_only_live_source_enters_profile(tmp_path):
+def test_human_and_automated_browser_sources_enter_profile_with_provenance(tmp_path):
     manager = setup_manager(("P01", "P02", "P03"))
     with TestClient(make_app(tmp_path, manager)) as client:
         session = create_session(client)
@@ -323,18 +323,24 @@ def test_only_live_source_enters_profile(tmp_path):
         rec = products["recommendation_id"]
         post_events(client, session["session_id"], [
             event("evt-live-0001", "product_click", rec, "P01", 1),
+            event("evt-auto-0001", "product_click", rec, "P01", 1, source="AUTOMATED_BROWSER_E2E"),
             event("evt-replay-01", "product_click", rec, "P02", 2, source="RECORDED_REPLAY"),
             event("evt-synth-001", "product_click", rec, "P03", 3, source="SYNTHETIC_TEST"),
         ])
         profile = client.get(f"/api/behavior/profile?session_id={session['session_id']}").json()
-        assert profile["counts"]["live_events"] == 1
+        assert profile["counts"]["live_events"] == 2
+        assert profile["counts"]["human_live_events"] == 1
+        assert profile["counts"]["automated_browser_e2e_events"] == 1
         assert profile["counts"]["recorded_replay"] == 1
         assert profile["counts"]["synthetic_test"] == 1
+        assert profile["source_counts"]["automated_browser_e2e"] == 1
         assert profile["source_counts"]["recorded_replay"] == 1
+        assert profile["profile_provenance"]["human_preference_statistics"] == "LIVE_USER_INTERACTION only"
         attrs = {item["attribute"] for item in profile["attribute_interests"]}
         assert attrs == {"in_ear", "wireless"}  # only P01, never the replayed P02/P03
         enters = {item["event_id"]: item["enters_profile"] for item in profile["recent_events"]}
         assert enters["evt-live-0001"] is True
+        assert enters["evt-auto-0001"] is True
         assert enters["evt-replay-01"] is False
         assert enters["evt-synth-001"] is False
 

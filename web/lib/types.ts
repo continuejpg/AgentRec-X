@@ -184,6 +184,7 @@ export interface TurnView {
   planner_kind?: string | null;
   planner_calls?: number | null;
   planner_latency_ms?: number | null;
+  planner_actions?: unknown[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +324,7 @@ export interface ProductsPayload {
   planner_kind?: string | null;
   planner_calls?: number | null;
   planner_latency_ms?: number | null;
+  planner_actions?: unknown[] | null;
 }
 
 export interface EvidencePayload {
@@ -474,6 +476,7 @@ export interface DonePayload {
   planner_model?: string | null;
   planner_calls?: number | null;
   planner_latency_ms?: number | null;
+  planner_actions?: unknown[] | null;
 }
 
 export interface ClarificationReplyResponse {
@@ -492,6 +495,7 @@ export interface ClarificationReplyResponse {
   planner_model?: string | null;
   planner_calls?: number | null;
   planner_latency_ms?: number | null;
+  planner_actions?: unknown[] | null;
   /** Current-task constraints and candidate re-evaluation metadata for a resumed Qwen turn. */
   task_constraints?: unknown;
   candidate_reevaluation?: unknown;
@@ -610,6 +614,7 @@ export type BehaviorEventType =
 
 export type BehaviorEventSource =
   | "LIVE_USER_INTERACTION"
+  | "AUTOMATED_BROWSER_E2E"
   | "RECORDED_REPLAY"
   | "SYNTHETIC_TEST";
 
@@ -655,6 +660,9 @@ export interface BehaviorEventView {
 
 export interface BehaviorCounts {
   live_events: number;
+  profile_events?: number;
+  human_live_events?: number;
+  automated_browser_e2e_events?: number;
   product_impression: number;
   product_click: number;
   product_compare: number;
@@ -778,8 +786,15 @@ export interface BehaviorProfile {
   source_counts: {
     stored_total: number;
     live_user_interaction: number;
+    automated_browser_e2e?: number;
     recorded_replay: number;
     synthetic_test: number;
+  };
+  profile_sources?: string[];
+  profile_provenance?: {
+    human_live_events: number;
+    automated_browser_e2e_events: number;
+    human_preference_statistics: string;
   };
   signal_semantics?: Record<string, unknown>;
   recent_impressions: BehaviorRecentImpression[];

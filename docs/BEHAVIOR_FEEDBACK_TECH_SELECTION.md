@@ -90,7 +90,7 @@ reporting the gap.
 | Memory writes | Existing MCP `remember_preference` / M9 `PreferenceMemoryService` | No new memory store; suggestion confirmation calls the existing writer |
 | Identity safety | Server-bound profile + session; browser never sends `user_id` | Behavior payload forbids extra fields and never accepts a user id |
 | Product truth | Existing `ProductsPayload` / `get_product_info` / P15 evidence | Added server-assigned positions, recommendation id and ranker version |
-| Replay/synthetic separation | Existing Replay mode is read-only and never a live model call | Event `event_source` tag; only `LIVE_USER_INTERACTION` enters the profile |
+| Replay/synthetic separation | Existing Replay mode is read-only and never a live model call | Event `event_source` tag; LIVE and AUTOMATED_BROWSER_E2E may enter the profile with separate provenance; replay/synthetic excluded |
 
 ## 3. Why not a heavier platform
 

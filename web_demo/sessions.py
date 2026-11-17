@@ -45,6 +45,8 @@ class Turn:
     planner_model: str | None = None
     planner_calls: int | None = None
     planner_latency_ms: float | None = None
+    # Real per-call Qwen Base actions/latency/tokens captured from run_agent_turn.
+    planner_actions: list[dict[str, Any]] | None = None
     created_at: str = field(default_factory=iso)
 
     def view(self) -> dict[str, Any]:
@@ -62,6 +64,7 @@ class Turn:
             "planner_model": self.planner_model,
             "planner_calls": self.planner_calls,
             "planner_latency_ms": self.planner_latency_ms,
+            "planner_actions": self.planner_actions,
             "created_at": self.created_at,
         }
 

@@ -44,8 +44,10 @@ Ranker Comparison is **recorded P100 replay**, not live ShopRanker/Hybrid infere
 ### Behavior Feedback V1.1 (new)
 
 Real browser-visible impressions, clicks, comparisons and short-term Like/Dislike travel through a
-first-party BFF event chain into local SQLite. Only `LIVE_USER_INTERACTION` enters the short-term
-profile; recorded-replay and synthetic events keep their provenance but are excluded. V1.1 makes
+first-party BFF event chain into local SQLite. `LIVE_USER_INTERACTION` and
+`AUTOMATED_BROWSER_E2E` may enter the short-term profile but are counted separately; only LIVE is
+human-preference statistics. Recorded-replay and synthetic events keep their provenance but are
+excluded. V1.1 makes
 **impressions exposure context only (zero interest)**; compare distinguishes attempted / succeeded /
 failed and never becomes a preference; the formal Behavior OFF/ON shadow is **eligible-only** over
 Gate `ALLOW_FINALIZE` + `candidate_presentable_ids`, while ineligible products appear only in the
@@ -59,6 +61,18 @@ the V1 record in
 [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md),
 and the reuse-first selection in
 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
+
+### Behavior Feedback V2 - GPU Live E2E (new)
+
+Qwen3.5-9B Base was loaded and run on a remote RTX 4090; a real PlannerAction was returned through
+the WSL-local tunnel, FastAPI BFF and MCP. BGE dense retrieval ran on local CPU with the existing
+accepted index. Real Chrome + Qwen Live + BGE completed a two-turn shopping flow with browser
+click/Like and the next-turn eligible OFF/ON shadow. The 100 independent scenarios (21 Qwen Live,
+79 Rule/CPU-BGE) all passed structural validation; 42 had at least two eligible candidates, and 2
+showed a real eligible rank change. Every automated event is tagged `AUTOMATED_BROWSER_E2E`; human
+LIVE counts are 0. No human labels were collected, so `preference_lift` is
+`unavailable_no_human_labels`. See
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md).
 
 ### V2.1 additions
 

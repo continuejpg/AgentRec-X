@@ -34,6 +34,7 @@
 | [V2_REPRODUCE.md](V2_REPRODUCE.md) | reproduce the environment, artifact checks and regression commands |
 | [AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md](AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md) | Behavior Feedback V1: real browser event chain, short-term profile and Behavior OFF/ON shadow evidence |
 | [AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md](AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md) | Behavior Feedback V1.1: impression/compare semantics, eligible-only ranking, compare lifecycle and human-review harness |
+| [AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md](AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md) | Behavior Feedback V2: real Qwen3.5-9B GPU Live + BGE + 100-scenario E2E and eligible OFF/ON evidence |
 | [AGENTREC_X_DEMO_GUIDE.md](AGENTREC_X_DEMO_GUIDE.md) | the current Web Demo walkthrough (chat, Memory, Behavior Inspector, Rankers) |
 | [B1_PREREGISTRATION.md](B1_PREREGISTRATION.md) | the frozen paired-evidence protocol for the Two-Tower/fusion study |
 | [M3_PREREGISTRATION.md](M3_PREREGISTRATION.md) / [M4_RESULT.md](M4_RESULT.md) | the bounded LLM policy experiment and its formal result |

@@ -196,6 +196,7 @@ async def chat_events(
                 "planner": turn.planner,
                 "planner_calls": turn.planner_calls,
                 "planner_latency_ms": turn.planner_latency_ms,
+                "planner_actions": turn.planner_actions,
             },
         )
         return
@@ -220,6 +221,7 @@ async def chat_events(
                 "planner": turn.planner,
                 "planner_calls": turn.planner_calls,
                 "planner_latency_ms": turn.planner_latency_ms,
+                "planner_actions": turn.planner_actions,
             },
         )
         return
@@ -235,6 +237,7 @@ async def chat_events(
             "planner_model": turn.planner_model,
             "planner_calls": turn.planner_calls,
             "planner_latency_ms": turn.planner_latency_ms,
+            "planner_actions": turn.planner_actions,
         },
     )
 
@@ -512,6 +515,7 @@ async def _qwen_live_turn(
     turn.planner = "qwen_base"
     turn.planner_model = planner.get("model")
     turn.planner_calls = planner.get("calls")
+    turn.planner_actions = list(planner.get("actions") or [])
     planner_latencies = [float(value) for value in (planner.get("latency_ms") or []) if value is not None]
     turn.planner_latency_ms = round(sum(planner_latencies), 2) if planner_latencies else None
 
@@ -957,6 +961,7 @@ async def clarification_reply(
         "planner_model": turn.planner_model,
         "planner_calls": turn.planner_calls,
         "planner_latency_ms": turn.planner_latency_ms,
+        "planner_actions": turn.planner_actions,
         "error": None,
     }
 

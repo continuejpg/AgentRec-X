@@ -4,9 +4,11 @@ Design boundaries
 -----------------
 * The browser posts **structured, whitelisted** events to this local BFF.  There is no
   third-party analytics SDK and no free text in the event payload.
-* Only ``LIVE_USER_INTERACTION`` events enter the behavior profile.  Recorded replay and
-  synthetic-test events are stored with their provenance but are excluded from every
-  profile signal and every shadow score.
+* ``LIVE_USER_INTERACTION`` and ``AUTOMATED_BROWSER_E2E`` may enter the behavior profile.
+  The latter is a real Chrome execution driven by CDP automation, not a human preference;
+  the profile and every report keep its provenance separate from human interactions.
+  Recorded replay and synthetic-test events are stored with provenance and excluded from
+  every profile signal and every shadow score.
 * Impressions are defined by *browser visibility* (IntersectionObserver in the Web Demo),
   never by the backend's Top-K list.  The BFF validates that the product and displayed
   position belong to the recommendation it issued to that same session.
@@ -35,10 +37,10 @@ from typing import Any, Iterable, Mapping, Sequence
 # Versions and fixed aggregation parameters (declared before any evaluation).
 # ---------------------------------------------------------------------------
 
-BEHAVIOR_EVENT_SCHEMA = "agentrecx.behavior.event.v1.1"
-BEHAVIOR_PROFILE_VERSION = "behavior_feedback_profile_v1.1"
-BEHAVIOR_SHADOW_VERSION = "behavior_shadow_v1.1"
-BEHAVIOR_SEMANTICS_VERSION = "behavior_semantics_v1.1"
+BEHAVIOR_EVENT_SCHEMA = "agentrecx.behavior.event.v1.2"
+BEHAVIOR_PROFILE_VERSION = "behavior_feedback_profile_v1.2"
+BEHAVIOR_SHADOW_VERSION = "behavior_shadow_v1.2"
+BEHAVIOR_SEMANTICS_VERSION = "behavior_semantics_v1.2"
 EXISTING_RANKER_VERSION = "existing_ranking_v1"
 
 EVENT_TYPES: tuple[str, ...] = (
@@ -49,10 +51,15 @@ EVENT_TYPES: tuple[str, ...] = (
 )
 EVENT_SOURCES: tuple[str, ...] = (
     "LIVE_USER_INTERACTION",
+    "AUTOMATED_BROWSER_E2E",
     "RECORDED_REPLAY",
     "SYNTHETIC_TEST",
 )
 LIVE_SOURCE = "LIVE_USER_INTERACTION"
+AUTOMATED_SOURCE = "AUTOMATED_BROWSER_E2E"
+#: Both sources can drive the short-term profile.  Reports and human-preference statistics
+#: must use LIVE_SOURCE only; automated browser runs are mechanism evidence, not human gold.
+PROFILE_SOURCES: tuple[str, ...] = (LIVE_SOURCE, AUTOMATED_SOURCE)
 
 #: Compare actions are attempts until the P16 comparison tool reports a result.
 COMPARE_ACTION_STATUSES: tuple[str, ...] = ("attempted", "succeeded", "failed")
@@ -644,8 +651,8 @@ class BehaviorStore:
             clauses.append("occurred_ts <= ?")
             params.append(float(as_of))
         if live_only:
-            clauses.append("event_source = ?")
-            params.append(LIVE_SOURCE)
+            clauses.append("event_source IN (?, ?)")
+            params.extend(PROFILE_SOURCES)
         params.append(max(1, int(limit)))
         with self._lock:
             rows = self._connection.execute(
@@ -719,7 +726,7 @@ def _row_view(row: Mapping[str, Any]) -> dict[str, Any]:
         "ranker_version": row.get("ranker_version"),
         "occurred_at": row.get("occurred_at"),
         "metadata": _public_metadata(row.get("metadata") or {}),
-        "enters_profile": row.get("event_source") == LIVE_SOURCE,
+        "enters_profile": row.get("event_source") in PROFILE_SOURCES,
     }
 
 
@@ -800,16 +807,17 @@ def build_behavior_profile(
     window_s: float = DEFAULT_WINDOW_S,
     half_life_s: float = DEFAULT_HALF_LIFE_S,
 ) -> dict[str, Any]:
-    """Aggregate live events into a transparent, evidence-bearing short-term profile."""
+    """Aggregate profile-eligible events into a transparent, evidence-bearing short-term profile."""
     window_start = reference_ts - max(0.0, float(window_s))
     live = [
         row for row in rows
-        if row.get("event_source") == LIVE_SOURCE
+        if row.get("event_source") in PROFILE_SOURCES
         and window_start <= float(row.get("occurred_ts") or 0.0) <= reference_ts
     ]
     source_counts = {
         "stored_total": len(rows),
         "live_user_interaction": 0,
+        "automated_browser_e2e": 0,
         "recorded_replay": 0,
         "synthetic_test": 0,
     }
@@ -817,6 +825,8 @@ def build_behavior_profile(
         source = str(row.get("event_source") or "")
         if source == LIVE_SOURCE:
             source_counts["live_user_interaction"] += 1
+        elif source == AUTOMATED_SOURCE:
+            source_counts["automated_browser_e2e"] += 1
         elif source == "RECORDED_REPLAY":
             source_counts["recorded_replay"] += 1
         elif source == "SYNTHETIC_TEST":
@@ -824,6 +834,9 @@ def build_behavior_profile(
 
     counts = {
         "live_events": len(live),
+        "profile_events": len(live),
+        "human_live_events": sum(1 for row in live if row.get("event_source") == LIVE_SOURCE),
+        "automated_browser_e2e_events": sum(1 for row in live if row.get("event_source") == AUTOMATED_SOURCE),
         "product_impression": 0,
         "product_click": 0,
         "product_compare": 0,
@@ -876,6 +889,12 @@ def build_behavior_profile(
             "half_life_seconds": float(half_life_s),
             "counts": {key: 0 for key in counts},
             "source_counts": source_counts,
+            "profile_sources": list(PROFILE_SOURCES),
+            "profile_provenance": {
+                "human_live_events": 0,
+                "automated_browser_e2e_events": 0,
+                "human_preference_statistics": "LIVE_USER_INTERACTION only",
+            },
             "recent_impressions": [],
             "recent_viewed": [],
             "recent_compared": [],
@@ -1153,6 +1172,12 @@ def build_behavior_profile(
         "half_life_seconds": float(half_life_s),
         "counts": counts,
         "source_counts": source_counts,
+        "profile_sources": list(PROFILE_SOURCES),
+        "profile_provenance": {
+            "human_live_events": int(counts.get("human_live_events") or 0),
+            "automated_browser_e2e_events": int(counts.get("automated_browser_e2e_events") or 0),
+            "human_preference_statistics": "LIVE_USER_INTERACTION only",
+        },
         "signal_semantics": {
             "impression": "exposure_context_only_zero_interest",
             "click": "weak_interest",
@@ -1667,6 +1692,7 @@ __all__ = [
     "BEHAVIOR_PROFILE_VERSION",
     "BEHAVIOR_SEMANTICS_VERSION",
     "BEHAVIOR_SHADOW_VERSION",
+    "AUTOMATED_SOURCE",
     "COMPARE_ACTION_STATUSES",
     "COMPARE_INTEREST_WEIGHT",
     "BehaviorError",
@@ -1682,6 +1708,7 @@ __all__ = [
     "IMPRESSION_VISIBILITY_THRESHOLD",
     "LIVE_SOURCE",
     "MAX_BATCH_EVENTS",
+    "PROFILE_SOURCES",
     "build_behavior_profile",
     "build_recommendation_snapshot",
     "build_shadow",

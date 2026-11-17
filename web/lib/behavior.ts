@@ -4,7 +4,9 @@
 //   * no PostHog/Snowplow SDK, no autocapture, no session recording;
 //   * no raw chat text, no memory text, no user id;
 //   * impressions require an IntersectionObserver visibility check, never the Top-K list;
-//   * only LIVE_USER_INTERACTION is produced by this module.
+//   * normal UI events are LIVE_USER_INTERACTION; a CDP-driven E2E browser can opt in to
+//     AUTOMATED_BROWSER_E2E through window.__AGENTRECX_AUTOMATED_BROWSER_E2E__, so automated
+//     mechanism evidence is never counted as human preference data.
 //
 // Events are batched and flushed to the local BFF.  A failed flush is retried; the BFF
 // enforces event-id and recommendation+product impression idempotency server-side.
@@ -13,7 +15,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { api } from "./api";
-import type { BehaviorEventInput, BehaviorEventType, ProductCard, ProductsPayload } from "./types";
+import type { BehaviorEventInput, BehaviorEventSource, BehaviorEventType, ProductCard, ProductsPayload } from "./types";
 
 const FLUSH_DELAY_MS = 450;
 const FLUSH_BATCH_SIZE = 25;
@@ -24,8 +26,20 @@ const COMPARE_DEDUPE_MS = 2_000;
 const DEFAULT_IMPRESSION_MS = 1_000;
 const DEFAULT_VISIBILITY_THRESHOLD = 0.6;
 
-/** Only this source is produced by the live browser UI. */
+/** Only this source is produced by a normal human browser session. */
 export const LIVE_EVENT_SOURCE = "LIVE_USER_INTERACTION" as const;
+
+/** CDP E2E may set this flag before interacting; it is never set by the product UI. */
+export function browserEventSource(): BehaviorEventSource {
+  if (
+    typeof window !== "undefined" &&
+    (window as unknown as { __AGENTRECX_AUTOMATED_BROWSER_E2E__?: boolean })
+      .__AGENTRECX_AUTOMATED_BROWSER_E2E__ === true
+  ) {
+    return "AUTOMATED_BROWSER_E2E";
+  }
+  return LIVE_EVENT_SOURCE;
+}
 
 export interface BehaviorFlushInfo {
   accepted: number;
@@ -69,7 +83,7 @@ function eventBase(
     recommendation_id: recommendationId,
     product_id: productId,
     displayed_position: Math.max(1, Math.round(position)),
-    event_source: LIVE_EVENT_SOURCE,
+    event_source: browserEventSource(),
   };
 }
 

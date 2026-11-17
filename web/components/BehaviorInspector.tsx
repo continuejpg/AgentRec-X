@@ -759,7 +759,13 @@ export default function BehaviorInspector({
                 <div className="rounded-lg border border-(--line) bg-(--card) px-2 py-1.5">
                   <div className="font-semibold text-(--ink-2)">Short-term behavior</div>
                   <div className="text-(--ink-soft)">
-                    {profile.counts.live_events} live events · {Math.round(profile.window_seconds / 60)} min window
+                    {profile.counts.live_events} profile events · {Math.round(profile.window_seconds / 60)} min window
+                    {profile.profile_provenance ? (
+                      <span className="block">
+                        {profile.profile_provenance.human_live_events} human ·{" "}
+                        {profile.profile_provenance.automated_browser_e2e_events} automated browser
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -781,7 +787,7 @@ export default function BehaviorInspector({
               <Section title="Short-term interests" aside={`${profile.attribute_interests.length} attributes`} open>
                 <InterestList profile={profile} />
               </Section>
-              <Section title="Recent behavior events" aside={`${profile.counts.live_events} live`}>
+              <Section title="Recent behavior events" aside={`${profile.counts.live_events} profile`}>
                 <EventList profile={profile} />
               </Section>
               <Section title="Eligible OFF / ON + diagnostic" aside={shadow?.eligible_ranking_changed ? "eligible diff" : "no eligible diff"} open>

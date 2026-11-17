@@ -140,7 +140,7 @@ return HTTP 400.
 Memory is process-local and resets when the BFF restarts; the UI and test evidence say this
 explicitly. Reset Session clears turns only and never another session's memory.
 
-### Behavior Inspector (Behavior Feedback V1.1)
+### Behavior Inspector (Behavior Feedback V1.2/V2 automated-browser extension)
 
 Open the header **Behavior** button or right panel → **Behavior**.  The panel shows:
 
@@ -176,10 +176,13 @@ F. Turn Personalization OFF: no behavior contribution, normal recommendations co
 
 The formal shadow is **eligible-only**: it uses the same query/candidates/metadata/positions/
 eligibility, Active M9 memory and Gate; ineligible products cannot enter the eligible Top-K.  The
-production product list above the panel is not re-ranked.  Only `LIVE_USER_INTERACTION` enters the
-profile; Replay/synthetic events are tagged and excluded.  Impressions are exposure context only;
-compare attempts/completed/failed are operation provenance, not preferences.  Event storage is a
-local SQLite file under `runs/web_demo/behavior/`; no external analytics SDK is used.  See
+production product list above the panel is not re-ranked.  `LIVE_USER_INTERACTION` and
+`AUTOMATED_BROWSER_E2E` can enter the profile, but they are counted separately; only
+`LIVE_USER_INTERACTION` may be used for human-preference statistics.  Replay/synthetic events are
+tagged and excluded.  Impressions are exposure context only; compare attempts/completed/failed are
+operation provenance, not preferences.  Event storage is a local SQLite file under
+`runs/web_demo/behavior/`; no external analytics SDK is used.  See
+[`AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md),
 [`AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md),
 [`AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md) and
 [`BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](BEHAVIOR_FEEDBACK_TECH_SELECTION.md).
@@ -194,6 +197,7 @@ file reports `preference_lift = unavailable_no_human_labels`.
 | Variable | Purpose | Default |
 |---|---|---|
 | `AGENTRECX_WEB_DEMO_SEARCH_MODE` | `bge` for demo, `bm25` for fast dev only | `bge` |
+| `AGENTRECX_WEB_DEMO_MCP_TIMEOUT_S` | startup/tool ceiling; set `360` for a cold BGE host with two MCP children | `180` |
 | `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES` | enables writes for `profile_0057` | `1` in launcher |
 | `AGENTRECX_WEB_DEMO_PORT` | BFF port | `8787` |
 | `QWEN_LIVE_ENABLED` / `QWEN_MODEL_ENDPOINT` | optional real Qwen Live; never silently faked | disabled |

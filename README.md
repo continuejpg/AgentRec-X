@@ -88,8 +88,8 @@
 Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
 
 **Behavior Feedback V1.1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
-BFF 事件链路进入 SQLite；只有 `LIVE_USER_INTERACTION` 进入短期画像，Replay/Synthetic 只保留来源
-但不参与统计。V1.1 明确 **Impression 只做曝光上下文、零正向兴趣**；Compare 区分
+BFF 事件链路进入 SQLite；`LIVE_USER_INTERACTION` 与 `AUTOMATED_BROWSER_E2E` 可进入短期画像但
+分别计数，只有 LIVE 可作为人类偏好统计。V1.1 明确 **Impression 只做曝光上下文、零正向兴趣**；Compare 区分
 attempted / succeeded / failed 且不自动变成偏好；Behavior Shadow 只对 Gate
 `ALLOW_FINALIZE + candidate_presentable_ids` 的 Eligible 候选做正式 OFF/ON，Ineligible 候选只出现在
 “Diagnostic Ranking — Not Final Recommendations”。浏览器验证：10 次 impression → 0 兴趣；
@@ -100,6 +100,14 @@ unavailable。报告见
 V1 记录见
 [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md)，
 技术选型见 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md)。
+
+**Behavior Feedback V2（GPU Live E2E）**：真实 Qwen3.5-9B Base 在远端 RTX 4090 上加载并通过
+`/plan` 返回结构化 PlannerAction；本地 BFF/MCP 使用 WSL loopback tunnel，BGE dense 检索在本地 CPU。
+真实 Chrome + Qwen Live + BGE 完成两轮购物与点击/Like 链路；100 个独立场景（21 个 Qwen Live，
+79 个 Rule/CPU-BGE）全部结构校验通过，42 个场景可比较 Eligible OFF/ON，其中 2 个发生真实
+Eligible 排名变化。所有自动化事件标记为 `AUTOMATED_BROWSER_E2E`，人类 LIVE 计数为 0；
+无真实人工标签，`preference_lift = unavailable_no_human_labels`。报告见
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。
 
 ---
 

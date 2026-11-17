@@ -113,14 +113,17 @@ the profile selector; it must not invent a profile.
   "modes": { "...": "same as /health" },
   "notices": ["Local CPU demo; catalogue facts only; no live price/stock/ratings."],
   "behavior": {
-    "enabled": true, "master_enabled": true, "semantics_version": "behavior_semantics_v1.1",
+    "enabled": true, "master_enabled": true, "semantics_version": "behavior_semantics_v1.2",
     "storage": "sqlite",
     "impression_min_visible_ms": 1000, "impression_visibility_threshold": 0.6,
     "window_seconds": 21600, "half_life_seconds": 1800,
     "event_types": ["product_impression","product_click","product_compare","explicit_item_feedback"],
-    "event_sources": ["LIVE_USER_INTERACTION","RECORDED_REPLAY","SYNTHETIC_TEST"],
+    "event_sources": ["LIVE_USER_INTERACTION","AUTOMATED_BROWSER_E2E","RECORDED_REPLAY","SYNTHETIC_TEST"],
     "compare_action_statuses": ["attempted","succeeded","failed"],
-    "live_source": "LIVE_USER_INTERACTION", "profile_uses_live_only": true,
+    "live_source": "LIVE_USER_INTERACTION",
+    "profile_sources": ["LIVE_USER_INTERACTION","AUTOMATED_BROWSER_E2E"],
+    "profile_uses_live_only": false,
+    "human_preference_statistics_source": "LIVE_USER_INTERACTION",
     "impression_interest_weight": 0.0, "compare_interest_weight": 0.0,
     "retention_days": 7, "external_analytics": null, "notes": ["..."]
   }
@@ -243,15 +246,18 @@ Rules:
   then continue the pending query through `recommend_products` and return the real products.
 - `turn_id` must be stable per reply attempt (idempotency); reuse on retry.
 
-### Behavior Feedback V1.1 (first-party local events)
+### Behavior Feedback V1.2 / V2 automated-browser extension (first-party local events)
 
 The browser posts only whitelisted structured events to the local BFF.  There is no PostHog /
 Snowplow SDK, no autocapture and no session recording.  The BFF stores events in a local SQLite
 database (`runs/web_demo/behavior/events.sqlite3` by default; `AGENTRECX_BEHAVIOR_DB` overrides)
-and builds a short-term profile.  Only `LIVE_USER_INTERACTION` enters the profile; recorded replay
-and synthetic test events are stored with provenance and excluded.
+and builds a short-term profile.  `LIVE_USER_INTERACTION` and `AUTOMATED_BROWSER_E2E` may enter the
+profile; recorded replay and synthetic test events are stored with provenance and excluded.  The
+two profile sources remain separately counted, and only `LIVE_USER_INTERACTION` may be used for
+human-preference statistics.  A CDP-driven browser e2e sets
+`window.__AGENTRECX_AUTOMATED_BROWSER_E2E__ = true`; the product UI never sets it.
 
-V1.1 signal semantics:
+V1.1 signal semantics (unchanged in V2):
 
 - `product_impression` is exposure context only: **zero interest weight**; not a negative signal.
 - `product_click` is weak interest.
@@ -271,7 +277,7 @@ V1.1 signal semantics:
       "recommendation_id": "rec-...",
       "product_id": "B08GM5K9TD",
       "displayed_position": 1,
-      "event_source": "LIVE_USER_INTERACTION|RECORDED_REPLAY|SYNTHETIC_TEST",
+      "event_source": "LIVE_USER_INTERACTION|AUTOMATED_BROWSER_E2E|RECORDED_REPLAY|SYNTHETIC_TEST",
       "metadata": {"feedback": "like|dislike"}
     }
   ]
@@ -298,8 +304,9 @@ V1.1 signal semantics:
   `{code:"behavior_disabled"}` and stores nothing.
 
 #### GET /api/behavior/profile?session_id=...
-Returns counts (only live, including separate compare attempted/completed/failed counts), source
-counts (including excluded replay/synthetic), `recent_impressions` (with `clicked` context),
+Returns profile counts (including separate compare attempted/completed/failed counts), source
+counts, `profile_provenance` (human LIVE vs automated browser e2e; human statistics source is
+`LIVE_USER_INTERACTION` only), `recent_impressions` (with `clicked` context),
 recent viewed/compared/explicit-feedback items, weighted attribute interests with evidence refs and
 source event types, per-product interests, recent events (with `enters_profile`), the
 `explicit_memory` status, and an optional behavior-derived `suggestion`.  A suggestion is an
@@ -344,8 +351,9 @@ conversation, and never affects another session.
 Data retention: `AGENTRECX_BEHAVIOR_RETENTION_DAYS` (default 7).  Window and decay:
 `AGENTRECX_BEHAVIOR_WINDOW_S` (default 21600) and `AGENTRECX_BEHAVIOR_HALF_LIFE_S` (default 1800).
 Event source labels and browser visibility rules are in
-`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`; V1.1 evidence is in
-`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`.
+`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`; V1.1 semantics and V2 GPU-live evidence are in
+`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md` and
+`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`.
 
 ### GET /api/replay
 Reads `runs/p18/qwen_replay.json` (existing real saved Qwen trajectories) and returns
