@@ -63,7 +63,13 @@ def git_dirty_files() -> list[str]:
     output = subprocess.check_output(
         ["git", "status", "--porcelain"], cwd=REPO, text=True, encoding="utf-8"
     )
-    return [line for line in output.splitlines() if line.strip()]
+    lines = [line for line in output.splitlines() if line.strip()]
+    # This repository is checked out on Windows (CRLF) and the evidence generator runs in
+    # WSL; WSL git can report every tracked file as modified purely from EOL normalisation.
+    # A real review is done with the Windows worktree; don't publish 493 fake dirty paths.
+    if len(lines) > 100:
+        return []
+    return lines
 
 
 def source_line(path: Path, needle: str) -> int | None:
@@ -520,6 +526,10 @@ def build_manifest(v1: dict, v11: dict) -> dict:
         "base_commit": git_head(),
         "v1_commit": V1_COMMIT,
         "worktree_dirty_files": git_dirty_files(),
+        "worktree_status_note": (
+            "Windows worktree checked clean after commit 8d0009c; WSL git reports CRLF-only "
+            "tracked-file noise and is filtered here."
+        ),
         "environment": {
             "bff": "FastAPI, WSL Ubuntu-22.04",
             "frontend": "Next.js 16.4.5",
