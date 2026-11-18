@@ -42,6 +42,8 @@
 7. 通过 **P17 官方 MCP stdio Server** 把这些能力暴露给独立客户端；
 8. 在 **P19 本地 Web Demo** 中把完整链路展示给用户。
 
+Planner 默认使用确定性的 **Rule Planner**；可选的真实 **Qwen3.5-9B Base Live Planner** 已通过远端 GPU + 本地 BFF/MCP 链路验证，失败时明确报告不可用，不静默降级。
+
 它最有价值的部分不是“接了一个 LLM”，而是围绕检索、事实、状态和评测建立的那些**边界**：
 
 - 模型不能编造商品 ID、分数、证据或最终排名；
@@ -87,6 +89,12 @@
 截图来自真实本地运行与真实浏览器调用，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
 Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
 
+**Behavior Feedback V2 实况（Qwen Live + BGE）**
+
+| Qwen Live + BGE + Gate | Eligible OFF/ON Shadow |
+|---|---|
+| ![Qwen Live 真实 PlannerAction 与 BGE 候选](docs/assets/web_demo/behavior-v2-qwen-live-browser.png) | ![Eligible-only Behavior OFF/ON](docs/assets/web_demo/behavior-v11-eligible-shadow.png) |
+
 **Behavior Feedback V1.1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
 BFF 事件链路进入 SQLite；`LIVE_USER_INTERACTION` 与 `AUTOMATED_BROWSER_E2E` 可进入短期画像但
 分别计数，只有 LIVE 可作为人类偏好统计。V1.1 明确 **Impression 只做曝光上下文、零正向兴趣**；Compare 区分
@@ -101,13 +109,12 @@ V1 记录见
 [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md)，
 技术选型见 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md)。
 
-**Behavior Feedback V2（GPU Live E2E）**：真实 Qwen3.5-9B Base 在远端 RTX 4090 上加载并通过
-`/plan` 返回结构化 PlannerAction；本地 BFF/MCP 使用 WSL loopback tunnel，BGE dense 检索在本地 CPU。
-真实 Chrome + Qwen Live + BGE 完成两轮购物与点击/Like 链路；100 个独立场景（21 个 Qwen Live，
-79 个 Rule/CPU-BGE）全部结构校验通过，42 个场景可比较 Eligible OFF/ON，其中 2 个发生真实
-Eligible 排名变化。所有自动化事件标记为 `AUTOMATED_BROWSER_E2E`，人类 LIVE 计数为 0；
-无真实人工标签，`preference_lift = unavailable_no_human_labels`。报告见
+**Behavior Feedback V2（GPU Live E2E）**：真实 Qwen3.5-9B Base 在远端 RTX 4090 上返回结构化
+PlannerAction，BGE dense 检索在本地 CPU；真实 Chrome 完成 Qwen Live + BGE + 点击/Like + 下一轮
+Eligible OFF/ON。100 个自动化场景、延迟与安全边界的完整数字见
+[关键结果](#关键结果口径必须一起读) 和
 [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。
+自动化浏览器事件不等同于真实人类偏好。
 
 ---
 
@@ -284,6 +291,28 @@ Qwen Live 的单次延迟来自 **一次真实浏览器运行**，不能写成�
 当前是 **BFF 进程内状态**，BFF 重启会丢失；不是持久化多租户 Memory。完整证据见
 [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
 
+### Behavior Feedback V2 GPU Live E2E（真实运行，不是离线平均）
+
+| 项目 | 结果 | 口径 |
+|---|---:|---|
+| 自动化场景 | **100 / 100 passed** | 独立 Session；结构校验，不等于质量结论 |
+| Qwen GPU Live / CPU-BGE | **21 / 79** | 21 个真实 Qwen Live；其余 Rule/CPU-BGE |
+| Qwen Live turns / raw actions | **31 / 31** | 真实远端 RTX 4090 推理，0 parser error |
+| BGE retrieval turns | **136** | 全部 `bge` / `bge_dense`，非 BM25 回退 |
+| BGE retrieval latency | **p50 159.64 ms / p95 187.18 ms** | 本地 CPU/WSL |
+| Qwen Planner latency | **p50 11.17 s / p95 14.23 s** | 每 turn 的真实 planner call 总和 |
+| Qwen turn total | **p50 17.98 s / p95 24.77 s** | 含工具与 Gate，不含浏览器渲染 |
+| Eligible-comparable OFF/ON | **42** | 仅统计 ≥2 Eligible 候选 |
+| Eligible ranking changes | **2 / 42** | `v2-022` / `v2-028`，OFF #5 → ON #4 |
+| Hard-constraint violations | **0** | Gate / Eligibility 不变 |
+| Human LIVE behavior events | **0** | 全部自动化事件为 `AUTOMATED_BROWSER_E2E` |
+| Human preference labels | **0** | `preference_lift = unavailable_no_human_labels` |
+
+**设备边界**：Qwen3.5-9B Planner 在远程 GPU；BGE encoder/index、FastAPI BFF 和 MCP 在本地
+CPU/WSL。**不能把 100 个场景称为 100 个 GPU Planner 测试**，也不能把自动化点击称为真实人类偏好。
+完整证据与失败边界见
+[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。
+
 ---
 
 ## 目录结构
@@ -317,7 +346,9 @@ third_party/        第三方来源、licence 与 provenance
 | [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) | **Local CPU / 远程 Qwen Live 完整启动与部署** |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 当前架构、Qwen Live / Memory / Session 隔离时序 |
 | [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md) | **V2.1 Qwen Live 与 Session Isolation 验收证据** |
-| [`docs/README_REVIEW_REPORT.md`](docs/README_REVIEW_REPORT.md) | 本次 README 增量审查记录 |
+| [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md) | **V2：真实 Qwen3.5-9B GPU Live + BGE + 100 场景 E2E 证据、延迟与边界** |
+| [`docs/AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md`](docs/AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md) | 本次 GitHub 展示整理、安全审计与发布建议 |
+| [`docs/README_REVIEW_REPORT.md`](docs/README_REVIEW_REPORT.md) | 更早的 README pre-edit 审查记录（历史基线） |
 | [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
 | [`P15_REPORT.md`](docs/milestones/P15-P17/P15_REPORT.md) | Evidence Bundle、Claim Validation |
 | [`P16_REPORT.md`](docs/milestones/P15-P17/P16_REPORT.md) | 两个 Shopping Skills |
@@ -342,6 +373,7 @@ third_party/        第三方来源、licence 与 provenance
 - 本地 Web Demo 没有 auth/TLS；Memory 写入默认关闭；MCP 默认只允许启动时绑定的单一可信用户，不允许调用方传任意 user id。
 - V2.1 起浏览器 Session 拥有独立 M9 namespace（A/B 不互读、不互相撤回）；但 Session Memory 仍是 **BFF 进程内状态，BFF 重启会丢失**，不是持久化多租户 Memory。
 - Qwen Live 已在 V2.1 用真实浏览器完成一次 `RETRIEVE → RERANK → FINALIZE` 调用；它需要 GPU 服务 + **WSL-local loopback tunnel**，tunnel/模型停止时 UI 明确显示 unavailable，不能声称 Qwen 成功。
+- Behavior V2 的 100 个自动化场景使用 `AUTOMATED_BROWSER_E2E` provenance；Qwen Planner 在远程 GPU，BGE 在本地 CPU。它们验证机制与排序响应，不是人类偏好标签；`human_review_count=0`，`preference_lift` 为 `unavailable_no_human_labels`，不声称 CTR/满意度提升。
 - Ranker Comparison 当前是 **P100 recorded Replay**，页面明确标注；不是实时 ShopRanker/Hybrid 推理。
 - 未运行 Reserved Test 的二次调参，也未基于最终指标修改模型或规则。
 
@@ -350,5 +382,5 @@ third_party/        第三方来源、licence 与 provenance
 ---
 
 <p align="center">
-  <a href="README_EN.md">Read the full English README</a> · <a href="AGENTRECX_HANDOFF.md">Handoff</a> · <a href="EXPERIMENT_SUMMARY.md">Experiments</a>
+  <a href="README_EN.md">Read the full English README</a> · <a href="docs/handoff/AGENTRECX_HANDOFF.md">Handoff</a> · <a href="EXPERIMENT_SUMMARY.md">Experiments</a>
 </p>

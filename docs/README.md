@@ -73,6 +73,7 @@
 | Document | Read it when you want to… |
 | --- | --- |
 | [MEMORY_AGENT_CAPABILITY_AUDIT.md](MEMORY_AGENT_CAPABILITY_AUDIT.md) | the L1–L4 Memory/Agent capability matrix |
+| [AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md](AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md) | read-only GitHub presentation, link and public-repository security audit |
 | [MEMORY_AGENT_CALL_CHAINS.md](MEMORY_AGENT_CALL_CHAINS.md) | three traced call chains and where one stopped |
 | [MEMORY_AGENT_RESUME_CLAIMS.md](MEMORY_AGENT_RESUME_CLAIMS.md) | supported vs unsupported resume claims |
 
