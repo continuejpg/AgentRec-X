@@ -118,6 +118,8 @@ PENDING_MODES = frozenset({"cpu_live", "qwen_live"})
 
 #: Versioned envelope written to ``web_turn.payload_json``.
 TURN_PAYLOAD_SCHEMA = "agentrecx.web.turn.v1"
+#: Versioned envelope written to ``web_request.result_json`` for completed replies.
+REPLY_RESULT_SCHEMA = "agentrecx.web.reply_result.v1"
 
 # --------------------------------------------------------------------------- #
 # Schema
@@ -1184,15 +1186,25 @@ class SQLiteWebStateStore:
         turn: Mapping[str, Any],
         ranking_source: str | None,
         timestamp: float,
+        turn_seq: int | None = None,
     ) -> str:
         envelope = pack_turn_payload(turn, ranking_source=ranking_source)
         turn_id = str(envelope["turn"]["turn_id"])
-        seq = _turn_seq_from_id(turn_id, session_id)
+        _validate_turn_id(turn_id, session_id)
+        if turn_seq is None:
+            # Insertion order across chat turns (-tN) and reply turns (-rN): a reply turn
+            # must follow its source turn and must never collide with a later chat turn.
+            row = connection.execute(
+                "SELECT COALESCE(MAX(turn_seq), 0) AS current FROM web_turn "
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            turn_seq = int(row["current"]) + 1
         try:
             connection.execute(
                 "INSERT INTO web_turn(session_id, turn_seq, turn_id, task_id, "
                 "payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, seq, turn_id, task_id,
+                (session_id, turn_seq, turn_id, task_id,
                  json.dumps(envelope, sort_keys=True, ensure_ascii=False), timestamp),
             )
         except sqlite3.IntegrityError as exc:
@@ -1271,7 +1283,14 @@ class SQLiteWebStateStore:
                     )
                 if str(existing["status"]) == "COMPLETED":
                     # Replay before task/pending state checks: a completed reply legitimately
-                    # leaves the task COMPLETED and the pending CONSUMED.
+                    # leaves the task COMPLETED and the pending CONSUMED.  It must still be
+                    # generation-aware: a reset makes the old success ineligible.
+                    if int(existing["reset_generation_at_claim"]) != int(
+                        session["reset_generation"]
+                    ):
+                        raise RequestFenced(
+                            "completed request belongs to a previous reset generation"
+                        )
                     return RequestClaim("replay", _to_request_record(existing), None)
             if str(task["status"]) != "WAITING_FOR_USER":
                 raise TaskStateConflict(f"task {task['task_id']!r} is not waiting for a reply")
@@ -1345,6 +1364,43 @@ class SQLiteWebStateStore:
             ).fetchone()
             return RequestClaim(outcome, _to_request_record(row), token)
 
+    def renew_request_lease(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        lease_duration: float = 60.0,
+        now: float | None = None,
+    ) -> RequestRecord:
+        """Extend a live claim lease; a stale token or expiry is fenced, never renewed."""
+        if lease_duration <= 0:
+            raise ValueError("lease_duration must be positive")
+        reference = time.time() if now is None else float(now)
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            updated = connection.execute(
+                "UPDATE web_request SET lease_expires_at = ?, updated_at = ? "
+                "WHERE session_id = ? AND request_id = ? AND status = 'PROCESSING' "
+                "AND claim_token = ? AND reset_generation_at_claim = ? "
+                "AND (lease_expires_at IS NULL OR lease_expires_at > ?)",
+                (reference + float(lease_duration), reference, session_id, request_id,
+                 claim_token, int(session["reset_generation"]), reference),
+            )
+            if updated.rowcount != 1:
+                raise RequestFenced("lease cannot be renewed: stale token, expiry or reset")
+            row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return _to_request_record(row)
+
     def finalize_reply_request(
         self,
         session_id: str,
@@ -1353,6 +1409,9 @@ class SQLiteWebStateStore:
         claim_token: str,
         outcome: str,
         requirements: Mapping[str, Any] | None = None,
+        turn: Mapping[str, Any] | None = None,
+        ranking_source: str | None = None,
+        result: Mapping[str, Any] | None = None,
         now: float | None = None,
     ) -> tuple[TaskRecord, PendingRecord, RequestRecord]:
         """Atomically commit a claimed reply: Task, Pending and Request in one transaction.
@@ -1367,8 +1426,8 @@ class SQLiteWebStateStore:
         requirements_json = (
             None if requirements is None else _dumps_json(requirements, "requirements")
         )
-        result = {"outcome": outcome, "request_id": request_id,
-                  "pending_id": request_id, "task_id": None}
+        if result is not None and not isinstance(result, Mapping):
+            raise ValueError("result must be a mapping")
 
         with self._transaction() as connection:
             session = connection.execute(
@@ -1389,6 +1448,11 @@ class SQLiteWebStateStore:
                 raise RequestNotFound(f"no request {request_id!r} for {session_id!r}")
             if str(request["status"]) != "PROCESSING" or request["claim_token"] != claim_token:
                 raise RequestFenced("claim token is stale or the request is not processing")
+            if (
+                request["lease_expires_at"] is not None
+                and float(request["lease_expires_at"]) <= reference
+            ):
+                raise RequestFenced("claim lease expired before finalize; the result was lost")
             if int(request["reset_generation_at_claim"]) != int(session["reset_generation"]):
                 raise RequestFenced("session was reset after this request was claimed")
 
@@ -1400,6 +1464,23 @@ class SQLiteWebStateStore:
                 raise RequestFenced("request task no longer belongs to this session")
             if int(task["reset_generation"]) != int(session["reset_generation"]):
                 raise RequestFenced("task belongs to a previous reset generation")
+
+            pending = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (request["pending_id"],),
+            ).fetchone()
+            if pending is None or str(pending["task_id"]) != str(task["task_id"]):
+                raise PendingStateConflict("pending no longer belongs to the request task")
+            if str(pending["status"]) != "OPEN":
+                raise PendingStateConflict(
+                    f"pending is {pending['status']!r}, not OPEN"
+                )
+            if turn is not None:
+                turn_id = str(turn.get("turn_id") or "")
+                if turn_id != str(pending["reply_turn_id"]):
+                    raise RequestFenced(
+                        "reply turn id must equal the reply_turn_id issued at ASK time"
+                    )
 
             target_status = "RUNNING" if outcome == "resumed" else "COMPLETED"
             if outcome == "resumed":
@@ -1429,6 +1510,14 @@ class SQLiteWebStateStore:
             if updated_task.rowcount != 1:
                 raise StaleTaskVersion("task changed since this request was claimed")
 
+            if turn is not None:
+                # Same transaction: the reply turn is visible if and only if the reply
+                # completed.  It reuses the reply identity issued at ASK time.
+                self._insert_turn_in_transaction(
+                    connection, session_id, str(task["task_id"]), turn,
+                    ranking_source, reference,
+                )
+
             consumed = connection.execute(
                 "UPDATE web_pending SET status = 'CONSUMED', consumed_at = ? "
                 "WHERE pending_id = ? AND task_id = ? AND status = 'OPEN'",
@@ -1437,13 +1526,21 @@ class SQLiteWebStateStore:
             if consumed.rowcount != 1:
                 raise PendingStateConflict("pending is no longer consumable by this request")
 
-            result["task_id"] = str(task["task_id"])
+            result_payload = {
+                "schema": REPLY_RESULT_SCHEMA,
+                "outcome": outcome,
+                "request_id": request_id,
+                "pending_id": str(request["pending_id"]),
+                "task_id": str(task["task_id"]),
+                "turn_id": None if turn is None else str(turn.get("turn_id")),
+                "payload": None if result is None else dict(result),
+            }
             finalized = connection.execute(
                 "UPDATE web_request SET status = 'COMPLETED', result_json = ?, updated_at = ? "
                 "WHERE session_id = ? AND request_id = ? AND status = 'PROCESSING' "
                 "AND claim_token = ?",
-                (json.dumps(result, sort_keys=True), reference, session_id, request_id,
-                 claim_token),
+                (json.dumps(result_payload, sort_keys=True, ensure_ascii=False), reference,
+                 session_id, request_id, claim_token),
             )
             if finalized.rowcount != 1:  # pragma: no cover - guarded above
                 raise RequestFenced("request was completed by another executor")
@@ -1914,6 +2011,18 @@ def pack_turn_payload(
     }
 
 
+def _validate_turn_id(turn_id: str, session_id: str) -> None:
+    """A stored turn must belong to the session and carry a real sequence suffix."""
+    prefix = f"{session_id}-"
+    if not turn_id.startswith(prefix):
+        raise ValueError(f"turn id {turn_id!r} does not belong to session {session_id!r}")
+    suffix = turn_id[len(prefix):]
+    if len(suffix) < 2 or suffix[0] not in {"t", "r"} or not suffix[1:].isdigit():
+        raise ValueError(f"turn id {turn_id!r} has no valid sequence number")
+    if int(suffix[1:]) < 1:
+        raise ValueError(f"turn id {turn_id!r} has no valid sequence number")
+
+
 def _turn_seq_from_id(turn_id: str, session_id: str) -> int:
     prefix = f"{session_id}-t"
     if not turn_id.startswith(prefix):
@@ -1978,6 +2087,11 @@ def _to_request_record(row: sqlite3.Row) -> RequestRecord:
         else _loads_json(row["result_json"], table="web_request", row_key=request_id,
                          field="result_json")
     )
+    if result is not None and result.get("schema") != REPLY_RESULT_SCHEMA:
+        raise StateDataCorruption(
+            f"web_request.result_json for {request_id!r} has unexpected schema "
+            f"{result.get('schema')!r}"
+        )
     return RequestRecord(
         session_id=str(row["session_id"]),
         request_id=request_id,

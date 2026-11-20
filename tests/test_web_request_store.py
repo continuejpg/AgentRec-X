@@ -21,6 +21,7 @@ from web_demo.state_store import (  # noqa: E402
     RequestConflict,
     RequestFenced,
     StaleTaskVersion,
+    StateMigrationError,
     StateStoreError,)
 
 REPLY = {"message": "For gaming.", "confirmed_by_user": True,
@@ -297,3 +298,131 @@ def test_v3_database_migrates_to_v4_preserving_state(tmp_path: Path) -> None:
         assert store.list_turns("web-v3") == ()
     finally:
         store.close()
+
+
+# --------------------------------------------------------------------------- #
+# Phase A gate: generation-aware replay, lease renewal, finalize expiry
+# --------------------------------------------------------------------------- #
+
+
+def test_completed_replay_after_reset_is_fenced(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        claim = store.claim_reply_request("web-r", pending.pending_id, payload=REPLY)
+        store.finalize_reply_request(
+            "web-r", pending.reply_turn_id, claim_token=claim.claim_token, outcome="completed"
+        )
+        store.reset_session("web-r")
+        with pytest.raises(RequestFenced):
+            store.claim_reply_request("web-r", pending.pending_id, payload=REPLY)
+        # Audit row survives; it is simply not replayable in the new generation.
+        record = store.get_request("web-r", pending.reply_turn_id)
+        assert record is not None and record.status == "COMPLETED"
+    finally:
+        store.close()
+
+
+def test_renew_lease_extends_and_fences_stale_token(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        now = time.time()
+        first = store.claim_reply_request(
+            "web-r", pending.pending_id, payload=REPLY, lease_duration=5, now=now
+        )
+        renewed = store.renew_request_lease(
+            "web-r", pending.reply_turn_id, claim_token=first.claim_token,
+            lease_duration=60, now=now + 4,
+        )
+        assert renewed.lease_expires_at == pytest.approx(now + 64)
+        with pytest.raises(RequestBusy):
+            store.claim_reply_request(
+                "web-r", pending.pending_id, payload=REPLY, lease_duration=60, now=now + 10
+            )
+        second = store.claim_reply_request(
+            "web-r", pending.pending_id, payload=REPLY, lease_duration=60, now=now + 70
+        )
+        assert second.outcome == "reclaimed"
+        with pytest.raises(RequestFenced):
+            store.renew_request_lease(
+                "web-r", pending.reply_turn_id, claim_token=first.claim_token, now=now + 71
+            )
+        with pytest.raises(RequestFenced):
+            store.finalize_reply_request(
+                "web-r", pending.reply_turn_id, claim_token=first.claim_token,
+                outcome="resumed", now=now + 72,
+            )
+        task, consumed, request = store.finalize_reply_request(
+            "web-r", pending.reply_turn_id, claim_token=second.claim_token,
+            outcome="resumed", now=now + 73,
+        )
+        assert (task.status, consumed.status, request.status) == (
+            "RUNNING", "CONSUMED", "COMPLETED"
+        )
+    finally:
+        store.close()
+
+
+def test_finalize_after_lease_expiry_is_fenced(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        now = time.time()
+        claim = store.claim_reply_request(
+            "web-r", pending.pending_id, payload=REPLY, lease_duration=5, now=now
+        )
+        with pytest.raises(RequestFenced):
+            store.finalize_reply_request(
+                "web-r", pending.reply_turn_id, claim_token=claim.claim_token,
+                outcome="resumed", now=now + 10,
+            )
+        task = store.get_active_task("web-r")
+        assert task is not None and task.status == "WAITING_FOR_USER" and task.task_version == 2
+        assert store.get_open_pending_for_session("web-r").status == "OPEN"
+        assert store.get_request("web-r", pending.reply_turn_id).status == "PROCESSING"
+    finally:
+        store.close()
+
+
+def test_v4_migration_failure_rolls_back(tmp_path: Path) -> None:
+    from web_demo.state_store import (
+        _SCHEMA_V1_STATEMENTS,
+        _SCHEMA_V2_STATEMENTS,
+        _SCHEMA_V3_STATEMENTS,
+    )
+
+    db = tmp_path / "v3_broken.sqlite3"
+    connection = sqlite3.connect(str(db))
+    try:
+        for statement in (
+            _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS + _SCHEMA_V3_STATEMENTS
+        ):
+            connection.execute(statement)
+        connection.execute("INSERT INTO meta(key, value) VALUES ('schema_version', '3')")
+        connection.execute(
+            "INSERT INTO web_session(session_id, profile_id, title, created_at, updated_at, "
+            "behavior_enabled, turn_counter, reply_counter, reset_generation, retired) "
+            "VALUES ('web-b', 'profile_0057', 'b', 1.0, 2.0, 1, 1, 1, 0, 0)"
+        )
+        connection.execute(
+            "INSERT INTO web_task(task_id, session_id, status, task_version, reset_generation, "
+            "current_requirements_json, requirements_version, created_at, updated_at) "
+            "VALUES ('task-b', 'web-b', 'WAITING_FOR_USER', 2, 0, '{}', 0, 1.0, 2.0)"
+        )
+        connection.execute("CREATE TABLE web_request (x INTEGER)")  # incompatible
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(StateMigrationError):
+        SQLiteWebStateStore(db)
+
+    raw = sqlite3.connect(str(db))
+    try:
+        assert raw.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0] == "3"
+        assert raw.execute("SELECT COUNT(*) FROM web_task").fetchone()[0] == 1
+    finally:
+        raw.close()
