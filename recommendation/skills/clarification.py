@@ -1,4 +1,4 @@
-"""P16 preference-clarification skill: ask one answerable question, then persist the real reply.
+﻿"""P16 preference-clarification skill: ask one answerable question, then persist the real reply.
 
 Uses the existing Planner/Gate question when available, and the existing M9
 PreferenceMemoryService.process_turn for updates/retractions.  It never invents a user reply and
@@ -74,6 +74,7 @@ def resume_with_user_reply(
     task: Mapping[str, Any],
     user_message: str,
     turn_id: str,
+    user_key: str | None = None,
     now: float | None = None,
     **_: Any,
 ) -> dict[str, Any]:
@@ -82,14 +83,20 @@ def resume_with_user_reply(
         raise ValueError("a real non-empty user reply is required; the skill never fabricates one")
     if not str(turn_id or "").strip():
         raise ValueError("turn_id is required for duplicate-reply idempotency")
-    user_key = str(task.get("task_id") or "")
+    if user_key is not None and not str(user_key).strip():
+        raise ValueError("an explicit user_key must be non-empty")
+    # Web sessions pass their session key explicitly so that writes and the follow-up read
+    # share one namespace.  Fixture/benchmark callers keep the original task_id identity.
+    effective_user_key = (
+        str(user_key) if user_key is not None else str(task.get("task_id") or "")
+    )
     started = time.perf_counter()
     result = memory.preference_service.process_turn(
-        user_key=user_key, user_message=str(user_message), turn_id=str(turn_id),
+        user_key=effective_user_key, user_message=str(user_message), turn_id=str(turn_id),
         now=now,
     )
     history = HistoryStateReader(memory.preference_service).read(
-        user_key, conversation_id=user_key,
+        effective_user_key, conversation_id=effective_user_key,
         current_query=str(task.get("current_query") or ""),
     )
     update = result.update
@@ -97,7 +104,7 @@ def resume_with_user_reply(
         "schema": CLARIFICATION_SKILL,
         "skill": "preference-clarification",
         "status": "memory_updated",
-        "user_key": user_key,
+        "user_key": effective_user_key,
         "user_message": str(user_message),
         "turn_id": str(turn_id),
         "already_processed": bool(update.already_processed),

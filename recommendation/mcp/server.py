@@ -940,12 +940,18 @@ def _submit_clarification_reply(
 ) -> dict[str, Any]:
     """Persist a real user reply through M9 after explicit local confirmation; never fabricate a reply."""
     ctx = _context()
+    scope_session: str | None = None
     with ctx.lock:
         state = ctx.handles.get(clarification_id)
         if state is None:
             raise ToolError("invalid_or_expired_clarification_id")
         if state.user_key != ctx.user_key:
             raise ToolError("clarification_id belongs to another authorized user")
+        if session_id and state.session_id and str(session_id) != str(state.session_id):
+            raise ToolError("clarification_id belongs to another session")
+        # Explicit Web session namespace: writes and reads must share this key.  Fixture
+        # callers pass no session and keep the historical task_id identity.
+        scope_session = state.session_id or session_id
         if time.time() > state.expires_at:
             state.status = "expired"
             raise ToolError("clarification_id_expired")
@@ -959,7 +965,8 @@ def _submit_clarification_reply(
             raise ToolError("user_confirmation_required: provide explicit local test-user confirmation; "
                             "model-generated text is not a user reply")
     result = resume_with_user_reply(memory=ctx.memory_for(state.session_id or session_id),
-                                    task=state.task, user_message=user_message, turn_id=turn_id)
+                                    task=state.task, user_message=user_message, turn_id=turn_id,
+                                    user_key=scope_session or None)
     extraction_payload = result.get("reply_extraction") or {}
     reply_constraints = CurrentTaskConstraints.from_payload(
         extraction_payload, source_turn_id=str(turn_id)
