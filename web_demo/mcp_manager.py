@@ -22,6 +22,7 @@ import shlex
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from mcp import Client, StdioServerParameters
@@ -173,6 +174,26 @@ class MCPManager:
         self._stopping = False
 
     # -- lifecycle -----------------------------------------------------------
+    def memory_database_path(self) -> Path | None:
+        """Resolve the durable M9 database for the MCP child, or ``None`` (memory mode).
+
+        Explicit ``AGENTRECX_MEMORY_DB`` wins.  When only Web state persistence is enabled,
+        a sibling ``<web-state-stem>.memory.sqlite3`` is derived so the demo is durable by
+        default *and* M9 stays a separate database from web session state.  Without either
+        setting the child keeps its original in-process store.
+        """
+        configured = self.settings.memory_db_path
+        if configured is None:
+            web_state = self.settings.web_state_db_path
+            if web_state is None:
+                return None
+            web_path = Path(web_state)
+            configured = web_path.with_name(f"{web_path.stem}.memory.sqlite3")
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = Path(self.settings.repo) / path
+        return path.resolve()
+
     def _server_parameters(self, runtime: ServerRuntime) -> StdioServerParameters:
         log_path = self.settings.log_dir / f"mcp-{runtime.profile_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,6 +227,11 @@ class MCPManager:
             "MKL_NUM_THREADS": "1",
             "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
         }
+        memory_db = self.memory_database_path()
+        if memory_db is not None:
+            # Absolute path: the child runs with cwd=repo, so a relative value would point
+            # at a different database than the BFF's.
+            child_env["AGENTRECX_MEMORY_DB"] = str(memory_db)
         if self.settings.qwen_live_configured:
             # The Qwen endpoint is passed only to the trusted stdio child process. It is never
             # included in health/config/SSE payloads or logs.

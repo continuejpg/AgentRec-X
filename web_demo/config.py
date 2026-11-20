@@ -180,6 +180,11 @@ class Settings:
     # Durable Web Demo session state (identity, counters, metadata).  ``None`` keeps the
     # process-local SessionStore so every existing test and the default demo are unchanged.
     web_state_db_path: Path | None = None
+    # Durable M9 for the MCP child.  ``None`` keeps its in-process store.  The environment
+    # variable name mirrors ``recommendation.memory.store.MEMORY_DB_ENV_VAR``; the BFF does
+    # not import recommendation core modules, so the literal is duplicated and asserted in
+    # tests instead of imported.
+    memory_db_path: Path | None = None
     # Optional real Qwen3.5-9B Base Live.  The endpoint is deliberately never exposed publicly.
     qwen_live_enabled: bool = False
     qwen_model_endpoint: str = ""
@@ -261,6 +266,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     behavior_db = Path(behavior_db_raw) if behavior_db_raw else None
     web_state_db_raw = str(want.get("AGENTRECX_WEB_STATE_DB") or "").strip()
     web_state_db = Path(web_state_db_raw) if web_state_db_raw else None
+    memory_db_raw = str(want.get("AGENTRECX_MEMORY_DB") or "").strip()
+    memory_db = Path(memory_db_raw) if memory_db_raw else None
     return Settings(
         port=port,
         search_mode=mode,
@@ -275,6 +282,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         behavior_enabled=_env_bool(want.get("AGENTRECX_BEHAVIOR_ENABLED", "1")),
         behavior_db_path=behavior_db,
         web_state_db_path=web_state_db,
+        memory_db_path=memory_db,
         behavior_window_s=_env_float(want, "AGENTRECX_BEHAVIOR_WINDOW_S", DEFAULT_WINDOW_S),
         behavior_half_life_s=_env_float(
             want, "AGENTRECX_BEHAVIOR_HALF_LIFE_S", DEFAULT_HALF_LIFE_S

@@ -46,6 +46,7 @@ from recommendation.demo.planner_http_proposer import (
     HttpPlannerProposer,
     planner_enabled,
 )
+from recommendation.memory.store import MEMORY_DB_ENV_VAR, SQLitePreferenceStore
 from recommendation.preference.current_task_constraints import CurrentTaskConstraints
 from recommendation.preference.history import HistoryStateReader
 from recommendation.shopping_companion.memory import SOURCE_KIND_SYNTHETIC_FIXTURE, ShoppingCompanionMemory
@@ -118,13 +119,17 @@ class AppContext:
     # Local Web Demo session namespaces. Each session gets its own existing
     # ShoppingCompanionMemory/M9 service; no second store or copied memory rules.
     session_memories: dict[str, ShoppingCompanionMemory] = field(default_factory=dict)
+    #: Optional shared durable M9 store.  When set, every *session* memory writes through
+    #: it (isolated by user_key).  The bound fixture ``memory`` above deliberately keeps its
+    #: own in-memory store so benchmark fixtures never pollute the demo database.
+    memory_store: Any = None
 
     def memory_for(self, session_id: str | None = None) -> ShoppingCompanionMemory:
         if not session_id:
             return self.memory
         key = str(session_id)
         if key not in self.session_memories:
-            self.session_memories[key] = ShoppingCompanionMemory()
+            self.session_memories[key] = ShoppingCompanionMemory(store=self.memory_store)
         return self.session_memories[key]
 
     def read_history(self, session_id: str | None = None) -> dict[str, Any]:
@@ -1075,6 +1080,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         search_mode = "bm25"
     memory, task = _memory_for(args.memory_fixture, args.user_key)
+    # Durable M9 for Web Demo session namespaces.  Explicit opt-in only: when the variable
+    # is absent the original in-process behaviour is preserved.  A configured database that
+    # cannot be opened fails startup instead of silently degrading to memory.
+    memory_db = (os.environ.get(MEMORY_DB_ENV_VAR) or "").strip()
+    memory_store = None
+    if memory_db:
+        resolved_memory_db = str(Path(memory_db).expanduser().resolve())
+        memory_store = SQLitePreferenceStore(resolved_memory_db)
+        LOGGER.info("M9 durable store active at %s", resolved_memory_db)
     qwen_url = (os.environ.get(ENV_URL) or "").strip()
     qwen_configured = bool(planner_enabled() and qwen_url)
     qwen_model = (os.environ.get(ENV_MODEL) or "").strip() or "Qwen3.5-9B-Base"
@@ -1083,7 +1097,8 @@ def main(argv: list[str] | None = None) -> int:
                      corrective_rag=corrective_rag,
                      evidence_verifier=evidence_verifier,
                      clarification_ttl_seconds=float(args.clarification_ttl_seconds),
-                     qwen_configured=qwen_configured, qwen_model=qwen_model)
+                     qwen_configured=qwen_configured, qwen_model=qwen_model,
+                     memory_store=memory_store)
     server = build_server(ctx)
     manifest = {
         "server": SERVER_NAME, "version": SERVER_VERSION, "protocol_target": PROTOCOL_TARGET,
@@ -1109,6 +1124,10 @@ def main(argv: list[str] | None = None) -> int:
         server.run(transport="stdio")
     finally:
         memory.close()
+        # ShoppingCompanionMemory.close() only closes its own M5 store, never an injected
+        # M9 store, so the shared connection is closed exactly once here.
+        if memory_store is not None:
+            memory_store.close()
     return 0
 
 
