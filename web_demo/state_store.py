@@ -1036,20 +1036,31 @@ class SQLiteWebStateStore:
         turn: Mapping[str, Any],
         task_id: str | None = None,
         ranking_source: str | None = None,
+        reset_generation: int | None = None,
     ) -> TurnRecord:
         """Persist one finished chat turn.  Used for non-ASK turns.
 
         The turn id must have been allocated through :meth:`allocate_turn_id`; its
         sequence number is derived from that id so the ledger and the stored history can
-        never disagree.
+        never disagree.  When ``reset_generation`` is supplied, a turn produced in a
+        previous reset generation is refused, so a late result can never resurrect
+        history the user has already cleared.
         """
         timestamp = time.time()
         with self._transaction() as connection:
             session = connection.execute(
-                "SELECT 1 FROM web_session WHERE session_id = ?", (session_id,)
+                "SELECT reset_generation FROM web_session WHERE session_id = ?",
+                (session_id,),
             ).fetchone()
             if session is None:
                 raise UnknownSession(f"no session {session_id!r}")
+            if (
+                reset_generation is not None
+                and int(reset_generation) != int(session["reset_generation"])
+            ):
+                raise TaskStateConflict(
+                    "turn belongs to a previous reset generation and must not be persisted"
+                )
             turn_id = self._insert_turn_in_transaction(
                 connection, session_id, task_id, turn, ranking_source, timestamp
             )

@@ -117,6 +117,7 @@ BFF_CHILD = textwrap.dedent(
                 "pid": os.getpid(), "session_id": sid,
                 "chat_status": chat.status_code, "chat_turn_id": done["turn_id"],
                 "reply_status": reply.status_code,
+                "reply_code": reply.json().get("code"),
                 "reply_turn_id": reply.json().get("turn_id"),
             }
         else:
@@ -280,17 +281,20 @@ def test_http_identities_survive_os_process_restart(tmp_path: Path) -> None:
     db_path = tmp_path / "state.sqlite3"
 
     first = _run_child(tmp_path, "turn", db_path)
-    assert first["chat_status"] == 200 and first["reply_status"] == 200
+    # S3b.1: persistent replies fail closed until durable consumption exists, but the ASK
+    # itself still allocates exactly one reply identity per chat.
+    assert first["chat_status"] == 200
+    assert first["reply_status"] == 409
+    assert first["reply_code"] == "clarification_resume_not_ready"
     session_id = first["session_id"]
     assert first["chat_turn_id"] == f"{session_id}-t1"
-    assert first["reply_turn_id"] == f"{session_id}-r1"
+    assert first["reply_turn_id"] is None
 
     second = _run_child(tmp_path, "turn", db_path, session_id)
     assert second["pid"] != first["pid"]
     assert second["chat_turn_id"] == f"{session_id}-t2"
-    assert second["reply_turn_id"] == f"{session_id}-r2"
     assert second["chat_turn_id"] != first["chat_turn_id"]
-    assert second["reply_turn_id"] != first["reply_turn_id"]
+    assert second["reply_status"] == 409
 
     state = SQLiteWebStateStore(db_path)
     try:

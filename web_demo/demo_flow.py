@@ -793,16 +793,20 @@ async def clarification_reply(
             http_status=409,
             detail={"pending_clarification_id": pending.payload.get("clarification_id")},
         )
-    if pending.restored:
-        # Rebuilt from SQLite after a restart: the MCP handle that created it died with the
-        # old process.  Forwarding this reply would target a dead handle and write M9 with
-        # no request idempotency, so it is refused explicitly instead.
+    if session._store is not None:
+        # Persistent mode has no durable reply consumption yet (no Request Ledger, no M9
+        # persistence).  A warm pending would reach MCP and M9 while the SQLite pending
+        # stayed OPEN, so a restart would resurrect a question the user already answered.
+        # Fail closed for *every* persistent reply, warm or restored, before any tool call.
         raise MCPManagerError(
-            "this clarification was restored from durable state and cannot be answered "
-            "until request idempotency is implemented",
+            "clarification replies are disabled while durable consumption is not "
+            "implemented; no MCP call, M9 write or pending transition was performed",
             code="clarification_resume_not_ready",
             http_status=409,
-            detail={"clarification_id": clarification_id, "restored": True},
+            detail={
+                "clarification_id": clarification_id,
+                "restored": bool(pending.restored),
+            },
         )
     profile_id = session.profile_id
     if not manager.ensure_ready(profile_id).writes_enabled:

@@ -211,11 +211,17 @@ class PersistentSessionStore:
         """
         if stop_reason == "awaiting_clarification":
             return
-        self._state.append_turn(
-            session.session_id,
-            turn=turn.view(),
-            task_id=None if task is None else task.task_id,
-        )
+        try:
+            self._state.append_turn(
+                session.session_id,
+                turn=turn.view(),
+                task_id=None if task is None else task.task_id,
+                reset_generation=None if task is None else task.reset_generation,
+            )
+        except TaskStateConflict:
+            # A reset happened while this turn was in flight: the late result must not
+            # resurrect history the user has already cleared.
+            return
         if task is None:
             return
         try:
