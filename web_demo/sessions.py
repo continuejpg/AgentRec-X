@@ -84,6 +84,9 @@ class PendingClarification:
     mode: str = "cpu_live"
     created_at: str = field(default_factory=iso)
     reply_attempts: int = 0
+    #: True when this handle was rebuilt from SQLite after a restart.  The MCP handle that
+    #: created it no longer exists, so a reply must not be forwarded to the resume API.
+    restored: bool = False
 
     def view(self) -> dict[str, Any]:
         return dict(self.payload)

@@ -116,6 +116,16 @@ def _attach_recommendation(
     return products
 
 
+def _persist_finished_turn(
+    session: Session, task: Any | None, turn: Turn, stop_reason: str
+) -> None:
+    """Persist a completed chat turn (persistent mode only).  No-op in memory mode."""
+    store = session._store
+    if store is None:
+        return
+    store.persist_finished_turn(session, task, turn, stop_reason=stop_reason)
+
+
 def is_comparison_request(message: str, selected_product_ids: Iterable[str]) -> bool:
     ids = [item for item in selected_product_ids if str(item or "").strip()]
     return COMPARE_MIN <= len(ids) <= COMPARE_MAX and bool(COMPARE_PATTERN.search(message or ""))
@@ -137,6 +147,8 @@ async def chat_events(
     qwen_health: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Full chat turn as contract-ordered SSE events (including ``done``)."""
+    # Persistent mode: bind this chat to a durable task before any identity is issued.
+    task = session._store.begin_chat_task(session, message) if session._store is not None else None
     turn = Turn(turn_id=session.next_turn_id(), user_text=message)
     session.last_query = message
     session.set_title_from(message)
@@ -159,7 +171,7 @@ async def chat_events(
                 async for payload_event in _qwen_live_turn(
                     manager=manager, session=session, settings=settings, turn=turn,
                     recorder=recorder, message=message, state=state,
-                    qwen_health=qwen_health,
+                    qwen_health=qwen_health, task=task,
                 ):
                     yield payload_event
         elif is_comparison_request(message, ids):
@@ -173,7 +185,7 @@ async def chat_events(
             turn.planner = "rule"
             async for payload_event in _search_and_recommend_turn(
                 manager=manager, session=session, settings=settings, turn=turn,
-                recorder=recorder, message=message, state=state,
+                recorder=recorder, message=message, state=state, task=task,
             ):
                 yield payload_event
     except MCPManagerError as exc:
@@ -186,6 +198,7 @@ async def chat_events(
             f"Error from {exc.tool or 'MCP'}: {exc.message}"
         )
         session.add_turn(turn)
+        _persist_finished_turn(session, task, turn, "error")
         yield event("error", error)
         yield event(
             "done",
@@ -211,6 +224,7 @@ async def chat_events(
         turn.error = error
         turn.assistant_text = f"Internal error: {error['message']}"
         session.add_turn(turn)
+        _persist_finished_turn(session, task, turn, "error")
         yield event("error", error)
         yield event(
             "done",
@@ -227,6 +241,7 @@ async def chat_events(
         return
 
     session.add_turn(turn)
+    _persist_finished_turn(session, task, turn, state["stop_reason"])
     yield event(
         "done",
         {
@@ -251,6 +266,7 @@ async def _search_and_recommend_turn(
     recorder: TurnRecorder,
     message: str,
     state: dict[str, Any],
+    task: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     profile_id = session.profile_id
 
@@ -342,15 +358,29 @@ async def _search_and_recommend_turn(
 
         clarification = vm.clarification_payload(clarification_raw)
         turn.clarification = clarification
-        session.pending_clarification = PendingClarification(
-            payload=clarification,
-            query=message,
-            turn_id=turn.turn_id,
-            reply_turn_id=session.next_reply_turn_id(),
-        )
-        yield event("clarification", clarification)
         narrative = vm.narrative_clarification(clarification)
         turn.assistant_text = narrative
+        # The ASK is committed to SQLite *before* the browser is told it exists.  In
+        # persistent mode commit_ask allocates the single reply identity itself.
+        if session._store is not None:
+            if task is None:  # pragma: no cover - persistent mode always binds a task
+                raise RuntimeError("persistent ASK requires a task")
+            session.pending_clarification = session._store.persist_ask(
+                session, task, turn, clarification,
+                query=message,
+                clarification_id=str(clarification.get("clarification_id") or ""),
+                mode="cpu_live",
+                expires_at=time.time() + float(settings.clarification_ttl_s),
+                ranking_source="cpu_live:search_products+recommend_products+gate",
+            )
+        else:
+            session.pending_clarification = PendingClarification(
+                payload=clarification,
+                query=message,
+                turn_id=turn.turn_id,
+                reply_turn_id=session.next_reply_turn_id(),
+            )
+        yield event("clarification", clarification)
         yield event("text", {"text": narrative, "final": True})
         state["stop_reason"] = "awaiting_clarification"
         return
@@ -446,6 +476,7 @@ async def _qwen_live_turn(
     message: str,
     state: dict[str, Any],
     qwen_health: Any | None,
+    task: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Real Qwen Base Live: MCP run_agent_turn + MCP progress notifications + P15 products.
 
@@ -585,19 +616,31 @@ async def _qwen_live_turn(
         clarification = vm.clarification_payload(clarification_raw)
         clarification["memory_write_enabled"] = bool(clarification_raw.get("memory_write_enabled"))
         turn.clarification = clarification
-        session.pending_clarification = PendingClarification(
-            payload=clarification,
-            query=message,
-            turn_id=turn.turn_id,
-            reply_turn_id=session.next_reply_turn_id(),
-            mode="qwen_live",
-        )
-        yield event("clarification", clarification)
         narrative = vm.narrative_qwen(
             status=status, gate=gate, planner=planner, selected_card=None,
             clarification=clarification, catalogue_size=products.get("catalogue_size"),
         )
         turn.assistant_text = narrative
+        if session._store is not None:
+            if task is None:  # pragma: no cover - persistent mode always binds a task
+                raise RuntimeError("persistent ASK requires a task")
+            session.pending_clarification = session._store.persist_ask(
+                session, task, turn, clarification,
+                query=message,
+                clarification_id=str(clarification.get("clarification_id") or ""),
+                mode="qwen_live",
+                expires_at=time.time() + float(settings.clarification_ttl_s),
+                ranking_source="qwen_live:run_agent_turn+gate",
+            )
+        else:
+            session.pending_clarification = PendingClarification(
+                payload=clarification,
+                query=message,
+                turn_id=turn.turn_id,
+                reply_turn_id=session.next_reply_turn_id(),
+                mode="qwen_live",
+            )
+        yield event("clarification", clarification)
         yield event("text", {"text": narrative, "final": True})
         state["stop_reason"] = "awaiting_clarification"
         return
@@ -749,6 +792,17 @@ async def clarification_reply(
             code="clarification_not_pending",
             http_status=409,
             detail={"pending_clarification_id": pending.payload.get("clarification_id")},
+        )
+    if pending.restored:
+        # Rebuilt from SQLite after a restart: the MCP handle that created it died with the
+        # old process.  Forwarding this reply would target a dead handle and write M9 with
+        # no request idempotency, so it is refused explicitly instead.
+        raise MCPManagerError(
+            "this clarification was restored from durable state and cannot be answered "
+            "until request idempotency is implemented",
+            code="clarification_resume_not_ready",
+            http_status=409,
+            detail={"clarification_id": clarification_id, "restored": True},
         )
     profile_id = session.profile_id
     if not manager.ensure_ready(profile_id).writes_enabled:

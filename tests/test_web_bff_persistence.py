@@ -318,21 +318,16 @@ def test_http_reset_delegates_to_sqlite(tmp_path: Path) -> None:
         first_turn = _turn_id(_chat(client, session_id))
         assert first_turn == f"{session_id}-t1"
 
-        # Seed a real active task + OPEN pending; the BFF does not create tasks yet.
+        # S3b: the BFF itself created the durable task and OPEN pending during the ASK.
         state = SQLiteWebStateStore(db_path)
         try:
-            seeded_turn = state.allocate_turn_id(session_id)
-            task = state.create_task(session_id, initial_requirements={"budget_max": 5000})
-            pending = state.commit_ask(
-                session_id, task.task_id, expected_task_version=1,
-                clarification_id="clar-seed", source_turn_id=seeded_turn,
-                query="Recommend a laptop under 5000 for me.",
-                payload={"question": "Office or gaming?"},
-                expires_at=time.time() + 600,
-            )
+            task = state.get_active_task(session_id)
+            pending = state.get_open_pending_for_session(session_id)
             before = state.get_session(session_id)
         finally:
             state.close()
+        assert task is not None and task.status == "WAITING_FOR_USER"
+        assert pending is not None and pending.status == "OPEN"
 
         response = client.post(f"/api/sessions/{session_id}/reset")
         assert response.status_code == 200, response.text
@@ -357,16 +352,14 @@ def test_http_reset_delegates_to_sqlite(tmp_path: Path) -> None:
             after_state.close()
 
         second_turn = _turn_id(_chat(client, session_id))
-        assert second_turn not in {first_turn, seeded_turn}
-        assert second_turn == f"{session_id}-t3"
+        assert second_turn != first_turn
+        assert second_turn == f"{session_id}-t2"
 
-    # Each ASK allocates the pending's reply identity too (demo_flow.py:349), so the
-    # ledger holds one turn + one reply id per chat, plus the seeded task's pair.
+    # One turn id plus one pending reply id per ASK, before and after the reset.
     assert _ledger(db_path, session_id) == sorted(
         [
             f"{session_id}-t1", f"{session_id}-r1",
             f"{session_id}-t2", f"{session_id}-r2",
-            f"{session_id}-t3", f"{session_id}-r3",
         ]
     )
 
@@ -381,23 +374,27 @@ def test_two_apps_allocate_identities_concurrently(tmp_path: Path) -> None:
     app_one = _app(tmp_path, db_path)
     app_two = _app(tmp_path, db_path)
 
-    results: dict[int, str] = {}
+    results: dict[int, tuple[str, str]] = {}
     errors: list[BaseException] = []
     barrier = threading.Barrier(2)
 
     with TestClient(app_one) as client_one, TestClient(app_two) as client_two:
-        session_id = _create(client_one)["session_id"]
+        # S3b binds every chat to a durable task, so two chats on the *same* session are
+        # deliberately not concurrent (the second would supersede the first's task).
+        # This test therefore exercises concurrent SQLite writes on two sessions.
+        session_one = _create(client_one)["session_id"]
+        session_two = _create(client_two)["session_id"]
 
-        def worker(index: int, client: TestClient) -> None:
+        def worker(index: int, client: TestClient, session_id: str) -> None:
             try:
                 barrier.wait(timeout=30)
-                results[index] = _turn_id(_chat(client, session_id))
+                results[index] = (session_id, _turn_id(_chat(client, session_id)))
             except BaseException as exc:  # noqa: BLE001 - collected and asserted
                 errors.append(exc)
 
         threads = [
-            threading.Thread(target=worker, args=(0, client_one)),
-            threading.Thread(target=worker, args=(1, client_two)),
+            threading.Thread(target=worker, args=(0, client_one, session_one)),
+            threading.Thread(target=worker, args=(1, client_two, session_two)),
         ]
         for thread in threads:
             thread.start()
@@ -405,20 +402,22 @@ def test_two_apps_allocate_identities_concurrently(tmp_path: Path) -> None:
             thread.join(timeout=120)
 
         assert errors == []
-        assert set(results.values()) == {f"{session_id}-t1", f"{session_id}-t2"}
+        assert {value[0] for value in results.values()} == {session_one, session_two}
+        for session_id, turn_id in results.values():
+            assert turn_id == f"{session_id}-t1"
 
     state = SQLiteWebStateStore(db_path)
     try:
-        record = state.get_session(session_id)
-        assert record is not None
-        assert record.turn_counter == 2
+        for session_id in (session_one, session_two):
+            record = state.get_session(session_id)
+            assert record is not None
+            assert record.turn_counter == 1
     finally:
         state.close()
-    # One turn id plus one pending reply id per concurrent chat.
-    assert sorted(_ledger(db_path, session_id)) == [
-        f"{session_id}-r1", f"{session_id}-r2",
-        f"{session_id}-t1", f"{session_id}-t2",
-    ]
+    for session_id in (session_one, session_two):
+        assert sorted(_ledger(db_path, session_id)) == [
+            f"{session_id}-r1", f"{session_id}-t1"
+        ]
 
 
 # --------------------------------------------------------------------------- #
@@ -509,26 +508,37 @@ def test_s3a_boundary_identity_persists_history_does_not(tmp_path: Path) -> None
         restored = client2.get(f"/api/sessions/{session_id}").json()
         assert restored["session_id"] == session_id
         assert restored["profile_id"] == "profile_0057"
-        assert restored["title"] == "Recommend a laptop under 5000 for me."  # metadata durable
-        assert restored["turns"] == []                    # history: NOT durable in S3a
-        assert restored["pending_clarification"] is None  # pending: NOT durable in S3a
+        assert restored["title"] == "Recommend a laptop under 5000 for me."
+        # S3b makes the transcript and the pending question durable too.
+        assert len(restored["turns"]) == 1
+        assert restored["turns"][0]["turn_id"] == chat_turn
+        assert restored["pending_clarification"] is not None
+        # A restored question cannot be answered (S5 adds request idempotency).
+        blocked = client2.post(
+            "/api/clarification/reply",
+            json={"session_id": session_id, "clarification_id": "clar_fake_handle",
+                  "message": "For gaming."},
+        )
+        assert blocked.status_code == 409
+        assert blocked.json()["code"] == "clarification_resume_not_ready"
 
     state = SQLiteWebStateStore(db_path)
     try:
         record = state.get_session(session_id)
         assert record is not None
         assert record.turn_counter == 1
-        assert state.list_tasks(session_id) == (), "the BFF created no Task in S3a"
+        tasks = state.list_tasks(session_id)
+        assert len(tasks) == 1 and tasks[0].status == "WAITING_FOR_USER"
     finally:
         state.close()
 
     raw = sqlite3.connect(str(db_path))
     try:
-        assert raw.execute("SELECT COUNT(*) FROM web_pending").fetchone()[0] == 0
-        assert raw.execute("SELECT COUNT(*) FROM web_task").fetchone()[0] == 0
+        assert raw.execute("SELECT COUNT(*) FROM web_pending").fetchone()[0] == 1
+        assert raw.execute("SELECT COUNT(*) FROM web_task").fetchone()[0] == 1
+        assert raw.execute("SELECT COUNT(*) FROM web_turn").fetchone()[0] == 1
     finally:
         raw.close()
 
-    # The identity ledger is durable even though the conversation is not: the chat
-    # allocated a turn id and, for the pending ASK, its reply id.
+    # The identity ledger records the chat turn and the ASK's reply identity.
     assert _ledger(db_path, session_id) == sorted([chat_turn, f"{session_id}-r1"])

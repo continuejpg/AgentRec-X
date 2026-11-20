@@ -52,6 +52,8 @@ __all__ = [
     "SQLiteWebStateStore",
     "SessionRecord",
     "TaskRecord",
+    "TURN_PAYLOAD_SCHEMA",
+    "TurnRecord",
     "WEB_STATE_SCHEMA_VERSION",
     "ActiveTaskExists",
     "AskCommitError",
@@ -72,8 +74,9 @@ __all__ = [
     "UnknownTurn",
 ]
 
-#: Current schema version.  v1 = S2a (identity only), v2 = S2b (tasks + clarifications).
-WEB_STATE_SCHEMA_VERSION = 2
+#: Current schema version. v1 = S2a (identity), v2 = S2b (tasks + clarifications),
+#: v3 = S3b (persisted chat turns).
+WEB_STATE_SCHEMA_VERSION = 3
 
 #: Mirrors ``web_demo.sessions.DEFAULT_TITLE``; a test asserts the two stay equal.
 DEFAULT_SESSION_TITLE = "New shopping session"
@@ -104,6 +107,9 @@ _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
 
 PENDING_STATUSES = ("OPEN", "CONSUMED", "EXPIRED", "CANCELLED")
 PENDING_MODES = frozenset({"cpu_live", "qwen_live"})
+
+#: Versioned envelope written to ``web_turn.payload_json``.
+TURN_PAYLOAD_SCHEMA = "agentrecx.web.turn.v1"
 
 # --------------------------------------------------------------------------- #
 # Schema
@@ -197,6 +203,24 @@ _SCHEMA_V2_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+_SCHEMA_V3_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS web_turn (
+        session_id   TEXT NOT NULL REFERENCES web_session(session_id),
+        turn_seq     INTEGER NOT NULL CHECK (turn_seq >= 1),
+        turn_id      TEXT NOT NULL,
+        task_id      TEXT REFERENCES web_task(task_id),
+        payload_json TEXT NOT NULL,
+        created_at   REAL NOT NULL,
+        PRIMARY KEY (session_id, turn_seq),
+        UNIQUE (session_id, turn_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_web_turn_task ON web_turn(task_id)
+    """,
+)
+
 _SESSION_COLUMNS = (
     "session_id, profile_id, title, created_at, updated_at, behavior_enabled, "
     "turn_counter, reply_counter, reset_generation, retired"
@@ -209,6 +233,11 @@ _TASK_COLUMNS = (
 _PENDING_COLUMNS = (
     "pending_id, task_id, clarification_id, query, turn_id, reply_turn_id, mode, "
     "payload_json, status, created_at, expires_at, consumed_at"
+)
+_TURN_COLUMNS = "session_id, turn_seq, turn_id, task_id, payload_json, created_at"
+_PENDING_ALIASED_COLUMNS = (
+    "p.pending_id, p.task_id, p.clarification_id, p.query, p.turn_id, p.reply_turn_id, "
+    "p.mode, p.payload_json, p.status, p.created_at, p.expires_at, p.consumed_at"
 )
 
 
@@ -351,6 +380,23 @@ class PendingRecord:
     consumed_at: float | None
 
 
+@dataclass(frozen=True)
+class TurnRecord:
+    """One persisted chat turn.
+
+    ``payload`` is the validated envelope produced by :func:`pack_turn_payload`
+    (``{"schema": ..., "turn": <TurnView>, "ranking_source": ...}``); it is never a
+    substitute for the session view and never contains identity counters.
+    """
+
+    session_id: str
+    turn_seq: int
+    turn_id: str
+    task_id: str | None
+    payload: dict[str, Any]
+    created_at: float
+
+
 # --------------------------------------------------------------------------- #
 # Store
 # --------------------------------------------------------------------------- #
@@ -435,40 +481,45 @@ class SQLiteWebStateStore:
                 )
 
             version = self._read_schema_version(self._connection)
-            if version == 1:
-                self._migrate_v1_to_v2_locked()
+            if version < WEB_STATE_SCHEMA_VERSION:
+                self._migrate_to_latest_locked()
                 version = self._read_schema_version(self._connection)
             if version != WEB_STATE_SCHEMA_VERSION:
                 raise SchemaVersionError(
                     f"web state database {self._path!r} has schema version {version}, "
                     f"expected {WEB_STATE_SCHEMA_VERSION}"
                 )
-            self._require_tables_locked(("web_session", "web_identity", "web_task", "web_pending"))
+            self._require_tables_locked(
+                ("web_session", "web_identity", "web_task", "web_pending", "web_turn")
+            )
 
     def _create_latest_schema_locked(self) -> None:
         with self._transaction() as connection:
             if self._table_names(connection):
                 # Another process created it between the probe and this transaction.
                 return
-            for statement in _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS:
+            for statement in _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS + _SCHEMA_V3_STATEMENTS:
                 connection.execute(statement)
             connection.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
                 (str(WEB_STATE_SCHEMA_VERSION),),
             )
 
-    def _migrate_v1_to_v2_locked(self) -> None:
-        """Upgrade a real v1 database in one transaction; never partially applies."""
+    def _migrate_to_latest_locked(self) -> None:
+        """Upgrade a real v1/v2 database in one transaction; never partially applies."""
         with self._transaction() as connection:
             version = self._read_schema_version(connection)
             if version == WEB_STATE_SCHEMA_VERSION:
                 return  # another process migrated it while we waited for the write lock
-            if version != 1:
+            if version not in (1, 2):
                 raise SchemaVersionError(
                     f"cannot migrate schema version {version} to {WEB_STATE_SCHEMA_VERSION}"
                 )
             try:
-                for statement in _SCHEMA_V2_STATEMENTS:
+                if version == 1:
+                    for statement in _SCHEMA_V2_STATEMENTS:
+                        connection.execute(statement)
+                for statement in _SCHEMA_V3_STATEMENTS:
                     connection.execute(statement)
                 connection.execute(
                     "UPDATE meta SET value = ? WHERE key = 'schema_version'",
@@ -476,7 +527,8 @@ class SQLiteWebStateStore:
                 )
             except sqlite3.Error as exc:
                 raise StateMigrationError(
-                    f"v1 -> v2 migration of {self._path!r} failed and was rolled back: {exc}"
+                    f"migration to v{WEB_STATE_SCHEMA_VERSION} of {self._path!r} failed "
+                    f"and was rolled back: {exc}"
                 ) from exc
 
     def _read_schema_version(self, connection: sqlite3.Connection) -> int:
@@ -802,6 +854,8 @@ class SQLiteWebStateStore:
         payload: Mapping[str, Any],
         expires_at: float,
         mode: str = "cpu_live",
+        turn: Mapping[str, Any] | None = None,
+        ranking_source: str | None = None,
     ) -> PendingRecord:
         """Persist one ASK round atomically.
 
@@ -898,6 +952,11 @@ class SQLiteWebStateStore:
             if updated.rowcount != 1:  # pragma: no cover - guarded by the checks above
                 raise StaleTaskVersion(f"task {task_id!r} changed during ASK commit")
 
+            if turn is not None:
+                self._insert_turn_in_transaction(
+                    connection, session_id, task_id, turn, ranking_source, timestamp
+                )
+
             row = connection.execute(
                 f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
                 (pending_id,),
@@ -948,6 +1007,95 @@ class SQLiteWebStateStore:
             except sqlite3.Error as exc:
                 raise StateStoreError(f"cannot list pending rows: {exc}") from exc
         return tuple(_to_pending_record(row) for row in rows)
+
+    def get_open_pending_for_session(
+        self, session_id: str, *, now: float | None = None
+    ) -> PendingRecord | None:
+        """Return the session's current unexpired OPEN pending, if any."""
+        reference = time.time() if now is None else float(now)
+        with self._lock:
+            self._ensure_open()
+            try:
+                row = self._connection.execute(
+                    f"SELECT {_PENDING_ALIASED_COLUMNS} FROM web_pending p "
+                    "JOIN web_task t ON p.task_id = t.task_id "
+                    "WHERE t.session_id = ? AND p.status = 'OPEN' AND p.expires_at > ? "
+                    "ORDER BY p.created_at DESC LIMIT 1",
+                    (session_id, reference),
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot read session pending: {exc}") from exc
+        return None if row is None else _to_pending_record(row)
+
+    # -- turns -------------------------------------------------------------- #
+
+    def append_turn(
+        self,
+        session_id: str,
+        *,
+        turn: Mapping[str, Any],
+        task_id: str | None = None,
+        ranking_source: str | None = None,
+    ) -> TurnRecord:
+        """Persist one finished chat turn.  Used for non-ASK turns.
+
+        The turn id must have been allocated through :meth:`allocate_turn_id`; its
+        sequence number is derived from that id so the ledger and the stored history can
+        never disagree.
+        """
+        timestamp = time.time()
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT 1 FROM web_session WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            turn_id = self._insert_turn_in_transaction(
+                connection, session_id, task_id, turn, ranking_source, timestamp
+            )
+            row = connection.execute(
+                f"SELECT {_TURN_COLUMNS} FROM web_turn WHERE session_id = ? AND turn_id = ?",
+                (session_id, turn_id),
+            ).fetchone()
+        return _to_turn_record(row)
+
+    def list_turns(self, session_id: str) -> tuple[TurnRecord, ...]:
+        with self._lock:
+            self._ensure_open()
+            try:
+                rows = self._connection.execute(
+                    f"SELECT {_TURN_COLUMNS} FROM web_turn WHERE session_id = ? "
+                    "ORDER BY turn_seq",
+                    (session_id,),
+                ).fetchall()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot list turns: {exc}") from exc
+        return tuple(_to_turn_record(row) for row in rows)
+
+    def _insert_turn_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        session_id: str,
+        task_id: str | None,
+        turn: Mapping[str, Any],
+        ranking_source: str | None,
+        timestamp: float,
+    ) -> str:
+        envelope = pack_turn_payload(turn, ranking_source=ranking_source)
+        turn_id = str(envelope["turn"]["turn_id"])
+        seq = _turn_seq_from_id(turn_id, session_id)
+        try:
+            connection.execute(
+                "INSERT INTO web_turn(session_id, turn_seq, turn_id, task_id, "
+                "payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, seq, turn_id, task_id,
+                 json.dumps(envelope, sort_keys=True, ensure_ascii=False), timestamp),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise StateStoreError(
+                f"turn {turn_id!r} is already persisted for session {session_id!r}"
+            ) from exc
+        return turn_id
 
     def consume_pending(
         self,
@@ -1207,6 +1355,9 @@ class SQLiteWebStateStore:
                 raise SessionRetired(f"session {session_id!r} is retired")
 
             connection.execute(
+                "DELETE FROM web_turn WHERE session_id = ?", (session_id,)
+            )
+            connection.execute(
                 "UPDATE web_pending SET status = 'CANCELLED' WHERE status = 'OPEN' "
                 "AND task_id IN (SELECT task_id FROM web_task WHERE session_id = ? "
                 "AND status IN ('RUNNING','WAITING_FOR_USER'))",
@@ -1372,6 +1523,62 @@ def _to_pending_record(row: sqlite3.Row) -> PendingRecord:
         created_at=float(row["created_at"]),
         expires_at=float(row["expires_at"]),
         consumed_at=None if row["consumed_at"] is None else float(row["consumed_at"]),
+    )
+
+
+def pack_turn_payload(
+    turn: Mapping[str, Any], *, ranking_source: str | None = None
+) -> dict[str, Any]:
+    """Build the versioned envelope stored for one turn; validates the minimum shape."""
+    if not isinstance(turn, Mapping):
+        raise ValueError("turn must be a mapping")
+    turn_dict = dict(turn)
+    turn_id = str(turn_dict.get("turn_id") or "").strip()
+    if not turn_id:
+        raise ValueError("turn payload must contain a non-empty turn_id")
+    if not isinstance(turn_dict.get("user_text"), str):
+        raise ValueError("turn payload must contain user_text")
+    return {
+        "schema": TURN_PAYLOAD_SCHEMA,
+        "turn": turn_dict,
+        "ranking_source": None if ranking_source is None else str(ranking_source),
+    }
+
+
+def _turn_seq_from_id(turn_id: str, session_id: str) -> int:
+    prefix = f"{session_id}-t"
+    if not turn_id.startswith(prefix):
+        raise ValueError(
+            f"turn id {turn_id!r} does not belong to session {session_id!r}"
+        )
+    suffix = turn_id[len(prefix):]
+    if not suffix.isdigit() or int(suffix) < 1:
+        raise ValueError(f"turn id {turn_id!r} has no valid sequence number")
+    return int(suffix)
+
+
+def _to_turn_record(row: sqlite3.Row) -> TurnRecord:
+    turn_id = str(row["turn_id"])
+    payload = _loads_json(
+        row["payload_json"], table="web_turn", row_key=turn_id, field="payload_json"
+    )
+    if payload.get("schema") != TURN_PAYLOAD_SCHEMA:
+        raise StateDataCorruption(
+            f"web_turn.payload_json for {turn_id!r} has unexpected schema "
+            f"{payload.get('schema')!r}"
+        )
+    turn = payload.get("turn")
+    if not isinstance(turn, dict) or str(turn.get("turn_id")) != turn_id:
+        raise StateDataCorruption(
+            f"web_turn.payload_json for {turn_id!r} does not contain its own turn"
+        )
+    return TurnRecord(
+        session_id=str(row["session_id"]),
+        turn_seq=int(row["turn_seq"]),
+        turn_id=turn_id,
+        task_id=None if row["task_id"] is None else str(row["task_id"]),
+        payload=payload,
+        created_at=float(row["created_at"]),
     )
 
 

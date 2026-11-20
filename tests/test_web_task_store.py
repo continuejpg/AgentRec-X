@@ -755,7 +755,7 @@ def test_v1_database_migrates_to_v2_preserving_identity(tmp_path: Path) -> None:
 
     migrated = SQLiteWebStateStore(db_path)
     try:
-        assert migrated.schema_version == WEB_STATE_SCHEMA_VERSION == 2
+        assert migrated.schema_version == WEB_STATE_SCHEMA_VERSION
 
         session = migrated.get_session("web-v1")
         assert session is not None
@@ -785,7 +785,7 @@ def test_v1_database_migrates_to_v2_preserving_identity(tmp_path: Path) -> None:
         assert {"web_task", "web_pending"} <= tables
         assert raw.execute(
             "SELECT value FROM meta WHERE key = 'schema_version'"
-        ).fetchone()[0] == "2"
+        ).fetchone()[0] == str(WEB_STATE_SCHEMA_VERSION)
     finally:
         raw.close()
 
