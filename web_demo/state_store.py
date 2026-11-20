@@ -36,6 +36,7 @@ Timestamps are Unix epoch seconds (``REAL``), matching the other SQLite stores h
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -49,17 +50,24 @@ from typing import Any, Iterator, Literal, Mapping
 __all__ = [
     "DEFAULT_SESSION_TITLE",
     "PendingRecord",
+    "RequestClaim",
+    "RequestRecord",
     "SQLiteWebStateStore",
     "SessionRecord",
     "TaskRecord",
     "TURN_PAYLOAD_SCHEMA",
     "TurnRecord",
+    "reply_payload_fingerprint",
     "WEB_STATE_SCHEMA_VERSION",
     "ActiveTaskExists",
     "AskCommitError",
     "IdentityAllocationError",
     "PendingExpired",
     "PendingStateConflict",
+    "RequestBusy",
+    "RequestConflict",
+    "RequestFenced",
+    "RequestNotFound",
     "SchemaVersionError",
     "SessionAlreadyExists",
     "SessionRetired",
@@ -75,8 +83,8 @@ __all__ = [
 ]
 
 #: Current schema version. v1 = S2a (identity), v2 = S2b (tasks + clarifications),
-#: v3 = S3b (persisted chat turns).
-WEB_STATE_SCHEMA_VERSION = 3
+#: v3 = S3b (persisted chat turns), v4 = S5a (durable reply request ledger).
+WEB_STATE_SCHEMA_VERSION = 4
 
 #: Mirrors ``web_demo.sessions.DEFAULT_TITLE``; a test asserts the two stay equal.
 DEFAULT_SESSION_TITLE = "New shopping session"
@@ -221,6 +229,33 @@ _SCHEMA_V3_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+_SCHEMA_V4_STATEMENTS: tuple[str, ...] = (
+    """
+    CREATE TABLE IF NOT EXISTS web_request (
+        session_id                TEXT NOT NULL REFERENCES web_session(session_id),
+        request_id                TEXT NOT NULL,
+        pending_id                TEXT NOT NULL,
+        task_id                   TEXT NOT NULL,
+        request_kind              TEXT NOT NULL,
+        payload_fingerprint       TEXT NOT NULL,
+        status                    TEXT NOT NULL CHECK (status IN
+                                    ('PROCESSING','COMPLETED','FAILED')),
+        claim_token               TEXT,
+        claim_attempt             INTEGER NOT NULL DEFAULT 0 CHECK (claim_attempt >= 0),
+        lease_expires_at          REAL,
+        task_version_at_claim     INTEGER NOT NULL,
+        reset_generation_at_claim INTEGER NOT NULL,
+        result_json               TEXT,
+        created_at                REAL NOT NULL,
+        updated_at                REAL NOT NULL,
+        PRIMARY KEY (session_id, request_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_web_request_pending ON web_request(pending_id)
+    """,
+)
+
 _SESSION_COLUMNS = (
     "session_id, profile_id, title, created_at, updated_at, behavior_enabled, "
     "turn_counter, reply_counter, reset_generation, retired"
@@ -235,6 +270,11 @@ _PENDING_COLUMNS = (
     "payload_json, status, created_at, expires_at, consumed_at"
 )
 _TURN_COLUMNS = "session_id, turn_seq, turn_id, task_id, payload_json, created_at"
+_REQUEST_COLUMNS = (
+    "session_id, request_id, pending_id, task_id, request_kind, payload_fingerprint, "
+    "status, claim_token, claim_attempt, lease_expires_at, task_version_at_claim, "
+    "reset_generation_at_claim, result_json, created_at, updated_at"
+)
 _PENDING_ALIASED_COLUMNS = (
     "p.pending_id, p.task_id, p.clarification_id, p.query, p.turn_id, p.reply_turn_id, "
     "p.mode, p.payload_json, p.status, p.created_at, p.expires_at, p.consumed_at"
@@ -312,6 +352,22 @@ class AskCommitError(StateStoreError):
 
 class StateStoreClosedError(StateStoreError):
     """The store has been closed and can no longer be used."""
+
+
+class RequestNotFound(StateStoreError):
+    """No request ledger row exists for this session/request id."""
+
+
+class RequestConflict(StateStoreError):
+    """The same request id was reused with different request content."""
+
+
+class RequestBusy(StateStoreError):
+    """Another executor holds a live claim lease for this request."""
+
+
+class RequestFenced(StateStoreError):
+    """The caller's claim token/state is stale and cannot commit."""
 
 
 # --------------------------------------------------------------------------- #
@@ -395,6 +451,36 @@ class TurnRecord:
     task_id: str | None
     payload: dict[str, Any]
     created_at: float
+
+
+@dataclass(frozen=True)
+class RequestRecord:
+    """One durable clarification-reply request and its claim/fencing state."""
+
+    session_id: str
+    request_id: str
+    pending_id: str
+    task_id: str
+    request_kind: str
+    payload_fingerprint: str
+    status: str
+    claim_token: str | None
+    claim_attempt: int
+    lease_expires_at: float | None
+    task_version_at_claim: int
+    reset_generation_at_claim: int
+    result: dict[str, Any] | None
+    created_at: float
+    updated_at: float
+
+
+@dataclass(frozen=True)
+class RequestClaim:
+    """Outcome of :meth:`SQLiteWebStateStore.claim_reply_request`."""
+
+    outcome: str  # "claimed" | "reclaimed" | "replay"
+    request: RequestRecord
+    claim_token: str | None
 
 
 # --------------------------------------------------------------------------- #
@@ -490,7 +576,8 @@ class SQLiteWebStateStore:
                     f"expected {WEB_STATE_SCHEMA_VERSION}"
                 )
             self._require_tables_locked(
-                ("web_session", "web_identity", "web_task", "web_pending", "web_turn")
+                ("web_session", "web_identity", "web_task", "web_pending", "web_turn",
+                 "web_request")
             )
 
     def _create_latest_schema_locked(self) -> None:
@@ -498,7 +585,10 @@ class SQLiteWebStateStore:
             if self._table_names(connection):
                 # Another process created it between the probe and this transaction.
                 return
-            for statement in _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS + _SCHEMA_V3_STATEMENTS:
+            for statement in (
+                _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS
+                + _SCHEMA_V3_STATEMENTS + _SCHEMA_V4_STATEMENTS
+            ):
                 connection.execute(statement)
             connection.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
@@ -511,7 +601,7 @@ class SQLiteWebStateStore:
             version = self._read_schema_version(connection)
             if version == WEB_STATE_SCHEMA_VERSION:
                 return  # another process migrated it while we waited for the write lock
-            if version not in (1, 2):
+            if version not in (1, 2, 3):
                 raise SchemaVersionError(
                     f"cannot migrate schema version {version} to {WEB_STATE_SCHEMA_VERSION}"
                 )
@@ -519,7 +609,10 @@ class SQLiteWebStateStore:
                 if version == 1:
                     for statement in _SCHEMA_V2_STATEMENTS:
                         connection.execute(statement)
-                for statement in _SCHEMA_V3_STATEMENTS:
+                if version <= 2:
+                    for statement in _SCHEMA_V3_STATEMENTS:
+                        connection.execute(statement)
+                for statement in _SCHEMA_V4_STATEMENTS:
                     connection.execute(statement)
                 connection.execute(
                     "UPDATE meta SET value = ? WHERE key = 'schema_version'",
@@ -1108,6 +1201,271 @@ class SQLiteWebStateStore:
             ) from exc
         return turn_id
 
+    # -- reply request ledger (S5a) ----------------------------------------- #
+
+    def get_request(self, session_id: str, request_id: str) -> RequestRecord | None:
+        with self._lock:
+            self._ensure_open()
+            try:
+                row = self._connection.execute(
+                    f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                    "WHERE session_id = ? AND request_id = ?",
+                    (session_id, request_id),
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot read request: {exc}") from exc
+        return None if row is None else _to_request_record(row)
+
+    def claim_reply_request(
+        self,
+        session_id: str,
+        pending_id: str,
+        *,
+        payload: Mapping[str, Any],
+        lease_duration: float = 60.0,
+        now: float | None = None,
+    ) -> RequestClaim:
+        """Claim the durable reply request identified by the pending's reply id.
+
+        ``request_id`` is the pending's ``reply_turn_id``: it is already persisted, unique
+        per pending and stable across HTTP retries and process restarts.  A different
+        payload under the same id is a conflict, never a silent reuse.
+        """
+        if lease_duration <= 0:
+            raise ValueError("lease_duration must be positive")
+        reference = time.time() if now is None else float(now)
+        fingerprint = reply_payload_fingerprint(session_id, pending_id, payload)
+        token = f"claim-{uuid.uuid4().hex}"
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation, retired FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            if int(session["retired"]):
+                raise SessionRetired(f"session {session_id!r} is retired")
+
+            pending = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (pending_id,),
+            ).fetchone()
+            if pending is None:
+                raise PendingStateConflict(f"no pending {pending_id!r}")
+            task = connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM web_task WHERE task_id = ?",
+                (pending["task_id"],),
+            ).fetchone()
+            if task is None or str(task["session_id"]) != session_id:
+                raise UnknownTask(f"pending {pending_id!r} does not belong to {session_id!r}")
+            request_id = str(pending["reply_turn_id"])
+            existing = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["payload_fingerprint"]) != fingerprint:
+                    raise RequestConflict(
+                        "the same request id was reused with different request content"
+                    )
+                if str(existing["status"]) == "COMPLETED":
+                    # Replay before task/pending state checks: a completed reply legitimately
+                    # leaves the task COMPLETED and the pending CONSUMED.
+                    return RequestClaim("replay", _to_request_record(existing), None)
+            if str(task["status"]) != "WAITING_FOR_USER":
+                raise TaskStateConflict(f"task {task['task_id']!r} is not waiting for a reply")
+            if int(task["reset_generation"]) != int(session["reset_generation"]):
+                raise TaskStateConflict("task belongs to a previous reset generation")
+            if str(pending["status"]) != "OPEN":
+                raise PendingStateConflict(
+                    f"pending {pending_id!r} is {pending['status']!r}, not OPEN"
+                )
+            if float(pending["expires_at"]) <= reference:
+                raise PendingExpired(f"pending {pending_id!r} has expired")
+
+            request_id = str(pending["reply_turn_id"])
+            existing = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+
+            if existing is None:
+                connection.execute(
+                    "INSERT INTO web_request(session_id, request_id, pending_id, task_id, "
+                    "request_kind, payload_fingerprint, status, claim_token, claim_attempt, "
+                    "lease_expires_at, task_version_at_claim, reset_generation_at_claim, "
+                    "result_json, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, 'clarification_reply', ?, 'PROCESSING', ?, 1, ?, ?, ?, "
+                    "NULL, ?, ?)",
+                    (session_id, request_id, pending_id, task["task_id"], fingerprint, token,
+                     reference + float(lease_duration), int(task["task_version"]),
+                     int(task["reset_generation"]), reference, reference),
+                )
+                outcome = "claimed"
+            else:
+                if str(existing["payload_fingerprint"]) != fingerprint:
+                    raise RequestConflict(
+                        "the same request id was reused with different request content"
+                    )
+                if str(existing["status"]) == "COMPLETED":
+                    row = connection.execute(
+                        f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                        "WHERE session_id = ? AND request_id = ?",
+                        (session_id, request_id),
+                    ).fetchone()
+                    return RequestClaim("replay", _to_request_record(row), None)
+                if str(existing["status"]) == "PROCESSING" and (
+                    existing["lease_expires_at"] is not None
+                    and float(existing["lease_expires_at"]) > reference
+                ):
+                    raise RequestBusy(
+                        f"request {request_id!r} is leased by another executor"
+                    )
+                updated = connection.execute(
+                    "UPDATE web_request SET status = 'PROCESSING', claim_token = ?, "
+                    "claim_attempt = claim_attempt + 1, lease_expires_at = ?, "
+                    "task_version_at_claim = ?, reset_generation_at_claim = ?, "
+                    "updated_at = ? WHERE session_id = ? AND request_id = ? "
+                    "AND status IN ('PROCESSING','FAILED') "
+                    "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+                    (token, reference + float(lease_duration), int(task["task_version"]),
+                     int(task["reset_generation"]), reference, session_id, request_id,
+                     reference),
+                )
+                if updated.rowcount != 1:  # pragma: no cover - guarded by the checks above
+                    raise RequestBusy(f"request {request_id!r} changed during takeover")
+                outcome = "reclaimed"
+
+            row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            return RequestClaim(outcome, _to_request_record(row), token)
+
+    def finalize_reply_request(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        outcome: str,
+        requirements: Mapping[str, Any] | None = None,
+        now: float | None = None,
+    ) -> tuple[TaskRecord, PendingRecord, RequestRecord]:
+        """Atomically commit a claimed reply: Task, Pending and Request in one transaction.
+
+        ``outcome`` is ``"resumed"`` (task back to RUNNING) or ``"completed"`` (task
+        COMPLETED).  The task version is the one captured at claim time, and reset
+        generations are re-checked, so a reset or a newer executor fences this commit.
+        """
+        if outcome not in {"resumed", "completed"}:
+            raise ValueError(f"unsupported finalize outcome {outcome!r}")
+        reference = time.time() if now is None else float(now)
+        requirements_json = (
+            None if requirements is None else _dumps_json(requirements, "requirements")
+        )
+        result = {"outcome": outcome, "request_id": request_id,
+                  "pending_id": request_id, "task_id": None}
+
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation, retired FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            if int(session["retired"]):
+                raise SessionRetired(f"session {session_id!r} is retired")
+
+            request = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            if request is None:
+                raise RequestNotFound(f"no request {request_id!r} for {session_id!r}")
+            if str(request["status"]) != "PROCESSING" or request["claim_token"] != claim_token:
+                raise RequestFenced("claim token is stale or the request is not processing")
+            if int(request["reset_generation_at_claim"]) != int(session["reset_generation"]):
+                raise RequestFenced("session was reset after this request was claimed")
+
+            task = connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM web_task WHERE task_id = ?",
+                (request["task_id"],),
+            ).fetchone()
+            if task is None or str(task["session_id"]) != session_id:
+                raise RequestFenced("request task no longer belongs to this session")
+            if int(task["reset_generation"]) != int(session["reset_generation"]):
+                raise RequestFenced("task belongs to a previous reset generation")
+
+            target_status = "RUNNING" if outcome == "resumed" else "COMPLETED"
+            if outcome == "resumed":
+                updated_task = connection.execute(
+                    "UPDATE web_task SET status = 'RUNNING', task_version = task_version + 1, "
+                    "updated_at = ? WHERE task_id = ? AND status = 'WAITING_FOR_USER' "
+                    "AND task_version = ?",
+                    (reference, task["task_id"], int(request["task_version_at_claim"])),
+                )
+            elif requirements_json is None:
+                updated_task = connection.execute(
+                    "UPDATE web_task SET status = 'COMPLETED', task_version = task_version + 1, "
+                    "updated_at = ?, closed_at = ? WHERE task_id = ? "
+                    "AND status = 'WAITING_FOR_USER' AND task_version = ?",
+                    (reference, reference, task["task_id"],
+                     int(request["task_version_at_claim"])),
+                )
+            else:
+                updated_task = connection.execute(
+                    "UPDATE web_task SET status = 'COMPLETED', task_version = task_version + 1, "
+                    "current_requirements_json = ?, requirements_version = "
+                    "requirements_version + 1, updated_at = ?, closed_at = ? "
+                    "WHERE task_id = ? AND status = 'WAITING_FOR_USER' AND task_version = ?",
+                    (requirements_json, reference, reference, task["task_id"],
+                     int(request["task_version_at_claim"])),
+                )
+            if updated_task.rowcount != 1:
+                raise StaleTaskVersion("task changed since this request was claimed")
+
+            consumed = connection.execute(
+                "UPDATE web_pending SET status = 'CONSUMED', consumed_at = ? "
+                "WHERE pending_id = ? AND task_id = ? AND status = 'OPEN'",
+                (reference, request["pending_id"], task["task_id"]),
+            )
+            if consumed.rowcount != 1:
+                raise PendingStateConflict("pending is no longer consumable by this request")
+
+            result["task_id"] = str(task["task_id"])
+            finalized = connection.execute(
+                "UPDATE web_request SET status = 'COMPLETED', result_json = ?, updated_at = ? "
+                "WHERE session_id = ? AND request_id = ? AND status = 'PROCESSING' "
+                "AND claim_token = ?",
+                (json.dumps(result, sort_keys=True), reference, session_id, request_id,
+                 claim_token),
+            )
+            if finalized.rowcount != 1:  # pragma: no cover - guarded above
+                raise RequestFenced("request was completed by another executor")
+
+            task_row = connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM web_task WHERE task_id = ?", (task["task_id"],)
+            ).fetchone()
+            pending_row = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (request["pending_id"],),
+            ).fetchone()
+            request_row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return (
+            _to_task_record(task_row),
+            _to_pending_record(pending_row),
+            _to_request_record(request_row),
+        )
+
     def consume_pending(
         self,
         session_id: str,
@@ -1590,6 +1948,54 @@ def _to_turn_record(row: sqlite3.Row) -> TurnRecord:
         task_id=None if row["task_id"] is None else str(row["task_id"]),
         payload=payload,
         created_at=float(row["created_at"]),
+    )
+
+
+def reply_payload_fingerprint(
+    session_id: str, pending_id: str, payload: Mapping[str, Any]
+) -> str:
+    """Deterministic SHA-256 over the fields that decide a reply's logical identity."""
+    if not isinstance(payload, Mapping):
+        raise ValueError("payload must be a mapping")
+    canonical = {
+        "session_id": str(session_id),
+        "pending_id": str(pending_id),
+        "message": str(payload.get("message") or ""),
+        "confirmed_by_user": bool(payload.get("confirmed_by_user", True)),
+        "confirmation_source": str(
+            payload.get("confirmation_source") or "web_ui_explicit_user_reply"
+        ),
+    }
+    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _to_request_record(row: sqlite3.Row) -> RequestRecord:
+    request_id = str(row["request_id"])
+    result = (
+        None
+        if row["result_json"] is None
+        else _loads_json(row["result_json"], table="web_request", row_key=request_id,
+                         field="result_json")
+    )
+    return RequestRecord(
+        session_id=str(row["session_id"]),
+        request_id=request_id,
+        pending_id=str(row["pending_id"]),
+        task_id=str(row["task_id"]),
+        request_kind=str(row["request_kind"]),
+        payload_fingerprint=str(row["payload_fingerprint"]),
+        status=str(row["status"]),
+        claim_token=None if row["claim_token"] is None else str(row["claim_token"]),
+        claim_attempt=int(row["claim_attempt"]),
+        lease_expires_at=(
+            None if row["lease_expires_at"] is None else float(row["lease_expires_at"])
+        ),
+        task_version_at_claim=int(row["task_version_at_claim"]),
+        reset_generation_at_claim=int(row["reset_generation_at_claim"]),
+        result=result,
+        created_at=float(row["created_at"]),
+        updated_at=float(row["updated_at"]),
     )
 
 
