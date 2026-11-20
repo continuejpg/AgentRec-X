@@ -173,8 +173,10 @@ class Session:
         self.recommendations = {}
         self._recommendation_order = []
         self.last_query = ""
-        self._turn_counter = 0
-        self._reply_counter = 0
+        # The turn/reply counters are business identities, not conversation history, so a
+        # reset must not rewind them.  An id already handed to M9 is part of that turn's
+        # idempotency key: reissuing it would make M9 treat a genuinely new statement as a
+        # replay and silently drop it (D-1).  Reset clears what the user sees, never identity.
         self.touch()
 
     # -- views ---------------------------------------------------------------
