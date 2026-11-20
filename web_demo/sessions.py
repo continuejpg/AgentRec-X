@@ -104,13 +104,23 @@ class Session:
     _recommendation_order: list[str] = field(default_factory=list)
     _turn_counter: int = 0
     _reply_counter: int = 0
+    #: Optional durable backend (``SQLiteWebStateStore``).  When set, identity allocation,
+    #: metadata writes and reset go through SQLite, and the two counters above are only a
+    #: snapshot of what the database reported when this object was loaded.
+    _store: Any = field(default=None, repr=False, compare=False)
 
     # -- ids -----------------------------------------------------------------
     def next_turn_id(self) -> str:
+        if self._store is not None:
+            # The database is the only authority in persistent mode; the in-memory
+            # counter is never used to allocate, so there is no "allocate then save" gap.
+            return self._store.allocate_turn_id(self.session_id)
         self._turn_counter += 1
         return f"{self.session_id}-t{self._turn_counter}"
 
     def next_reply_turn_id(self) -> str:
+        if self._store is not None:
+            return self._store.allocate_reply_id(self.session_id)
         self._reply_counter += 1
         return f"{self.session_id}-r{self._reply_counter}"
 
@@ -118,13 +128,32 @@ class Session:
     def touch(self) -> None:
         self.updated_at = iso()
 
+    def update_metadata(
+        self, *, title: str | None = None, behavior_enabled: bool | None = None
+    ) -> None:
+        """Persist the supported mutable metadata, then mirror it in memory.
+
+        The store is written first: if it fails, this object keeps its previous values and
+        the caller sees the error instead of a silently diverged session.
+        """
+        if self._store is not None:
+            self._store.update_session_metadata(
+                self.session_id, title=title, behavior_enabled=behavior_enabled
+            )
+        if title is not None:
+            self.title = title
+        if behavior_enabled is not None:
+            self.behavior_enabled = behavior_enabled
+        self.touch()
+
     def set_title_from(self, text: str) -> None:
         if self.title != DEFAULT_TITLE:
             return
         cleaned = " ".join(str(text or "").split())
         if not cleaned:
             return
-        self.title = cleaned[:TITLE_MAX_CHARS] + ("…" if len(cleaned) > TITLE_MAX_CHARS else "")
+        resolved = cleaned[:TITLE_MAX_CHARS] + ("…" if len(cleaned) > TITLE_MAX_CHARS else "")
+        self.update_metadata(title=resolved)
 
     def add_turn(self, turn: Turn) -> None:
         self.turns.append(turn)
@@ -165,7 +194,12 @@ class Session:
     def latest_recommendation_id(self) -> str | None:
         return self._recommendation_order[-1] if self._recommendation_order else None
 
-    def reset_turns(self) -> None:
+    def reset_turns(self, *, title: str | None = None) -> None:
+        # In persistent mode the SQLite store is authoritative and performs the whole reset
+        # (generation bump, task/pending cancellation, optional title) in one transaction.
+        # If it fails, this raises before any in-memory state is cleared.
+        if self._store is not None:
+            self._store.reset_session(self.session_id, title=title)
         self.turns = []
         self.pending_clarification = None
         # The cards from the old turns are no longer displayed; late events must not attach
@@ -177,6 +211,8 @@ class Session:
         # reset must not rewind them.  An id already handed to M9 is part of that turn's
         # idempotency key: reissuing it would make M9 treat a genuinely new statement as a
         # replay and silently drop it (D-1).  Reset clears what the user sees, never identity.
+        if title is not None:
+            self.title = title
         self.touch()
 
     # -- views ---------------------------------------------------------------

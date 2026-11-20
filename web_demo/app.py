@@ -59,8 +59,10 @@ from web_demo.config import (
     modes_public,
 )
 from web_demo.mcp_manager import MCPManager, MCPManagerError
+from web_demo.persistent_sessions import PersistentSessionStore
 from web_demo.qwen_health import QwenHealthMonitor
 from web_demo.sessions import DEFAULT_TITLE, Session, SessionStore, iso, utc_now
+from web_demo.state_store import StateStoreError
 
 LOGGER = logging.getLogger("agentrecx.web_demo.bff")
 HEARTBEAT_SECONDS = 5.0
@@ -317,16 +319,36 @@ def sse_response(events: AsyncIterator[dict[str, Any]]) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 
+def _build_session_store(settings: Settings) -> SessionStore | PersistentSessionStore:
+    """Choose the session store once, at app construction.
+
+    ``web_state_db_path`` is the explicit opt-in for durable identity.  When it is set the
+    SQLite store must open successfully: falling back to the in-memory store would hand
+    out identities the database has already issued, so the app refuses to start instead.
+    """
+    if settings.web_state_db_path is None:
+        return SessionStore()
+    return PersistentSessionStore(settings.web_state_db_path)
+
+
+def _close_session_store(store: Any) -> None:
+    """Close a durable session store; the in-memory store owns nothing to close."""
+    closer = getattr(store, "close", None)
+    if callable(closer):
+        with suppress(Exception):
+            closer()
+
+
 def create_app(
     settings: Settings | None = None,
     manager: MCPManager | Any | None = None,
-    sessions: SessionStore | None = None,
+    sessions: SessionStore | PersistentSessionStore | None = None,
     qwen_health: QwenHealthMonitor | Any | None = None,
     behavior: BehaviorStore | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     manager = manager or MCPManager(settings)
-    store = sessions or SessionStore()
+    store = sessions or _build_session_store(settings)
     monitor = qwen_health or QwenHealthMonitor(settings)
     behavior_store = behavior or BehaviorStore(
         settings.behavior_store_path,
@@ -353,6 +375,7 @@ def create_app(
             await manager.stop()
             with suppress(Exception):
                 behavior_store.close()
+            _close_session_store(store)
             _remove_handlers(logging.getLogger("agentrecx.web_demo"), handlers_added)
             handlers_added.clear()
 
@@ -376,6 +399,16 @@ def create_app(
     @app.exception_handler(BehaviorError)
     async def behavior_error_handler(request: Request, exc: BehaviorError) -> JSONResponse:  # noqa: ARG001
         return JSONResponse(status_code=exc.http_status, content=exc.as_payload())
+
+    @app.exception_handler(StateStoreError)
+    async def state_store_error_handler(request: Request, exc: StateStoreError) -> JSONResponse:  # noqa: ARG001
+        # Durable state is unavailable: report it instead of pretending the write succeeded
+        # or silently continuing on an in-memory session.
+        LOGGER.error("state store failure: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"code": "state_store_unavailable", "message": str(exc)},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -532,8 +565,9 @@ def create_app(
     @app.post("/api/sessions/{session_id}/reset")
     async def reset_session(session_id: str) -> dict[str, Any]:
         session = get_session(session_id)
-        session.reset_turns()
-        session.title = DEFAULT_TITLE
+        # One authoritative call: in persistent mode this bumps the reset generation and
+        # cancels the active task/pending in SQLite before any in-memory state is cleared.
+        session.reset_turns(title=DEFAULT_TITLE)
         LOGGER.info("session reset id=%s", session.session_id)
         return session.view()
 
@@ -745,9 +779,11 @@ def create_app(
     @app.post("/api/behavior/enabled")
     async def behavior_set_enabled(body: BehaviorEnabledRequest) -> dict[str, Any]:
         session = get_session(body.session_id)
-        session.behavior_enabled = bool(body.enabled and settings.behavior_enabled)
-        behavior_store.set_enabled(session.session_id, session.behavior_enabled)
-        session.touch()
+        enabled = bool(body.enabled and settings.behavior_enabled)
+        # Persist the durable flag first: if SQLite rejects the write the request fails
+        # instead of reporting an "enabled/disabled" state that will not survive a restart.
+        session.update_metadata(behavior_enabled=enabled)
+        behavior_store.set_enabled(session.session_id, enabled)
         return {
             "session_id": session.session_id,
             "enabled": session.behavior_enabled,

@@ -570,6 +570,69 @@ class SQLiteWebStateStore:
                 raise StateStoreError(f"cannot read session {session_id!r}: {exc}") from exc
         return None if row is None else _to_session_record(row)
 
+    def update_session_metadata(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        behavior_enabled: bool | None = None,
+    ) -> SessionRecord:
+        """Persist the supported mutable session metadata in one transaction.
+
+        Only ``title`` and ``behavior_enabled`` are mutable here; ``profile_id`` and
+        ``created_at`` are immutable, and counters/identity are owned by
+        :meth:`allocate_turn_id` / :meth:`allocate_reply_id`.  At least one field is
+        required so a no-op call cannot silently "succeed".
+        """
+        if title is None and behavior_enabled is None:
+            raise ValueError("at least one of title/behavior_enabled is required")
+        resolved_title = None if title is None else _require_text(title, "title")
+        timestamp = time.time()
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT retired FROM web_session WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if row is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            if int(row["retired"]):
+                raise SessionRetired(f"session {session_id!r} is retired")
+
+            assignments: list[str] = []
+            parameters: list[Any] = []
+            if resolved_title is not None:
+                assignments.append("title = ?")
+                parameters.append(resolved_title)
+            if behavior_enabled is not None:
+                assignments.append("behavior_enabled = ?")
+                parameters.append(1 if behavior_enabled else 0)
+            assignments.append("updated_at = ?")
+            parameters.append(timestamp)
+            parameters.append(session_id)
+            connection.execute(
+                f"UPDATE web_session SET {', '.join(assignments)} WHERE session_id = ?",
+                tuple(parameters),
+            )
+            row = connection.execute(
+                f"SELECT {_SESSION_COLUMNS} FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return _to_session_record(row)
+
+    def list_sessions(self, limit: int = 20) -> tuple[SessionRecord, ...]:
+        """Return the most recently updated sessions, newest first."""
+        bounded = max(1, int(limit))
+        with self._lock:
+            self._ensure_open()
+            try:
+                rows = self._connection.execute(
+                    f"SELECT {_SESSION_COLUMNS} FROM web_session "
+                    "ORDER BY updated_at DESC, session_id ASC LIMIT ?",
+                    (bounded,),
+                ).fetchall()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot list sessions: {exc}") from exc
+        return tuple(_to_session_record(row) for row in rows)
+
     def retire_session(self, session_id: str) -> SessionRecord:
         """Mark a session permanently unusable.  Terminal and idempotent.
 
@@ -1123,13 +1186,15 @@ class SQLiteWebStateStore:
 
     # -- reset -------------------------------------------------------------- #
 
-    def reset_session(self, session_id: str) -> SessionRecord:
+    def reset_session(self, session_id: str, *, title: str | None = None) -> SessionRecord:
         """Atomically reset the visible conversation of one session.
 
         Keeps ``session_id``, both counters and the identity ledger; advances
         ``reset_generation``; cancels the active task and its OPEN pending.  Completed
         history is untouched and M9 is in a different store, so it is not modified.
+        ``title`` is applied in the same transaction so a reset cannot half-succeed.
         """
+        resolved_title = None if title is None else _require_text(title, "title")
         timestamp = time.time()
         with self._transaction() as connection:
             row = connection.execute(
@@ -1153,11 +1218,18 @@ class SQLiteWebStateStore:
                 "WHERE session_id = ? AND status IN ('RUNNING','WAITING_FOR_USER')",
                 (timestamp, timestamp, session_id),
             )
-            connection.execute(
-                "UPDATE web_session SET reset_generation = reset_generation + 1, "
-                "updated_at = ? WHERE session_id = ?",
-                (timestamp, session_id),
-            )
+            if resolved_title is None:
+                connection.execute(
+                    "UPDATE web_session SET reset_generation = reset_generation + 1, "
+                    "updated_at = ? WHERE session_id = ?",
+                    (timestamp, session_id),
+                )
+            else:
+                connection.execute(
+                    "UPDATE web_session SET reset_generation = reset_generation + 1, "
+                    "title = ?, updated_at = ? WHERE session_id = ?",
+                    (resolved_title, timestamp, session_id),
+                )
             row = connection.execute(
                 f"SELECT {_SESSION_COLUMNS} FROM web_session WHERE session_id = ?",
                 (session_id,),

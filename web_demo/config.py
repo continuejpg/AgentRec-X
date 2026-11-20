@@ -17,6 +17,9 @@ Environment variables (all optional):
     AGENTRECX_BEHAVIOR_WINDOW_S              short-term profile window, default 21600 s (6 h)
     AGENTRECX_BEHAVIOR_HALF_LIFE_S           decay half-life, default 1800 s
     AGENTRECX_BEHAVIOR_RETENTION_DAYS        event retention, default 7 days
+    AGENTRECX_WEB_STATE_DB                   optional SQLite path for durable session
+                                             identity/counters/metadata; unset keeps the
+                                             original process-local SessionStore
 """
 
 from __future__ import annotations
@@ -174,6 +177,9 @@ class Settings:
     behavior_window_s: float = DEFAULT_WINDOW_S
     behavior_half_life_s: float = DEFAULT_HALF_LIFE_S
     behavior_retention_days: float = DEFAULT_RETENTION_DAYS
+    # Durable Web Demo session state (identity, counters, metadata).  ``None`` keeps the
+    # process-local SessionStore so every existing test and the default demo are unchanged.
+    web_state_db_path: Path | None = None
     # Optional real Qwen3.5-9B Base Live.  The endpoint is deliberately never exposed publicly.
     qwen_live_enabled: bool = False
     qwen_model_endpoint: str = ""
@@ -253,6 +259,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
     behavior_db_raw = str(want.get("AGENTRECX_BEHAVIOR_DB") or "").strip()
     behavior_db = Path(behavior_db_raw) if behavior_db_raw else None
+    web_state_db_raw = str(want.get("AGENTRECX_WEB_STATE_DB") or "").strip()
+    web_state_db = Path(web_state_db_raw) if web_state_db_raw else None
     return Settings(
         port=port,
         search_mode=mode,
@@ -266,6 +274,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
         behavior_enabled=_env_bool(want.get("AGENTRECX_BEHAVIOR_ENABLED", "1")),
         behavior_db_path=behavior_db,
+        web_state_db_path=web_state_db,
         behavior_window_s=_env_float(want, "AGENTRECX_BEHAVIOR_WINDOW_S", DEFAULT_WINDOW_S),
         behavior_half_life_s=_env_float(
             want, "AGENTRECX_BEHAVIOR_HALF_LIFE_S", DEFAULT_HALF_LIFE_S
