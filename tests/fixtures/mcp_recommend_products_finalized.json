@@ -1,0 +1,560 @@
+{
+  "corrective_retrieval": {
+    "attempts": 0,
+    "enabled": false,
+    "trace": []
+  },
+  "error": null,
+  "evidence_bundle": {
+    "bundle_id": "p15_web-rec-fixture_B0824MW646",
+    "current_query": "wireless headphones",
+    "eligibility": {
+      "selected_product_id": "B0824MW646"
+    },
+    "gate_decision": {
+      "action": "ALLOW_FINALIZE",
+      "allow_finalize": true,
+      "ask_question": null,
+      "bounded_scope": true,
+      "budget_used": {
+        "max_product_evidence_rounds": 2,
+        "max_retrievals": 1,
+        "product_evidence_remaining": 2,
+        "product_evidence_rounds_used": 0,
+        "retrievals_remaining": 1,
+        "retrievals_used": 0
+      },
+      "candidate_presentable_ids": [
+        "B0824MW646",
+        "B08CDZYJ99",
+        "B07C6WP7R9",
+        "B0BPC7S4W6",
+        "B0C7429KCR",
+        "B0BN85TBR3",
+        "B0BKPFC7JN",
+        "B09V7LDJP3",
+        "B0BG2W9PQ3",
+        "B0BV96YRWJ"
+      ],
+      "evidence_refs": [],
+      "gate_version": "decision_gate_v0.1",
+      "hard_constraint_status": {
+        "hard_constraints": "verified"
+      },
+      "preference_conflict_status": "none",
+      "product_role": "main",
+      "product_type": null,
+      "reason": "hard constraints verified; no explicit preference conflict",
+      "reason_code": "evidence_sufficient",
+      "reasons": [],
+      "selected_candidate_id": "B0824MW646",
+      "task_constraint_status": "none",
+      "unknown_fields": []
+    },
+    "ledger_source": "CatalogSearchSource(mode=bm25)",
+    "namespace": "amazon_electronics_c4",
+    "notes": [
+      "product evidence proves only what the catalogue field says, not product quality, stock, ratings or real-world performance",
+      "preference evidence is read from the authorised M9 history; inactive/removed/superseded preferences are never active evidence",
+      "UNKNOWN fields are not facts and must not be filled from model knowledge"
+    ],
+    "preference_evidence": [
+      {
+        "active": true,
+        "evidence_id": "mev_d8ab8fcf87f5960da3aafac4",
+        "kind": "color",
+        "memory_id": "d8ab8fcf87f5960da3aafac4",
+        "polarity": "prefer",
+        "preference_id": "d8ab8fcf87f5960da3aafac4",
+        "source": "M9:PreferenceMemoryService.get_memory_history",
+        "source_text": "I prefer black.",
+        "source_turn_id": "fixture-r1",
+        "status": "active",
+        "user_id": "web-rec-fixture",
+        "value": "black",
+        "verification_status": "memory_event_exact"
+      }
+    ],
+    "product_evidence": [
+      {
+        "attribute": null,
+        "evidence_id": "pev_01",
+        "namespace": "amazon_electronics_c4",
+        "product_id": "B0824MW646",
+        "raw_excerpt": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black).",
+        "raw_field": "title",
+        "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+        "span_end": 166,
+        "span_start": 0,
+        "span_text": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black).",
+        "verification_status": "lexical_span_exact"
+      },
+      {
+        "attribute": null,
+        "evidence_id": "pev_02",
+        "namespace": "amazon_electronics_c4",
+        "product_id": "B0824MW646",
+        "raw_excerpt": "Electronics",
+        "raw_field": "main_category",
+        "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+        "span_end": 11,
+        "span_start": 0,
+        "span_text": "Electronics",
+        "verification_status": "lexical_span_exact"
+      },
+      {
+        "attribute": null,
+        "evidence_id": "pev_03",
+        "namespace": "amazon_electronics_c4",
+        "product_id": "B0824MW646",
+        "raw_excerpt": "Electronics",
+        "raw_field": "categories",
+        "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+        "span_end": 11,
+        "span_start": 0,
+        "span_text": "Electronics",
+        "verification_status": "lexical_span_exact"
+      },
+      {
+        "attribute": "wireless",
+        "evidence_id": "pev_04",
+        "namespace": "amazon_electronics_c4",
+        "product_id": "B0824MW646",
+        "raw_excerpt": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black).",
+        "raw_field": "title",
+        "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+        "span_end": 47,
+        "span_start": 39,
+        "span_text": "Wireless",
+        "verification_status": "lexical_span_exact"
+      },
+      {
+        "attribute": null,
+        "evidence_id": "pev_05",
+        "namespace": "amazon_electronics_c4",
+        "product_id": "B0824MW646",
+        "raw_excerpt": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black). .",
+        "raw_field": "description",
+        "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+        "span_end": 168,
+        "span_start": 0,
+        "span_text": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black). .",
+        "verification_status": "lexical_span_exact"
+      }
+    ],
+    "product_type": "headphones",
+    "role_status": null,
+    "schema": "agentrecx.p15.evidence_bundle.v1",
+    "search_mode": "bm25",
+    "selected_product": {
+      "attributes": {
+        "in_ear": {
+          "evidence": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones",
+          "source": "catalog_meta:text",
+          "status": "present"
+        },
+        "wireless": {
+          "evidence": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Hea",
+          "source": "catalog_meta:text",
+          "status": "present"
+        }
+      },
+      "form_factor": "in_ear",
+      "item_id": "B0824MW646",
+      "namespaced_id": "amazon_electronics_c4:B0824MW646",
+      "product_type": "headphones",
+      "source": "data/p13r/electronics/catalog_meta.jsonl",
+      "source_record": "data/p13r/electronics/catalog_meta.jsonl:amazon_electronics_c4:B0824MW646",
+      "text_chars": 168,
+      "title": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black)."
+    },
+    "task_id": "web-rec-fixture",
+    "unknown_fields": [
+      {
+        "attribute": "price",
+        "reason": "no reliable numeric price in the catalogue record"
+      },
+      {
+        "attribute": "brand",
+        "reason": "the catalogue record has no trusted brand/store field"
+      },
+      {
+        "attribute": "material",
+        "reason": "no trusted material field in the catalogue record"
+      },
+      {
+        "attribute": "size",
+        "reason": "no trusted size field in the catalogue record"
+      },
+      {
+        "attribute": "stock",
+        "reason": "the catalogue snapshot is not a live availability feed"
+      },
+      {
+        "attribute": "warranty",
+        "reason": "the catalogue record carries no warranty statement"
+      }
+    ],
+    "user_id": "web-rec-fixture"
+  },
+  "gate": {
+    "action": "ALLOW_FINALIZE",
+    "allow_finalize": true,
+    "ask_question": null,
+    "bounded_scope": true,
+    "budget_used": {
+      "max_product_evidence_rounds": 2,
+      "max_retrievals": 1,
+      "product_evidence_remaining": 2,
+      "product_evidence_rounds_used": 0,
+      "retrievals_remaining": 1,
+      "retrievals_used": 0
+    },
+    "candidate_presentable_ids": [
+      "B0824MW646",
+      "B08CDZYJ99",
+      "B07C6WP7R9",
+      "B0BPC7S4W6",
+      "B0C7429KCR",
+      "B0BN85TBR3",
+      "B0BKPFC7JN",
+      "B09V7LDJP3",
+      "B0BG2W9PQ3",
+      "B0BV96YRWJ"
+    ],
+    "evidence_refs": [],
+    "gate_version": "decision_gate_v0.1",
+    "hard_constraint_status": {
+      "hard_constraints": "verified"
+    },
+    "preference_conflict_status": "none",
+    "product_role": "main",
+    "product_type": null,
+    "reason": "hard constraints verified; no explicit preference conflict",
+    "reason_code": "evidence_sufficient",
+    "reasons": [],
+    "selected_candidate_id": "B0824MW646",
+    "task_constraint_status": "none",
+    "unknown_fields": []
+  },
+  "latency_ms": 3140.09,
+  "notes": [
+    "Gate remains authoritative; awaiting_clarification/no_verified_candidate_in_scope is not a successful recommendation",
+    "the candidate pool is bounded and does not imply the full catalogue has no product"
+  ],
+  "planner_steps": {
+    "final_ids": [
+      "B0824MW646"
+    ],
+    "steps": [
+      {
+        "action": "RETRIEVE",
+        "action_arguments": {
+          "query": "wireless headphones"
+        },
+        "observation_after": {
+          "candidate_ids": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B07R21PM77",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ],
+          "needs_user_input": false,
+          "reranked": false,
+          "state_version": null,
+          "step": 0,
+          "terminal": false
+        },
+        "observation_before": {
+          "candidate_ids": [],
+          "needs_user_input": false,
+          "reranked": false,
+          "state_version": null,
+          "step": 0
+        },
+        "state_version": null,
+        "step": 1,
+        "terminal": false,
+        "tool": "retrieve",
+        "tool_observation": {
+          "candidate_count": 20,
+          "candidate_set_changed": true,
+          "new_candidate_count": 20,
+          "query": "wireless headphones",
+          "retrievals_remaining": 1,
+          "status": "retrieved"
+        }
+      },
+      {
+        "action": "RERANK",
+        "action_arguments": {
+          "candidates": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B07R21PM77",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ]
+        },
+        "observation_after": {
+          "candidate_ids": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ],
+          "needs_user_input": false,
+          "reranked": true,
+          "state_version": null,
+          "step": 0,
+          "terminal": false
+        },
+        "observation_before": {
+          "candidate_ids": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B07R21PM77",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ],
+          "needs_user_input": false,
+          "reranked": false,
+          "state_version": null,
+          "step": 0
+        },
+        "state_version": null,
+        "step": 2,
+        "terminal": false,
+        "tool": "rerank",
+        "tool_observation": {
+          "candidate_count": 19,
+          "eligibility": {
+            "hard_constraint_ineligible": 0,
+            "hard_constraint_unknown": 0,
+            "hard_constraint_verified": 19,
+            "ineligible": 0,
+            "scope": "category_eligibility_only",
+            "task_constraint_unknown": 0,
+            "task_constraint_violations": 0,
+            "unresolved": 0,
+            "verified": 5
+          },
+          "status": "reranked"
+        }
+      },
+      {
+        "action": "FINALIZE",
+        "action_arguments": {
+          "candidates": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ]
+        },
+        "observation_after": {
+          "candidate_ids": [
+            "B0824MW646"
+          ],
+          "needs_user_input": false,
+          "reranked": true,
+          "state_version": null,
+          "step": 0,
+          "terminal": true
+        },
+        "observation_before": {
+          "candidate_ids": [
+            "B0824MW646",
+            "B08CDZYJ99",
+            "B07C6WP7R9",
+            "B0BPC7S4W6",
+            "B0C7429KCR",
+            "B0BN85TBR3",
+            "B0BKPFC7JN",
+            "B09V7LDJP3",
+            "B0BG2W9PQ3",
+            "B0BV96YRWJ",
+            "B0C1NGPMVP",
+            "B0CCCV4586",
+            "B09F5VFJL9",
+            "B08HYPZ6YG",
+            "B000KKKQ0O",
+            "B0BM657X74",
+            "B0C5XB5P4B",
+            "B07FXXVKDK",
+            "B08YNLBHYV"
+          ],
+          "needs_user_input": false,
+          "reranked": true,
+          "state_version": null,
+          "step": 0
+        },
+        "state_version": null,
+        "step": 3,
+        "terminal": true,
+        "tool": "finalize",
+        "tool_observation": {
+          "gate": {
+            "action": "ALLOW_FINALIZE",
+            "allow_finalize": true,
+            "ask_question": null,
+            "bounded_scope": true,
+            "budget_used": {
+              "max_product_evidence_rounds": 2,
+              "max_retrievals": 1,
+              "product_evidence_remaining": 2,
+              "product_evidence_rounds_used": 0,
+              "retrievals_remaining": 1,
+              "retrievals_used": 0
+            },
+            "candidate_presentable_ids": [
+              "B0824MW646",
+              "B08CDZYJ99",
+              "B07C6WP7R9",
+              "B0BPC7S4W6",
+              "B0C7429KCR",
+              "B0BN85TBR3",
+              "B0BKPFC7JN",
+              "B09V7LDJP3",
+              "B0BG2W9PQ3",
+              "B0BV96YRWJ"
+            ],
+            "evidence_refs": [],
+            "gate_version": "decision_gate_v0.1",
+            "hard_constraint_status": {
+              "hard_constraints": "verified"
+            },
+            "preference_conflict_status": "none",
+            "product_role": "main",
+            "product_type": null,
+            "reason": "hard constraints verified; no explicit preference conflict",
+            "reason_code": "evidence_sufficient",
+            "reasons": [],
+            "selected_candidate_id": "B0824MW646",
+            "task_constraint_status": "none",
+            "unknown_fields": []
+          },
+          "recommendation": {
+            "evidence_refs": [],
+            "product_ref": {
+              "item_id": "B0824MW646",
+              "namespace": "amazon_electronics_c4"
+            },
+            "rank": 1,
+            "task_constraint_status": {
+              "matched": [],
+              "status": "none",
+              "unknown": [],
+              "violations": []
+            },
+            "unknown_fields": []
+          },
+          "status": "finalized"
+        }
+      }
+    ],
+    "termination": "FINALIZE"
+  },
+  "query": "wireless headphones",
+  "schema": "agentrecx.p17.recommend_products.v1",
+  "search_mode": "bm25",
+  "selected_product": {
+    "attributes": {
+      "in_ear": {
+        "evidence": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones",
+        "source": "catalog_meta:text",
+        "status": "present"
+      },
+      "wireless": {
+        "evidence": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Hea",
+        "source": "catalog_meta:text",
+        "status": "present"
+      }
+    },
+    "form_factor": "in_ear",
+    "item_id": "B0824MW646",
+    "namespaced_id": "amazon_electronics_c4:B0824MW646",
+    "product_type": "headphones",
+    "source": "data/p13r/electronics/catalog_meta.jsonl",
+    "text_chars": 168,
+    "title": "Luisport Open Ear Bluetooth Headphones Wireless Earbuds Bluetooth Earbuds Bluetooth Headphones Wireless Headphones Bluetooth Earphones Wireless Earphones(S900-Black)."
+  },
+  "selected_product_id": "B0824MW646",
+  "status": "finalized"
+}
