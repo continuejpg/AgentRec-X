@@ -1,4 +1,4 @@
-"""Durable state for the Web Demo: session identity, tasks and clarifications.
+﻿"""Durable state for the Web Demo: session identity, tasks and clarifications.
 
 Scope (M1-C S2a + S2b)
 -----------------------
@@ -64,6 +64,7 @@ __all__ = [
     "IdentityAllocationError",
     "PendingExpired",
     "PendingStateConflict",
+    "RequestAmbiguous",
     "RequestBusy",
     "RequestConflict",
     "RequestFenced",
@@ -84,7 +85,7 @@ __all__ = [
 
 #: Current schema version. v1 = S2a (identity), v2 = S2b (tasks + clarifications),
 #: v3 = S3b (persisted chat turns), v4 = S5a (durable reply request ledger).
-WEB_STATE_SCHEMA_VERSION = 4
+WEB_STATE_SCHEMA_VERSION = 5
 
 #: Mirrors ``web_demo.sessions.DEFAULT_TITLE``; a test asserts the two stay equal.
 DEFAULT_SESSION_TITLE = "New shopping session"
@@ -258,6 +259,15 @@ _SCHEMA_V4_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+_SCHEMA_V5_STATEMENTS: tuple[str, ...] = (
+    "ALTER TABLE web_request ADD COLUMN execution_stage TEXT NOT NULL DEFAULT 'CLAIMED'",
+    "ALTER TABLE web_request ADD COLUMN payload_json TEXT",
+    """
+    UPDATE web_request SET execution_stage = CASE
+        WHEN status = 'COMPLETED' THEN 'COMPLETED' ELSE 'AMBIGUOUS' END
+    """,
+)
+
 _SESSION_COLUMNS = (
     "session_id, profile_id, title, created_at, updated_at, behavior_enabled, "
     "turn_counter, reply_counter, reset_generation, retired"
@@ -273,6 +283,7 @@ _PENDING_COLUMNS = (
 )
 _TURN_COLUMNS = "session_id, turn_seq, turn_id, task_id, payload_json, created_at"
 _REQUEST_COLUMNS = (
+    "execution_stage, payload_json, "
     "session_id, request_id, pending_id, task_id, request_kind, payload_fingerprint, "
     "status, claim_token, claim_attempt, lease_expires_at, task_version_at_claim, "
     "reset_generation_at_claim, result_json, created_at, updated_at"
@@ -370,6 +381,10 @@ class RequestBusy(StateStoreError):
 
 class RequestFenced(StateStoreError):
     """The caller's claim token/state is stale and cannot commit."""
+
+
+class RequestAmbiguous(StateStoreError):
+    """External execution may have happened but its result is unrecoverable."""
 
 
 # --------------------------------------------------------------------------- #
@@ -474,6 +489,8 @@ class RequestRecord:
     result: dict[str, Any] | None
     created_at: float
     updated_at: float
+    execution_stage: str = "CLAIMED"
+    reply_payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -590,6 +607,7 @@ class SQLiteWebStateStore:
             for statement in (
                 _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS
                 + _SCHEMA_V3_STATEMENTS + _SCHEMA_V4_STATEMENTS
+                + _SCHEMA_V5_STATEMENTS
             ):
                 connection.execute(statement)
             connection.execute(
@@ -603,7 +621,7 @@ class SQLiteWebStateStore:
             version = self._read_schema_version(connection)
             if version == WEB_STATE_SCHEMA_VERSION:
                 return  # another process migrated it while we waited for the write lock
-            if version not in (1, 2, 3):
+            if version not in (1, 2, 3, 4):
                 raise SchemaVersionError(
                     f"cannot migrate schema version {version} to {WEB_STATE_SCHEMA_VERSION}"
                 )
@@ -616,6 +634,9 @@ class SQLiteWebStateStore:
                         connection.execute(statement)
                 for statement in _SCHEMA_V4_STATEMENTS:
                     connection.execute(statement)
+                if version <= 4:
+                    for statement in _SCHEMA_V5_STATEMENTS:
+                        connection.execute(statement)
                 connection.execute(
                     "UPDATE meta SET value = ? WHERE key = 'schema_version'",
                     (str(WEB_STATE_SCHEMA_VERSION),),
@@ -1248,6 +1269,12 @@ class SQLiteWebStateStore:
         reference = time.time() if now is None else float(now)
         fingerprint = reply_payload_fingerprint(session_id, pending_id, payload)
         token = f"claim-{uuid.uuid4().hex}"
+        stored_payload = json.dumps({
+            "message": str(payload.get("message") or ""),
+            "confirmed_by_user": bool(payload.get("confirmed_by_user", True)),
+            "confirmation_source": str(payload.get("confirmation_source")
+                                     or "web_ui_explicit_user_reply"),
+        }, sort_keys=True, ensure_ascii=False)
         with self._transaction() as connection:
             session = connection.execute(
                 "SELECT reset_generation, retired FROM web_session WHERE session_id = ?",
@@ -1281,6 +1308,37 @@ class SQLiteWebStateStore:
                     raise RequestConflict(
                         "the same request id was reused with different request content"
                     )
+                stage = str(existing["execution_stage"])
+                if stage in {"EXTERNAL_STARTED", "AMBIGUOUS"}:
+                    raise RequestAmbiguous(
+                        "external execution started but no durable result exists; "
+                        "automatic retry is refused"
+                    )
+                if stage == "RESULT_DURABLE":
+                    if (
+                        existing["lease_expires_at"] is not None
+                        and float(existing["lease_expires_at"]) > reference
+                    ):
+                        raise RequestBusy(
+                            f"request {request_id!r} result is leased by another executor"
+                        )
+                    updated = connection.execute(
+                        "UPDATE web_request SET claim_token = ?, "
+                        "claim_attempt = claim_attempt + 1, lease_expires_at = ?, "
+                        "updated_at = ? WHERE session_id = ? AND request_id = ? "
+                        "AND status = 'PROCESSING' AND execution_stage = 'RESULT_DURABLE' "
+                        "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+                        (token, reference + float(lease_duration), reference, session_id,
+                         request_id, reference),
+                    )
+                    if updated.rowcount != 1:  # pragma: no cover
+                        raise RequestBusy(f"request {request_id!r} changed during takeover")
+                    row = connection.execute(
+                        f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                        "WHERE session_id = ? AND request_id = ?",
+                        (session_id, request_id),
+                    ).fetchone()
+                    return RequestClaim("result_ready", _to_request_record(row), token)
                 if str(existing["status"]) == "COMPLETED":
                     # Replay before task/pending state checks: a completed reply legitimately
                     # leaves the task COMPLETED and the pending CONSUMED.  It must still be
@@ -1315,12 +1373,12 @@ class SQLiteWebStateStore:
                     "INSERT INTO web_request(session_id, request_id, pending_id, task_id, "
                     "request_kind, payload_fingerprint, status, claim_token, claim_attempt, "
                     "lease_expires_at, task_version_at_claim, reset_generation_at_claim, "
-                    "result_json, created_at, updated_at) "
+                    "result_json, created_at, updated_at, execution_stage, payload_json) "
                     "VALUES (?, ?, ?, ?, 'clarification_reply', ?, 'PROCESSING', ?, 1, ?, ?, ?, "
-                    "NULL, ?, ?)",
+                    "NULL, ?, ?, 'CLAIMED', ?)",
                     (session_id, request_id, pending_id, task["task_id"], fingerprint, token,
                      reference + float(lease_duration), int(task["task_version"]),
-                     int(task["reset_generation"]), reference, reference),
+                     int(task["reset_generation"]), reference, reference, stored_payload),
                 )
                 outcome = "claimed"
             else:
@@ -1401,6 +1459,141 @@ class SQLiteWebStateStore:
             ).fetchone()
         return _to_request_record(row)
 
+    def mark_request_external_started(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        now: float | None = None,
+    ) -> RequestRecord:
+        """Persist EXTERNAL_STARTED *before* the MCP tool is invoked."""
+        reference = time.time() if now is None else float(now)
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            updated = connection.execute(
+                "UPDATE web_request SET execution_stage = 'EXTERNAL_STARTED', "
+                "updated_at = ? WHERE session_id = ? AND request_id = ? "
+                "AND status = 'PROCESSING' AND execution_stage = 'CLAIMED' "
+                "AND claim_token = ? AND reset_generation_at_claim = ? "
+                "AND (lease_expires_at IS NULL OR lease_expires_at > ?)",
+                (reference, session_id, request_id, claim_token,
+                 int(session["reset_generation"]), reference),
+            )
+            if updated.rowcount != 1:
+                raise RequestFenced(
+                    "external execution cannot start: stale token, lease or reset"
+                )
+            row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return _to_request_record(row)
+
+    def checkpoint_reply_result(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        result: Mapping[str, Any],
+        now: float | None = None,
+    ) -> RequestRecord:
+        """Persist the complete tool result so Finalize never has to call MCP again."""
+        if not isinstance(result, Mapping):
+            raise ValueError("result must be a mapping")
+        reference = time.time() if now is None else float(now)
+        payload = json.dumps(
+            {"schema": REPLY_RESULT_SCHEMA, "payload": dict(result)},
+            sort_keys=True, ensure_ascii=False,
+        )
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation FROM web_session WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            existing = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            if existing is None:
+                raise RequestNotFound(f"no request {request_id!r}")
+            if (
+                str(existing["status"]) != "PROCESSING"
+                or existing["claim_token"] != claim_token
+            ):
+                raise RequestFenced("claim token is stale or the request is not processing")
+            if str(existing["execution_stage"]) not in {"EXTERNAL_STARTED", "RESULT_DURABLE"}:
+                raise RequestFenced("external execution has not started for this request")
+            if (
+                existing["lease_expires_at"] is not None
+                and float(existing["lease_expires_at"]) <= reference
+            ):
+                raise RequestFenced("claim lease expired before result checkpoint")
+            if int(existing["reset_generation_at_claim"]) != int(session["reset_generation"]):
+                raise RequestFenced("session was reset after this request was claimed")
+            if existing["result_json"] is not None:
+                stored = _loads_json(existing["result_json"], table="web_request",
+                                     row_key=request_id, field="result_json")
+                if stored.get("payload") != dict(result):
+                    raise RequestConflict(
+                        "a different result was already checkpointed for this request"
+                    )
+                return _to_request_record(existing)
+            updated = connection.execute(
+                "UPDATE web_request SET result_json = ?, execution_stage = 'RESULT_DURABLE', "
+                "updated_at = ? WHERE session_id = ? AND request_id = ? "
+                "AND status = 'PROCESSING' AND claim_token = ? "
+                "AND execution_stage = 'EXTERNAL_STARTED'",
+                (payload, reference, session_id, request_id, claim_token),
+            )
+            if updated.rowcount != 1:
+                raise RequestFenced("result checkpoint lost a race with another executor")
+            row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return _to_request_record(row)
+
+    def mark_request_ambiguous(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        reason: str = "external_result_lost",
+        now: float | None = None,
+    ) -> RequestRecord:
+        """Fail closed: side effects may have happened, result is not recoverable."""
+        reference = time.time() if now is None else float(now)
+        with self._transaction() as connection:
+            updated = connection.execute(
+                "UPDATE web_request SET status = 'FAILED', execution_stage = 'AMBIGUOUS', "
+                "result_json = ?, updated_at = ? WHERE session_id = ? AND request_id = ? "
+                "AND status = 'PROCESSING' AND claim_token = ? "
+                "AND execution_stage = 'EXTERNAL_STARTED'",
+                (json.dumps({"schema": REPLY_RESULT_SCHEMA, "error": str(reason)}),
+                 reference, session_id, request_id, claim_token),
+            )
+            if updated.rowcount != 1:
+                raise RequestFenced("only an EXTERNAL_STARTED claim can become AMBIGUOUS")
+            row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return _to_request_record(row)
+
     def finalize_reply_request(
         self,
         session_id: str,
@@ -1453,6 +1646,11 @@ class SQLiteWebStateStore:
                 and float(request["lease_expires_at"]) <= reference
             ):
                 raise RequestFenced("claim lease expired before finalize; the result was lost")
+            stage = str(request["execution_stage"])
+            if stage not in {"CLAIMED", "EXTERNAL_STARTED", "RESULT_DURABLE"}:
+                raise RequestFenced(
+                    f"request in stage {stage!r} cannot be finalized"
+                )
             if int(request["reset_generation_at_claim"]) != int(session["reset_generation"]):
                 raise RequestFenced("session was reset after this request was claimed")
 
@@ -1480,6 +1678,18 @@ class SQLiteWebStateStore:
                 if turn_id != str(pending["reply_turn_id"]):
                     raise RequestFenced(
                         "reply turn id must equal the reply_turn_id issued at ASK time"
+                    )
+            if stage == "RESULT_DURABLE" and request["result_json"] is not None:
+                checkpoint = _loads_json(
+                    request["result_json"], table="web_request",
+                    row_key=request_id, field="result_json",
+                )
+                checkpoint_payload = checkpoint.get("payload")
+                if result is None:
+                    result = checkpoint_payload
+                elif dict(result) != checkpoint_payload:
+                    raise RequestConflict(
+                        "finalize result differs from the durable checkpoint"
                     )
 
             target_status = "RUNNING" if outcome == "resumed" else "COMPLETED"
@@ -2110,6 +2320,12 @@ def _to_request_record(row: sqlite3.Row) -> RequestRecord:
         result=result,
         created_at=float(row["created_at"]),
         updated_at=float(row["updated_at"]),
+        execution_stage=str(row["execution_stage"]),
+        reply_payload=(
+            None if row["payload_json"] is None
+            else _loads_json(row["payload_json"], table="web_request",
+                             row_key=request_id, field="payload_json")
+        ),
     )
 
 
