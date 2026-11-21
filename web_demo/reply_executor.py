@@ -32,6 +32,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
+from observability import OPENINFERENCE_CHAIN, Tracing, get_tracing
 from web_demo.handle_lifecycle import (
     HANDLE_EXPIRED,
     HANDLE_MISSING,
@@ -276,6 +277,7 @@ class WarmReplyExecutor:
         heartbeat_interval: float = 1.0,
         lease_duration: float = 60.0,
         tool_timeout: float = 60.0,
+        tracing: Tracing | None = None,
     ) -> None:
         if not callable(assemble):
             raise TypeError("WarmReplyExecutor requires a reply assembler")
@@ -289,6 +291,7 @@ class WarmReplyExecutor:
         self._heartbeat_interval = heartbeat_interval
         self._lease_duration = lease_duration
         self._tool_timeout = tool_timeout
+        self._tracing = tracing or get_tracing()
         self._heartbeat: asyncio.Task[None] | None = None
         self._heartbeat_failed = False
         self._request_id: str | None = None
@@ -361,6 +364,27 @@ class WarmReplyExecutor:
     async def _resolve_handle(
         self, session: Session, pending: PendingRecord
     ) -> ResolvedClarificationHandle:
+        with self._tracing.span(
+            "reply.handle_check",
+            openinference_kind=OPENINFERENCE_CHAIN,
+            attributes={
+                "agentrecx.session_id": session.session_id,
+                "agentrecx.pending_id": pending.pending_id,
+                "agentrecx.clarification_id": pending.clarification_id,
+            },
+        ) as span:
+            resolved = await self._resolve_handle_impl(session, pending)
+            span.set_attributes({
+                "agentrecx.handle.ok": resolved.handle.ok,
+                "agentrecx.handle.code": resolved.handle.code,
+                "agentrecx.resume.restored": resolved.restored,
+                "agentrecx.resume.mode": "cold" if resolved.restored else "warm",
+            })
+            return resolved
+
+    async def _resolve_handle_impl(
+        self, session: Session, pending: PendingRecord
+    ) -> ResolvedClarificationHandle:
         """Return the handle a reply may use, rebuilding it only when that is provable."""
         ref = HandleRef(
             profile_id=self._profile_id,
@@ -390,6 +414,44 @@ class WarmReplyExecutor:
 
     # -- claim -------------------------------------------------------------- #
 
+    def _claim_request(
+        self, session: Session, pending: PendingRecord, payload: Mapping[str, Any]
+    ) -> Any:
+        with self._tracing.span(
+            "reply.claim",
+            attributes={
+                "agentrecx.session_id": session.session_id,
+                "agentrecx.pending_id": pending.pending_id,
+                "agentrecx.reply_turn_id": pending.reply_turn_id,
+                "agentrecx.request_id": pending.reply_turn_id,
+            },
+        ) as span:
+            try:
+                claim = self._store.claim_reply_request(
+                    session.session_id, pending.pending_id, payload=payload,
+                    lease_duration=self._lease_duration,
+                )
+            except Exception as exc:
+                span.set_attribute(
+                    "agentrecx.claim.result",
+                    {
+                        RequestBusy: "busy",
+                        RequestConflict: "conflict",
+                        RequestAmbiguous: "ambiguous",
+                        PendingStateConflict: "fenced",
+                        RequestFenced: "fenced",
+                        StateStoreError: "state_error",
+                    }.get(type(exc), "error"),
+                )
+                raise
+            span.set_attributes({
+                "agentrecx.claim.result": claim.outcome,
+                "agentrecx.request_id": claim.request.request_id,
+                "agentrecx.request_status": claim.request.status,
+                "agentrecx.execution_stage": claim.request.execution_stage,
+            })
+            return claim
+
     async def _claim(
         self,
         session: Session,
@@ -406,10 +468,7 @@ class WarmReplyExecutor:
             "confirmation_source": "web_ui_explicit_user_reply",
         }
         try:
-            claim = self._store.claim_reply_request(
-                session.session_id, pending.pending_id, payload=payload,
-                lease_duration=self._lease_duration,
-            )
+            claim = self._claim_request(session, pending, payload)
         except RequestBusy as exc:
             return ReplyExecutionOutcome(BUSY, pending=pending, detail=str(exc))
         except RequestConflict as exc:
@@ -441,6 +500,10 @@ class WarmReplyExecutor:
                     CHECKPOINT_FAILED, pending=pending,
                     detail=f"the durable reply result is invalid: {exc}",
                 )
+            self._tracing.annotate_current({
+                "agentrecx.replay": True,
+                "agentrecx.execution_stage": claim.request.execution_stage,
+            })
             return ReplyExecutionOutcome(
                 REPLAYED, request=claim.request, pending=pending,
                 result=result, turn=turn_from_result(result), handle=handle,
@@ -466,6 +529,41 @@ class WarmReplyExecutor:
         handle: HandleCheck | None = None,
         handle_clarification_id: str | None = None,
     ) -> ReplyExecutionOutcome:
+        with self._tracing.span(
+            "reply.external_execution",
+            openinference_kind=OPENINFERENCE_CHAIN,
+            attributes={
+                "agentrecx.session_id": session.session_id,
+                "agentrecx.pending_id": pending.pending_id,
+                "agentrecx.request_id": self._request_id,
+                "agentrecx.reply_turn_id": pending.reply_turn_id,
+            },
+        ) as span:
+            outcome = await self._execute_external_impl(
+                session, pending, message, recommend_arguments,
+                handle=handle, handle_clarification_id=handle_clarification_id,
+            )
+            span.set_attributes({
+                "agentrecx.reply.outcome": outcome.outcome,
+                "agentrecx.request_status": (
+                    outcome.request.status if outcome.request is not None else None
+                ),
+                "agentrecx.execution_stage": (
+                    outcome.request.execution_stage if outcome.request is not None else None
+                ),
+            })
+            return outcome
+
+    async def _execute_external_impl(
+        self,
+        session: Session,
+        pending: PendingRecord,
+        message: str,
+        recommend_arguments: Mapping[str, Any] | None,
+        *,
+        handle: HandleCheck | None = None,
+        handle_clarification_id: str | None = None,
+    ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
         self._start_heartbeat(session.session_id, self._request_id, self._claim_token)
         # A cold resume installs a NEW handle in the current process; the old id is never
@@ -482,10 +580,18 @@ class WarmReplyExecutor:
         steps: list[dict[str, Any]] = []
         try:
             try:
-                self._store.mark_request_external_started(
-                    session.session_id, self._request_id,
-                    claim_token=self._claim_token,
-                )
+                with self._tracing.span(
+                    "reply.external_started",
+                    attributes={
+                        "agentrecx.session_id": session.session_id,
+                        "agentrecx.request_id": self._request_id,
+                    },
+                ) as stage_span:
+                    self._store.mark_request_external_started(
+                        session.session_id, self._request_id,
+                        claim_token=self._claim_token,
+                    )
+                    stage_span.set_attribute("agentrecx.execution_stage", "EXTERNAL_STARTED")
             except (RequestFenced, StateStoreError) as exc:
                 return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),
                                              handle=handle)
@@ -704,10 +810,19 @@ class WarmReplyExecutor:
     ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
         try:
-            self._store.checkpoint_reply_result(
-                session.session_id, self._request_id,
-                claim_token=self._claim_token, result=result,
-            )
+            with self._tracing.span(
+                "reply.checkpoint",
+                attributes={
+                    "agentrecx.session_id": session.session_id,
+                    "agentrecx.request_id": self._request_id,
+                    "agentrecx.reply_turn_id": pending.reply_turn_id,
+                },
+            ) as span:
+                self._store.checkpoint_reply_result(
+                    session.session_id, self._request_id,
+                    claim_token=self._claim_token, result=result,
+                )
+                span.set_attribute("agentrecx.execution_stage", "RESULT_DURABLE")
         except RequestFenced as exc:
             return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),
                                          handle=handle)
@@ -720,7 +835,10 @@ class WarmReplyExecutor:
                 CHECKPOINT_FAILED, pending=pending, handle=handle,
                 detail=f"checkpoint not durable: {type(exc).__name__}",
             )
-        return self._finalize(session, pending, turn=dict(turn), result=result, handle=handle)
+        return self._finalize(
+            session, pending, turn=dict(turn), result=result, handle=handle,
+            source="execute",
+        )
 
     # -- finalize ----------------------------------------------------------- #
 
@@ -746,7 +864,14 @@ class WarmReplyExecutor:
                 CHECKPOINT_FAILED, pending=pending, handle=handle,
                 detail=f"the durable checkpoint is invalid: {exc}",
             )
-        outcome = self._finalize(session, pending, turn=turn, result=result, handle=handle)
+        self._tracing.annotate_current({
+            "agentrecx.used_checkpoint": True,
+            "agentrecx.execution_stage": "RESULT_DURABLE",
+        })
+        outcome = self._finalize(
+            session, pending, turn=turn, result=result, handle=handle,
+            source="checkpoint",
+        )
         if outcome.outcome == SUCCESS:
             return ReplyExecutionOutcome(
                 RESULT_REUSED, request=outcome.request, task=outcome.task,
@@ -763,14 +888,29 @@ class WarmReplyExecutor:
         turn: dict[str, Any],
         result: Mapping[str, Any],
         handle: HandleCheck | None = None,
+        source: str = "execute",
     ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
         try:
-            task, consumed, request = self._store.finalize_reply_request(
-                session.session_id, self._request_id,
-                claim_token=self._claim_token, outcome="completed",
-                turn=turn, result=result,
-            )
+            with self._tracing.span(
+                "reply.finalize",
+                attributes={
+                    "agentrecx.session_id": session.session_id,
+                    "agentrecx.request_id": self._request_id,
+                    "agentrecx.reply_turn_id": pending.reply_turn_id,
+                    "agentrecx.finalize.source": source,
+                },
+            ) as span:
+                task, consumed, request = self._store.finalize_reply_request(
+                    session.session_id, self._request_id,
+                    claim_token=self._claim_token, outcome="completed",
+                    turn=turn, result=result,
+                )
+                span.set_attributes({
+                    "agentrecx.execution_stage": request.execution_stage,
+                    "agentrecx.request_status": request.status,
+                    "agentrecx.turn_id": pending.reply_turn_id,
+                })
         except (RequestFenced, StaleTaskVersion, TaskStateConflict,
                 PendingStateConflict, RequestConflict) as exc:
             return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),

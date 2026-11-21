@@ -199,6 +199,14 @@ class Settings:
     #: Meta historical USD price at a fixed 7.00 rate for the local demonstration only.
     price_mode: str = "strict"
     demo_price_sidecar: Path | None = None
+    # Optional OpenTelemetry tracing.  Disabled by default; the OTLP endpoint is only read
+    # by the exporter and is never exposed through health/config payloads.
+    otel_enabled: bool = False
+    otel_endpoint: str = "http://127.0.0.1:6006/v1/traces"
+    otel_project_name: str = "agentrecx-x"
+    otel_service_name: str = "agentrecx-web-demo"
+    otel_sample_ratio: float = 1.0
+    otel_export_timeout_s: float = 2.0
     repo: Path = REPO
     log_dir: Path = LOG_DIR
     replay_path: Path = REPLAY_PATH
@@ -280,6 +288,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         )
     demo_sidecar_raw = str(want.get("AGENTRECX_DEMO_PRICE_SIDECAR") or "").strip()
     demo_sidecar = Path(demo_sidecar_raw) if demo_sidecar_raw else None
+    otel_timeout = _env_float(want, "AGENTRECX_OTEL_EXPORT_TIMEOUT_S", 2.0)
+    if otel_timeout <= 0:
+        raise ValueError("AGENTRECX_OTEL_EXPORT_TIMEOUT_S must be positive")
+    otel_ratio = _env_float(want, "AGENTRECX_OTEL_SAMPLE_RATIO", 1.0)
+    if not 0.0 <= otel_ratio <= 1.0:
+        raise ValueError("AGENTRECX_OTEL_SAMPLE_RATIO must be between 0 and 1")
+    otel_endpoint = (
+        str(want.get("AGENTRECX_OTEL_ENDPOINT") or "").strip()
+        or str(want.get("PHOENIX_COLLECTOR_ENDPOINT") or "").strip()
+        or str(want.get("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip()
+        or "http://127.0.0.1:6006/v1/traces"
+    )
     return Settings(
         port=port,
         search_mode=mode,
@@ -297,6 +317,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         memory_db_path=memory_db,
         price_mode=price_mode,
         demo_price_sidecar=demo_sidecar,
+        otel_enabled=_env_bool(want.get("AGENTRECX_OTEL_ENABLED")),
+        otel_endpoint=otel_endpoint,
+        otel_project_name=(
+            str(want.get("AGENTRECX_OTEL_PROJECT") or "agentrecx-x").strip()
+            or "agentrecx-x"
+        ),
+        otel_service_name=(
+            str(want.get("AGENTRECX_OTEL_SERVICE_NAME") or "agentrecx-web-demo").strip()
+            or "agentrecx-web-demo"
+        ),
+        otel_sample_ratio=otel_ratio,
+        otel_export_timeout_s=otel_timeout,
         behavior_window_s=_env_float(want, "AGENTRECX_BEHAVIOR_WINDOW_S", DEFAULT_WINDOW_S),
         behavior_half_life_s=_env_float(
             want, "AGENTRECX_BEHAVIOR_HALF_LIFE_S", DEFAULT_HALF_LIFE_S

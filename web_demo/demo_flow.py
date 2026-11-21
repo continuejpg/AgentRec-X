@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Iterable, Mapping
 
+from observability import OPENINFERENCE_AGENT, Tracing, annotate_current_span, get_tracing
 from web_demo import viewmodels as vm
 from web_demo.behavior import EXISTING_RANKER_VERSION  # re-exported: demo metadata helpers
 from web_demo.config import (
@@ -185,11 +186,51 @@ async def chat_events(
     selected_product_ids: list[str] | None = None,
     mode: str = "cpu_live",
     qwen_health: Any | None = None,
+    tracing: Tracing | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Open one Agent span around the real SSE turn, then delegate unchanged."""
+    runtime = tracing or get_tracing()
+    with runtime.span(
+        "agent.chat",
+        openinference_kind=OPENINFERENCE_AGENT,
+        attributes={
+            "agent.name": "AgentRec-X CPU/BM25 shopping agent",
+            "agentrecx.path": "chat",
+            "agentrecx.mode": mode,
+            "agentrecx.session_id": session.session_id,
+            "agentrecx.profile_id": session.profile_id,
+        },
+    ):
+        async for payload_event in _chat_events_impl(
+            manager=manager,
+            session=session,
+            settings=settings,
+            message=message,
+            selected_product_ids=selected_product_ids,
+            mode=mode,
+            qwen_health=qwen_health,
+        ):
+            yield payload_event
+
+
+async def _chat_events_impl(
+    *,
+    manager: MCPManager,
+    session: Session,
+    settings: Settings,
+    message: str,
+    selected_product_ids: list[str] | None = None,
+    mode: str = "cpu_live",
+    qwen_health: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Full chat turn as contract-ordered SSE events (including ``done``)."""
     # Persistent mode: bind this chat to a durable task before any identity is issued.
     task = session._store.begin_chat_task(session, message) if session._store is not None else None
     turn = Turn(turn_id=session.next_turn_id(), user_text=message)
+    annotate_current_span({
+        "agentrecx.task_id": getattr(task, "task_id", None),
+        "agentrecx.turn_id": turn.turn_id,
+    })
     session.last_query = message
     session.set_title_from(message)
     recorder = TurnRecorder(turn)
@@ -824,6 +865,7 @@ async def clarification_reply(
     clarification_id: str,
     message: str,
     qwen_health: Any | None = None,
+    tracing: Tracing | None = None,
 ) -> dict[str, Any]:
     """Persist a real user reply through M9, refresh preferences and resume the pending query.
 
@@ -842,6 +884,7 @@ async def clarification_reply(
             session=session,
             clarification_id=clarification_id,
             message=message,
+            tracing=tracing,
         )
     pending = session.pending_clarification
     if pending is None:
@@ -1171,6 +1214,35 @@ async def _cold_resume_handle(
     session: Session,
     pending: Any,
 ) -> ResolvedClarificationHandle:
+    tracing = getattr(manager, "tracing", None) or get_tracing()
+    with tracing.span(
+        "resume.cold_restore",
+        attributes={
+            "agentrecx.resume.mode": "cold",
+            "agentrecx.session_id": session.session_id,
+            "agentrecx.pending_id": pending.pending_id,
+            "agentrecx.clarification_id": pending.clarification_id,
+            "agentrecx.continuation.present": pending.continuation is not None,
+        },
+    ) as span:
+        resolved = await _cold_resume_handle_impl(
+            manager=manager, store=store, session=session, pending=pending,
+        )
+        span.set_attributes({
+            "agentrecx.handle.ok": resolved.handle.ok,
+            "agentrecx.handle.code": resolved.handle.code,
+            "agentrecx.resume.restored": resolved.restored,
+        })
+        return resolved
+
+
+async def _cold_resume_handle_impl(
+    *,
+    manager: MCPManager,
+    store: Any,
+    session: Session,
+    pending: Any,
+) -> ResolvedClarificationHandle:
     """Rebuild one pending's handle in the CURRENT MCP process from its durable snapshot.
 
     This runs before the request claim and performs no business effect: the child only
@@ -1252,6 +1324,7 @@ async def _persistent_clarification_reply(
     session: Session,
     clarification_id: str,
     message: str,
+    tracing: Tracing | None = None,
 ) -> dict[str, Any]:
     """Durable Warm/Cold Reply: resolve a handle, claim, execute, checkpoint, finalize."""
     store = getattr(session._store, "state_store", None)
@@ -1288,6 +1361,7 @@ async def _persistent_clarification_reply(
             http_status=409,
             detail={"clarification_id": clarification_id, "mode": pending.mode},
         )
+    runtime = tracing or get_tracing()
     executor = WarmReplyExecutor(
         store,
         call_tool=manager.call_tool,
@@ -1299,10 +1373,60 @@ async def _persistent_clarification_reply(
         cold_resume=lambda pending_row: _cold_resume_handle(
             manager=manager, store=store, session=session, pending=pending_row,
         ),
+        tracing=runtime,
     )
-    outcome = await executor.execute(
-        session, pending, message=message, clarification_id=clarification_id,
+    # A pure handle check tells us which *observed* path this attempt takes.  It performs no
+    # MCP call and no state write; the executor still proves the handle itself.
+    warm_before = (
+        manager.check_handle(HandleRef(
+            profile_id=session.profile_id,
+            session_id=session.session_id,
+            clarification_id=clarification_id,
+        )).ok
+        if runtime.enabled
+        else None
     )
+    with runtime.span(
+        "agent.reply",
+        openinference_kind=OPENINFERENCE_AGENT,
+        attributes={
+            "agent.name": "AgentRec-X durable clarification reply",
+            "agentrecx.path": "reply",
+            "agentrecx.mode": pending.mode,
+            "agentrecx.session_id": session.session_id,
+            "agentrecx.profile_id": session.profile_id,
+            "agentrecx.task_id": pending.task_id,
+            "agentrecx.pending_id": pending.pending_id,
+            "agentrecx.reply_turn_id": pending.reply_turn_id,
+            "agentrecx.request_id": pending.reply_turn_id,
+            "agentrecx.clarification_id": clarification_id,
+        },
+    ) as reply_span:
+        outcome = await executor.execute(
+            session, pending, message=message, clarification_id=clarification_id,
+        )
+        if runtime.enabled:
+            if outcome.outcome == REPLAYED:
+                reply_path = "replay"
+            elif outcome.outcome == RESULT_REUSED:
+                reply_path = "checkpoint_finalize"
+            elif outcome.outcome == SUCCESS:
+                reply_path = "warm" if warm_before else "cold_resume"
+            else:
+                reply_path = "warm_attempt" if warm_before else "cold_resume_attempt"
+            reply_span.set_attributes({
+                "agentrecx.reply.outcome": outcome.outcome,
+                "agentrecx.reply.path": reply_path,
+                "agentrecx.reply.succeeded": outcome.outcome in {
+                    SUCCESS, REPLAYED, RESULT_REUSED,
+                },
+                "agentrecx.request_status": (
+                    outcome.request.status if outcome.request is not None else None
+                ),
+                "agentrecx.execution_stage": (
+                    outcome.request.execution_stage if outcome.request is not None else None
+                ),
+            })
     if outcome.outcome not in {SUCCESS, REPLAYED, RESULT_REUSED} or outcome.result is None:
         raise _reply_outcome_error(outcome)
     result = outcome.result

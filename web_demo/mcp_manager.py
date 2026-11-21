@@ -33,6 +33,7 @@ from typing import Any, Mapping
 
 from mcp import Client, StdioServerParameters
 
+from observability import OPENINFERENCE_TOOL, Tracing, get_tracing
 from web_demo.config import (
     MCP_SERVER_MODULE,
     PROFILE_BY_ID,
@@ -183,8 +184,9 @@ class ServerRuntime:
 class MCPManager:
     """Owns both long-lived MCP clients: start, health, serialized calls, restart, shutdown."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, tracing: Tracing | None = None) -> None:
         self.settings = settings
+        self.tracing = tracing or get_tracing()
         self.runtimes: dict[str, ServerRuntime] = {}
         for profile_id, profile in PROFILE_BY_ID.items():
             self.runtimes[profile_id] = ServerRuntime(
@@ -263,6 +265,19 @@ class MCPManager:
             "MKL_NUM_THREADS": "1",
             "AGENTRECX_WEB_DEMO_PROFILE": runtime.profile_id,
         }
+        if self.settings.otel_enabled:
+            # The stdio child is a separate process and needs its own SDK/provider.  The
+            # project name is shared so BFF and MCP spans land in the same Phoenix project.
+            child_env.update({
+                "AGENTRECX_OTEL_ENABLED": "1",
+                "AGENTRECX_OTEL_ENDPOINT": self.settings.otel_endpoint,
+                "AGENTRECX_OTEL_PROJECT": self.settings.otel_project_name,
+                "AGENTRECX_OTEL_SERVICE_NAME": "agentrecx-mcp",
+                "AGENTRECX_OTEL_SAMPLE_RATIO": repr(float(self.settings.otel_sample_ratio)),
+                "AGENTRECX_OTEL_EXPORT_TIMEOUT_S": repr(
+                    float(self.settings.otel_export_timeout_s)
+                ),
+            })
         memory_db = self.memory_database_path()
         if memory_db is not None:
             # Absolute path: the child runs with cwd=repo, so a relative value would point
@@ -573,6 +588,81 @@ class MCPManager:
         timeout_s: float | None = None,
         progress_callback: Any | None = None,
     ) -> dict[str, Any]:
+        """Call one MCP tool, recording a real client span and injecting W3C context.
+
+        The span is observational only.  ``inject`` writes ``traceparent``/``tracestate``
+        into the MCP request ``_meta``; the official MCP server middleware extracts it and
+        creates the matching child server span in the stdio child process.
+        """
+        if not self.tracing.enabled:
+            return await self._call_tool_impl(
+                profile_id, tool, arguments,
+                timeout_s=timeout_s, progress_callback=progress_callback,
+            )
+        runtime = self.runtimes.get(profile_id)
+        args = dict(arguments or {})
+        attrs: dict[str, Any] = {
+            "mcp.method.name": "tools/call",
+            "mcp.tool.name": tool,
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": tool,
+            "mcp.profile_id": profile_id,
+            "mcp.argument_keys": sorted(str(key) for key in args),
+            "mcp.process_instance_id": (
+                runtime.process_instance_id if runtime is not None else None
+            ),
+            "mcp.generation": runtime.generation if runtime is not None else None,
+            "agentrecx.profile_id": profile_id,
+        }
+        for source_key, attr_key in (
+            ("session_id", "agentrecx.session_id"),
+            ("turn_id", "agentrecx.reply_turn_id"),
+            ("clarification_id", "agentrecx.clarification_id"),
+        ):
+            value = args.get(source_key)
+            if isinstance(value, str) and value:
+                attrs[attr_key] = value
+        started = time.perf_counter()
+        with self.tracing.span(
+            f"mcp.call {tool}",
+            openinference_kind=OPENINFERENCE_TOOL,
+            attributes=attrs,
+        ) as span:
+            # Inject while the client span is current, so the server span's parent is this
+            # exact real MCP call rather than an arbitrary ambient request.
+            meta: dict[str, Any] = {}
+            self.tracing.inject(meta)
+            try:
+                result = await self._call_tool_impl(
+                    profile_id, tool, arguments,
+                    timeout_s=timeout_s, progress_callback=progress_callback,
+                    trace_meta=meta or None,
+                )
+            except BaseException as exc:
+                span.set_attribute("mcp.tool.success", False)
+                code = getattr(exc, "code", None)
+                if isinstance(code, str) and code:
+                    span.set_attribute("mcp.error.code", code)
+                raise
+            else:
+                span.set_attribute("mcp.tool.success", True)
+                return result
+            finally:
+                span.set_attribute(
+                    "mcp.tool.latency_ms",
+                    round((time.perf_counter() - started) * 1000.0, 2),
+                )
+
+    async def _call_tool_impl(
+        self,
+        profile_id: str,
+        tool: str,
+        arguments: Mapping[str, Any] | None = None,
+        *,
+        timeout_s: float | None = None,
+        progress_callback: Any | None = None,
+        trace_meta: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         runtime = self.ensure_ready(profile_id)
         call_timeout = float(timeout_s) if timeout_s is not None else float(self.settings.mcp_timeout_s)
         async with runtime.lock:
@@ -588,10 +678,15 @@ class MCPManager:
             request_started_at = time.time()
             started = time.perf_counter()
             try:
+                call_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
+                if trace_meta:
+                    # MCP 2.3.0 forwards request ``_meta`` to the server's official
+                    # OpenTelemetryMiddleware; only a real W3C carrier is sent.
+                    call_kwargs["meta"] = dict(trace_meta)
                 result = await asyncio.wait_for(
                     client.call_tool(
                         tool, dict(arguments or {}),
-                        progress_callback=progress_callback,
+                        **call_kwargs,
                     ),
                     timeout=call_timeout,
                 )

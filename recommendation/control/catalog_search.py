@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from observability import OPENINFERENCE_RETRIEVER, get_tracing
 from recommendation.rag.retrieval import BM25_B, BM25_K1, _idf, tokenize
 
 __all__ = [
@@ -337,6 +338,29 @@ class CatalogSearchSource:
     # -- search ------------------------------------------------------------ #
 
     def search(self, query: str, *, limit: int = 10) -> CatalogSearchResult:
+        """Return the real retrieval result, wrapped in a privacy-safe retriever span."""
+        with get_tracing().span(
+            "retrieval.catalog_search",
+            openinference_kind=OPENINFERENCE_RETRIEVER,
+            attributes={
+                "retrieval.mode": self._mode,
+                "retrieval.top_k": limit,
+                "retrieval.catalogue_size": self.catalogue_size,
+                "retrieval.strategy": (
+                    "bm25" if self._mode == "bm25" else "bge" if self._mode == "bge"
+                    else "bm25+bge_rrf"
+                ),
+            },
+        ) as span:
+            result = self._search_impl(query, limit=limit)
+            span.set_attributes({
+                "retrieval.hit_count": len(result.hits),
+                "retrieval.matched": bool(result.matched),
+                "retrieval.score_kind": result.score_kind,
+            })
+            return result
+
+    def _search_impl(self, query: str, *, limit: int = 10) -> CatalogSearchResult:
         """Return the top ``limit`` catalogue records by BM25 over the query.
 
         Deterministic: ties break on identity, so repeated searches cannot reorder.  A

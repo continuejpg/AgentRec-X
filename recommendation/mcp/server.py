@@ -31,6 +31,7 @@ from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
+from observability import annotate_current_span, configure_tracing_from_env
 from experiments.p14b1.diagnose import conflicts
 from experiments.p14c0.electronics_executor import MAX_STEPS, ElectronicsPlannerExecutor, prepare_hard, prepare_preferences
 from experiments.p14c1.search_backend import configure_catalogue
@@ -240,6 +241,13 @@ def _search_products(query: Annotated[str, Field(min_length=1, description="Natu
             "source": "catalog_search",
             "namespace": "amazon_electronics_c4",
         })
+    annotate_current_span({
+        "retrieval.search_mode": ctx.search_mode,
+        "retrieval.top_k": top_k,
+        "retrieval.hit_count": len(hits),
+        "retrieval.catalogue_size": result.catalogue_size,
+        "retrieval.matched": bool(result.matched),
+    })
     return {
         "schema": "agentrecx.p17.search_products.v1",
         "status": "ok",
@@ -344,6 +352,25 @@ def _recommend_products(
                           "the task budget cannot be verified for the selected candidate"),
             "budget": budget,
         })
+    budget_trace = dict(executor.last_budget or {})
+    gate_trace = gate_payload if isinstance(gate_payload, Mapping) else {}
+    annotate_current_span({
+        "agentrecx.recommend.status": status,
+        "agentrecx.recommend.selected_product_id": selected,
+        "agentrecx.recommend.search_mode": ctx.search_mode,
+        "agentrecx.budget.present": executor.last_budget is not None,
+        "agentrecx.budget.candidates_checked": budget_trace.get("candidates_checked"),
+        "agentrecx.budget.within": budget_trace.get("within"),
+        "agentrecx.budget.over": budget_trace.get("over"),
+        "agentrecx.budget.unknown": budget_trace.get("unknown"),
+        "agentrecx.budget.currency_mismatch": budget_trace.get("currency_mismatch"),
+        "agentrecx.gate.action": gate_trace.get("action"),
+        "agentrecx.gate.allow_finalize": gate_trace.get("allow_finalize"),
+        "agentrecx.gate.reason_code": gate_trace.get("reason_code"),
+        "agentrecx.budget.refusal_reason": (
+            status if status in {"budget_unverifiable", "budget_exceeded"} else None
+        ),
+    })
     return {
         "schema": "agentrecx.p17.recommend_products.v1",
         "status": status,
@@ -1248,6 +1275,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence-verifier", action="store_true",
                         help="run the independent Qwen claim-evidence verifier in shadow mode")
     args = parser.parse_args(argv)
+    # The stdio child is a separate process.  MCP SDK's official OpenTelemetryMiddleware
+    # resolves the global provider when a tools/call request arrives, so the child configures
+    # it here before serving.  Disabled tracing remains a no-op.
+    tracing = configure_tracing_from_env(
+        service_name="agentrecx-mcp", set_global_provider=True,
+    )
     corrective_rag = bool(args.corrective_rag or _env_bool(ENV_CORRECTIVE_RAG))
     evidence_verifier = bool(args.evidence_verifier or _env_bool(ENV_EVIDENCE_VERIFIER))
     startup_started = time.perf_counter()
@@ -1341,6 +1374,7 @@ def main(argv: list[str] | None = None) -> int:
         # M9 store, so the shared connection is closed exactly once here.
         if memory_store is not None:
             memory_store.close()
+        tracing.shutdown()
     return 0
 
 

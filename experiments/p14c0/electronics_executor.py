@@ -12,6 +12,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from observability import OPENINFERENCE_CHAIN, get_tracing
 from experiments.p14b1.diagnose import (
     canonical_prefs,
     candidate_rows,
@@ -290,31 +291,54 @@ class ElectronicsPlannerExecutor:
             ],
         }
         if self.price_budget is not None:
-            counts = {PRICE_WITHIN: 0, PRICE_OVER: 0, PRICE_UNKNOWN: 0,
-                      PRICE_CURRENCY_MISMATCH: 0, PRICE_NOT_APPLICABLE: 0}
-            for row in compatible:
-                status = str(row.get("budget_status") or PRICE_UNKNOWN)
-                counts[status] = counts.get(status, 0) + 1
-            self.last_budget = {
-                "budget": self.price_budget.as_dict(),
-                "label": self.price_budget.label,
-                "candidates_checked": len(compatible),
-                "within": counts.get(PRICE_WITHIN, 0),
-                "over": counts.get(PRICE_OVER, 0),
-                "unknown": counts.get(PRICE_UNKNOWN, 0),
-                "currency_mismatch": counts.get(PRICE_CURRENCY_MISMATCH, 0),
-                "verified": counts.get(PRICE_WITHIN, 0) > 0,
-                "excluded_candidate_ids": [
-                    row["product_ref"]["item_id"] for row in compatible
-                    if row.get("budget_violation")
-                ],
-                "sample": next(
-                    (row.get("budget_evidence") for row in compatible
-                     if row.get("budget_evidence")),
-                    None,
-                ),
-            }
-            self._log("price_budget", {"budget": self.price_budget.as_dict()}, self.last_budget)
+            with get_tracing().span(
+                "budget.assessment",
+                openinference_kind=OPENINFERENCE_CHAIN,
+                attributes={
+                    "budget.currency": self.price_budget.currency,
+                    "budget.max_amount": self.price_budget.max_amount,
+                    "budget.min_amount": self.price_budget.min_amount,
+                    "budget.price_mode": getattr(self.catalogue, "price_mode", None),
+                },
+            ) as budget_span:
+                counts = {PRICE_WITHIN: 0, PRICE_OVER: 0, PRICE_UNKNOWN: 0,
+                          PRICE_CURRENCY_MISMATCH: 0, PRICE_NOT_APPLICABLE: 0}
+                for row in compatible:
+                    status = str(row.get("budget_status") or PRICE_UNKNOWN)
+                    counts[status] = counts.get(status, 0) + 1
+                self.last_budget = {
+                    "budget": self.price_budget.as_dict(),
+                    "label": self.price_budget.label,
+                    "candidates_checked": len(compatible),
+                    "within": counts.get(PRICE_WITHIN, 0),
+                    "over": counts.get(PRICE_OVER, 0),
+                    "unknown": counts.get(PRICE_UNKNOWN, 0),
+                    "currency_mismatch": counts.get(PRICE_CURRENCY_MISMATCH, 0),
+                    "verified": counts.get(PRICE_WITHIN, 0) > 0,
+                    "excluded_candidate_ids": [
+                        row["product_ref"]["item_id"] for row in compatible
+                        if row.get("budget_violation")
+                    ],
+                    "sample": next(
+                        (row.get("budget_evidence") for row in compatible
+                         if row.get("budget_evidence")),
+                        None,
+                    ),
+                }
+                budget_span.set_attributes({
+                    "budget.candidates_checked": self.last_budget["candidates_checked"],
+                    "budget.within": self.last_budget["within"],
+                    "budget.over": self.last_budget["over"],
+                    "budget.unknown": self.last_budget["unknown"],
+                    "budget.currency_mismatch": self.last_budget["currency_mismatch"],
+                    "budget.known": (
+                        self.last_budget["within"]
+                        + self.last_budget["over"]
+                        + self.last_budget["currency_mismatch"]
+                    ),
+                    "budget.verified": self.last_budget["verified"],
+                })
+                self._log("price_budget", {"budget": self.price_budget.as_dict()}, self.last_budget)
         top = [row["product_ref"]["item_id"] for row in task_checked[:INSPECT_TOP_K]]
         inspected = []
         for item_id in top:
@@ -662,8 +686,27 @@ class ElectronicsPlannerExecutor:
                     item.as_dict() for item in self.task_constraints.hard_exclusions
                 ],
             )
-            decision = self.gate.check(context)
-            self.last_decision = decision.as_dict()
+            with get_tracing().span(
+                "gate.decision",
+                openinference_kind=OPENINFERENCE_CHAIN,
+                attributes={
+                    "gate.candidate_count": len(self.last_rows),
+                    "gate.expected_product_type": self.product_target.product_type,
+                    "gate.expected_product_role": self.product_target.role.value,
+                    "gate.budget_present": self.price_budget is not None,
+                },
+            ) as gate_span:
+                decision = self.gate.check(context)
+                self.last_decision = decision.as_dict()
+                gate_span.set_attributes({
+                    "gate.action": decision.action,
+                    "gate.allow_finalize": decision.allow_finalize,
+                    "gate.reason_code": decision.reason_code,
+                    "gate.selected_product_id": decision.selected_candidate_id,
+                    "gate.product_type": decision.product_type,
+                    "gate.product_role": decision.product_role,
+                    "gate.bounded_scope": decision.bounded_scope,
+                })
             self._log("decision_gate", {"candidate_count": len(self.last_rows),
                                         "budget": self.gate_budget.as_dict()}, self.last_decision)
             if decision.allow_finalize:

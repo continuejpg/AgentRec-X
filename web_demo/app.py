@@ -38,6 +38,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from observability import Tracing, annotate_current_span, configure_tracing, current_trace_id
 from web_demo import demo_flow
 from web_demo import viewmodels as vm
 from web_demo.behavior import (
@@ -345,9 +346,21 @@ def create_app(
     sessions: SessionStore | PersistentSessionStore | None = None,
     qwen_health: QwenHealthMonitor | Any | None = None,
     behavior: BehaviorStore | None = None,
+    tracing: Tracing | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
-    manager = manager or MCPManager(settings)
+    # Tracing is constructed before the MCP manager so every child gets the same endpoint,
+    # project and service configuration.  A tracing setup failure returns a disabled runtime
+    # instead of failing app construction.
+    tracing = tracing or configure_tracing(
+        enabled=settings.otel_enabled,
+        endpoint=settings.otel_endpoint,
+        project_name=settings.otel_project_name,
+        service_name=settings.otel_service_name,
+        sample_ratio=settings.otel_sample_ratio,
+        export_timeout_s=settings.otel_export_timeout_s,
+    )
+    manager = manager or MCPManager(settings, tracing=tracing)
     store = sessions or _build_session_store(settings)
     monitor = qwen_health or QwenHealthMonitor(settings)
     behavior_store = behavior or BehaviorStore(
@@ -361,9 +374,10 @@ def create_app(
     async def lifespan(app: FastAPI):  # noqa: ARG001
         handlers_added.extend(configure_logging(settings))
         LOGGER.info(
-            "BFF starting host=%s port=%s search_mode=%s writes=%s qwen_configured=%s",
+            "BFF starting host=%s port=%s search_mode=%s writes=%s qwen_configured=%s "
+            "tracing=%s",
             settings.host, settings.port, settings.search_mode, settings.allow_memory_writes,
-            settings.qwen_live_configured,
+            settings.qwen_live_configured, tracing.health(),
         )
         manager.start()
         monitor.start()
@@ -376,6 +390,10 @@ def create_app(
             with suppress(Exception):
                 behavior_store.close()
             _close_session_store(store)
+            # Flush/stop only this app's provider.  A collector that is down is reported by
+            # the exporter and never changes an HTTP response.
+            with suppress(Exception):
+                tracing.shutdown()
             _remove_handlers(logging.getLogger("agentrecx.web_demo"), handlers_added)
             handlers_added.clear()
 
@@ -391,6 +409,7 @@ def create_app(
     app.state.qwen_health = monitor
     app.state.meta = meta
     app.state.behavior = behavior_store
+    app.state.tracing = tracing
 
     @app.exception_handler(MCPManagerError)
     async def mcp_error_handler(request: Request, exc: MCPManagerError) -> JSONResponse:  # noqa: ARG001
@@ -432,13 +451,19 @@ def create_app(
     @app.middleware("http")
     async def log_requests(request: Request, call_next):  # type: ignore[no-untyped-def]
         started = time.perf_counter()
+        state = request.scope.setdefault("state", {})
+        request_id = state.get("agentrecx_request_id") or uuid.uuid4().hex
+        state["agentrecx_request_id"] = request_id
         response = await call_next(request)
+        response.headers["X-AgentRecX-Request-Id"] = request_id
         LOGGER.info(
-            "%s %s -> %s in %.1fms",
+            "%s %s -> %s in %.1fms request_id=%s trace_id=%s",
             request.method,
             request.url.path,
             response.status_code,
             (time.perf_counter() - started) * 1000.0,
+            request_id,
+            current_trace_id() or "-",
         )
         return response
 
@@ -451,6 +476,10 @@ def create_app(
                 code="session_not_found",
                 http_status=404,
             )
+        annotate_current_span({
+            "agentrecx.session_id": session.session_id,
+            "agentrecx.profile_id": session.profile_id,
+        })
         return session
 
     def require_ready(session: Session) -> None:
@@ -471,6 +500,8 @@ def create_app(
             "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
             "qwen_live": qwen,
             "memory_writes_enabled": bool(settings.allow_memory_writes),
+            # Non-sensitive diagnostic only: no collector URL, headers or credentials.
+            "observability": tracing.health(),
         }
 
     @app.get("/api/demo/config")
@@ -551,6 +582,10 @@ def create_app(
         session = store.create(
             body.profile_id, behavior_enabled=settings.behavior_enabled
         )
+        annotate_current_span({
+            "agentrecx.session_id": session.session_id,
+            "agentrecx.profile_id": session.profile_id,
+        })
         LOGGER.info("session created id=%s profile=%s", session.session_id, session.profile_id)
         return session.view()
 
@@ -624,6 +659,7 @@ def create_app(
             selected_product_ids=list(body.selected_product_ids or []),
             mode=body.mode,
             qwen_health=monitor,
+            tracing=tracing,
         )
         return sse_response(events)
 
@@ -656,6 +692,7 @@ def create_app(
             clarification_id=body.clarification_id,
             message=body.message,
             qwen_health=monitor,
+            tracing=tracing,
         )
 
     # -- behavior feedback V1 ------------------------------------------------
@@ -801,4 +838,8 @@ def create_app(
             "message": "behavior events for this session were deleted; M9 preferences were not touched",
         }
 
+    # Add the official ASGI middleware last so its server span is the outermost span; the
+    # request-id hook then runs before the logging middleware and every child span shares
+    # the same trace.
+    tracing.instrument_fastapi(app)
     return app
