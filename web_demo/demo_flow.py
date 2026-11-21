@@ -1,4 +1,4 @@
-"""Deterministic demo controllers for the Web Demo BFF.
+﻿"""Deterministic demo controllers for the Web Demo BFF.
 
 No LLM is involved.  Every controller maps a real MCP tool payload into the view models from
 ``web_demo.viewmodels`` and yields SSE events in the contract order.  Tool activity is recorded
@@ -93,6 +93,20 @@ def _mark_running_tool_error(turn: Turn, message: str) -> dict[str, Any] | None:
     return None
 
 
+def prepare_recommendation_products(
+    products: Mapping[str, Any],
+    *,
+    recommendation_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    """Return a copy carrying recommendation metadata; never allocates ids or writes state."""
+    prepared = dict(products)
+    prepared["recommendation_id"] = recommendation_id
+    prepared["request_id"] = turn_id
+    prepared["ranker_version"] = EXISTING_RANKER_VERSION
+    return prepared
+
+
 def _attach_recommendation(
     session: Session,
     products: dict[str, Any],
@@ -107,9 +121,10 @@ def _attach_recommendation(
     unchanged; only the behavior shadow (a separate preview) may reorder it.
     """
     recommendation_id = f"rec-{uuid.uuid4().hex[:12]}"
-    products["recommendation_id"] = recommendation_id
-    products["request_id"] = turn_id
-    products["ranker_version"] = EXISTING_RANKER_VERSION
+    prepared = prepare_recommendation_products(
+        products, recommendation_id=recommendation_id, turn_id=turn_id
+    )
+    products.update(prepared)
     session.record_recommendation(
         products, turn_id=turn_id, ranking_source=ranking_source
     )
