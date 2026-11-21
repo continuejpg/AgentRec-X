@@ -105,6 +105,7 @@ def test_fixed_fx_conversion_is_decimal_with_two_decimals(tmp_path: Path) -> Non
     assert index.stats["fx_source"] == "demo_fixed_rate"
 
     fact = index.get("B0A").as_fact()
+    assert fact["item_id"] == "B0A"
     assert fact["status"] == "historical_metadata"
     assert fact["currency"] == "CNY"
     assert fact["value"] == 6293.0
@@ -114,9 +115,12 @@ def test_fixed_fx_conversion_is_decimal_with_two_decimals(tmp_path: Path) -> Non
     assert fact["fx_rate"] == "7.00"
     assert fact["source"] == "amazon_reviews_2023:raw_meta_Electronics"
     assert fact["dataset_version"] == "test-version"
+    assert fact["price_kind"] == "historical_demo_converted"
+    assert fact["source_price_kind"] == "historical_crawl_time"
+    assert fact["history_year"] == 2023
     assert fact["historical_time"] is None
-    assert "no per-item crawl timestamp" in fact["historical_time_note"]
-    assert fact["price_note"].startswith("历史价格按固定汇率换算")
+    assert "confirmed source dataset year=2023" in fact["historical_time_note"]
+    assert fact["price_note"] == "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
     assert "not a live price" in fact["reason"]
 
 
@@ -198,8 +202,9 @@ def test_product_card_is_marked_as_historical_fx_not_live(tmp_path: Path) -> Non
     )
     assert card["price"]["status"] == "historical_metadata"
     assert card["price"]["display"] == "¥6,293.00 CNY"
-    assert "历史价格按固定汇率换算" in card["price"]["reason"]
-    assert "非实时售价" in card["price"]["reason"]
+    assert card["price"]["reason"] == "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
+    assert card["price"]["price_kind"] == "historical_demo_converted"
+    assert card["price"]["history_year"] == 2023
     assert card["price"]["original_usd_price"] == 899.0
     assert card["price"]["fx_rate"] == "7.00"
     assert card["price"]["currency"] == "CNY"
@@ -289,7 +294,7 @@ def test_real_catalogue_matches_real_sidecar_prices_and_accepts_8000_cny() -> No
     assert fact["value"] == 6293.0
     assert fact["original_usd_price"] == 899.0
     assert fact["fx_rate"] == "7.00"
-    assert fact["price_note"].startswith("历史价格按固定汇率换算")
+    assert fact["price_note"].startswith("演示参考价：历史美元价格按固定汇率换算")
     assert 6293.0 <= 8000.0
 
     hits = catalogue.search("laptop gaming", limit=20).hits
@@ -358,6 +363,57 @@ def test_gate_selects_a_converted_cny_price_within_8000(tmp_path: Path) -> None:
     assert selected_price["fx_rate"] == "7.00"
     assert selected_price["original_usd_price"] in {1142.71, 800.0}
     assert selected_price["converted_cny_price"] in {"7998.97", "5600.00"}
+
+
+def test_gate_falls_back_from_an_over_budget_top_pick(tmp_path: Path) -> None:
+    products = {
+        "B0OVER": _product(
+            "B0OVER", "Gaming Laptop Gaming Laptop Gaming Laptop Over Budget"
+        ),
+        "B0WITHIN": _product("B0WITHIN", "Gaming Laptop Within Budget"),
+    }
+    catalogue = ElectronicsCatalogue(products, {})
+    index = DemoPriceIndex.load(
+        _write_sidecar(tmp_path / "fallback_sidecar.jsonl", [
+            _sidecar_row("B0OVER", 1142.86),   # 8000.02 CNY, over
+            _sidecar_row("B0WITHIN", 800.00),  # 5600.00 CNY, within
+        ]),
+        item_ids=set(products),
+    )
+    catalogue.attach_demo_prices(index)
+    first = catalogue.search("gaming laptop", limit=5).hits[0].parent_asin
+    assert first.endswith("B0OVER"), "the fixture must rank the over-budget item first"
+
+    executor = ElectronicsPlannerExecutor(
+        catalogue=catalogue,
+        current_query="gaming laptop",
+        preferences=[],
+        hard=[],
+        price_budget=PriceBudget(max_amount=8000.0, currency="CNY"),
+    )
+    _run_executor(executor, "gaming laptop")
+    assert executor.terminal_status == "finalized"
+    budget = executor.last_budget or {}
+    assert budget["gate_selected_candidate_id"] == "B0OVER"
+    assert budget["selected_candidate_id"] == "B0WITHIN"
+    assert budget["selected_status"] == "within"
+    assert budget["selected_price"]["amount"] == 5600.0
+    assert "selection_note" in budget
+
+
+def test_all_over_budget_is_not_a_success(tmp_path: Path) -> None:
+    catalogue = _gate_catalogue(tmp_path)
+    executor = ElectronicsPlannerExecutor(
+        catalogue=catalogue,
+        current_query="gaming laptop",
+        preferences=[],
+        hard=[],
+        price_budget=PriceBudget(max_amount=5000.0, currency="CNY"),
+    )
+    _run_executor(executor, "gaming laptop")
+    assert executor.terminal_status == "budget_exceeded"
+    assert executor.selected_candidate_id is None
+    assert (executor.last_budget or {})["over"] >= 1
 
 
 def test_strict_catalogue_refuses_the_same_budget_without_a_price(tmp_path: Path) -> None:

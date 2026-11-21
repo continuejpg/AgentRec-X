@@ -133,14 +133,15 @@ def _price_view(product_info: Mapping[str, Any] | None) -> dict[str, Any]:
                 display = f"¥{float(value):,.2f} CNY"
                 reason = str(
                     price.get("price_note")
-                    or "历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）"
+                    or "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
                 )
                 view = {
                     "status": "historical_metadata",
                     "display": display,
                     "value": value,
                     "currency": "CNY",
-                    "price_kind": price.get("price_kind") or "historical_crawl_time",
+                    "price_kind": price.get("price_kind") or "historical_demo_converted",
+                    "source_price_kind": price.get("source_price_kind"),
                     "price_note": reason,
                     "reason": reason,
                     "original_usd_price": price.get("original_usd_price"),
@@ -150,6 +151,9 @@ def _price_view(product_info: Mapping[str, Any] | None) -> dict[str, Any]:
                     "fx_source": price.get("fx_source"),
                     "source": price.get("source"),
                     "dataset_version": price.get("dataset_version"),
+                    "history_year": price.get("history_year"),
+                    "historical_time": price.get("historical_time"),
+                    "historical_time_note": price.get("historical_time_note"),
                     "verification": price.get("verification"),
                 }
                 return view

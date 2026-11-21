@@ -130,8 +130,12 @@ def test_real_demo_fx_price_survives_cold_resume_and_replay(tmp_path: Path) -> N
         assert price["original_usd_price"] == 899.0
         assert price["fx_rate"] == "7.00"
         assert price["converted_cny_price"] == "6293.00"
-        assert "历史价格按固定汇率换算" in price["reason"]
-        assert "非实时售价" in price["reason"]
+        assert price["price_kind"] == "historical_demo_converted"
+        assert price["source_price_kind"] == "historical_crawl_time"
+        assert price["history_year"] == 2023
+        assert price["reason"] == "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
+        assert "演示参考价" in price["reason"]
+        assert "非当前市场售价" in price["reason"]
         assert price["source"] == "amazon_reviews_2023:raw_meta_Electronics"
 
         budget = body["budget_verification"]
@@ -142,10 +146,11 @@ def test_real_demo_fx_price_survives_cold_resume_and_replay(tmp_path: Path) -> N
         assert budget["unknown"] == 3
         assert budget["selected_price"]["amount"] == 6293.0
         assert budget["selected_price"]["currency"] == "CNY"
+        assert budget["selected_price"]["price_kind"] == "historical_demo_converted"
         assert budget["selected_price"]["original_usd_price"] == 899.0
         assert budget["selected_price"]["fx_rate"] == "7.00"
         assert "Price note:" in body["message"]
-        assert "历史价格按固定汇率换算" in body["message"]
+        assert "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。" in body["message"]
 
         state = SQLiteWebStateStore(db_path)
         try:
@@ -165,7 +170,7 @@ def test_real_demo_fx_price_survives_cold_resume_and_replay(tmp_path: Path) -> N
             assert stored_price["converted_cny_price"] == "6293.00"
             assert stored_price["original_usd_price"] == 899.0
             assert stored_price["fx_rate"] == "7.00"
-            assert stored_price["reason"].startswith("历史价格")
+            assert stored_price["reason"].startswith("演示参考价")
             assert stored["reply"]["recommendation"]["id"] is not None
             turns = [row.turn_id for row in state.list_turns(session_id)]
             assert turns == [f"{session_id}-t1", reply_turn_id]

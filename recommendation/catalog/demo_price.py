@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
@@ -30,10 +31,13 @@ from typing import Any, Iterable, Mapping
 __all__ = [
     "DEMO_FX_RATE",
     "DEMO_FX_SOURCE",
+    "DEMO_PRICE_KIND",
     "DEMO_PRICE_MODE",
+    "DEMO_PRICE_NOTE",
     "ENV_DEMO_PRICE_SIDECAR",
     "ENV_PRICE_MODE",
     "PRICE_MODES",
+    "SOURCE_PRICE_KIND",
     "STRICT_PRICE_MODE",
     "DemoPrice",
     "DemoPriceIndex",
@@ -47,7 +51,9 @@ ENV_PRICE_MODE = "AGENTRECX_PRICE_MODE"
 ENV_DEMO_PRICE_SIDECAR = "AGENTRECX_DEMO_PRICE_SIDECAR"
 DEMO_FX_RATE = Decimal("7.00")
 DEMO_FX_SOURCE = "demo_fixed_rate"
-DEMO_PRICE_NOTE = "历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）"
+DEMO_PRICE_KIND = "historical_demo_converted"
+SOURCE_PRICE_KIND = "historical_crawl_time"
+DEMO_PRICE_NOTE = "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
 SIDECAR_SCHEMA = "agentrecx.electronics_metadata_sidecar.v1"
 _REPO = Path(__file__).resolve().parents[2]
 DEFAULT_DEMO_SIDECAR = _REPO / "data/enrichment/electronics_metadata_sidecar.jsonl"
@@ -94,6 +100,12 @@ def _money(value: Decimal) -> str:
     return f"{value.quantize(_CENT, rounding=ROUND_HALF_UP):.2f}"
 
 
+def _history_year(source: str) -> int | None:
+    """The confirmed dataset year when the source name carries one; never invent a date."""
+    match = re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", str(source or ""))
+    return int(match.group(1)) if match else None
+
+
 @dataclass(frozen=True)
 class DemoPrice:
     """A real historical USD price with its deterministic demo CNY conversion."""
@@ -103,7 +115,20 @@ class DemoPrice:
     cny_amount: Decimal
     source: str
     dataset_version: str = ""
+    history_year: int | None = None
     fx_rate: Decimal = DEMO_FX_RATE
+
+    def _time_note(self) -> str:
+        if self.history_year is not None:
+            return (
+                "the Raw Meta sidecar has no per-item quote date; "
+                f"confirmed source dataset year={self.history_year}; "
+                f"dataset_version={self.dataset_version or 'unknown'}"
+            )
+        return (
+            "the Raw Meta sidecar has no per-item quote date or confirmed dataset year; "
+            f"dataset_version={self.dataset_version or 'unknown'}"
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -114,12 +139,11 @@ class DemoPrice:
             "fx_source": DEMO_FX_SOURCE,
             "source": self.source,
             "dataset_version": self.dataset_version,
-            "price_kind": "historical_crawl_time",
+            "price_kind": DEMO_PRICE_KIND,
+            "source_price_kind": SOURCE_PRICE_KIND,
+            "history_year": self.history_year,
             "historical_time": None,
-            "historical_time_note": (
-                "the Raw Meta sidecar has no per-item crawl timestamp; "
-                f"dataset_version={self.dataset_version or 'unknown'}"
-            ),
+            "historical_time_note": self._time_note(),
             "price_mode": DEMO_PRICE_MODE,
             "note": DEMO_PRICE_NOTE,
         }
@@ -127,10 +151,12 @@ class DemoPrice:
     def as_fact(self) -> dict[str, Any]:
         """Return a catalogue ``inspect(price)`` fact that the budget Gate can verify."""
         return {
+            "item_id": self.item_id,
             "status": "historical_metadata",
             "value": float(self.cny_amount),
             "currency": "CNY",
-            "price_kind": "historical_crawl_time",
+            "price_kind": DEMO_PRICE_KIND,
+            "source_price_kind": SOURCE_PRICE_KIND,
             "source": self.source,
             "verification": "upstream_metadata_demo_fx",
             "demo_price_mode": DEMO_PRICE_MODE,
@@ -140,11 +166,9 @@ class DemoPrice:
             "fx_rate": _money(self.fx_rate),
             "fx_source": DEMO_FX_SOURCE,
             "dataset_version": self.dataset_version,
+            "history_year": self.history_year,
             "historical_time": None,
-            "historical_time_note": (
-                "the Raw Meta sidecar has no per-item crawl timestamp; "
-                f"dataset_version={self.dataset_version or 'unknown'}"
-            ),
+            "historical_time_note": self._time_note(),
             "price_note": DEMO_PRICE_NOTE,
             "reason": (
                 "historical Amazon USD price converted at the fixed demo rate "
@@ -190,6 +214,7 @@ class DemoPriceIndex:
         invalid_price = 0
         duplicates = 0
         versions: set[str] = set()
+        years: set[int] = set()
         with source.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -220,12 +245,17 @@ class DemoPriceIndex:
                 version = str(row.get("dataset_version") or "")
                 if version:
                     versions.add(version)
+                source_name = str(row.get("source") or "amazon_reviews_2023:raw_meta_Electronics")
+                history_year = _history_year(source_name)
+                if history_year is not None:
+                    years.add(history_year)
                 records[item_id] = DemoPrice(
                     item_id=item_id,
                     usd_amount=usd,
                     cny_amount=_cny(usd, rate),
-                    source=str(row.get("source") or "amazon_reviews_2023:raw_meta_Electronics"),
+                    source=source_name,
                     dataset_version=version,
+                    history_year=history_year,
                     fx_rate=rate,
                 )
         stats = {
@@ -243,6 +273,7 @@ class DemoPriceIndex:
             "match_rate": round(matched / len(wanted), 6) if wanted else 0.0,
             "priced_rate": round(len(records) / len(wanted), 6) if wanted else 0.0,
             "dataset_versions": sorted(versions),
+            "history_years": sorted(years),
         }
         return cls(records=records, stats=stats)
 

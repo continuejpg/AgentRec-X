@@ -236,20 +236,22 @@ catalogue 的匹配率是 100%，对原始文件是 99.15%。没有用假商品�
 
 - `recommendation/catalog/demo_price.py`：`DemoPriceIndex` 流式读取真实 sidecar，只保留 catalogue
   item_id；`Decimal` + `ROUND_HALF_UP` 换算；`DemoPrice.as_fact()` 同时保留
-  `original_usd_price`、`original_currency`、`source`、`dataset_version`、`fx_rate="7.00"`、
-  `converted_cny_price` 和中文 `price_note`；sidecar 没有 per-item crawl timestamp，因此
-  `historical_time=None` 并明确记录 `historical_time_note`（不编造抓取时间）。
+  `original_usd_price`、`original_currency`、`source`、`dataset_version`、`history_year=2023`、
+  `fx_rate="7.00"`、`converted_cny_price`、`price_kind="historical_demo_converted"` 和中文
+  `price_note`。sidecar 没有 per-item quote date，因此 `historical_time=None` 并明确记录
+  `historical_time_note`（只写可确认的 source dataset year，不编造抓取时间）。
 - `ElectronicsCatalogue.load(price_mode="demo_historical_fx", demo_price_sidecar=...)` 才附加
   index；默认 strict 完全不加价。`inspect(price)` 在 demo 模式返回 CNY 事实；strict 仍是 UNKNOWN。
 - `AGENTRECX_PRICE_MODE=demo_historical_fx` 是唯一开关；`read_price_mode` 拒绝其他值。BFF
   `Settings.price_mode` 通过 `--price-mode` 显式传给子进程（strict 也显式传入，避免继承环境泄漏）。
 - `web_demo/viewmodels.py::_price_view` 仅在 `verification="upstream_metadata_demo_fx"` 时显示
-  `¥6,293.00 CNY`，并把 `price_note` 作为卡片 reason；`build_product_evidence` 用 demo 价格的
-  USD/CNY/汇率文本作为 price evidence，因此商品卡不会同时显示 `price UNKNOWN`。
+  `¥6,293.00 CNY`，并把 `price_note` 作为卡片 reason（精确文案：
+  **“演示参考价：历史美元价格按固定汇率换算，非当前市场售价。”**）；`build_product_evidence`
+  用 demo 价格的 USD/CNY/汇率文本作为 price evidence，因此商品卡不会同时显示 `price UNKNOWN`。
 - Gate：budget 仍由 executor 的 `evaluate_price_budget` 判定。Gate 可以因缺少 use case 先 ASK；
-  ALLOW 时若其首选没有可验证价格，则回退到 rank 最高的 **verified within-budget** 候选，
-  并在 `budget_verification.selection_note` 留下证据；没有 verified 候选则 `budget_unverifiable`
-  / `budget_exceeded`，不展示未验证商品。
+  ALLOW 时若其首选没有可验证价格**或超预算**，则回退到 rank 最高的 **verified within-budget**
+  候选，并在 `budget_verification.selection_note` 留下证据；没有 verified 候选则
+  `budget_unverifiable` / `budget_exceeded`，不展示未验证商品。
 
 **过期预算检索修复**：`strip_budget_expressions` 从 BM25 查询中删除预算金额/短语；原始用户文本
 不修改，继续作为历史（`pending.query`、durable `query`）。`augment_query` 只追加
@@ -262,12 +264,12 @@ category/use-case 英文词。最终 E2E 的 `retrieval_query` 为
 
 ## 3. 测试状态（真实数字）
 
-- **M1-F 全量回归（33 个文件，最终代码）：`367 passed in 837.82s`，exit code 0。**
+- **M1-F 全量回归（33 个文件，最终代码）：`369 passed in 857.14s`，exit code 0。**
   含 `tests/test_demo_price.py`（12）、`tests/test_web_demo_price_e2e.py`（1）、
   `tests/test_p14c0r_product_role.py`，以及 M1-C/M1-D/M1-E 的全部回归。
 - **M1-F 真实演示价格 Cold Resume E2E**：`1 passed in 106.43s`（真实 PID A→B、
   5000→8000 合并、BM25 检索词无 5000/8000、MSI GF65 ¥6,293、Replay、strict 重启不重算）。
-- M1-F 价格适配器/边界/laptop 角色单测：`12 passed`。
+- M1-F 价格适配器/边界/laptop 角色/预算回退单测：`14 passed`。
 - opt-in 真实 MCP 集成：`1 passed in 32.46s`。
 - **M1-E 全量回归（29 个文件）：`345 passed in 727.83s`，exit code 0。**
 - 预算边界/需求合并纯函数：`16 passed`（7999/8000/8001 闭区间、币种不匹配、缺价、合并覆盖）。
@@ -387,7 +389,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
     finalize。Gate 的首选没有可验证价格时，只能回退到 rank 最高的 verified 候选（记录
     `selection_note`）；没有 verified 候选则显式拒绝，不展示未验证商品。
 17. 已提交回复保存原始 USD、换算 CNY、汇率和来源；Replay/重启不得重新计算，即使配置改成
-    strict 也必须返回已提交值。商品卡必须显示“历史价格按固定汇率换算，非实时售价”。
+    strict 也必须返回已提交值。商品卡必须显示“演示参考价：历史美元价格按固定汇率换算，非当前市场售价。”。
 18. 不使用 `git add -A`；不 Push。
 
 ## 6. 已知陷阱
@@ -438,10 +440,10 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 - [x] `AGENTRECX_PRICE_MODE=demo_historical_fx` 才启用；strict 显式传给子进程
 - [x] Gate 实际使用换算 CNY：MSI GF65 ¥6,293 选中；3 个无价候选不可 finalize
 - [x] 缺价/未匹配/非法价格保持 UNKNOWN；无 verified 候选时显式拒绝
-- [x] 商品卡显示“历史价格按固定汇率换算，非实时售价”；narrative 有 Price note
+- [x] 商品卡显示“演示参考价：历史美元价格按固定汇率换算，非当前市场售价。”；narrative 有 Price note
 - [x] 过期 5000 从 BM25 检索删除；原始 5000 保留在 history；`retrieval_query` 无 5000/8000
 - [x] Replay + strict 配置重启：返回已提交 ¥6,293/7.00，零 MCP，不重算
-- [x] Warm/Cold/M9/Replay/Reset/Product Role 全绿（`367 passed`）
+- [x] Warm/Cold/M9/Replay/Reset/Product Role 全绿（`369 passed`）
 - [x] opt-in 真实 MCP 集成通过（`1 passed`）
 - [x] 本地 Commit，未 Push
 - [ ] 真实 CNY feed / qwen_live 持久化回复 / 多轮跟随 ASK（明确未实现，见第 4 节）
@@ -529,8 +531,8 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 | Gate 真实结果 | MSI GF65 `B0BY2Z27LC`，$899.00 → ¥6,293.00，≤ ¥8,000；3 个角色兼容候选无价 |
 | 过期预算 | 检索文本 `推荐一台 笔记本 laptop gaming`；无 5000/8000；原始 5000 保留 |
 | 新 demo E2E | `1 passed in 106.43s` |
-| 新单测 | `tests/test_demo_price.py` 12 passed |
-| **最终全量（33 文件）** | **`367 passed in 837.82s`，exit code 0** |
+| 新单测 | `tests/test_demo_price.py` 14 passed（含超预算首选回退） |
+| **最终全量（33 文件）** | **`369 passed in 857.14s`，exit code 0** |
 | opt-in 真实 MCP 集成 | `1 passed in 32.46s` |
 | `git diff --check` | 无输出 |
 | Commit / Push | 1 个本地提交（`feat: match demo historical FX prices and fix expired budget retrieval`）/ 未 Push |
@@ -545,7 +547,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 4. 真实 BM25 角色过滤后 4 个兼容候选：3 个无历史价（UNKNOWN），1 个 MSI GF65 ¥6,293；
    Gate 首选是无价的 Lenovo，budget 硬约束回退到 verified 候选 MSI，并记录
    `selection_note`；
-5. HTTP 200；商品卡 `¥6,293.00 CNY` + `历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）`；
+5. HTTP 200；商品卡 `¥6,293.00 CNY` + `演示参考价：历史美元价格按固定汇率换算，非当前市场售价。`；
    `budget_verification.selected_price` 保留 USD 899/汇率 7.00/CNY 6293；narrative 有
    `Price note:`；
 6. DB：Request COMPLETED、Pending CONSUMED、Reply Turn 1 个商品；Replay 零 MCP 完全一致；

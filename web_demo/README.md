@@ -140,9 +140,10 @@ budget Gate refuses an unverifiable price.  For the local internship demonstrati
 Electronics sidecar and converts the historical USD `price` with `Decimal` at the fixed rate
 `1 USD = 7.00 CNY`, quantized to 2 decimals.  Missing, unmatched or malformed prices stay UNKNOWN.
 
-The price fact retains the original USD amount, source, dataset version, fixed rate and converted
-CNY amount.  Only in this mode may the budget Gate finalize a product, and the product card is
-labelled `历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）`.  The committed reply stores the
+The price fact retains the original USD amount, source, dataset version, fixed rate, converted
+CNY amount and `price_kind=historical_demo_converted`.  Only in this mode may the budget Gate
+finalize a product, and the product card is labelled
+`演示参考价：历史美元价格按固定汇率换算，非当前市场售价。`.  The committed reply stores the
 converted price and rate, so Replay never recomputes it when the configuration changes.
 
 ## Clarification reply and the memory-write boundary
