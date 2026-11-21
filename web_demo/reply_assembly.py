@@ -35,6 +35,7 @@ from web_demo.reply_result_contract import (
 __all__ = [
     "ReplyAssemblyError",
     "ReplyAssemblyRequest",
+    "assemble_refusal_memory",
     "assemble_reply_presentation",
     "new_recommendation_id",
     "prepare_recommendation_products",
@@ -182,6 +183,20 @@ def assemble_reply_presentation(
     }
 
 
+def assemble_refusal_memory(
+    reply: Mapping[str, Any],
+    preference_payload: Mapping[str, Any],
+    *,
+    profile_id: str,
+) -> dict[str, Any]:
+    """The M9 view of a bounded refusal: preferences and memory update, no product."""
+    preferences = vm.preference_state(
+        dict(preference_payload or {}), profile_id=profile_id
+    )
+    memory_update = vm.memory_update_payload(dict(reply or {}), preferences)
+    return {"preferences": preferences, "memory_update": memory_update}
+
+
 def turn_from_result(result: Mapping[str, Any]) -> dict[str, Any]:
     """Project a durable reply result onto the persisted TurnView shape.
 
@@ -205,11 +220,21 @@ def reply_response_from_result(
     _require(isinstance(reply, Mapping), "durable reply result has no contract payload")
     narrative = str(reply.get("assistant_text") or "")
     _require(bool(narrative.strip()), "durable reply result has no assistant narrative")
+    products = reply.get("products")
+    has_products = (
+        isinstance(products, Mapping) and bool(products.get("items"))
+    )
+    refusal = result.get("refusal")
+    if refusal is None and isinstance(products, Mapping):
+        refusal = products.get("refusal")
     return {
         "turn_id": reply.get("reply_turn_id"),
         "memory_update": result.get("memory_update"),
         "preferences": result.get("preferences"),
-        "recommendation": reply.get("products"),
+        # A bounded refusal has no product: never present an empty list as a recommendation.
+        "recommendation": dict(products) if has_products else None,
+        "refusal": dict(refusal) if isinstance(refusal, Mapping) else None,
+        "task_requirements": result.get("task_requirements"),
         "steps": list(result.get("steps") or []),
         "clarification_id": clarification_id,
         "message": narrative,

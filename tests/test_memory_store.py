@@ -431,3 +431,45 @@ def test_sqlite_store_serialises_concurrent_writers(tmp_path: Path) -> None:
     # Deterministic ordering is by ``logical_seq``, not by thread scheduling.
     assert [entry.logical_seq for entry in store.get_entries("alice")] == list(range(1, 13))
     store.close()
+
+
+def test_two_stores_can_create_the_same_fresh_schema_concurrently(
+    tmp_path: Path,
+) -> None:
+    """Two MCP children open one fresh M9 database at once (no UNIQUE meta race).
+
+    The Web demo runs one MCP child per profile against one shared M9 store.  When both
+    children start together on a brand-new database, schema creation must be idempotent;
+    before this regression a losing child crashed with
+    ``sqlite3.IntegrityError: UNIQUE constraint failed: meta.key`` and the BFF never became
+    ready.
+    """
+    import threading
+
+    db = tmp_path / "shared.sqlite3"
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(4)
+
+    def open_shared() -> None:
+        try:
+            barrier.wait(timeout=30)
+            store = SQLitePreferenceStore(db)
+            try:
+                assert store.schema_version == MEMORY_SCHEMA_VERSION
+            finally:
+                store.close()
+        except BaseException as exc:  # noqa: BLE001 - collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=open_shared) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert errors == []
+    assert all(not thread.is_alive() for thread in threads)
+    with sqlite3.connect(str(db)) as connection:
+        assert connection.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()[0] == str(MEMORY_SCHEMA_VERSION)

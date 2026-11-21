@@ -52,6 +52,11 @@ from recommendation.preference.current_task_constraints import (
     CurrentTaskConstraints,
 )
 from recommendation.preference.history import HistoryStateReader
+from recommendation.preference.task_requirements import (
+    TaskRequirements,
+    augment_query,
+    extract_task_requirements,
+)
 from recommendation.shopping_companion.memory import SOURCE_KIND_SYNTHETIC_FIXTURE, ShoppingCompanionMemory
 from recommendation.shopping_companion.planner_bridge import PHASE_FINALIZE, PHASE_PRODUCT_RETRIEVE, P14ARulePlanner
 from recommendation.skills import build_registry
@@ -97,6 +102,10 @@ class ClarificationState:
     #: Task-scoped constraints recovered from the real reply.  They are separate from
     #: M9's permanent memory and are applied only to the resumed current task.
     task_constraints: CurrentTaskConstraints = field(default_factory=CurrentTaskConstraints)
+    #: Task-scoped requirements (budget/currency/category/use case) extracted from the real
+    #: query and merged with the real reply.  They are JSON data, so they survive a process
+    #: restart through the continuation snapshot; M9 stays a separate preference store.
+    task_requirements: dict[str, Any] = field(default_factory=dict)
     #: In-memory continuation for a real Qwen ASK.  It keeps the *same* executor instance,
     #: CandidateLedger, tool observations, budgets and planner observation across the user reply;
     #: only the M9-derived preference list is refreshed before the second real /plan call.
@@ -269,24 +278,35 @@ def _get_product_info(product_ref: Annotated[str, Field(min_length=1, descriptio
 def _recommend_products(
     query: Annotated[str, Field(min_length=1, description="Current shopping query")],
     session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
+    task_requirements: Annotated[dict[str, Any] | None, Field(
+        description="Optional task-scoped requirements (budget/currency/category/use case) "
+                    "merged from the original query and the real clarification reply")] = None,
 ) -> dict[str, Any]:
     """Run the existing Rule Planner + shared tools + V0/Role/Eligibility/Gate; never fake a FINALIZE."""
     started = time.perf_counter()
     ctx = _context()
     history = ctx.read_history(session_id)
     task = ctx.current_task(query)
+    # Task-scoped requirements: the original query, merged with the real reply carried by the
+    # caller (the newest statement wins).  The budget is enforced as a hard constraint on the
+    # catalogue price; it is never put into the lexical query text.
+    requirements = extract_task_requirements(query)
+    if isinstance(task_requirements, Mapping):
+        requirements = requirements.merged(TaskRequirements.from_dict(task_requirements))
+    effective_query = augment_query(query, requirements)
     if session_id:
         task["task_id"] = str(session_id)
         task["user_id"] = str(session_id)
     executor = ElectronicsPlannerExecutor(
-        catalogue=ctx.catalogue, current_query=query,
-        preferences=prepare_preferences(history), hard=prepare_hard(query),
+        catalogue=ctx.catalogue, current_query=effective_query,
+        preferences=prepare_preferences(history), hard=prepare_hard(effective_query),
         task_context=task, memory_history=history,
         corrective_rag=ctx.corrective_rag,
+        price_budget=requirements.budget,
     )
     observation = PlannerObservation(
-        step=0, query=query,
-        m5_state={"phase": PHASE_PRODUCT_RETRIEVE, "next_query": query,
+        step=0, query=effective_query,
+        m5_state={"phase": PHASE_PRODUCT_RETRIEVE, "next_query": effective_query,
                   "preferences": executor.preferences},
     )
     error = None
@@ -310,13 +330,30 @@ def _recommend_products(
                               history=history, gate_decision=executor.last_decision or {},
                               search_mode=ctx.search_mode,
                               ledger_source=f"CatalogSearchSource(mode={ctx.search_mode})").as_dict()
+    gate_payload = executor.last_decision
+    if status in {"budget_unverifiable", "budget_exceeded"}:
+        # The Gate's own decision was ALLOW_FINALIZE, but the task budget is a hard
+        # constraint on top of it.  Surface the authoritative refusal instead of a Gate
+        # object that would read as success.
+        budget = dict(executor.last_budget or {})
+        gate_payload = dict(executor.last_decision or {})
+        gate_payload.update({
+            "allow_finalize": False,
+            "reason_code": status,
+            "reason": str(budget.get("selected_reason") or
+                          "the task budget cannot be verified for the selected candidate"),
+            "budget": budget,
+        })
     return {
         "schema": "agentrecx.p17.recommend_products.v1",
         "status": status,
         "query": query,
+        "effective_query": effective_query,
+        "task_requirements": requirements.as_dict(),
+        "budget_verification": executor.last_budget,
         "selected_product_id": selected,
         "selected_product": selected_product.as_dict() if selected_product else None,
-        "gate": executor.last_decision,
+        "gate": gate_payload,
         "evidence_bundle": bundle,
         "planner_steps": steps,
         "search_mode": ctx.search_mode,
@@ -328,7 +365,8 @@ def _recommend_products(
         "error": error,
         "latency_ms": round((time.perf_counter() - started) * 1000.0, 2),
         "notes": ["Gate remains authoritative; awaiting_clarification/no_verified_candidate_in_scope is not a successful recommendation",
-                  "the candidate pool is bounded and does not imply the full catalogue has no product"],
+                  "the candidate pool is bounded and does not imply the full catalogue has no product",
+                  "a task budget is enforced against the catalogue price; an UNKNOWN price or a currency mismatch is never treated as compliance"],
     }
 
 
@@ -921,7 +959,9 @@ def _request_preference_clarification(
     state = ClarificationState(clarification_id=clarification_id, user_key=ctx.user_key,
                                question=str(result["question"]), current_query=str(task["current_query"]),
                                task=task, created_at=now, expires_at=now + ctx.clarification_ttl_seconds,
-                               session_id=session_id)
+                               session_id=session_id,
+                               task_requirements=extract_task_requirements(
+                                   str(task["current_query"])).as_dict())
     with ctx.lock:
         ctx.handles[clarification_id] = state
     result = dict(result)
@@ -944,6 +984,7 @@ def _request_preference_clarification(
             "current_query": str(task["current_query"]),
             "task": task,
             "task_constraints": state.task_constraints.as_dict(),
+            "task_requirements": state.task_requirements,
             "created_at": now,
             "expires_at": now + ctx.clarification_ttl_seconds,
         },
@@ -1002,19 +1043,28 @@ def _submit_clarification_reply(
             current.status = "answered"
             current.last_turn_id = turn_id
             current.task_constraints = current.task_constraints.merged(reply_constraints)
+            # Merge the real reply's task requirements over the ones carried from the query.
+            current.task_requirements = TaskRequirements.from_dict(
+                current.task_requirements
+            ).merged(extract_task_requirements(str(user_message))).as_dict()
             if current.continuation is not None:
                 current.continuation["task_constraints"] = current.task_constraints.as_dict()
+                current.continuation["task_requirements"] = current.task_requirements
             task_constraints_payload = current.task_constraints.as_dict()
+            task_requirements_payload = current.task_requirements
         else:
             task_constraints_payload = reply_constraints.as_dict()
+            task_requirements_payload = extract_task_requirements(str(user_message)).as_dict()
     result = dict(result)
     result.update({
         "clarification_id": clarification_id,
         "authorized_user_key": ctx.user_key,
         "confirmation_source": confirmation_source,
         "task_constraints": task_constraints_payload,
+        "task_requirements": task_requirements_payload,
         "notes": ["reply was persisted through the existing M9 process_turn writer",
                   "current-purchase constraints are task-scoped and do not delete historical M9 preferences",
+                  "task requirements (budget/currency/category/use case) are task-scoped and merge the latest reply over the original query",
                   "the reply is explicitly labelled as a local test input; it is not claimed to be real online user data",
                   "confirmation_source distinguishes an explicit local test reply from an explicit local Web-UI user reply"],
     })
@@ -1104,6 +1154,9 @@ def _restore_clarification_handle(
     if dict(task_snapshot) != expected_task:
         raise ToolError("continuation_task_mismatch: the snapshot task differs from this process")
     constraints = _constraints_from_snapshot(continuation.get("task_constraints"))
+    task_requirements = TaskRequirements.from_dict(
+        continuation.get("task_requirements")
+    )
     restored_from = str(continuation.get("clarification_id") or "")
     with ctx.lock:
         state = ClarificationState(
@@ -1116,6 +1169,7 @@ def _restore_clarification_handle(
             expires_at=float(expires_at),
             session_id=str(session_id),
             task_constraints=constraints,
+            task_requirements=task_requirements.as_dict(),
         )
         ctx.handles[state.clarification_id] = state
     LOGGER.info(
@@ -1133,6 +1187,7 @@ def _restore_clarification_handle(
         "authorized_user_key": ctx.user_key,
         "session_id": state.session_id,
         "memory_write_enabled": ctx.writes_enabled,
+        "task_requirements": state.task_requirements,
         "notes": ["restored from a durable continuation in a new MCP process; the original handle id was not reused",
                   "restore performs no M9 write and no recommendation; the reply is still required"],
     }

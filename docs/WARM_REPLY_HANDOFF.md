@@ -19,8 +19,10 @@
 - M1-C 冲刺**接手时** HEAD：`cf3a465`（`refactor: separate recommendation snapshot construction from session writes`）。
   用户提示的 `762e636` 是它的父提交（`cf3a465 → 762e636 → 32f7770`），仓库实际多 2 个提交。
 - M1-C 结束时：本地 Commit `3643ffc`（`feat: complete durable warm clarification reply`），未 Push。
-- M1-D S6 接手时 HEAD：`3643ffc`（与任务提示一致）；本轮结束会再产生一个本地 Commit
-  （`feat: restore durable clarification after MCP restart`），仍未 Push。
+- M1-D S6 接手时 HEAD：`3643ffc`（与任务提示一致）；M1-D 结束本地 Commit
+  `b1165b5`（`feat: restore durable clarification after MCP restart`），未 Push。
+- M1-E 接手时 HEAD：`b1165b5`（与任务提示一致）；本轮结束会再产生一个本地 Commit
+  （`feat: merge task requirements and enforce price budgets`），仍未 Push。
 - M1-C 提交前的 Coordinator 原型（`state_store.py` / `reply_executor.py` /
   `test_web_reply_executor.py`）已随 `3643ffc` 入库，没有被删除或改写成简化版。
 
@@ -176,16 +178,65 @@ mcp: {schema: agentrecx.mcp.clarification_continuation.v1, version, mode, user_k
 5. 同一 Pending 的并发 Cold Reply 各自 restore 一个 handle，但只有一个能 Claim 成功；
    失败方的孤儿 handle 随 TTL 失效（无业务效果）。
 
+### 2.9 Task Requirements 与预算硬约束（M1-E）
+
+`recommendation/preference/task_requirements.py`（纯函数）：
+
+- `extract_task_requirements(text)`：中/英文显式购物表述 → `budget`（max/min、currency、source_text）、
+  `category`、`use_cases`；无匹配不猜。中文预算必须带 `元/块/人民币/RMB/CNY`（或英文 `$`）；
+  `预算改成/改为/调整到` 作为“最新一次声明”；币种只从字面量取，绝不从无关符号推断。
+- `TaskRequirements.merged(update)`：新 budget/category 覆盖旧的，`use_cases` 取并集，保留两条 source_text。
+- `augment_query`：只追加英文 category/use-case（如 `laptop gaming`），**绝不追加预算数字**
+  （BM25 会把 `8000` 当型号并污染检索）。
+- `evaluate_price_budget(price_fact, budget)`：`within / over / unknown / currency_mismatch /
+  not_applicable`；`historical_metadata` 价格在币种一致时可用于历史预算核对；
+  缺价、缺币种、跨币种一律**不视为合规**。边界为闭区间：7999/8000 在 8000 内，8001 超。
+
+持久化/恢复链路：
+
+- ASK 的 continuation 新增 `mcp.task_requirements`（原查询的 5000 CNY / laptop）；
+- `restore_clarification_handle` 恢复它；`submit_clarification_reply` 把新回复合并进去
+  （8000 CNY / gaming，保留 laptop）并在响应返回 `task_requirements`；
+- Coordinator 把合并结果作为 `recommend_products(task_requirements=...)` 参数传入；
+  `recommend_products` 再从 query 提取一次并合并（直接调用也成立），用 `augment_query` 检索；
+- executor 对每个候选执行 `evaluate_price_budget`：超预算候选排除；未验证候选在 Gate 之后仍被拒绝；
+- `budget_unverifiable` / `budget_exceeded` 是“已知拒绝”，不是 AMBIGUOUS：Coordinator 用
+  `build_refusal_payload` 持久化一条**无商品**的拒绝回复（HTTP 200、`recommendation: null`、
+  `refusal: {code, reason, budget, task_requirements}`），Replay/重启恢复一致；`web_turn.items` 为空。
+
+真实数据缺口（本部署）：
+
+- 默认 C4 Electronics 目录只有 `item_id/category/text`；`catalogue.inspect(price)` 返回
+  `unknown`（reason: “catalog_meta.jsonl has no price field”）→ 20/20 候选无价 → `budget_unverifiable`。
+- 可选 Raw Meta sidecar（`data/enrichment/electronics_metadata_sidecar.jsonl`）确有数值 price，
+  但 `inspect` 标为 `historical_metadata`、`currency: "USD"`、`price_kind: historical_crawl_time`、
+  source `amazon_reviews_2023:raw_meta_Electronics`；用户预算 8000 CNY，仓库无汇率来源
+  → `currency_mismatch`。因此本部署下不存在“8000 元预算的真实可核实商品”；系统明确拒绝展示
+  未验证商品，绝不伪造推荐。
+
 ## 3. 测试状态（真实数字）
 
-- **M1-D S6 全量回归（22 个文件，最终代码）：`294 passed in 629.92s`，exit code 0。**
+- **M1-E 全量回归（29 个文件，最终代码）：`345 passed in 781.11s`，exit code 0。**
+  命令含 `tests/test_task_requirements.py`、`tests/test_budget_enforcement.py`、
+  `tests/test_web_requirement_update_e2e.py`，以及 M1-C/M1-D 的全部 22 个文件。
+- 预算边界/需求合并纯函数：`16 passed`（7999/8000/8001 闭区间、币种不匹配、缺价、合并覆盖）。
+- executor 预算执行（含 Gate 集成，使用明确标注的测试商品价格）：
+  `4 passed`（超预算排除、全超预算拒绝、跨币种拒绝、无预算行为不变）。
+- M9 共享库并发建 schema 回归：`test_two_stores_can_create_the_same_fresh_schema_concurrently`
+  通过（修复前两个 MCP 子进程同时建库会 `UNIQUE constraint failed: meta.key`）。
+- 真实需求更新 Cold Resume E2E（`tests/test_web_requirement_update_e2e.py`）：
+  在本轮最终代码上连续 2 次单跑通过，并包含在 345 中；断言 ASK 快照 5000 CNY/laptop →
+  restart → 合并 8000 CNY/gaming/laptop → 推荐工具收到合并约束 → `budget_unverifiable`
+  拒绝 → Replay/重启一致。
+- **M1-D S6 全量回归（22 个文件）：`294 passed in 629.92s`，exit code 0。**
 - 真实跨 OS 进程 Cold Resume（`tests/test_web_cold_resume_e2e.py` 的 `real_cold` 两条）：
   `2 passed in 157.78s`（PID A→B、旧 handle stale、restore 新 handle、M9、推荐、200、Replay、双重启）。
 - 该文件完整跑：`12 passed`（2 真实 + 10 确定性注入：损坏/过期快照、restore 失败、
   并发、外部执行后崩溃、RESULT_DURABLE、Reset/跨 Session）。
 - 持久化快照单测（`tests/test_web_continuation.py`）：`38 passed`。
-- opt-in 真实 MCP 集成（`AGENTRECX_RUN_MCP_INTEGRATION=1`）：`1 passed in 37.83s`（9 工具断言已更新）。
-- M1-C 结束基线：`244 passed`；本轮增量 38（continuation）+ 12（cold e2e）= 50 → 294。
+- opt-in 真实 MCP 集成（`AGENTRECX_RUN_MCP_INTEGRATION=1`）：`1 passed in 32.75s`（9 工具断言）。
+- M1-C 结束基线：`244 passed`；M1-D 22 文件 `294 passed`；M1-E 命令扩大到 29 文件
+  （新增需求/预算/M9 竞态测试，并纳入 4 个既有相关文件），最终 `345 passed`。
 - 真实 MCP 单测（`tests/test_web_handle_lifecycle.py` 的 restart/expiry 场景）：约 67s。
 
 全量命令：
@@ -221,25 +272,35 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 ## 4. 剩余工作与真实阻断
 
 1. **Cold Resume 仅覆盖 CPU/BM25 单轮**（本轮范围）：`pending.mode == "cpu_live"` 且
-   `recommend_products` 一次能 finalize。以下仍是明确的 409：
+   `recommend_products` 一次能给出结果。以下仍是明确的 409：
    - **qwen_live 持久化 Pending**：Qwen 的 handle 依赖子进程内的 planner/executor continuation，
      不是 JSON 可序列化状态；需要事件化/重放式设计，不在本轮。
    - **多轮跟随 ASK**：回复后 `recommend_products` 若再次 `awaiting_clarification`
      → 503 `clarification_reply_ambiguous`（M9 已写、结果不可最终展示、禁止自动重试）；
      需要新的 ASK/Pending + continuation 轮次。
-   - **中文预算约束**：本轮未新增任何中文约束解析；沿用现有 M9 抽取能力。
-2. **直接从 MCP 客户端冷恢复未开放**：`restore_clarification_handle` 需要可信的 Web 快照；
+2. **价格数据缺口（本轮真实结论）**：默认 C4 目录没有 price；可选 sidecar 的价格是 USD 历史
+   抓取值；仓库没有 CNY/USD 汇率来源。因此“8000 元预算 + 真实可核实价格”在本部署中不存在，
+   系统只能给出 `budget_unverifiable` 的明确拒绝。要完成真实商品推荐，需要：
+   - 有 CNY 价格（或有来源的汇率转换）的目录；或
+   - 用户以 USD 预算提问（且明确接受 historical crawl-time price 语义）。
+3. **laptop 不在 Product Role 契约的类型表**（`recommendation/preference/product_role.py` 只有
+   headphones/earbuds/keyboard/mouse/speaker）。中文查询经 `augment_query` 变成
+   `... laptop gaming` 后可以检索到真实笔记本/配件，但没有 laptop 角色过滤；在预算不可验证时
+   不会 finalize 任何商品，所以本轮不受影响。若未来要推荐笔记本，需要扩展类型表与测试。
+4. **中文回复仍不进 M9**：M9 抽取器是英文规则；本轮的“游戏/8000”是 **task-scoped**
+   `task_requirements`，不是永久偏好。这是有意的边界：购买任务约束不应写进长期偏好。
+5. **直接从 MCP 客户端冷恢复未开放**：`restore_clarification_handle` 需要可信的 Web 快照；
    旧 handle 在子进程重启后对直接客户端仍是 `invalid_or_expired_clarification_id`。
-3. **不承诺 exactly-once**：Web SQLite 与 M9 SQLite 是两库；M9 写成功后 Web finalize 失败 →
+6. **不承诺 exactly-once**：Web SQLite 与 M9 SQLite 是两库；M9 写成功后 Web finalize 失败 →
    AMBIGUOUS，绝不返回成功。
-4. **并发 Cold Reply 的孤儿 handle**：失败方 restore 出的新 handle 没有业务副作用，
+7. **并发 Cold Reply 的孤儿 handle**：失败方 restore 出的新 handle 没有业务副作用，
    会随子进程 TTL 失效；不做跨进程回收（避免引入第二套生命周期）。
-5. **opt-in 集成测试断言已按真实工具注册表更新（本轮修复）**：
+8. **opt-in 集成测试断言已按真实工具注册表更新**：
    `tests/test_web_demo_integration.py` 的 `EXPECTED_TOOLS` 现为真实 9 工具
    （`remember_preference` 自 `d66f95a` 起无条件注册、权限在调用时校验；
-   `restore_clarification_handle` 为本轮新增）。已用
-   `AGENTRECX_RUN_MCP_INTEGRATION=1` 实测通过（见第 8 节），未禁用测试。
-6. 未 Push；未使用 `git add -A`。
+   `restore_clarification_handle` 为 M1-D 新增）。已用
+   `AGENTRECX_RUN_MCP_INTEGRATION=1` 实测通过（见第 3 节），未禁用测试。
+9. 未 Push；未使用 `git add -A`。
 
 ## 5. 不可违反的安全规则
 
@@ -254,7 +315,16 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 9. Cold Resume 的 restore 是**无业务副作用**的进程内状态重建，必须在 Claim 之前；
    真正的业务执行只有在 `EXTERNAL_STARTED` 之后才开始。
 10. 旧 Handle id 永不复用；新进程签发新 Handle；快照缺失/损坏/过期/版本不符/绑定不符 → 409。
-11. 不使用 `git add -A`；不 Push。
+11. **Task budget 是硬约束**：`within` 才允许 finalize；`over` 直接排除；`unknown`/
+    `currency_mismatch` 永不视为合规。预算边界为闭区间（8000 ≤ 8000），金额比较不做四舍五入。
+12. **拒绝必须是已知结果**：只有真实推荐返回了 `budget_unverifiable`/`budget_exceeded` 才走
+    refusal；`awaiting_clarification`/`error`/通用 `no_verified_candidate_in_scope` 仍按原语义
+    处理（后者仍是 503，避免改变既有 Gate 边界）。refusal 在 finalize COMMIT 后才返回 200，且
+    **没有商品**（`recommendation: null`），Replay/重启必须返回同一 refusal。
+13. 预算数字**不得**进入 BM25 查询文本；只追加 category/use-case 英文词。
+14. M9 与 task requirements 是两个域：M9 是永久用户偏好，task requirements 是本次购买约束；
+    不得把任务预算写成永久 M9 偏好来“证明”覆盖。
+15. 不使用 `git add -A`；不 Push。
 
 ## 6. 已知陷阱
 
@@ -272,19 +342,34 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 - v6 迁移给 `web_pending` 加列；旧行是 NULL。若用 SQL 手工构造已过期 pending，
   必须先改 `created_at` 再改 `expires_at`（CHECK `expires_at > created_at`）。
 - 测试替身 `FakeManager.call_tool` 必须接受真管理器的 `timeout_s` 等 kwargs。
+- **BM25 数字污染**：`gaming laptop under 8000` 会命中型号 `8000`（适配器/电池），检索结果与
+  预算无关。预算只作为硬约束，不进入查询；查询增强只用 `laptop gaming`。
+- **sidecar 价格是 historical USD**：`inspect` 返回 `historical_metadata` + `currency: "USD"`，
+  且仍把 `price` 放进 `unknown_fields`（不是 live price）；跨币种比较必须拒绝。
+- **refusal 响应形状**：`recommendation: null`，`refusal: {code, reason, detail, budget,
+  task_requirements}`；前端用 `response.recommendation ?? null`，不会渲染商品卡。
+- **共享 M9 DB 的建库竞态**：两个 MCP 子进程会同时打开同一个 `m9.sqlite3`；schema 初始化必须
+  幂等（`INSERT OR IGNORE` + 重读），否则子进程启动即崩、`/api/health` 永不 ready。
+  已加回归 `test_two_stores_can_create_the_same_fresh_schema_concurrently`。
+- 真实 E2E 的 `_wait_ready` 超时统一用 300s；机器负载高时 240s 会误报启动失败。
 
 ## 7. 交接检查清单
 
-- [x] HEAD/工作区核对（M1-D 接手 `3643ffc`，与任务提示一致）
-- [x] Cold Resume 真实跨进程 E2E（PID A/B、旧 handle 拒绝、新 handle、M9、推荐、200、Replay、双重启）
-- [x] Warm Reply 仍正常（`test_web_warm_reply_e2e.py` 全绿；FakeManager 无快照时仍 409）
-- [x] Replay / RESULT_DURABLE / AMBIGUOUS / Reset / 并发 / 跨 Session 仍 fail-closed
-- [x] 全量回归通过：`294 passed`（真实数字见第 3 节）
-- [x] opt-in 集成测试断言按真实 9 工具更新并实测通过
+- [x] HEAD/工作区核对（M1-E 接手 `b1165b5`，与任务提示一致）
+- [x] 中文原查询 5000 CNY / laptop 进入 ASK continuation；restore 后仍保留
+- [x] 中文回复“游戏，预算改成 8000 元”合并为 8000 CNY / gaming / laptop（不是并存）
+- [x] `recommend_products` 实际收到合并后的 `task_requirements`，并对 20 个候选执行价格核对
+- [x] 默认目录无价 → `budget_unverifiable`；HTTP 200 的可重放 refusal，`recommendation: null`
+- [x] 预算边界 7999/8000/8001（闭区间）与跨币种/缺价拒绝有单测和 executor 集成测试
+- [x] Warm Reply / Cold Reply / 旧 Handle 拒绝 / M9 / Replay / RESULT_DURABLE / AMBIGUOUS /
+      Reset Fencing 仍全绿（`345 passed`）
+- [x] opt-in 真实 MCP 集成通过（`1 passed`）
+- [x] 修复 M9 共享库并发建 schema 竞态并加回归
 - [x] 本地 Commit，未 Push
-- [ ] qwen_live 持久化回复 / 多轮跟随 ASK / 中文预算约束（明确未实现，见第 4 节）
+- [ ] 真实 CNY 价格（或有来源汇率）/ laptop Product Role / qwen_live 持久化回复 /
+      多轮跟随 ASK（明确未实现，见第 4 节）
 
-## 8. 本次冲刺执行记录（M1-D S6）
+## 8. 上一冲刺执行记录（M1-D S6）
 
 | 步骤 | 结果 |
 |---|---|
@@ -314,3 +399,45 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 8. 重启整个 BFF：GET 恢复同一 Reply Turn/商品/Recommendation ID，replay 仍 200 且零 MCP。
 
 另一条真实测试 `test_real_cold_resume_after_bff_and_mcp_restart` 覆盖 BFF 与 MCP 同时重启。
+
+## 9. 本次冲刺执行记录（M1-E）
+
+| 步骤 | 结果 |
+|---|---|
+| 接手核对 | `git rev-parse HEAD` = `b1165b5`；工作区 clean |
+| 新纯函数模块 | `recommendation/preference/task_requirements.py` |
+| 真实 probe（MCP 直连） | ASK 快照 `5000 CNY / laptop`；restore 后不变；回复合并为 `8000 CNY / gaming / laptop`；推荐 20/20 候选 `price UNKNOWN` → `budget_unverifiable` |
+| 需求/价格单测 | `16 passed`（含 7999/8000/8001、跨币种、缺价） |
+| executor/Gate 预算集成 | `4 passed`（测试商品价格，明确非 MCP E2E） |
+| 真实需求更新 Cold Resume E2E | 连续 2 次单跑通过（含 PID A→B、旧 handle stale、合并约束、refusal、Replay、重启） |
+| M9 竞态修复 | `INSERT OR IGNORE` + 重读；回归测试通过 |
+| **最终全量（29 文件）** | **`345 passed in 781.11s`，exit code 0** |
+| opt-in 真实 MCP 集成 | `1 passed in 32.75s` |
+| `git diff --check` | 无输出 |
+| Commit / Push | 1 个本地提交（`feat: merge task requirements and enforce price budgets`）/ 未 Push |
+
+真实端到端证据（`tests/test_web_requirement_update_e2e.py`）：
+
+1. 真实 BFF + BM25 MCP 子进程 A：中文查询“推荐一台 5000 元的笔记本” → 真实 Gate
+   `NEED_USER_CLARIFICATION`（缺 use case）→ ASK；continuation 的
+   `mcp.task_requirements` = `{budget: 5000 CNY, category: laptop}`；
+2. `POST /api/demo/restart` → PID B（与 A 不相交），旧 handle = `stale_process`；
+3. 回复“游戏，预算改成 8000 元” → 工具严格为
+   `restore_clarification_handle → submit_clarification_reply → get_active_preferences →
+   recommend_products`；restore 参数带 5000，推荐参数带 **8000 CNY / gaming / laptop**；
+4. 推荐真实执行：`effective_query = 推荐一台 5000 元的笔记本 laptop gaming`，20 个候选全部
+   `price UNKNOWN`（`catalog_meta.jsonl has no price field`）→ Gate 的 ALLOW 被预算硬约束覆盖为
+   `budget_unverifiable`，`selected_product_id = null`；
+5. Coordinator 持久化 refusal（HTTP 200、`recommendation: null`），message 明确写出
+   `8000 CNY`、`price UNKNOWN`、`No product is shown ... not a recommendation`；
+6. DB：Request `COMPLETED`、Pending `CONSUMED`、Reply Turn 商品 items 为空、refusal 落库；
+   M9 中文回复不产生永久偏好（`active == []`）；
+7. Replay 完全一致且零 MCP；BFF 重启后恢复同一 refusal Turn，Replay 仍 200 且零 MCP。
+
+价格数据证据：
+
+- 默认 `catalog_meta.jsonl`：`inspect(price)` → `status=unknown`，reason
+  “catalog_meta.jsonl has no price field”；
+- 真实 sidecar 行（`amazon_reviews_2023:raw_meta_Electronics`）：数值 price、`currency: "USD"`、
+  `price_kind: historical_crawl_time`；CNY 预算 → `currency_mismatch`（单测）；
+- 因此没有把 USD 历史价格冒充为 8000 元内的真实推荐；没有为通过测试而放宽币种。

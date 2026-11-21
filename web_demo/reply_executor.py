@@ -42,11 +42,13 @@ from web_demo.handle_lifecycle import (
 from web_demo.reply_assembly import (
     ReplyAssemblyError,
     ReplyAssemblyRequest,
+    assemble_refusal_memory,
     new_recommendation_id,
     turn_from_result,
 )
 from web_demo.reply_result_contract import (
     RecommendationResultError,
+    build_refusal_payload,
     build_reply_payload,
 )
 from web_demo.sessions import Session
@@ -104,6 +106,14 @@ CHECKPOINT_FAILED = "checkpoint_failed"
 
 #: A cold resume failed before any external execution began (validation/MCP error).
 COLD_RESUME_FAILED = "cold_resume_failed"
+
+#: Legitimate "no product can be finalized" outcomes caused by the task budget.  The real
+#: recommendation ran and explicitly declined; they are durable, replayable refusals, never
+#: AMBIGUOUS.  Generic gate outcomes keep the existing 503 semantics.
+REFUSAL_STATUSES = frozenset({
+    "budget_unverifiable",
+    "budget_exceeded",
+})
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,76 @@ def _validated_presentation(
             "the reply presentation re-issued the recommendation id instead of reusing it"
         )
     return presentation
+
+
+def _budget_label(budget: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(budget, Mapping):
+        return None
+    currency = str(budget.get("currency") or "currency unknown")
+    if isinstance(budget.get("max_amount"), (int, float)):
+        return f"<= {float(budget['max_amount']):g} {currency}"
+    if isinstance(budget.get("min_amount"), (int, float)):
+        return f">= {float(budget['min_amount']):g} {currency}"
+    return None
+
+
+def _refusal_narrative(
+    *,
+    status: str,
+    recommendation: Mapping[str, Any],
+    task_requirements: Mapping[str, Any] | None,
+) -> str:
+    """Deterministic, data-backed explanation of a bounded refusal (no fabricated product)."""
+    gate = recommendation.get("gate") if isinstance(recommendation, Mapping) else {}
+    budget = (
+        recommendation.get("budget_verification")
+        if isinstance(recommendation, Mapping) else None
+    )
+    budget = budget if isinstance(budget, Mapping) else {}
+    requirements = task_requirements if isinstance(task_requirements, Mapping) else {}
+    task_budget = requirements.get("budget")
+    task_budget = task_budget if isinstance(task_budget, Mapping) else {}
+    lines: list[str] = ["No product recommendation can be finalized for this task."]
+    label = str(budget.get("label") or "") or _budget_label(task_budget)
+    if label:
+        lines.append(f"Task budget: {label}.")
+        source = str(task_budget.get("source_text") or "").strip()
+        if source:
+            lines.append(f"Budget source: {source!r}.")
+    reason = str(
+        budget.get("selected_reason")
+        or (gate or {}).get("reason")
+        or (gate or {}).get("reason_code")
+        or status
+    )
+    lines.append(f"Constraint check: {reason}.")
+    counts: list[str] = []
+    if isinstance(budget.get("over"), int) and budget.get("over"):
+        counts.append(f"{budget['over']} above the budget")
+    if isinstance(budget.get("unknown"), int) and budget.get("unknown"):
+        counts.append(f"{budget['unknown']} with no verifiable catalogue price (price UNKNOWN)")
+    if isinstance(budget.get("currency_mismatch"), int) and budget.get("currency_mismatch"):
+        counts.append(
+            f"{budget['currency_mismatch']} priced in another currency (no exchange rate is available)"
+        )
+    if counts:
+        lines.append("Candidates not verifiable under the budget: " + ", ".join(counts) + ".")
+    category = requirements.get("category")
+    use_cases = requirements.get("use_cases")
+    task_bits: list[str] = []
+    if isinstance(category, str) and category:
+        task_bits.append(f"category={category}")
+    if isinstance(use_cases, list) and use_cases:
+        task_bits.append("use_case=" + ", ".join(str(item) for item in use_cases))
+    if task_bits:
+        lines.append("Merged task requirements: " + "; ".join(task_bits) + ".")
+    lines.append(
+        "No product is shown rather than presenting an unverified match."
+    )
+    lines.append(
+        "Catalogue evidence only; this is not a recommendation."
+    )
+    return "\n".join(lines)
 
 
 class WarmReplyExecutor:
@@ -425,6 +505,13 @@ class WarmReplyExecutor:
                     detail=f"external execution outcome unknown: {type(exc).__name__}",
                 )
             steps.append(_step("submit_clarification_reply", started))
+            # The reply carries the merged task requirements (original query + real reply).
+            # Passing them into the resumed recommendation makes the budget/use case
+            # explicit even for a cold-resumed handle.
+            reply_requirements: dict[str, Any] | None = None
+            if (isinstance(reply, Mapping)
+                    and isinstance(reply.get("task_requirements"), Mapping)):
+                reply_requirements = dict(reply["task_requirements"])
 
             try:
                 started = time.perf_counter()
@@ -437,12 +524,15 @@ class WarmReplyExecutor:
                 )
                 steps.append(_step("get_active_preferences", started))
 
+                recommend_payload = dict(
+                    recommend_arguments or _default_recommend_arguments(session, pending)
+                )
+                if reply_requirements is not None:
+                    recommend_payload["task_requirements"] = reply_requirements
                 started = time.perf_counter()
                 recommendation = await asyncio.wait_for(
                     self._call_tool(
-                        self._profile_id, "recommend_products",
-                        dict(recommend_arguments
-                             or _default_recommend_arguments(session, pending)),
+                        self._profile_id, "recommend_products", recommend_payload
                     ),
                     timeout=self._tool_timeout,
                 )
@@ -474,6 +564,49 @@ class WarmReplyExecutor:
                 return ReplyExecutionOutcome(
                     FENCED, pending=pending, handle=handle,
                     detail="lease heartbeat failed",
+                )
+
+            recommendation_status = (
+                str(recommendation.get("status") or "")
+                if isinstance(recommendation, Mapping) else ""
+            )
+            if recommendation_status in REFUSAL_STATUSES:
+                # The real recommendation ran and explicitly declined to finalize a product
+                # (for example the task budget cannot be verified against the catalogue
+                # price).  This is a known, durable refusal -- not AMBIGUOUS, and never a
+                # fabricated recommendation.
+                gate = recommendation.get("gate")
+                budget = recommendation.get("budget_verification")
+                contract = build_refusal_payload(
+                    reply_turn_id=pending.reply_turn_id,
+                    pending_id=pending.pending_id,
+                    user_message=message,
+                    narrative=_refusal_narrative(
+                        status=recommendation_status, recommendation=recommendation,
+                        task_requirements=reply_requirements,
+                    ),
+                    status=recommendation_status,
+                    gate=gate if isinstance(gate, Mapping) else None,
+                    task_requirements=reply_requirements,
+                    ranking_source=self._ranking_source,
+                    budget=budget if isinstance(budget, Mapping) else None,
+                )
+                memory = assemble_refusal_memory(
+                    reply if isinstance(reply, Mapping) else {},
+                    preferences if isinstance(preferences, Mapping) else {},
+                    profile_id=self._profile_id,
+                )
+                result = {
+                    "reply": contract,
+                    "preferences": memory["preferences"],
+                    "memory_update": memory["memory_update"],
+                    "steps": steps,
+                    "refusal": dict(contract["refusal"]),
+                    "task_requirements": reply_requirements,
+                }
+                turn = turn_from_result(result)
+                return self._checkpoint_and_finalize(
+                    session, pending, turn=turn, result=result, handle=handle
                 )
 
             # Presentation is pure BFF logic over the real tool payloads.  A non-final or
@@ -522,31 +655,47 @@ class WarmReplyExecutor:
                 "preferences": presentation.get("preferences"),
                 "memory_update": presentation.get("memory_update"),
                 "steps": steps,
+                "task_requirements": reply_requirements,
             }
             # The durable turn carries the same BFF extras as the live response so a restored
             # transcript shows the memory update and tool activity without re-running MCP.
             turn = turn_from_result(result)
-            try:
-                self._store.checkpoint_reply_result(
-                    session.session_id, self._request_id,
-                    claim_token=self._claim_token, result=result,
-                )
-            except RequestFenced as exc:
-                return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),
-                                             handle=handle)
-            except RequestConflict as exc:
-                return ReplyExecutionOutcome(CONFLICT, pending=pending, detail=str(exc),
-                                             handle=handle)
-            except Exception as exc:  # noqa: BLE001 - checkpoint never durable
-                self._mark_ambiguous(f"checkpoint failed: {exc}")
-                return ReplyExecutionOutcome(
-                    CHECKPOINT_FAILED, pending=pending, handle=handle,
-                    detail=f"checkpoint not durable: {type(exc).__name__}",
-                )
-
-            return self._finalize(session, pending, turn=turn, result=result, handle=handle)
+            return self._checkpoint_and_finalize(
+                session, pending, turn=turn, result=result, handle=handle
+            )
         finally:
             await self._stop_heartbeat()
+
+    # -- commit ------------------------------------------------------------- #
+
+    def _checkpoint_and_finalize(
+        self,
+        session: Session,
+        pending: PendingRecord,
+        *,
+        turn: Mapping[str, Any],
+        result: Mapping[str, Any],
+        handle: HandleCheck | None,
+    ) -> ReplyExecutionOutcome:
+        assert self._claim_token is not None and self._request_id is not None
+        try:
+            self._store.checkpoint_reply_result(
+                session.session_id, self._request_id,
+                claim_token=self._claim_token, result=result,
+            )
+        except RequestFenced as exc:
+            return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),
+                                         handle=handle)
+        except RequestConflict as exc:
+            return ReplyExecutionOutcome(CONFLICT, pending=pending, detail=str(exc),
+                                         handle=handle)
+        except Exception as exc:  # noqa: BLE001 - checkpoint never durable
+            self._mark_ambiguous(f"checkpoint failed: {exc}")
+            return ReplyExecutionOutcome(
+                CHECKPOINT_FAILED, pending=pending, handle=handle,
+                detail=f"checkpoint not durable: {type(exc).__name__}",
+            )
+        return self._finalize(session, pending, turn=dict(turn), result=result, handle=handle)
 
     # -- finalize ----------------------------------------------------------- #
 

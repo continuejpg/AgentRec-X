@@ -27,6 +27,7 @@ from web_demo.handle_lifecycle import (  # noqa: E402
 from web_demo.reply_assembly import (  # noqa: E402
     ReplyAssemblyRequest,
     assemble_reply_presentation,
+    reply_response_from_result,
 )
 from web_demo.reply_executor import (  # noqa: E402
     CPU_RESUME_RANKING_SOURCE,
@@ -53,12 +54,13 @@ def _handle_missing(ref) -> HandleCheck:  # noqa: ARG001 - no recorded handle
 class FakeTools:
     """Real-shaped MCP payloads for the four calls a warm reply performs."""
 
-    def __init__(self, *, on_call=None, recommend=None) -> None:
+    def __init__(self, *, on_call=None, recommend=None, reply=None) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.on_call = on_call
         self.fail: dict[str, Exception] = {}
         self.delay: dict[str, float] = {}
         self.recommend = recommend or recommend_payload()
+        self.reply = reply or reply_payload()
 
     async def __call__(self, profile: str, tool: str, arguments: dict) -> dict:
         self.calls.append((tool, dict(arguments)))
@@ -69,7 +71,7 @@ class FakeTools:
         if self.on_call is not None:
             self.on_call(tool)
         if tool == "submit_clarification_reply":
-            return reply_payload()
+            return self.reply
         if tool == "get_active_preferences":
             return preferences_payload()
         if tool == "recommend_products":
@@ -173,7 +175,9 @@ def test_happy_path_executes_real_call_order_and_finalizes(tmp_path: Path) -> No
         assert outcome.request.execution_stage == "COMPLETED"
 
         result = outcome.result
-        assert set(result) == {"reply", "preferences", "memory_update", "steps"}
+        assert set(result) == {
+            "reply", "preferences", "memory_update", "steps", "task_requirements",
+        }
         reply = result["reply"]
         assert reply["schema"] == CONTRACT_SCHEMA
         assert reply["reply_turn_id"] == pending.reply_turn_id
@@ -493,5 +497,82 @@ def test_concurrent_executors_have_exactly_one_winner(tmp_path: Path) -> None:
         assert len(submits) == 1, "only the winning executor may perform the M9 write"
         assert len(store.list_turns("web-r")) == 1
         assert store.get_open_pending_for_session("web-r") is None
+    finally:
+        store.close()
+
+
+def test_known_budget_refusal_is_durable_without_a_product(tmp_path: Path) -> None:
+    """A real budget refusal is a known outcome: durable, replayable, and never a product."""
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        requirements = {
+            "schema": "agentrecx.task_requirements.v1",
+            "budget": {"max_amount": 8000.0, "min_amount": None, "currency": "CNY",
+                       "source_text": "游戏，预算改成 8000 元"},
+            "category": "laptop",
+            "use_cases": ["gaming"],
+            "source_text": ["推荐一台 5000 元的笔记本", "游戏，预算改成 8000 元"],
+        }
+        reply = {**reply_payload(), "task_requirements": requirements}
+        recommendation = {
+            "schema": "agentrecx.p17.recommend_products.v1",
+            "status": "budget_unverifiable",
+            "selected_product_id": None,
+            "selected_product": None,
+            "gate": {
+                "action": "ALLOW_FINALIZE",
+                "allow_finalize": False,
+                "reason_code": "budget_unverifiable",
+                "reason": "the catalogue provides no price for this candidate",
+            },
+            "budget_verification": {
+                "budget": requirements["budget"],
+                "label": "<= 8000 CNY",
+                "candidates_checked": 3,
+                "within": 0,
+                "over": 0,
+                "unknown": 3,
+                "currency_mismatch": 0,
+                "verified": False,
+            },
+            "error": None,
+        }
+        tools = FakeTools(recommend=recommendation, reply=reply)
+        outcome = asyncio.run(_run(
+            _executor(store, tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+        ))
+        assert outcome.outcome == "completed"
+        assert [tool for tool, _ in tools.calls] == [
+            "submit_clarification_reply",
+            "get_active_preferences",
+            "recommend_products",
+        ], "a refusal must not fetch product details or assemble a product"
+        assert tools.calls[2][1]["task_requirements"] == requirements
+
+        result = outcome.result
+        assert result["refusal"]["code"] == "budget_unverifiable"
+        assert result["reply"]["products"]["items"] == []
+        assert result["reply"]["recommendation"]["id"] is None
+        assert result["task_requirements"] == requirements
+        response = reply_response_from_result(
+            result, clarification_id=pending.clarification_id
+        )
+        assert response["recommendation"] is None
+        assert response["refusal"]["code"] == "budget_unverifiable"
+        assert "No product recommendation" in response["message"]
+        assert "8000 CNY" in response["message"]
+        assert "price UNKNOWN" in response["message"]
+        assert outcome.pending.status == "CONSUMED"
+
+        replay_tools = FakeTools()
+        replay = asyncio.run(_run(
+            _executor(store, replay_tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+        ))
+        assert replay.outcome == "replayed"
+        assert replay_tools.calls == []
+        assert replay.result == result
     finally:
         store.close()

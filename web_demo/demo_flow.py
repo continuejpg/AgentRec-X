@@ -1149,6 +1149,9 @@ def _mirror_committed_reply(
     recommendation_meta = reply_payload.get("recommendation") or {}
     ranking_source = str(recommendation_meta.get("ranking_source") or "")
     products = turn_view.get("products") or {}
+    if not (isinstance(products, Mapping) and products.get("items")):
+        # A bounded refusal has no product; there is no behavior snapshot to build.
+        return
     try:
         session.record_recommendation(
             dict(products), turn_id=str(turn_view["turn_id"]),

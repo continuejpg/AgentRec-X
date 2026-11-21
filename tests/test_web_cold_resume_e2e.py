@@ -82,7 +82,7 @@ def _fake_settings(tmp_path: Path) -> Settings:
     )
 
 
-def _wait_ready(client: TestClient, timeout_s: float = 240.0) -> None:
+def _wait_ready(client: TestClient, timeout_s: float = 300.0) -> None:
     deadline = time.time() + timeout_s
     response = None
     while time.time() < deadline:

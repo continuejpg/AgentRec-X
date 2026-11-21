@@ -12,6 +12,7 @@ from typing import Any, Mapping
 __all__ = [
     "CONTRACT_SCHEMA",
     "RecommendationResultError",
+    "build_refusal_payload",
     "build_reply_payload",
     "turn_from_payload",
     "validate_recommendation",
@@ -167,4 +168,73 @@ def turn_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "user_text": str(payload["user_text"]),
         "assistant_text": str(payload["assistant_text"]),
         "products": dict(products),
+    }
+
+
+def build_refusal_payload(
+    *,
+    reply_turn_id: str,
+    pending_id: str,
+    user_message: str,
+    narrative: str,
+    status: str,
+    gate: Mapping[str, Any] | None,
+    task_requirements: Mapping[str, Any] | None,
+    ranking_source: str,
+    budget: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the durable payload for a *bounded refusal* after a real resume.
+
+    A refusal is a known outcome, not an uncertain one: the recommendation ran and the Gate
+    (or the task budget) explicitly declined to finalize a product.  It is therefore stored
+    and replayable exactly like a successful reply, but with **no product** and an explicit
+    machine-readable reason.  It must never be mistaken for a recommendation.
+    """
+    _require(bool(str(reply_turn_id or "").strip()), "reply_turn_id is required")
+    _require(bool(str(pending_id or "").strip()), "pending_id is required")
+    _require(bool(str(user_message or "").strip()), "user_message is required")
+    _require(bool(str(narrative or "").strip()), "assistant narrative is required")
+    _require(bool(str(status or "").strip()), "refusal status is required")
+    _require(bool(str(ranking_source or "").strip()), "ranking source is required")
+    gate_payload = dict(gate) if isinstance(gate, Mapping) else {}
+    budget_payload = dict(budget) if isinstance(budget, Mapping) else None
+    requirements_payload = (
+        dict(task_requirements) if isinstance(task_requirements, Mapping) else None
+    )
+    refusal = {
+        "code": str(status),
+        "reason": str(gate_payload.get("reason_code") or status),
+        "detail": str(gate_payload.get("reason") or ""),
+        "budget": budget_payload,
+        "task_requirements": requirements_payload,
+    }
+    products = {
+        "items": [],
+        "query": str(user_message),
+        "search_mode": None,
+        "score_kind": None,
+        "catalogue_size": None,
+        "recommended_product_id": None,
+        "gate": gate_payload,
+        "recommendation_id": None,
+        "request_id": str(reply_turn_id),
+        "ranker_version": None,
+        "refusal": refusal,
+    }
+    return {
+        "schema": CONTRACT_SCHEMA,
+        "reply_turn_id": str(reply_turn_id),
+        "pending_id": str(pending_id),
+        "request_id": str(reply_turn_id),
+        "user_text": str(user_message),
+        "assistant_text": str(narrative),
+        "products": products,
+        "recommendation": {
+            "id": None,
+            "ranking_source": str(ranking_source),
+            "status": str(status),
+            "gate": gate_payload,
+        },
+        "preference_evidence": [],
+        "refusal": refusal,
     }

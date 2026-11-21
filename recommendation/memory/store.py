@@ -261,7 +261,13 @@ class SQLitePreferenceStore:
         return self._database
 
     def _ensure_schema(self) -> None:
-        """Create the schema and record/verify its version."""
+        """Create the schema and record/verify its version.
+
+        Two MCP children can open the same fresh M9 database at the same time (the Web demo
+        runs one child per profile against one shared store).  Schema creation is therefore
+        idempotent: an ``INSERT OR IGNORE`` plus a re-read so the loser of the race verifies
+        the value instead of failing with ``UNIQUE constraint failed: meta.key``.
+        """
         with self._lock:
             self._connection.executescript(_SQLITE_SCHEMA)
             row = self._connection.execute(
@@ -269,10 +275,17 @@ class SQLitePreferenceStore:
             ).fetchone()
             if row is None:
                 self._connection.execute(
-                    "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+                    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
                     (str(MEMORY_SCHEMA_VERSION),),
                 )
-            elif int(row["value"]) != MEMORY_SCHEMA_VERSION:
+                row = self._connection.execute(
+                    "SELECT value FROM meta WHERE key = 'schema_version'"
+                ).fetchone()
+                if row is None:  # pragma: no cover - the insert above always lands
+                    raise RuntimeError(
+                        f"memory database {self._database!r} has no schema_version row"
+                    )
+            if int(row["value"]) != MEMORY_SCHEMA_VERSION:
                 raise RuntimeError(
                     f"memory database {self._database!r} has schema version "
                     f"{row['value']}, expected {MEMORY_SCHEMA_VERSION}"
