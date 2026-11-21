@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import sys
 import threading
@@ -15,13 +16,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import tests.test_web_demo_unit as twu  # noqa: E402
 from tests.test_web_ask_persistence import (  # noqa: E402
     _app,
     _chat,
     _create,
     _run_child,
 )
+from web_demo.app import create_app  # noqa: E402
+from web_demo.config import Settings  # noqa: E402
 from web_demo.persistent_sessions import PersistentSessionStore  # noqa: E402
+from web_demo.reply_executor import CPU_RESUME_RANKING_SOURCE  # noqa: E402
 from web_demo.state_store import (  # noqa: E402
     SQLiteWebStateStore,
     TaskStateConflict,
@@ -30,13 +35,16 @@ from web_demo.state_store import (  # noqa: E402
 REPLY_CODE = "clarification_resume_not_ready"
 
 
-def _reply(client: TestClient, session_id: str, clarification_id: str):
+def _reply(
+    client: TestClient, session_id: str, clarification_id: str, *,
+    message: str = "For gaming.",
+):
     return client.post(
         "/api/clarification/reply",
         json={
             "session_id": session_id,
             "clarification_id": clarification_id,
-            "message": "For gaming.",
+            "message": message,
         },
     )
 
@@ -83,34 +91,155 @@ def _counts(db_path: Path) -> tuple[int, int]:
 
 
 # --------------------------------------------------------------------------- #
-# Persistent warm reply is refused (the P0 inconsistency)
+# Persistent Warm Reply: commit, replay and the fail-closed rejections
 # --------------------------------------------------------------------------- #
 
+REPLY_MESSAGE = "I prefer noise cancelling."
 
-def test_persistent_warm_reply_is_refused_without_side_effects(tmp_path: Path) -> None:
+
+def _warm_manager():
+    """A manager whose ASK stays open and whose post-reply resume finalizes."""
+    return twu.warm_reply_manager()
+
+
+def _warm_app(tmp_path: Path, db_path: Path, manager=None):
+    settings = Settings(
+        search_mode="bm25", allow_memory_writes=True, log_dir=tmp_path / "logs",
+        web_state_db_path=db_path, python_executable=sys.executable, mcp_timeout_s=30.0,
+    )
+    return create_app(settings=settings, manager=manager or _warm_manager())
+
+
+def _reply_message(client: TestClient, session_id: str, clarification_id: str):
+    return _reply(client, session_id, clarification_id, message=REPLY_MESSAGE)
+
+
+def test_persistent_warm_reply_commits_real_presentation_and_reply_turn(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "state.sqlite3"
-    app = _app(tmp_path, db_path)
+    app = _warm_app(tmp_path, db_path)
+    manager = app.state.manager
     with TestClient(app) as client:
         session_id = _create(client)
-        events = _chat(client, session_id)
-        assert "clarification" in [event["event"] for event in events]
+        _chat(client, session_id, "I need some new headphones.")
         clarification_id = client.get(f"/api/sessions/{session_id}").json()[
             "pending_clarification"
         ]["clarification_id"]
+        calls_before = len(manager.calls)
+        response = _reply_message(client, session_id, clarification_id)
+        view = client.get(f"/api/sessions/{session_id}").json()
+        tools = [call[1] for call in manager.calls[calls_before:]]
 
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["turn_id"] == f"{session_id}-r1"
+    assert body["clarification_id"] == clarification_id
+    assert body["clarification"] is None
+    assert body["message"].startswith("Memory update (profile_0057)")
+    assert body["memory_update"]["added"] == 2
+    assert body["preferences"]["profile_id"] == "profile_0057"
+    recommendation = body["recommendation"]
+    assert recommendation["items"][0]["product_id"] == "B004K6R43G"
+    assert recommendation["recommended_product_id"] == "B004K6R43G"
+    assert recommendation["recommendation_id"].startswith("rec-")
+    assert recommendation["request_id"] == f"{session_id}-r1"
+    assert tools == [
+        "submit_clarification_reply", "get_active_preferences",
+        "recommend_products", "get_product_info",
+    ]
+
+    assert view["pending_clarification"] is None
+    assert [turn["turn_id"] for turn in view["turns"]] == [
+        f"{session_id}-t1", f"{session_id}-r1",
+    ]
+    assert view["turns"][-1]["products"]["items"][0]["product_id"] == "B004K6R43G"
+
+    state = SQLiteWebStateStore(db_path)
+    try:
+        assert state.get_open_pending_for_session(session_id) is None
+        pending = state.get_pending_for_clarification(session_id, clarification_id)
+        assert pending is not None and pending.status == "CONSUMED"
+        request = state.get_request(session_id, f"{session_id}-r1")
+        assert request is not None
+        assert (request.status, request.execution_stage) == ("COMPLETED", "COMPLETED")
+        stored = request.result["payload"]
+        assert stored["reply"]["recommendation"]["id"] == recommendation["recommendation_id"]
+        assert stored["reply"]["recommendation"]["ranking_source"] == CPU_RESUME_RANKING_SOURCE
+        task = state.get_task(request.task_id)
+        assert task is not None and task.status == "COMPLETED"
+        assert [row.turn_id for row in state.list_turns(session_id)] == [
+            f"{session_id}-t1", f"{session_id}-r1",
+        ]
+    finally:
+        state.close()
+
+
+def test_duplicate_persistent_reply_replays_without_second_mcp_call(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite3"
+    app = _warm_app(tmp_path, db_path)
+    manager = app.state.manager
+    with TestClient(app) as client:
+        session_id = _create(client)
+        _chat(client, session_id, "I need some new headphones.")
+        clarification_id = client.get(f"/api/sessions/{session_id}").json()[
+            "pending_clarification"
+        ]["clarification_id"]
+        first = _reply_message(client, session_id, clarification_id)
+        calls_after_first = len(manager.calls)
+        second = _reply_message(client, session_id, clarification_id)
+        view = client.get(f"/api/sessions/{session_id}").json()
+
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert first.json() == second.json(), "a replay must return the persisted result verbatim"
+    assert len(manager.calls) == calls_after_first, "a replay must not call MCP again"
+    submits = [call for call in manager.calls if call[1] == "submit_clarification_reply"]
+    assert len(submits) == 1
+    assert len(view["turns"]) == 2
+    assert view["pending_clarification"] is None
+
+
+def test_persistent_reply_after_manager_restart_is_refused(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite3"
+    app = _warm_app(tmp_path, db_path)
+    manager = app.state.manager
+    with TestClient(app) as client:
+        session_id = _create(client)
+        _chat(client, session_id, "I need some new headphones.")
+        clarification_id = client.get(f"/api/sessions/{session_id}").json()[
+            "pending_clarification"
+        ]["clarification_id"]
+        asyncio.run(manager.restart("profile_0057"))
+        calls_before = len(manager.calls)
         before = _snapshot(db_path, session_id)
-        ledger_before = _ledger(db_path)
-        calls_before = len(app.state.manager.calls)
-
-        response = _reply(client, session_id, clarification_id)
+        response = _reply_message(client, session_id, clarification_id)
 
     assert response.status_code == 409
     assert response.json()["code"] == REPLY_CODE
-    assert len(app.state.manager.calls) == calls_before, "no MCP call may be made"
+    assert response.json()["detail"]["handle"]["code"] == "stale_process"
+    assert len(manager.calls) == calls_before, "no MCP call may follow a dead handle"
     assert _snapshot(db_path, session_id) == before
-    assert _ledger(db_path) == ledger_before
     assert before["pending_status"] == "OPEN"
-    assert before["task_status"] == "WAITING_FOR_USER"
+
+
+def test_persistent_reply_after_handle_expiry_is_refused(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite3"
+    app = _warm_app(tmp_path, db_path)
+    manager = app.state.manager
+    with TestClient(app) as client:
+        session_id = _create(client)
+        _chat(client, session_id, "I need some new headphones.")
+        clarification_id = client.get(f"/api/sessions/{session_id}").json()[
+            "pending_clarification"
+        ]["clarification_id"]
+        manager.expire_handles()
+        calls_before = len(manager.calls)
+        response = _reply_message(client, session_id, clarification_id)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == REPLY_CODE
+    assert response.json()["detail"]["handle"]["code"] == "expired"
+    assert len(manager.calls) == calls_before
 
 
 def test_persistent_restored_reply_is_refused(tmp_path: Path) -> None:
@@ -126,24 +255,6 @@ def test_persistent_restored_reply_is_refused(tmp_path: Path) -> None:
     assert response.json()["code"] == REPLY_CODE
     assert app.state.manager.calls == []
     assert _snapshot(db_path, written["session_id"]) == before
-
-
-def test_duplicate_persistent_reply_stays_refused(tmp_path: Path) -> None:
-    db_path = tmp_path / "state.sqlite3"
-    app = _app(tmp_path, db_path)
-    with TestClient(app) as client:
-        session_id = _create(client)
-        _chat(client, session_id)
-        clarification_id = client.get(f"/api/sessions/{session_id}").json()[
-            "pending_clarification"
-        ]["clarification_id"]
-        before = _snapshot(db_path, session_id)
-        first = _reply(client, session_id, clarification_id)
-        second = _reply(client, session_id, clarification_id)
-
-    assert (first.status_code, second.status_code) == (409, 409)
-    assert first.json()["code"] == second.json()["code"] == REPLY_CODE
-    assert _snapshot(db_path, session_id) == before
 
 
 # --------------------------------------------------------------------------- #

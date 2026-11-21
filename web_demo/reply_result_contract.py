@@ -61,11 +61,19 @@ def validate_recommendation(recommendation: Any) -> str:
 
 
 def _selected_card(selected: Mapping[str, Any]) -> dict[str, Any]:
-    card = {"item_id": selected.get("item_id"), "title": selected.get("title")}
+    item_id = selected.get("item_id")
+    # ``item_id`` is the MCP selected-product identity; ``product_id`` is the BFF card
+    # identity used by the behavior snapshot.  Both are carried so a restored reply can
+    # rebuild its presentation without inventing either one.
+    card = {"item_id": item_id, "product_id": item_id, "title": selected.get("title")}
     for key in ("product_type", "attributes", "namespaced_id", "source", "form_factor"):
         if key in selected:
             card[key] = selected[key]
     return {key: value for key, value in card.items() if value is not None}
+
+
+def _item_identity(item: Mapping[str, Any]) -> str:
+    return str(item.get("product_id") or item.get("item_id") or "").strip()
 
 
 def _products_snapshot(products: Mapping[str, Any] | None, selected: Mapping[str, Any]) -> dict:
@@ -77,10 +85,12 @@ def _products_snapshot(products: Mapping[str, Any] | None, selected: Mapping[str
     items = products.get("items")
     _require(isinstance(items, list) and items, "products.items must be a non-empty list")
     for item in items:
-        _require(isinstance(item, Mapping) and str(item.get("item_id") or "").strip(),
-                 "every product item needs a non-empty item_id")
+        _require(
+            isinstance(item, Mapping) and bool(_item_identity(item)),
+            "every product item needs a non-empty product_id (or item_id)",
+        )
     snapshot = dict(products)
-    if str(selected.get("item_id") or "") not in {str(i.get("item_id")) for i in items}:
+    if str(selected.get("item_id") or "") not in {_item_identity(item) for item in items}:
         snapshot["items"] = [*items, _selected_card(selected)]
         snapshot["selected_appended"] = True
     return snapshot

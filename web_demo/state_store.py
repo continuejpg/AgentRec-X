@@ -1,4 +1,4 @@
-﻿"""Durable state for the Web Demo: session identity, tasks and clarifications.
+"""Durable state for the Web Demo: session identity, tasks and clarifications.
 
 Scope (M1-C S2a + S2b)
 -----------------------
@@ -1143,6 +1143,29 @@ class SQLiteWebStateStore:
                 raise StateStoreError(f"cannot read session pending: {exc}") from exc
         return None if row is None else _to_pending_record(row)
 
+    def get_pending_for_clarification(
+        self, session_id: str, clarification_id: str
+    ) -> PendingRecord | None:
+        """Return the session's most recent ASK for this clarification id (any status).
+
+        The reply path needs the durable ``pending_id``/``reply_turn_id`` both for a fresh
+        OPEN pending and for an idempotent replay after the pending was CONSUMED.  This is a
+        read only; every state transition is still enforced by the claim/finalize methods.
+        """
+        with self._lock:
+            self._ensure_open()
+            try:
+                row = self._connection.execute(
+                    f"SELECT {_PENDING_ALIASED_COLUMNS} FROM web_pending p "
+                    "JOIN web_task t ON p.task_id = t.task_id "
+                    "WHERE t.session_id = ? AND p.clarification_id = ? "
+                    "ORDER BY p.created_at DESC, p.pending_id DESC LIMIT 1",
+                    (session_id, str(clarification_id)),
+                ).fetchone()
+            except sqlite3.Error as exc:
+                raise StateStoreError(f"cannot read session clarification: {exc}") from exc
+        return None if row is None else _to_pending_record(row)
+
     # -- turns -------------------------------------------------------------- #
 
     def append_turn(
@@ -1746,7 +1769,8 @@ class SQLiteWebStateStore:
                 "payload": None if result is None else dict(result),
             }
             finalized = connection.execute(
-                "UPDATE web_request SET status = 'COMPLETED', result_json = ?, updated_at = ? "
+                "UPDATE web_request SET status = 'COMPLETED', execution_stage = 'COMPLETED', "
+                "result_json = ?, updated_at = ? "
                 "WHERE session_id = ? AND request_id = ? AND status = 'PROCESSING' "
                 "AND claim_token = ?",
                 (json.dumps(result_payload, sort_keys=True, ensure_ascii=False), reference,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -18,6 +19,14 @@ from fastapi.testclient import TestClient
 from web_demo import viewmodels as vm
 from web_demo.app import create_app
 from web_demo.config import PROFILE_BY_ID, REPLAY_PATH, Settings
+from web_demo.handle_lifecycle import (
+    HandleCheck,
+    HandleRef,
+    HandleTicket,
+    ProcessIdentity,
+    issued_handles_in_response,
+    verify_handle,
+)
 from web_demo.mcp_manager import MCPManagerError, MCPToolError, MCPUnavailableError
 from web_demo.sessions import SessionStore
 
@@ -58,6 +67,63 @@ class FakeManager:
         self.started = False
         self.stopped = False
         self.restarted: list[str | None] = []
+        # Handle lifetime proof, mirrored from web_demo.handle_lifecycle: every handle the
+        # fake "child" reports issuing is remembered against the current process identity.
+        self.instance_id = "fake-manager"
+        self.process_instance_id = "fake-process-1"
+        self._process_starts = 1
+        self.handles: dict[str, HandleTicket] = {}
+
+    # -- closure of the real manager's handle API ---------------------------
+    def process_identity(self, profile_id: str) -> ProcessIdentity:
+        return ProcessIdentity(
+            profile_id=profile_id,
+            manager_instance_id=self.instance_id,
+            process_instance_id=self.process_instance_id,
+            ready=self.ready,
+            generation=self._process_starts,
+        )
+
+    def check_handle(self, ref: HandleRef, *, now: float | None = None) -> HandleCheck:
+        return verify_handle(ref, self.handles.get(ref.clarification_id),
+                             self.process_identity(ref.profile_id), now=now)
+
+    def expire_handles(self) -> None:
+        """Test hook: make every recorded handle past its absolute deadline."""
+        expired = {
+            clarification_id: HandleTicket(
+                clarification_id=ticket.clarification_id,
+                profile_id=ticket.profile_id,
+                session_id=ticket.session_id,
+                manager_instance_id=ticket.manager_instance_id,
+                process_instance_id=ticket.process_instance_id,
+                issued_at=ticket.issued_at - 10.0,
+                expires_at=ticket.issued_at - 5.0,
+                tool=ticket.tool,
+            )
+            for clarification_id, ticket in self.handles.items()
+        }
+        self.handles = expired
+
+    def _remember_handles(
+        self, profile_id: str, tool: str, arguments: Mapping[str, Any], value: Any
+    ) -> None:
+        if not isinstance(value, Mapping):
+            return
+        raw_session = arguments.get("session_id")
+        session_id = str(raw_session) if isinstance(raw_session, str) and raw_session else None
+        for clarification_id, lifetime in issued_handles_in_response(value):
+            now = time.time()
+            self.handles[clarification_id] = HandleTicket(
+                clarification_id=clarification_id,
+                profile_id=profile_id,
+                session_id=session_id,
+                manager_instance_id=self.instance_id,
+                process_instance_id=self.process_instance_id,
+                issued_at=now,
+                expires_at=now + lifetime,
+                tool=tool,
+            )
 
     # -- lifecycle / health --------------------------------------------------
     def start(self) -> None:
@@ -68,6 +134,8 @@ class FakeManager:
 
     async def restart(self, profile_id: str | None = None) -> list[dict[str, Any]]:
         self.restarted.append(profile_id)
+        self._process_starts += 1
+        self.process_instance_id = f"fake-process-{self._process_starts}"
         return [
             {"profile_id": pid, "status": "starting", "tools": None}
             for pid in ([profile_id] if profile_id else PROFILE_BY_ID)
@@ -122,7 +190,9 @@ class FakeManager:
         value = handler(profile_id, args) if callable(handler) else handler
         if isinstance(value, Exception):
             raise value
-        return json.loads(json.dumps(value))
+        copied = json.loads(json.dumps(value))
+        self._remember_handles(profile_id, tool, args, copied)
+        return copied
 
 
 def product_title(item_id: str) -> str:
@@ -776,6 +846,32 @@ def _clarification_setup(manager: FakeManager) -> None:
         "recommend_products": recommend_payload(status="awaiting_clarification"),
         "request_preference_clarification": clarification_payload(),
     }
+
+
+def warm_reply_manager() -> FakeManager:
+    """A manager whose ASK stays open and whose post-reply resume finalizes.
+
+    Used by the persistent Warm Reply tests: the first ``recommend_products`` asks the
+    clarification, every later call returns a finalized recommendation.
+    """
+    manager = FakeManager(writes_enabled=True)
+    _clarification_setup(manager)
+    calls = {"recommend": 0}
+
+    def recommend(profile_id: str, arguments: Mapping[str, Any]) -> dict[str, Any]:  # noqa: ARG001
+        calls["recommend"] += 1
+        return recommend_payload(
+            status="awaiting_clarification" if calls["recommend"] == 1 else "finalized"
+        )
+
+    manager.responses.update(
+        {
+            "recommend_products": recommend,
+            "submit_clarification_reply": reply_payload(),
+            "get_active_preferences": preferences_payload(),
+        }
+    )
+    return manager
 
 
 def test_chat_clarification_flow_stores_pending_handle(tmp_path):

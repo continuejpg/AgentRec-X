@@ -1,4 +1,4 @@
-﻿"""Deterministic demo controllers for the Web Demo BFF.
+"""Deterministic demo controllers for the Web Demo BFF.
 
 No LLM is involved.  Every controller maps a real MCP tool payload into the view models from
 ``web_demo.viewmodels`` and yields SSE events in the contract order.  Tool activity is recorded
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -16,10 +17,30 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Iterable, Mapping
 
 from web_demo import viewmodels as vm
-from web_demo.behavior import EXISTING_RANKER_VERSION
+from web_demo.behavior import EXISTING_RANKER_VERSION  # re-exported: demo metadata helpers
 from web_demo.config import COMPARE_MAX, COMPARE_MIN, SEARCH_TOP_K, Settings
 from web_demo.mcp_manager import MCPManager, MCPManagerError
+from web_demo.reply_assembly import (
+    assemble_reply_presentation,
+    prepare_recommendation_products,
+    reply_response_from_result,
+    turn_from_result,
+)
+from web_demo.reply_executor import (
+    AMBIGUOUS,
+    BUSY,
+    CHECKPOINT_FAILED,
+    CONFLICT,
+    FENCED,
+    REPLAYED,
+    RESULT_REUSED,
+    SUCCESS,
+    WARM_UNAVAILABLE,
+    WarmReplyExecutor,
+)
 from web_demo.sessions import PendingClarification, Session, Turn
+
+LOGGER = logging.getLogger("agentrecx.web_demo.demo_flow")
 
 TOOL_LABELS = {
     "search_products": "Search",
@@ -91,20 +112,6 @@ def _mark_running_tool_error(turn: Turn, message: str) -> dict[str, Any] | None:
             entry["detail"] = message
             return entry
     return None
-
-
-def prepare_recommendation_products(
-    products: Mapping[str, Any],
-    *,
-    recommendation_id: str,
-    turn_id: str,
-) -> dict[str, Any]:
-    """Return a copy carrying recommendation metadata; never allocates ids or writes state."""
-    prepared = dict(products)
-    prepared["recommendation_id"] = recommendation_id
-    prepared["request_id"] = turn_id
-    prepared["ranker_version"] = EXISTING_RANKER_VERSION
-    return prepared
 
 
 def _attach_recommendation(
@@ -793,7 +800,19 @@ async def clarification_reply(
     The browser never supplies ``confirmed_by_user``; this controller sets it only because a real
     HTTP POST containing user-authored text arrived, and labels the channel as
     ``web_ui_explicit_user_reply``.
+
+    Persistent sessions take the durable Warm Reply path: the coordinator proves the live MCP
+    handle, claims the durable request, performs the real MCP reply + resume, checkpoints the
+    complete result and only returns success after the Finalize transaction commits.  The
+    in-process (memory) path below is unchanged.
     """
+    if session._store is not None:
+        return await _persistent_clarification_reply(
+            manager=manager,
+            session=session,
+            clarification_id=clarification_id,
+            message=message,
+        )
     pending = session.pending_clarification
     if pending is None:
         raise MCPManagerError(
@@ -807,21 +826,6 @@ async def clarification_reply(
             code="clarification_not_pending",
             http_status=409,
             detail={"pending_clarification_id": pending.payload.get("clarification_id")},
-        )
-    if session._store is not None:
-        # Persistent mode has no durable reply consumption yet (no Request Ledger, no M9
-        # persistence).  A warm pending would reach MCP and M9 while the SQLite pending
-        # stayed OPEN, so a restart would resurrect a question the user already answered.
-        # Fail closed for *every* persistent reply, warm or restored, before any tool call.
-        raise MCPManagerError(
-            "clarification replies are disabled while durable consumption is not "
-            "implemented; no MCP call, M9 write or pending transition was performed",
-            code="clarification_resume_not_ready",
-            http_status=409,
-            detail={
-                "clarification_id": clarification_id,
-                "restored": bool(pending.restored),
-            },
         )
     profile_id = session.profile_id
     if not manager.ensure_ready(profile_id).writes_enabled:
@@ -1037,6 +1041,157 @@ async def clarification_reply(
         "planner_actions": turn.planner_actions,
         "error": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Persistent Warm Reply (durable coordinator)
+# ---------------------------------------------------------------------------
+
+#: How each coordinator outcome leaves the HTTP layer.  Nothing here is ever a 200.
+_REPLY_OUTCOME_ERRORS: dict[str, tuple[str, int, str]] = {
+    WARM_UNAVAILABLE: (
+        "clarification_resume_not_ready", 409,
+        "no live MCP handle proves this clarification is still resumable",
+    ),
+    BUSY: (
+        "clarification_reply_in_progress", 409,
+        "another executor is already processing this reply",
+    ),
+    CONFLICT: (
+        "clarification_reply_conflict", 409,
+        "this request was already used with different reply content",
+    ),
+    FENCED: (
+        "clarification_reply_fenced", 409,
+        "the session, task or pending changed after this reply was claimed",
+    ),
+    AMBIGUOUS: (
+        "clarification_reply_ambiguous", 503,
+        "the M9 write may have happened but no durable result was produced; "
+        "automatic retry is refused",
+    ),
+    CHECKPOINT_FAILED: (
+        "clarification_result_not_durable", 503,
+        "the reply result could not be persisted; nothing was committed",
+    ),
+}
+
+
+def _reply_outcome_error(outcome: Any) -> MCPManagerError:
+    code, status, message = _REPLY_OUTCOME_ERRORS.get(
+        outcome.outcome,
+        ("clarification_reply_failed", 503, "the reply could not be completed"),
+    )
+    detail: dict[str, Any] = {"outcome": outcome.outcome, "reason": outcome.detail}
+    if outcome.handle is not None:
+        detail["handle"] = outcome.handle.as_payload()
+    return MCPManagerError(
+        f"{message}: {outcome.detail}" if outcome.detail else message,
+        code=code,
+        http_status=status,
+        detail=detail,
+    )
+
+
+def _mirror_committed_reply(
+    session: Session, pending: Any, result: Mapping[str, Any]
+) -> None:
+    """Reflect a committed reply in the cached Session (the database is already authoritative).
+
+    The Finalize transaction wrote the reply turn, consumed the pending and completed the
+    task.  This only mirrors that committed state for subsequent in-process reads and does
+    not perform any durable write.
+    """
+    turn_view = turn_from_result(result)
+    known = {row.turn_id for row in session.turns}
+    if turn_view["turn_id"] not in known:
+        session.add_turn(Turn(
+            turn_id=str(turn_view["turn_id"]),
+            user_text=str(turn_view["user_text"]),
+            assistant_text=str(turn_view["assistant_text"]),
+            products=dict(turn_view.get("products") or {}),
+            memory_update=turn_view.get("memory_update"),
+            tool_activity=list(turn_view.get("tool_activity") or []),
+        ))
+    session.pending_clarification = None
+    session.last_query = str(pending.query)
+    reply_payload = (result.get("reply") or {}) if isinstance(result, Mapping) else {}
+    recommendation_meta = reply_payload.get("recommendation") or {}
+    ranking_source = str(recommendation_meta.get("ranking_source") or "")
+    products = turn_view.get("products") or {}
+    try:
+        session.record_recommendation(
+            dict(products), turn_id=str(turn_view["turn_id"]),
+            ranking_source=ranking_source or "durable_reply",
+        )
+    except Exception as exc:  # noqa: BLE001 - behavior context is not the durable authority
+        LOGGER.warning(
+            "committed reply turn %s could not rebuild its behavior snapshot: %s",
+            turn_view.get("turn_id"), exc,
+        )
+
+
+async def _persistent_clarification_reply(
+    *,
+    manager: MCPManager,
+    session: Session,
+    clarification_id: str,
+    message: str,
+) -> dict[str, Any]:
+    """Durable Warm Reply: prove the handle, claim, execute, checkpoint, finalize, return."""
+    store = getattr(session._store, "state_store", None)
+    if store is None:  # pragma: no cover - persistent sessions always expose the state store
+        raise MCPManagerError(
+            "durable clarification reply requires a persistent session store",
+            code="clarification_resume_not_ready",
+            http_status=409,
+        )
+    pending = store.get_pending_for_clarification(session.session_id, clarification_id)
+    if pending is None:
+        raise MCPManagerError(
+            "no clarification in this session matches this reply",
+            code="clarification_not_pending",
+            http_status=409,
+            detail={"clarification_id": clarification_id},
+        )
+    if pending.status in {"CANCELLED", "EXPIRED"}:
+        # Reset/supersede/expiry already closed this question; it is not a warm handle issue.
+        raise MCPManagerError(
+            f"clarification {clarification_id!r} is {pending.status}, not pending",
+            code="clarification_not_pending",
+            http_status=409,
+            detail={"clarification_id": clarification_id, "status": pending.status},
+        )
+    if pending.mode != "cpu_live":
+        # Cold Resume (a new process resuming another process's handle) is deliberately not
+        # implemented; a Qwen-issued pending would need its continuation in the old child.
+        raise MCPManagerError(
+            "durable clarification replies are implemented for the CPU rule planner only; "
+            f"this pending was issued by mode={pending.mode!r}",
+            code="clarification_resume_not_ready",
+            http_status=409,
+            detail={"clarification_id": clarification_id, "mode": pending.mode},
+        )
+    executor = WarmReplyExecutor(
+        store,
+        call_tool=manager.call_tool,
+        assemble=lambda request: assemble_reply_presentation(
+            request, catalogue_size=manager.catalogue_size()
+        ),
+        profile_id=session.profile_id,
+        handle_check=manager.check_handle,
+    )
+    outcome = await executor.execute(
+        session, pending, message=message, clarification_id=clarification_id,
+    )
+    if outcome.outcome not in {SUCCESS, REPLAYED, RESULT_REUSED} or outcome.result is None:
+        raise _reply_outcome_error(outcome)
+    result = outcome.result
+    response = reply_response_from_result(
+        result, clarification_id=pending.clarification_id
+    )
+    _mirror_committed_reply(session, pending, result)
+    return response
 
 
 async def _recommendation_view(

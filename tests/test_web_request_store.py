@@ -1,4 +1,4 @@
-﻿"""S5a durable request ledger, claim leases and atomic finalize (real SQLite)."""
+"""S5a durable request ledger, claim leases and atomic finalize (real SQLite)."""
 
 from __future__ import annotations
 
@@ -426,3 +426,52 @@ def test_v4_migration_failure_rolls_back(tmp_path: Path) -> None:
         assert raw.execute("SELECT COUNT(*) FROM web_task").fetchone()[0] == 1
     finally:
         raw.close()
+
+
+# --------------------------------------------------------------------------- #
+# Reply lookup by clarification id (used by the HTTP reply route)
+# --------------------------------------------------------------------------- #
+
+
+def test_get_pending_for_clarification_covers_open_consumed_and_sessions(
+    tmp_path: Path,
+) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        open_row = store.get_pending_for_clarification("web-r", pending.clarification_id)
+        assert open_row is not None
+        assert (open_row.pending_id, open_row.status) == (pending.pending_id, "OPEN")
+
+        store.create_session(session_id="web-other", profile_id="profile_0057")
+        assert store.get_pending_for_clarification(
+            "web-other", pending.clarification_id
+        ) is None
+        assert store.get_pending_for_clarification("web-r", "clar-unknown") is None
+
+        claim = store.claim_reply_request("web-r", pending.pending_id, payload=REPLY)
+        store.mark_request_external_started(
+            "web-r", pending.reply_turn_id, claim_token=claim.claim_token
+        )
+        result = {"reply": {"schema": "test"}}
+        store.checkpoint_reply_result(
+            "web-r", pending.reply_turn_id, claim_token=claim.claim_token, result=result
+        )
+        store.finalize_reply_request(
+            "web-r", pending.reply_turn_id, claim_token=claim.claim_token,
+            outcome="completed",
+            turn={
+                "turn_id": pending.reply_turn_id,
+                "user_text": "For gaming.",
+                "assistant_text": "Here is one match.",
+                "products": {"items": []},
+            },
+            result=result,
+        )
+        consumed = store.get_pending_for_clarification("web-r", pending.clarification_id)
+        assert consumed is not None and consumed.status == "CONSUMED"
+        assert consumed.reply_turn_id == pending.reply_turn_id
+        # The OPEN-only reader no longer sees it; the clarification reader still does.
+        assert store.get_open_pending_for_session("web-r") is None
+    finally:
+        store.close()

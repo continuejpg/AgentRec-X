@@ -102,16 +102,31 @@ BFF_CHILD = textwrap.dedent(
             sid = session_id or client.post(
                 "/api/sessions", json={"profile_id": "profile_0057"}
             ).json()["session_id"]
+            # First recommend asks the clarification; the post-reply resume finalizes.
+            recommend_calls = {"n": 0}
+
+            def recommend(profile_id, arguments):
+                recommend_calls["n"] += 1
+                return twu.recommend_payload(
+                    status="awaiting_clarification" if recommend_calls["n"] == 1
+                    else "finalized"
+                )
+
+            manager.responses["recommend_products"] = recommend
             chat = client.post(
                 "/api/chat/stream",
                 json={"session_id": sid, "message": "I need some new headphones."},
             )
             events = twu.parse_sse(chat.text)
             done = next(event["data"] for event in events if event["event"] == "done")
+            clarification_id = next(
+                event["data"]["clarification_id"] for event in events
+                if event["event"] == "clarification"
+            )
             reply = client.post(
                 "/api/clarification/reply",
-                json={"session_id": sid, "clarification_id": "clar_fake_handle",
-                      "message": "I prefer black."},
+                json={"session_id": sid, "clarification_id": clarification_id,
+                      "message": "I prefer noise cancelling."},
             )
             payload = {
                 "pid": os.getpid(), "session_id": sid,
@@ -281,26 +296,30 @@ def test_http_identities_survive_os_process_restart(tmp_path: Path) -> None:
     db_path = tmp_path / "state.sqlite3"
 
     first = _run_child(tmp_path, "turn", db_path)
-    # S3b.1: persistent replies fail closed until durable consumption exists, but the ASK
-    # itself still allocates exactly one reply identity per chat.
+    # A warm reply now commits through the durable coordinator, and the identity ledger
+    # still allocates exactly one turn id and one reply id per ASK/reply pair.
     assert first["chat_status"] == 200
-    assert first["reply_status"] == 409
-    assert first["reply_code"] == "clarification_resume_not_ready"
+    assert first["reply_status"] == 200
+    assert first["reply_code"] is None
     session_id = first["session_id"]
     assert first["chat_turn_id"] == f"{session_id}-t1"
-    assert first["reply_turn_id"] is None
+    assert first["reply_turn_id"] == f"{session_id}-r1"
 
     second = _run_child(tmp_path, "turn", db_path, session_id)
     assert second["pid"] != first["pid"]
     assert second["chat_turn_id"] == f"{session_id}-t2"
     assert second["chat_turn_id"] != first["chat_turn_id"]
-    assert second["reply_status"] == 409
+    assert second["reply_status"] == 200
+    assert second["reply_turn_id"] == f"{session_id}-r2"
 
     state = SQLiteWebStateStore(db_path)
     try:
         record = state.get_session(session_id)
         assert record is not None
         assert (record.turn_counter, record.reply_counter) == (2, 2)
+        turns = [row.turn_id for row in state.list_turns(session_id)]
+        assert turns == [f"{session_id}-t1", f"{session_id}-r1",
+                         f"{session_id}-t2", f"{session_id}-r2"]
     finally:
         state.close()
     assert sorted(_ledger(db_path, session_id)) == sorted(

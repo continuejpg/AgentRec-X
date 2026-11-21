@@ -298,11 +298,15 @@ def test_memory_mode_session_memory_is_in_process() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# J: persistent reply gate is unchanged
+# J: a dead MCP handle is refused before either database is touched
 # --------------------------------------------------------------------------- #
 
 
-def test_persistent_reply_stays_blocked_with_both_databases(tmp_path: Path) -> None:
+def test_dead_handle_blocks_persistent_reply_without_touching_either_database(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
     web_state = tmp_path / "web_state.sqlite3"
     m9_path = tmp_path / "m9.sqlite3"
     settings = _settings(tmp_path, web_state_db_path=web_state, memory_db_path=m9_path)
@@ -315,6 +319,7 @@ def test_persistent_reply_stays_blocked_with_both_databases(tmp_path: Path) -> N
         clarification_id = client.get(f"/api/sessions/{session_id}").json()[
             "pending_clarification"
         ]["clarification_id"]
+        asyncio.run(manager.restart("profile_0057"))
         calls_before = len(manager.calls)
         response = client.post(
             "/api/clarification/reply",
@@ -324,6 +329,7 @@ def test_persistent_reply_stays_blocked_with_both_databases(tmp_path: Path) -> N
 
     assert response.status_code == 409
     assert response.json()["code"] == "clarification_resume_not_ready"
+    assert response.json()["detail"]["handle"]["code"] == "stale_process"
     assert len(manager.calls) == calls_before
     assert not m9_path.exists() or sqlite3.connect(str(m9_path)).execute(
         "SELECT COUNT(*) FROM preference_memory"
