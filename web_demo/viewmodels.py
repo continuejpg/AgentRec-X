@@ -119,9 +119,40 @@ def _price_view(product_info: Mapping[str, Any] | None) -> dict[str, Any]:
     price = facts.get("price") if isinstance(facts, Mapping) else None
     if isinstance(price, Mapping):
         value = price.get("value")
+        status = price.get("status")
         # Boolean presence flags from catalogue.inspect are not price values; never display them
         # as a price.  Only a real numeric/textual price may leave the UNKNOWN state.
-        if price.get("status") == "present" and value not in (None, True, False):
+        demo_historical = (
+            status == "historical_metadata"
+            and price.get("verification") == "upstream_metadata_demo_fx"
+            and price.get("currency") == "CNY"
+            and isinstance(value, (int, float))
+        )
+        if (status == "present" or demo_historical) and value not in (None, True, False):
+            if demo_historical:
+                display = f"¥{float(value):,.2f} CNY"
+                reason = str(
+                    price.get("price_note")
+                    or "历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）"
+                )
+                view = {
+                    "status": "historical_metadata",
+                    "display": display,
+                    "value": value,
+                    "currency": "CNY",
+                    "price_kind": price.get("price_kind") or "historical_crawl_time",
+                    "price_note": reason,
+                    "reason": reason,
+                    "original_usd_price": price.get("original_usd_price"),
+                    "original_currency": price.get("original_currency") or "USD",
+                    "converted_cny_price": price.get("converted_cny_price"),
+                    "fx_rate": price.get("fx_rate") or "7.00",
+                    "fx_source": price.get("fx_source"),
+                    "source": price.get("source"),
+                    "dataset_version": price.get("dataset_version"),
+                    "verification": price.get("verification"),
+                }
+                return view
             return {"status": "present", "display": str(value), "value": value}
         reason = price.get("reason") or DEFAULT_PRICE_UNKNOWN_REASON
     else:
@@ -260,6 +291,7 @@ def products_payload(
     items: list[dict[str, Any]],
     recommended_product_id: str | None,
     gate: Mapping[str, Any] | None,
+    retrieval_query: str | None = None,
 ) -> dict[str, Any]:
     # ``displayed_position`` is assigned by the server exactly once, in the order the
     # browser will render.  Behavior events are validated against this value, never
@@ -270,6 +302,9 @@ def products_payload(
     ]
     return {
         "query": query,
+        # The actual BM25 text (budget expressions stripped).  ``query`` stays the original
+        # user text for history and audit.
+        "retrieval_query": retrieval_query,
         "search_mode": search_mode,
         "score_kind": score_kind,
         "catalogue_size": catalogue_size,
@@ -667,6 +702,7 @@ def narrative_memory(
     memory_update: Mapping[str, Any],
     preference_payload: Mapping[str, Any],
     recommendation_payload: Mapping[str, Any] | None,
+    price_note: str | None = None,
 ) -> str:
     lines = [
         f"Memory update ({profile_id}): added {memory_update.get('added')}, "
@@ -685,9 +721,17 @@ def narrative_memory(
             lines.append(
                 f"Selected product: {selected.get('title')} ({selected.get('item_id')})."
             )
-    lines.append(
-        "Catalogue evidence only; this is not a claim about real-world quality, price, stock or ratings."
-    )
+    if price_note:
+        # An explicit demo price is present, so do not deny that a price was used; state
+        # exactly how it was obtained instead.
+        lines.append(
+            "Catalogue evidence only; this is not a claim about real-world availability, stock or ratings."
+        )
+        lines.append(f"Price note: {price_note}")
+    else:
+        lines.append(
+            "Catalogue evidence only; this is not a claim about real-world quality, price, stock or ratings."
+        )
     return "\n".join(lines)
 
 def ranker_replay_payload(

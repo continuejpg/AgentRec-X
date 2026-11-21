@@ -132,6 +132,19 @@ View models keep UNKNOWN as UNKNOWN: a card's `price` is `Price unavailable / UN
 catalogue really returns a price value; `image_url` is always `null` (the catalogue snapshot has no
 image URL); Gate action/status/candidate ids pass through unchanged.
 
+### Demo historical USD -> CNY price (opt-in, M1-F)
+
+The default `AGENTRECX_PRICE_MODE=strict` behaviour is unchanged: the C4 catalogue has no price and
+budget Gate refuses an unverifiable price.  For the local internship demonstration only,
+`AGENTRECX_PRICE_MODE=demo_historical_fx` matches C4 `parent_asin` IDs to the real Raw Meta
+Electronics sidecar and converts the historical USD `price` with `Decimal` at the fixed rate
+`1 USD = 7.00 CNY`, quantized to 2 decimals.  Missing, unmatched or malformed prices stay UNKNOWN.
+
+The price fact retains the original USD amount, source, dataset version, fixed rate and converted
+CNY amount.  Only in this mode may the budget Gate finalize a product, and the product card is
+labelled `历史价格按固定汇率换算，非实时售价（1 USD = 7.00 CNY）`.  The committed reply stores the
+converted price and rate, so Replay never recomputes it when the configuration changes.
+
 ## Clarification reply and the memory-write boundary
 
 `POST /api/clarification/reply` only works for the session's own pending clarification (otherwise

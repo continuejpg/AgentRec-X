@@ -273,12 +273,10 @@ class ElectronicsPlannerExecutor:
         ]
         # A current hard exclusion is authoritative for this task.  Excluded rows stay
         # in the CandidateLedger score rows for audit, but never enter last_rows/Gate.
-        # A verified over-budget candidate is excluded for the same reason; an unverifiable
-        # price stays visible but can never be finalized under a budget (see the Gate check).
-        eligible = [
-            row for row in compatible
-            if not row.get("task_constraint_conflicts") and not row.get("budget_violation")
-        ]
+        # Budget evidence is attached to every row; the final selection prefers a verified
+        # within-budget row (see the FINALIZE check) while the Gate still sees the full
+        # role-compatible pool so it can ask for missing criteria.
+        eligible = [row for row in compatible if not row.get("task_constraint_conflicts")]
         self._role_compatible_rows = compatible
         self._task_filtered_rows = [row for row in compatible if row.get("task_constraint_conflicts")]
         self.last_task_constraint_summary = {
@@ -610,29 +608,6 @@ class ElectronicsPlannerExecutor:
                 else:
                     raise PlannerContractError("rerank_without_candidates", "RERANK requires candidates")
             rows = self._score_and_inspect(ids)
-            if (self.price_budget is not None and not self.last_rows
-                    and (self.last_budget or {}).get("candidates_checked")):
-                # The budget (not an empty catalogue) removed every candidate.  Stop here
-                # with an explicit bounded outcome; FINALIZE would otherwise be proposed
-                # over an empty candidate set.
-                report = dict(self.last_budget or {})
-                report["selected_candidate_id"] = None
-                report["selected_status"] = (
-                    PRICE_OVER if report.get("over") else (
-                        PRICE_CURRENCY_MISMATCH if report.get("currency_mismatch")
-                        else PRICE_UNKNOWN
-                    )
-                )
-                self.last_budget = report
-                self.terminal_status = (
-                    "budget_exceeded" if report.get("over") else "budget_unverifiable"
-                )
-                return (replace(observation, terminal=True, candidate_ids=(),
-                                m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
-                                          "status": self.terminal_status,
-                                          "budget": report}),
-                        {"status": self.terminal_status, "budget": report,
-                         "bounded_scope": True}, True)
             compatible = list(self.last_rows)
             if self.product_target.product_type and not compatible:
                 if self.retrievals < 1 + GATE_RETRIEVAL_ROUNDS:
@@ -671,23 +646,6 @@ class ElectronicsPlannerExecutor:
             if not self.last_rows:
                 self._score_and_inspect(ids)
                 ids = [row["product_ref"]["item_id"] for row in self.last_rows]
-            if (self.price_budget is not None and not self.last_rows
-                    and (self.last_budget or {}).get("candidates_checked")):
-                # The budget (not an empty catalogue) removed every candidate: this is a
-                # bounded, explicit outcome, not a question and not a recommendation.
-                report = dict(self.last_budget or {})
-                report["selected_candidate_id"] = None
-                report["selected_status"] = PRICE_OVER if report.get("over") else PRICE_UNKNOWN
-                self.last_budget = report
-                self.terminal_status = (
-                    "budget_exceeded" if report.get("over") else "budget_unverifiable"
-                )
-                return (replace(observation, terminal=True, candidate_ids=(),
-                                m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
-                                          "status": self.terminal_status,
-                                          "budget": report}),
-                        {"status": self.terminal_status, "budget": report,
-                         "bounded_scope": True}, True)
             specific = query_specificity(self.current_query, self.hard, self.preferences)
             context = GateContext(
                 query=self.current_query,
@@ -725,20 +683,26 @@ class ElectronicsPlannerExecutor:
                             {"status": self.terminal_status, "gate": decision.as_dict(),
                              "candidate_id": selected, "task_constraint_conflicts": task_conflicts,
                              "bounded_scope": True}, True)
-                # A task budget is a hard constraint: the Gate may have selected a candidate
-                # whose price is unverifiable or in another currency.  Never present it as a
-                # recommendation, and never rescan/retry automatically here.
+                # A task budget is a hard constraint.  The Gate keeps the full role-compatible
+                # pool (so it can still ask for missing criteria), but only a candidate with a
+                # verified within-budget price may be presented.  If the Gate's top pick has
+                # no verifiable price, fall back to the highest-ranked verified candidate
+                # instead of presenting an unverified price or refusing prematurely.
                 if self.price_budget is not None:
-                    budget_status = str((row or {}).get("budget_status") or PRICE_UNKNOWN)
-                    if budget_status != PRICE_WITHIN:
+                    within_rows = [
+                        candidate for candidate in self.last_rows
+                        if str(candidate.get("budget_status")) == PRICE_WITHIN
+                        and not candidate.get("task_constraint_conflicts")
+                    ]
+                    if not within_rows:
+                        counts = self.last_budget or {}
                         self.terminal_status = (
-                            "budget_exceeded" if budget_status == PRICE_OVER
-                            else "budget_unverifiable"
+                            "budget_exceeded" if counts.get("over") else "budget_unverifiable"
                         )
-                        budget_report = dict(self.last_budget or {})
+                        budget_report = dict(counts)
                         budget_report.update({
                             "selected_candidate_id": selected,
-                            "selected_status": budget_status,
+                            "selected_status": str((row or {}).get("budget_status") or PRICE_UNKNOWN),
                             "selected_reason": (row or {}).get("budget_reason"),
                         })
                         self.last_budget = budget_report
@@ -750,6 +714,30 @@ class ElectronicsPlannerExecutor:
                                                   "budget": budget_report}),
                                 {"status": self.terminal_status, "gate": decision.as_dict(),
                                  "budget": budget_report, "bounded_scope": True}, True)
+                    if str((row or {}).get("budget_status")) != PRICE_WITHIN:
+                        gate_selected = selected
+                        chosen = within_rows[0]
+                        selected = chosen["product_ref"]["item_id"]
+                        row = chosen
+                        budget_report = dict(self.last_budget or {})
+                        budget_report["gate_selected_candidate_id"] = gate_selected
+                        budget_report["selection_note"] = (
+                            "the Gate pick had no verified price; the highest-ranked "
+                            "verified within-budget candidate was selected"
+                        )
+                        self.last_budget = budget_report
+                if self.price_budget is not None:
+                    # Record the exact verified price evidence of the selected candidate so
+                    # the card and the durable replay carry the converted CNY amount, the
+                    # original USD amount and the fixed rate, rather than a later recomputation.
+                    report = dict(self.last_budget or {})
+                    report.update({
+                        "selected_candidate_id": selected,
+                        "selected_status": (row or {}).get("budget_status"),
+                        "selected_reason": (row or {}).get("budget_reason"),
+                        "selected_price": (row or {}).get("budget_evidence"),
+                    })
+                    self.last_budget = report
                 self.selected_candidate_id = selected
                 self.terminal_status = "finalized"
                 recommendation = {

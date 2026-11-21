@@ -248,6 +248,14 @@ class MCPManager:
                 parts.append("--warmup")
         if runtime.writes_enabled:
             parts.append("--allow-memory-writes")
+        if self.settings.price_mode == "demo_historical_fx":
+            parts.extend(["--price-mode", "demo_historical_fx"])
+            if self.settings.demo_price_sidecar is not None:
+                parts.extend(["--demo-price-sidecar", str(self.settings.demo_price_sidecar)])
+        else:
+            # Explicitly pin strict mode so an inherited AGENTRECX_PRICE_MODE cannot leak a
+            # demo price into a strict deployment.
+            parts.extend(["--price-mode", "strict"])
         inner = " ".join(shlex.quote(part) for part in parts)
         child_env: dict[str, str] = {
             "PYTHONPATH": str(self.settings.repo),

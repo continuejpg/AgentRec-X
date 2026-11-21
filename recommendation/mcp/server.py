@@ -1235,6 +1235,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="original C4 only (default) or C4 + Raw Meta Electronics sidecar")
     parser.add_argument("--metadata-sidecar", type=Path, default=None,
                         help="optional sidecar path; env AGENTRECX_METADATA_SIDECAR otherwise")
+    parser.add_argument("--price-mode", choices=("strict", "demo_historical_fx"), default=None,
+                        help="strict (default) or the demo fixed-FX historical price mode")
+    parser.add_argument("--demo-price-sidecar", type=Path, default=None,
+                        help="Raw Meta sidecar used by demo_historical_fx")
     parser.add_argument("--warmup", action="store_true",
                         help="load and exercise the BGE encoder before advertising MCP readiness")
     parser.add_argument("--allow-memory-writes", action="store_true",
@@ -1249,7 +1253,9 @@ def main(argv: list[str] | None = None) -> int:
     startup_started = time.perf_counter()
     catalogue_started = time.perf_counter()
     catalogue = ElectronicsCatalogue.load(metadata_mode=args.metadata_mode,
-                                          metadata_sidecar=args.metadata_sidecar)
+                                          metadata_sidecar=args.metadata_sidecar,
+                                          price_mode=args.price_mode,
+                                          demo_price_sidecar=args.demo_price_sidecar)
     catalogue_ms = round((time.perf_counter() - catalogue_started) * 1000.0, 2)
     configure_ms: float | None = None
     warmup_ms: float | None = None
@@ -1311,6 +1317,8 @@ def main(argv: list[str] | None = None) -> int:
         "memory_fixture": str(args.memory_fixture), "writes_enabled": bool(args.allow_memory_writes),
         "metadata_mode": catalogue.metadata_mode,
         "metadata_stats": catalogue.metadata_stats,
+        "price_mode": catalogue.price_mode,
+        "demo_price_stats": catalogue.demo_price_stats,
         "corrective_rag": corrective_rag,
         "evidence_verifier": evidence_verifier,
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,

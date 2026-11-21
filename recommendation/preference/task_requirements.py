@@ -38,6 +38,7 @@ __all__ = [
     "augment_query",
     "evaluate_price_budget",
     "extract_task_requirements",
+    "strip_budget_expressions",
 ]
 
 TASK_REQUIREMENTS_SCHEMA = "agentrecx.task_requirements.v1"
@@ -72,6 +73,20 @@ _EN_LOWER = re.compile(r"\bat\s+least\b|\bminimum\b|\bno\s+less\s+than\b|\bstart
                        re.IGNORECASE)
 _EN_UPPER = re.compile(r"\bbudget\b|\bunder\b|\bbelow\b|\bless\s+than\b|\bup\s+to\b|"
                        r"\bno\s+more\s+than\b|\bmax(?:imum)?\b", re.IGNORECASE)
+
+#: Budget expressions are removed from the **retrieval** text.  A budget is applied as a
+#: structured hard constraint; leaving an old amount in the lexical query makes BM25 match
+#: model numbers ("5000"/"8000") and, after a revision, keeps the expired amount alive.
+_ZH_BUDGET_SPAN = re.compile(
+    r"(?:(?:预算|价格|价位|上限|最高|最多|不超过|封顶|控制在)\s*"
+    r"(?:是|为|改成|改为|调整到|调到|改到|到|:|：)?\s*)?[¥￥]?\s*"
+    r"\d{1,7}(?:\.\d{1,2})?\s*(?:元|块|人民币|rmb|RMB|cny|CNY)\s*的?"
+)
+_EN_BUDGET_SPAN = re.compile(
+    r"\b(?:budget|price|spend|cost|under|below|less\s+than|up\s+to|no\s+more\s+than|"
+    r"maximum|max|at\s+least|minimum|min)\b[^.!?;]{0,25}?\$?\s*\d{1,7}(?:\.\d{1,2})?",
+    re.IGNORECASE,
+)
 
 _ZH_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("笔记本电脑", "laptop"), ("笔记本", "laptop"), ("耳机", "headphones"),
@@ -267,13 +282,28 @@ def extract_task_requirements(text: str) -> TaskRequirements:
     )
 
 
-def augment_query(query: str, requirements: TaskRequirements) -> str:
-    """Append the structured category/use-case terms for English BM25 retrieval.
+def strip_budget_expressions(text: str) -> str:
+    """Remove budget amounts from retrieval text while leaving the original untouched.
 
-    Budget digits are deliberately **not** appended: on a lexical index a number matches model
-    numbers ("8000") and pollutes retrieval.  The budget is enforced as a hard constraint.
+    The caller must keep the original user text for history; only the BM25 query is stripped.
     """
-    parts = [str(query or "").strip()]
+    value = str(text or "")
+    if not value:
+        return ""
+    stripped = _ZH_BUDGET_SPAN.sub(" ", value)
+    stripped = _EN_BUDGET_SPAN.sub(" ", stripped)
+    return " ".join(stripped.split())
+
+
+def augment_query(query: str, requirements: TaskRequirements) -> str:
+    """Build the lexical retrieval query from the current (non-expired) requirements.
+
+    Budget amounts are deliberately **not** appended, and any budget expression already in the
+    user text is stripped: on a lexical index a number matches model numbers ("8000") and an
+    expired amount must never keep influencing retrieval.  The original query is preserved
+    elsewhere for history and audit.
+    """
+    parts = [strip_budget_expressions(query)]
     lowered = " ".join(parts).lower()
     if requirements.category and requirements.category not in lowered:
         parts.append(requirements.category)
@@ -294,6 +324,14 @@ def evaluate_price_budget(
     currency on either side, or two different currencies is never treated as compliance.
     """
     fact = price_fact if isinstance(price_fact, Mapping) else {}
+    extra: dict[str, Any] = {}
+    original_usd = fact.get("original_usd_price")
+    if isinstance(original_usd, (int, float)):
+        extra["original_usd_price"] = float(original_usd)
+    for key in ("fx_rate", "converted_cny_price", "price_note", "verification"):
+        value = fact.get(key)
+        if isinstance(value, str) and value:
+            extra[key] = value
     if budget is None or (budget.max_amount is None and budget.min_amount is None):
         return PriceEvaluation(PRICE_NOT_APPLICABLE, "no budget constraint for this task")
     status = str(fact.get("status") or "")
@@ -305,6 +343,7 @@ def evaluate_price_budget(
             "the catalogue provides no price for this candidate",
             source=fact.get("source"),
             price_kind=fact.get("price_kind"),
+            **extra,
         )
     if not budget.currency or not currency:
         return PriceEvaluation(
@@ -312,6 +351,7 @@ def evaluate_price_budget(
             "the budget or catalogue price has no explicit currency",
             amount=float(value), currency=currency,
             source=fact.get("source"), price_kind=fact.get("price_kind"),
+            **extra,
         )
     if str(budget.currency) != str(currency):
         return PriceEvaluation(
@@ -319,6 +359,7 @@ def evaluate_price_budget(
             f"budget is in {budget.currency} but the catalogue price is in {currency}",
             amount=float(value), currency=str(currency),
             source=fact.get("source"), price_kind=fact.get("price_kind"),
+            **extra,
         )
     amount = float(value)
     if budget.max_amount is not None and amount > float(budget.max_amount):
@@ -327,6 +368,7 @@ def evaluate_price_budget(
             f"{amount:g} {currency} exceeds the {budget.max_amount:g} {budget.currency} budget",
             amount=amount, currency=str(currency),
             source=fact.get("source"), price_kind=fact.get("price_kind"),
+            **extra,
         )
     if budget.min_amount is not None and amount < float(budget.min_amount):
         return PriceEvaluation(
@@ -334,12 +376,14 @@ def evaluate_price_budget(
             f"{amount:g} {currency} is below the {budget.min_amount:g} {budget.currency} floor",
             amount=amount, currency=str(currency),
             source=fact.get("source"), price_kind=fact.get("price_kind"),
+            **extra,
         )
     return PriceEvaluation(
         PRICE_WITHIN,
         f"{amount:g} {currency} is within the task budget",
         amount=amount, currency=str(currency),
         source=fact.get("source"), price_kind=fact.get("price_kind"),
+        **extra,
     )
 
 
@@ -353,13 +397,18 @@ class PriceEvaluation:
     currency: str | None = None
     source: str | None = None
     price_kind: str | None = None
+    original_usd_price: float | None = None
+    fx_rate: str | None = None
+    converted_cny_price: str | None = None
+    price_note: str | None = None
+    verification: str | None = None
 
     @property
     def verified(self) -> bool:
         return self.status == PRICE_WITHIN
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "status": self.status,
             "verified": self.verified,
             "reason": self.reason,
@@ -367,4 +416,14 @@ class PriceEvaluation:
             "currency": self.currency,
             "source": self.source,
             "price_kind": self.price_kind,
+            "verification": self.verification,
         }
+        if self.original_usd_price is not None:
+            payload["original_usd_price"] = self.original_usd_price
+        if self.fx_rate is not None:
+            payload["fx_rate"] = self.fx_rate
+        if self.converted_cny_price is not None:
+            payload["converted_cny_price"] = self.converted_cny_price
+        if self.price_note is not None:
+            payload["price_note"] = self.price_note
+        return payload

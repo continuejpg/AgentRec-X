@@ -177,7 +177,10 @@ def test_happy_path_executes_real_call_order_and_finalizes(tmp_path: Path) -> No
         result = outcome.result
         assert set(result) == {
             "reply", "preferences", "memory_update", "steps", "task_requirements",
+            "budget_verification", "retrieval_query",
         }
+        assert result["budget_verification"] is None
+        assert result["retrieval_query"] is None
         reply = result["reply"]
         assert reply["schema"] == CONTRACT_SCHEMA
         assert reply["reply_turn_id"] == pending.reply_turn_id

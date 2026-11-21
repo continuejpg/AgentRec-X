@@ -34,24 +34,29 @@ TYPE_PATTERNS: dict[str, str] = {
     "keyboard": r"\bkeyboards?\b",
     "mouse": r"\b(mouse|mice|trackball)\b",
     "speaker": r"\b(speakers?|soundbar)\b",
+    # Laptops exist in the C4 Electronics catalogue but were outside the original role
+    # vocabulary.  Listed last so an accessory title with another main type (e.g. "Keyboard
+    # Cover for ... Laptop") is still typed by that head noun and stays an accessory.
+    "laptop": r"\b(laptops?|notebooks?)\b",
 }
 ACCESSORY_PATTERNS = {
     "accessory": r"\b(stand|stands|mount|mounts|case|cases|cover|covers|sleeve|sleeves|cable|cables|adapter|adapters|dock|docks|replacement|skin|skins|bag|bags|keycaps?|carrying case)\b",
-    "complement": r"\b(mouse pad|wrist rest|cleaning kit|batteries|battery pack|charger)\b",
+    "complement": r"\b(mouse pad|wrist rest|cleaning kit|batteries|battery pack|battery|charger|lcd screen)\b",
 }
 ACCESSORY_REQUEST = re.compile(
-    r"\b(stand|mount|case|cover|sleeve|cable|adapter|dock|replacement|skin|bag|keycaps?|accessor(?:y|ies)|parts?)\b",
+    r"\b(stand|mount|case|cover|sleeve|cable|adapter|charger|dock|replacement|skin|bag|keycaps?|accessor(?:y|ies)|parts?)\b",
     re.IGNORECASE,
 )
 FOR_TYPE = re.compile(
     r"\b(?:for|compatible\s+with)\s+(?:the\s+|my\s+|a\s+)?"
-    r"(headphones?|headset|earbuds?|earphones?|keyboards?|mice|mouse|trackball|speakers?|soundbar)\b",
+    r"(headphones?|headset|earbuds?|earphones?|keyboards?|mice|mouse|trackball|speakers?|soundbar|laptops?|notebooks?)\b",
     re.IGNORECASE,
 )
 TYPE_THEN_ACCESSORY = re.compile(
-    r"\b(headphones?|headset|earbuds?|earphones?|keyboards?|mouse|mice|speakers?|soundbar)\b"
+    r"\b(headphones?|headset|earbuds?|earphones?|keyboards?|mouse|mice|speakers?|soundbar|laptops?|notebooks?)\b"
     r"[^.]{0,40}?\b(stand|stands|mount|mounts|case|cases|cover|covers|sleeve|sleeves|cable|cables|"
-    r"adapter|adapters|dock|docks|replacement|skin|skins|bag|bags|keycaps?|mouse pad|wrist rest)\b",
+    r"adapter|adapters|charger|battery|cooling pad|dock|docks|replacement|skin|skins|bag|bags|"
+    r"keycaps?|mouse pad|wrist rest|screen protector|lcd screen|motherboard|power jack|dc jack)\b",
     re.IGNORECASE,
 )
 WITH_ACCESSORY = re.compile(r"\bwith\b[^.]{0,30}\b(case|cover|stand|sleeve|bag|cable|adapter|dock)\b", re.IGNORECASE)
@@ -109,11 +114,22 @@ def _text(value: Any) -> str:
 
 
 def _type_in(text: str) -> str | None:
+    """Return the main product type named earliest in the title/query.
+
+    Earliest occurrence beats dictionary order: "Gaming Laptop with RGB keyboard" is a
+    laptop (the keyboard is a component), while "Keyboard Cover for ... Laptop" is a
+    keyboard accessory (the head noun comes first).
+    """
     lowered = text.casefold()
-    for name, pattern in TYPE_PATTERNS.items():
-        if re.search(pattern, lowered):
-            return name
-    return None
+    best: tuple[int, int, str] | None = None
+    for order, (name, pattern) in enumerate(TYPE_PATTERNS.items()):
+        match = re.search(pattern, lowered)
+        if match is None:
+            continue
+        candidate = (match.start(), order, name)
+        if best is None or candidate < best:
+            best = candidate
+    return best[2] if best is not None else None
 
 
 def infer_product_target(query: str) -> ProductTarget:

@@ -590,6 +590,12 @@ class WarmReplyExecutor:
                     task_requirements=reply_requirements,
                     ranking_source=self._ranking_source,
                     budget=budget if isinstance(budget, Mapping) else None,
+                    query=pending.query,
+                    retrieval_query=(
+                        str(recommendation.get("effective_query"))
+                        if isinstance(recommendation, Mapping)
+                        and recommendation.get("effective_query") else None
+                    ),
                 )
                 memory = assemble_refusal_memory(
                     reply if isinstance(reply, Mapping) else {},
@@ -603,6 +609,14 @@ class WarmReplyExecutor:
                     "steps": steps,
                     "refusal": dict(contract["refusal"]),
                     "task_requirements": reply_requirements,
+                    "budget_verification": (
+                        dict(budget) if isinstance(budget, Mapping) else None
+                    ),
+                    "retrieval_query": (
+                        str(recommendation.get("effective_query"))
+                        if isinstance(recommendation, Mapping)
+                        and recommendation.get("effective_query") else None
+                    ),
                 }
                 turn = turn_from_result(result)
                 return self._checkpoint_and_finalize(
@@ -656,6 +670,17 @@ class WarmReplyExecutor:
                 "memory_update": presentation.get("memory_update"),
                 "steps": steps,
                 "task_requirements": reply_requirements,
+                "budget_verification": (
+                    dict(recommendation.get("budget_verification"))
+                    if isinstance(recommendation, Mapping)
+                    and isinstance(recommendation.get("budget_verification"), Mapping)
+                    else None
+                ),
+                "retrieval_query": (
+                    str(recommendation.get("effective_query"))
+                    if isinstance(recommendation, Mapping)
+                    and recommendation.get("effective_query") else None
+                ),
             }
             # The durable turn carries the same BFF extras as the live response so a restored
             # transcript shows the memory update and tool activity without re-running MCP.

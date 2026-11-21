@@ -28,6 +28,13 @@ from recommendation.catalog.enrichment import (
     attach_metadata,
     read_metadata_mode,
 )
+from recommendation.catalog.demo_price import (
+    DEFAULT_DEMO_SIDECAR,
+    DEMO_PRICE_MODE,
+    STRICT_PRICE_MODE,
+    DemoPriceIndex,
+    read_price_mode,
+)
 from recommendation.catalog.schemas import ProductMetadata
 from recommendation.control.catalog_search import CatalogSearchSource, CatalogSearchResult
 
@@ -106,6 +113,9 @@ class ElectronicsProduct:
     metadata: Any | None = None
     metadata_facts: dict[str, dict[str, Any]] = field(default_factory=dict)
     metadata_conflicts: dict[str, Any] = field(default_factory=dict)
+    #: Demo-only historical USD->CNY price (``demo_historical_fx`` mode).  ``None`` in the
+    #: default strict mode, where the catalogue price remains UNKNOWN.
+    demo_price: Any | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload = {
@@ -124,6 +134,8 @@ class ElectronicsProduct:
             payload["metadata_attributes"] = sorted(self.metadata_facts)
             if self.metadata_conflicts:
                 payload["metadata_conflicts"] = self.metadata_conflicts
+        if self.demo_price is not None:
+            payload["demo_price"] = self.demo_price.as_dict()
         return payload
 
 
@@ -188,6 +200,8 @@ class ElectronicsCatalogue:
         self._search_source: CatalogSearchSource | None = None
         self._metadata_mode = "original"
         self._metadata_stats: dict[str, Any] = {}
+        self._price_mode = STRICT_PRICE_MODE
+        self._demo_prices: DemoPriceIndex | None = None
 
     # -- construction ------------------------------------------------------ #
     @classmethod
@@ -197,6 +211,8 @@ class ElectronicsCatalogue:
         *,
         metadata_mode: str | None = None,
         metadata_sidecar: str | Path | None = None,
+        price_mode: str | None = None,
+        demo_price_sidecar: str | Path | None = None,
     ) -> "ElectronicsCatalogue":
         path = Path(path)
         mode = read_metadata_mode(metadata_mode)
@@ -294,6 +310,20 @@ class ElectronicsCatalogue:
             catalogue._metadata_stats = attach_metadata(catalogue, sidecar)
             catalogue._metadata_stats["coverage"] = sidecar.coverage(products)
             stats["enrichment"] = catalogue._metadata_stats
+        price_mode = read_price_mode(price_mode)
+        catalogue._price_mode = price_mode
+        catalogue._stats["price_mode"] = price_mode
+        stats["price_mode"] = price_mode
+        if price_mode == DEMO_PRICE_MODE:
+            demo_path = Path(
+                demo_price_sidecar or os.environ.get(
+                    "AGENTRECX_DEMO_PRICE_SIDECAR", str(DEFAULT_DEMO_SIDECAR)
+                )
+            )
+            demo_prices = DemoPriceIndex.load(demo_path, item_ids=products)
+            catalogue.attach_demo_prices(demo_prices)
+            stats["price_mode"] = price_mode
+            stats["demo_price"] = demo_prices.stats
         return catalogue
 
     # -- metadata ---------------------------------------------------------- #
@@ -304,6 +334,32 @@ class ElectronicsCatalogue:
     @property
     def metadata_mode(self) -> str:
         return self._metadata_mode
+
+    @property
+    def price_mode(self) -> str:
+        return self._price_mode
+
+    @property
+    def demo_price_stats(self) -> dict[str, Any]:
+        return dict(self._demo_prices.stats) if self._demo_prices is not None else {}
+
+    def demo_price_for(self, item_id: str) -> Any | None:
+        return self._demo_prices.get(item_id) if self._demo_prices is not None else None
+
+    def attach_demo_prices(self, index: DemoPriceIndex) -> dict[str, Any]:
+        """Attach a demo FX index (used by ``load`` and by focused tests)."""
+        self._demo_prices = index
+        self._price_mode = DEMO_PRICE_MODE
+        self._stats = dict(self._stats)
+        self._stats["price_mode"] = DEMO_PRICE_MODE
+        self._stats["demo_price"] = index.stats
+        self._metadata_stats = dict(self._metadata_stats)
+        self._metadata_stats["demo_price"] = index.stats
+        for item_id, demo in index.records.items():
+            product = self._products.get(item_id)
+            if product is not None:
+                product.demo_price = demo
+        return dict(index.stats)
 
     @property
     def metadata_stats(self) -> dict[str, Any]:
@@ -378,15 +434,29 @@ class ElectronicsCatalogue:
                     facts[name]["metadata_value"] = meta.title
                     facts[name]["metadata_source"] = meta.source
                 continue
-            if name == "price" and meta and meta.price is not None:
+            if name == "price":
+                demo_price = getattr(product, "demo_price", None)
+                if demo_price is not None:
+                    facts[name] = demo_price.as_fact()
+                    continue
+                if meta is not None and meta.price is not None:
+                    facts[name] = {
+                        "status": "historical_metadata",
+                        "value": meta.price,
+                        "currency": "USD",
+                        "price_kind": "historical_crawl_time",
+                        "source": meta.source,
+                        "verification": "upstream_metadata",
+                        "reason": "historical crawl-time price, not a live price or availability",
+                    }
+                    unknown.append(name)
+                    continue
                 facts[name] = {
-                    "status": "historical_metadata",
-                    "value": meta.price,
-                    "currency": "USD",
-                    "price_kind": "historical_crawl_time",
-                    "source": meta.source,
-                    "verification": "upstream_metadata",
-                    "reason": "historical crawl-time price, not a live price or availability",
+                    "status": "unknown",
+                    "value": None,
+                    "source": CATALOG_SOURCE,
+                    "reason": UNKNOWN_FACTS[name],
+                    "verification": "absent",
                 }
                 unknown.append(name)
                 continue
@@ -447,7 +517,10 @@ class ElectronicsCatalogue:
             "unsupported_fields": unsupported,
             "source": CATALOG_SOURCE,
             "metadata_mode": self._metadata_mode,
+            "price_mode": self._price_mode,
         }
+        if product.demo_price is not None:
+            result["demo_price"] = product.demo_price.as_dict()
         if meta is not None:
             result["metadata"] = meta.summary()
             result["metadata_attributes"] = sorted(product.metadata_facts)
@@ -462,6 +535,8 @@ class ElectronicsCatalogue:
             "source": CATALOG_SOURCE,
             "limited_catalogue": True,
             "metadata_mode": self._metadata_mode,
+            "price_mode": self._price_mode,
+            "demo_price": self.demo_price_stats,
             "metadata": self._metadata_stats,
             "stats": self.stats,
         }

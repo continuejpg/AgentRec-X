@@ -195,6 +195,10 @@ class Settings:
     qwen_max_steps: int = DEFAULT_QWEN_MAX_STEPS
     qwen_health_interval_s: float = DEFAULT_QWEN_HEALTH_INTERVAL_S
     qwen_explain: bool = True
+    #: ``strict`` (default) or ``demo_historical_fx``.  The demo mode converts the real Raw
+    #: Meta historical USD price at a fixed 7.00 rate for the local demonstration only.
+    price_mode: str = "strict"
+    demo_price_sidecar: Path | None = None
     repo: Path = REPO
     log_dir: Path = LOG_DIR
     replay_path: Path = REPLAY_PATH
@@ -268,6 +272,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     web_state_db = Path(web_state_db_raw) if web_state_db_raw else None
     memory_db_raw = str(want.get("AGENTRECX_MEMORY_DB") or "").strip()
     memory_db = Path(memory_db_raw) if memory_db_raw else None
+    price_mode = str(want.get("AGENTRECX_PRICE_MODE", "strict")).strip().lower() or "strict"
+    if price_mode not in {"strict", "demo_historical_fx"}:
+        raise ValueError(
+            "AGENTRECX_PRICE_MODE must be 'strict' or 'demo_historical_fx', "
+            f"got {price_mode!r}"
+        )
+    demo_sidecar_raw = str(want.get("AGENTRECX_DEMO_PRICE_SIDECAR") or "").strip()
+    demo_sidecar = Path(demo_sidecar_raw) if demo_sidecar_raw else None
     return Settings(
         port=port,
         search_mode=mode,
@@ -283,6 +295,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         behavior_db_path=behavior_db,
         web_state_db_path=web_state_db,
         memory_db_path=memory_db,
+        price_mode=price_mode,
+        demo_price_sidecar=demo_sidecar,
         behavior_window_s=_env_float(want, "AGENTRECX_BEHAVIOR_WINDOW_S", DEFAULT_WINDOW_S),
         behavior_half_life_s=_env_float(
             want, "AGENTRECX_BEHAVIOR_HALF_LIFE_S", DEFAULT_HALF_LIFE_S

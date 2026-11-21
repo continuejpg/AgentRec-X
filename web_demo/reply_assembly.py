@@ -147,6 +147,10 @@ def assemble_reply_presentation(
         items=items,
         recommended_product_id=selected_id,
         gate=gate,
+        retrieval_query=(
+            str(recommendation.get("effective_query"))
+            if recommendation.get("effective_query") else None
+        ),
     )
     products = prepare_recommendation_products(
         products,
@@ -163,6 +167,14 @@ def assemble_reply_presentation(
     reply = request.reply
     _require(isinstance(reply, Mapping), "submit_clarification_reply returned no object")
     memory_update = vm.memory_update_payload(dict(reply), preferences)
+    price_fact = ((info.get("product_info") or {}).get("facts") or {}).get("price")
+    price_note = None
+    if (
+        isinstance(price_fact, Mapping)
+        and price_fact.get("verification") == "upstream_metadata_demo_fx"
+        and price_fact.get("price_note")
+    ):
+        price_note = str(price_fact["price_note"])
     narrative = vm.narrative_memory(
         profile_id=request.profile_id,
         memory_update=memory_update,
@@ -171,6 +183,7 @@ def assemble_reply_presentation(
         # narrative carries the status line (not a second title line).  The durable reply
         # matches that text exactly; the full selected card is in ``products`` either way.
         recommendation_payload={"status": status},
+        price_note=price_note,
     )
     _require(bool(narrative.strip()), "the reply narrative is empty")
     return {
@@ -235,6 +248,8 @@ def reply_response_from_result(
         "recommendation": dict(products) if has_products else None,
         "refusal": dict(refusal) if isinstance(refusal, Mapping) else None,
         "task_requirements": result.get("task_requirements"),
+        "budget_verification": result.get("budget_verification"),
+        "retrieval_query": result.get("retrieval_query"),
         "steps": list(result.get("steps") or []),
         "clarification_id": clarification_id,
         "message": narrative,

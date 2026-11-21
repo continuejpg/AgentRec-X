@@ -150,6 +150,12 @@ def _raw_fields(product: ElectronicsProduct) -> dict[str, str]:
     add("features", getattr(record, "features", None))
     add("description", getattr(record, "description", None))
     add("price_text", getattr(record, "price_text", None))
+    demo_price = getattr(product, "demo_price", None)
+    if demo_price is not None:
+        # A real historical USD price converted at the fixed demo rate.  This is the exact
+        # text shown as the price evidence span, so it keeps the original USD amount and the
+        # rate instead of rewriting it into an unsourced live price.
+        add("price_text", demo_price.evidence_text())
     # Additive Raw Meta sidecar fields.  They are separate raw fields so an evidence span
     # still points at the exact upstream value and never silently rewrites C4 text.
     meta = getattr(product, "metadata", None)

@@ -182,6 +182,8 @@ def build_refusal_payload(
     task_requirements: Mapping[str, Any] | None,
     ranking_source: str,
     budget: Mapping[str, Any] | None = None,
+    query: str | None = None,
+    retrieval_query: str | None = None,
 ) -> dict[str, Any]:
     """Build the durable payload for a *bounded refusal* after a real resume.
 
@@ -207,10 +209,14 @@ def build_refusal_payload(
         "detail": str(gate_payload.get("reason") or ""),
         "budget": budget_payload,
         "task_requirements": requirements_payload,
+        "retrieval_query": retrieval_query,
     }
     products = {
         "items": [],
-        "query": str(user_message),
+        # Keep the original user text (including a superseded budget) as history; the
+        # actual retrieval text is reported separately.
+        "query": str(query or user_message),
+        "retrieval_query": retrieval_query,
         "search_mode": None,
         "score_kind": None,
         "catalogue_size": None,
@@ -234,6 +240,7 @@ def build_refusal_payload(
             "ranking_source": str(ranking_source),
             "status": str(status),
             "gate": gate_payload,
+            "retrieval_query": retrieval_query,
         },
         "preference_evidence": [],
         "refusal": refusal,
