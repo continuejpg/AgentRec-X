@@ -616,6 +616,13 @@ def test_two_concurrent_cold_replies_have_exactly_one_executor(tmp_path: Path) -
     state = SQLiteWebStateStore(tmp_path / "state.sqlite3")
     try:
         turns = [row.turn_id for row in state.list_turns(session_id)]
+        pending = state.get_pending_for_clarification(session_id, clarification_id)
+        assert pending is not None and pending.status == "CONSUMED"
+        request = state.get_request(session_id, pending.reply_turn_id)
+        assert request is not None
+        assert (request.status, request.execution_stage) == ("COMPLETED", "COMPLETED")
+        task = state.get_task(request.task_id)
+        assert task is not None and task.status == "COMPLETED"
     finally:
         state.close()
 
@@ -623,6 +630,13 @@ def test_two_concurrent_cold_replies_have_exactly_one_executor(tmp_path: Path) -
     statuses = sorted(response.status_code for response in responses)
     assert 200 in statuses, [response.text for response in responses]
     assert set(statuses) <= {200, 409, 503}
+    losers = [response for response in responses if response.status_code != 200]
+    assert len(losers) == 1
+    assert losers[0].json()["code"] in {
+        "clarification_reply_in_progress",
+        "clarification_reply_ambiguous",
+        "clarification_reply_conflict",
+    }
     submits = [call for call in manager.calls if call[1] == "submit_clarification_reply"]
     assert len(submits) == 1, "only one executor may perform the M9 write"
     assert turns == [f"{session_id}-t1", f"{session_id}-r1"]
