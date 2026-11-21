@@ -58,14 +58,14 @@ can review or replace the labels:
 Only binary labels are used. Recall/MRR/nDCG are intentionally not reported: the judged pool
 contains only the top-5 union, not all relevant products in the 76,263-record catalogue.
 
-## 3. Recorded result (`m3c-pre-09`)
+## 3. Recorded result (`m3c-final-01`)
 
 | Metric | Baseline | Candidate | Delta |
 |---|---:|---:|---:|
 | Precision@5 | **11 / 50 = 22.0%** | **37 / 50 = 74.0%** | **+52.0 pp** |
 | Obvious error/accessory count | 39 / 50 | 13 / 50 | -26 |
 | Error/accessory share | 78.0% | 26.0% | -52.0 pp |
-| Search-only latency, sum of per-query medians | 435.97 ms | 6.84 ms | — |
+| Search-only latency, sum of per-query medians | 419.18 ms | 6.97 ms | — |
 
 Per-query:
 
@@ -83,8 +83,33 @@ Per-query:
 | `keyboard_mechanical_500` | 0 | 2 | improved |
 
 Candidate scope sizes: laptop 457, headphones 1,993, tablet 339, mouse 377, keyboard 559.
-Scope index build was 12–65 ms per category; sidecar loading was about 8.0 s and is shared with
-the existing catalogue setup. These are separate from the per-query search latency above.
+Scope index build was 11–64 ms per category; sidecar loading was 4.80 s and full-catalogue
+load/index setup was 8.07 s. These are separate from the per-query search latency above.
+
+### Scope audit (important limitation)
+
+A diagnostic audit (`runs/m3_audit/scope_audit.md`) counted title-type products excluded by the
+category scope:
+
+| Target | Scope members | Title-type diagnostic population | Excluded by scope |
+|---|---:|---:|---:|
+| laptop | 457 | 7,620 | 7,258 |
+| headphones | 1,993 | 3,158 | 1,527 |
+| mouse | 377 | 625 | 261 |
+| keyboard | 559 | 2,332 | 1,787 |
+| tablet | 339 | 0 by title type | 339 sidecar-only |
+
+The title-type population is a diagnostic, not a qrels ground truth, and includes accessories
+whose titles mention a laptop. Still, the audit found **obvious false exclusions of real target
+products**: laptops whose titles contain "Hard Drive"/"Keyboard", headphones bundled "with
+Carrying Case", a real Microsoft wireless mouse with a charging base, and a headset excluded
+because its title contains "CD". It also found sidecar-only false positives, including a mini PC
+and "Silvia Osteo Plus Tablets" in the tablet scope.
+
+This is why the high Precision@5 is **exploratory and not production-ready**: the scope improves
+category purity on the top-5 fixture while likely reducing recall and occasionally retaining
+non-target products. No recall figure is reported, because the judged pool is not complete and
+no human-reviewed corpus qrels exist.
 
 The laptop gaming top-5 changed from keyboard skins/covers and a headset to real gaming
 laptops (Alienware, MSI, ASUS, HP Omen, Lenovo Y50). The general laptop top-5 changed from
@@ -101,8 +126,9 @@ because the BM25 corpus is smaller.
 It is **not integrated** in this milestone because:
 
 1. the labels are machine-assisted and have not been independently human-verified;
-2. the scope classifier is still heuristic and has false positives/negatives (for example a
-   laptop portfolio or a tablet cradle can survive a broad title rule);
+2. the scope classifier is still heuristic and has material false positives/negatives (see the
+   scope audit above: real laptops, headphones and mice are excluded, while a mini PC and
+   medicine tablets appear in the tablet scope);
 3. the test is 10 queries and 50 judged slots per strategy, not a representative benchmark;
 4. no broad-query regression or downstream recommendation evaluation was run for an
    integrated candidate.

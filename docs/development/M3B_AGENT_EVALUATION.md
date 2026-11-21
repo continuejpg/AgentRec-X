@@ -38,8 +38,8 @@ already implemented observability is left disabled (no Phoenix dependency).
 - expected structured requirements (`budget`, `category`, `use_cases`);
 - expected business outcome;
 - machine-checkable hard constraints;
-- optional manually pinned acceptable product ids;
-- optional manually judged retrieval labels;
+- optional Harness-pinned acceptable product ids (pending human review);
+- optional Harness-authored retrieval labels (pending human review);
 - per-case dataset version and optional price mode.
 
 | Category | Cases | What is evaluated |
@@ -61,11 +61,12 @@ silently leak between modes.
 
 ### Retrieval labels
 
-Only three cases have manual labels: `hp_noise_warm`, `laptop_update_warm` and
-`laptop_direct_8000`. Every retrieved top-5 id is graded 0/1 by reading the product title and
-description; BM25 scores and ranks were not used as labels. `Precision@5 = relevant / 5` over
-these fully judged pools. An unjudged id is excluded from the metric and reported, never
-assumed non-relevant.
+Only three cases have pooled labels: `hp_noise_warm`, `laptop_update_warm` and
+`laptop_direct_8000`. Every retrieved top-5 id was graded 0/1 by the Harness from the product
+title/description; BM25 scores and ranks were not used as labels. **These labels are
+machine-assisted and pending human review, not independent human verification.** `Precision@5 =
+relevant / 5` over these fully judged pools. An unjudged id is excluded from the metric and
+reported, never assumed non-relevant.
 
 ## 3. Real Runner
 

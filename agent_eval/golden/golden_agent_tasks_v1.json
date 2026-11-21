@@ -2,8 +2,8 @@
   "schema": "agentrecx.golden.agent_tasks.v1",
   "dataset_version": "1.0.0",
   "created_at": "2026-11-21",
-  "description": "Versioned task-level Golden Dataset for the real CPU/BM25 AgentRec-X Web demo. Expected outcomes and relevance labels are manual task annotations, not outputs of the current BM25 ranker.",
-  "labeling_policy": "Binary relevance labels (0/1) were assigned by reading each pooled top-5 product title/description. BM25 scores and ranks were not used as labels. A case is included in Precision@5 only when every retrieved top-5 id has a manual label; newly retrieved unjudged ids are excluded from the metric and reported.",
+  "description": "Versioned task-level Golden Dataset for the real CPU/BM25 AgentRec-X Web demo. Expected outcomes and relevance labels are Harness-assisted annotations pending human review, not outputs of the current BM25 ranker.",
+  "labeling_policy": "Binary relevance labels (0/1) were authored by the Harness from each pooled top-5 product title/description; they are machine-assisted and pending human review, not independently human-verified. BM25 scores and ranks were not used as labels. A case is included in Precision@5 only when every retrieved top-5 id has a pooled label; newly retrieved unjudged ids are excluded from the metric and reported.",
   "catalog": {
     "name": "accepted C4 Electronics catalogue + Raw Meta historical USD sidecar",
     "catalog_size": 76263,
@@ -30,7 +30,9 @@
         "refusal_codes": []
       },
       "hard_constraints": {},
-      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "acceptable_product_ids": [
+        "B00LJX4KZ8"
+      ],
       "relevance": {
         "judged_ids": {
           "B00Y2WGMAY": 0,
@@ -61,7 +63,9 @@
         "refusal_codes": []
       },
       "hard_constraints": {},
-      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "acceptable_product_ids": [
+        "B00LJX4KZ8"
+      ],
       "relevance": null,
       "notes": "The old handle must be rejected and a new handle issued from the durable continuation."
     },
@@ -83,7 +87,9 @@
         "refusal_codes": []
       },
       "hard_constraints": {},
-      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "acceptable_product_ids": [
+        "B00LJX4KZ8"
+      ],
       "relevance": null,
       "notes": "Replay must return the same recommendation id and must add zero MCP calls."
     },
@@ -102,7 +108,9 @@
           "currency": "CNY"
         },
         "category": "headphones",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -114,7 +122,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": null
       },
-      "acceptable_product_ids": ["B0833X5GNK"],
+      "acceptable_product_ids": [
+        "B0833X5GNK"
+      ],
       "relevance": null,
       "notes": "The reply supplies the missing gaming use case; the historical demo price is allowed only with its provenance."
     },
@@ -133,7 +143,9 @@
           "currency": "CNY"
         },
         "category": "headphones",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -145,7 +157,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": null
       },
-      "acceptable_product_ids": ["B0833X5GNK"],
+      "acceptable_product_ids": [
+        "B0833X5GNK"
+      ],
       "relevance": null,
       "notes": "Exercises Cold Resume with task requirements that include a budget and use case."
     },
@@ -164,7 +178,9 @@
           "currency": "CNY"
         },
         "category": "headphones",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -176,7 +192,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": null
       },
-      "acceptable_product_ids": ["B0833X5GNK"],
+      "acceptable_product_ids": [
+        "B0833X5GNK"
+      ],
       "relevance": null,
       "notes": "Second reply must be a COMPLETED replay, not a new recommendation."
     },
@@ -195,7 +213,9 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -207,7 +227,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": "main"
       },
-      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "acceptable_product_ids": [
+        "B0BY2Z27LC"
+      ],
       "relevance": {
         "judged_ids": {
           "B08TR3PM8Z": 0,
@@ -216,7 +238,7 @@
           "B01M62JTH2": 0,
           "B0B9XSCRZP": 0
         },
-        "note": "All five retrieved items are laptop chargers/adapters/memory/accessories, not laptops; manually graded 0."
+        "note": "All five retrieved items are laptop chargers/adapters/memory/accessories, not laptops; Harness-graded (pending human review) 0."
       },
       "notes": "The original 5000 text stays in history; retrieval must use the merged 8000/gaming requirements."
     },
@@ -235,7 +257,9 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -247,7 +271,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": "main"
       },
-      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "acceptable_product_ids": [
+        "B0BY2Z27LC"
+      ],
       "relevance": null,
       "notes": "Cold Resume must preserve the merged requirements, not only the old 5000 query."
     },
@@ -266,7 +292,9 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -278,7 +306,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": "main"
       },
-      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "acceptable_product_ids": [
+        "B0BY2Z27LC"
+      ],
       "relevance": null,
       "notes": "Replay must preserve the recommendation id and converted historical price."
     },
@@ -297,7 +327,9 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -309,7 +341,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": "main"
       },
-      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "acceptable_product_ids": [
+        "B0BY2Z27LC"
+      ],
       "relevance": {
         "judged_ids": {
           "B00178N5Q0": 0,
@@ -318,7 +352,7 @@
           "B000KU6DE2": 0,
           "B08BHVWM1K": 0
         },
-        "note": "All five retrieved items are batteries/adapters/monitor/flash accessories, not laptops; manually graded 0."
+        "note": "All five retrieved items are batteries/adapters/monitor/flash accessories, not laptops; Harness-graded (pending human review) 0."
       },
       "notes": "No clarification should be necessary; the task is intentionally direct."
     },
@@ -337,11 +371,15 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "refusal",
-        "refusal_codes": ["budget_exceeded"]
+        "refusal_codes": [
+          "budget_exceeded"
+        ]
       },
       "hard_constraints": {},
       "acceptable_product_ids": [],
@@ -364,11 +402,15 @@
           "currency": "CNY"
         },
         "category": "headphones",
-        "use_cases": ["noise_cancelling"]
+        "use_cases": [
+          "noise_cancelling"
+        ]
       },
       "expected_outcome": {
         "kind": "refusal",
-        "refusal_codes": ["budget_unverifiable"]
+        "refusal_codes": [
+          "budget_unverifiable"
+        ]
       },
       "hard_constraints": {},
       "acceptable_product_ids": [],
@@ -390,7 +432,9 @@
           "currency": "CNY"
         },
         "category": "laptop",
-        "use_cases": ["office"]
+        "use_cases": [
+          "office"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -421,7 +465,9 @@
           "currency": "CNY"
         },
         "category": "tablet",
-        "use_cases": ["study"]
+        "use_cases": [
+          "study"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -452,7 +498,9 @@
           "currency": "CNY"
         },
         "category": "headphones",
-        "use_cases": ["gaming"]
+        "use_cases": [
+          "gaming"
+        ]
       },
       "expected_outcome": {
         "kind": "recommendation",
@@ -464,7 +512,9 @@
         "price_kind": "historical_demo_converted",
         "product_role": null
       },
-      "acceptable_product_ids": ["B0833X5GNK"],
+      "acceptable_product_ids": [
+        "B0833X5GNK"
+      ],
       "relevance": null,
       "notes": "Budget 1000 is looser than 500 but still requires the selected price and provenance to be verified."
     }
