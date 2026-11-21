@@ -1,4 +1,4 @@
-﻿"""FastAPI-level ASK durability tests for M1-C S3b."""
+"""FastAPI-level ASK durability tests for M1-C S3b."""
 
 from __future__ import annotations
 
@@ -512,7 +512,7 @@ def test_v2_database_migrates_to_v3_preserving_state(tmp_path: Path) -> None:
 
     store = SQLiteWebStateStore(db_path)
     try:
-        assert store.schema_version == WEB_STATE_SCHEMA_VERSION == 5
+        assert store.schema_version == WEB_STATE_SCHEMA_VERSION == 6
         sessions = store.list_sessions(10)
         assert [row.session_id for row in sessions] == ["web-v2"]
         task = store.get_task("task-v2")

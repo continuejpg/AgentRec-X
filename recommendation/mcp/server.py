@@ -47,7 +47,10 @@ from recommendation.demo.planner_http_proposer import (
     planner_enabled,
 )
 from recommendation.memory.store import MEMORY_DB_ENV_VAR, SQLitePreferenceStore
-from recommendation.preference.current_task_constraints import CurrentTaskConstraints
+from recommendation.preference.current_task_constraints import (
+    CurrentTaskConstraint,
+    CurrentTaskConstraints,
+)
 from recommendation.preference.history import HistoryStateReader
 from recommendation.shopping_companion.memory import SOURCE_KIND_SYNTHETIC_FIXTURE, ShoppingCompanionMemory
 from recommendation.shopping_companion.planner_bridge import PHASE_FINALIZE, PHASE_PRODUCT_RETRIEVE, P14ARulePlanner
@@ -61,6 +64,11 @@ SERVER_VERSION = "0.1.0"
 PROTOCOL_TARGET = "2026-07-28"
 ENV_CORRECTIVE_RAG = "AGENTRECX_CORRECTIVE_RAG"
 ENV_EVIDENCE_VERIFIER = "AGENTRECX_EVIDENCE_VERIFIER"
+#: Versioned, JSON-only snapshot of what is needed to rebuild one clarification handle in a
+#: *different* process.  It never contains the old handle itself, a process object or a
+#: closure.  The Web BFF persists the wrapped form (``web_demo.continuation``).
+CLARIFICATION_CONTINUATION_SCHEMA = "agentrecx.mcp.clarification_continuation.v1"
+CLARIFICATION_CONTINUATION_VERSION = 1
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -922,6 +930,23 @@ def _request_preference_clarification(
         "authorized_user_key": ctx.user_key,
         "expires_in_seconds": ctx.clarification_ttl_seconds,
         "memory_write_enabled": ctx.writes_enabled,
+        # Everything a different process needs to rebuild *this* handle for the same task.
+        # It is JSON-only and contains no handle identity, process object or closure.
+        "continuation": {
+            "schema": CLARIFICATION_CONTINUATION_SCHEMA,
+            "version": CLARIFICATION_CONTINUATION_VERSION,
+            "mode": "cpu_live",
+            "user_key": ctx.user_key,
+            "session_id": session_id,
+            "clarification_id": clarification_id,
+            "question": str(result["question"]),
+            "reason": str(result.get("reason") or ""),
+            "current_query": str(task["current_query"]),
+            "task": task,
+            "task_constraints": state.task_constraints.as_dict(),
+            "created_at": now,
+            "expires_at": now + ctx.clarification_ttl_seconds,
+        },
         "notes": ["clarification handle is bound to the server's trusted local user; it cannot be reused by another user",
                   "a real user reply is required; a model-generated reply is not accepted as user confirmation"],
     })
@@ -996,6 +1021,123 @@ def _submit_clarification_reply(
     return result
 
 
+def _constraints_from_snapshot(payload: Any) -> CurrentTaskConstraints:
+    """Rebuild the task-scoped constraints stored in a continuation snapshot."""
+    if not isinstance(payload, Mapping):
+        return CurrentTaskConstraints()
+    def _items(key: str) -> list[CurrentTaskConstraint]:
+        rows = payload.get(key)
+        if not isinstance(rows, (list, tuple)):
+            return []
+        out: list[CurrentTaskConstraint] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            try:
+                out.append(CurrentTaskConstraint(**dict(row)))
+            except TypeError:
+                continue
+        return out
+    turns = [
+        str(item) for item in (payload.get("source_turns") or ())
+        if isinstance(item, str) and item
+    ]
+    return CurrentTaskConstraints(
+        hard_exclusions=_items("hard_exclusions"),
+        soft_preferences=_items("soft_preferences"),
+        source_turns=turns,
+    )
+
+
+def _restore_clarification_handle(
+    continuation: Annotated[dict[str, Any], Field(description="Durable continuation snapshot emitted by request_preference_clarification and persisted by the Web BFF")],
+    session_id: Annotated[str, Field(min_length=1, description="Web session namespace this snapshot belongs to")],
+) -> dict[str, Any]:
+    """Re-create a resumable handle in THIS process from a durable snapshot.
+
+    This is not a second ASK: it never runs the clarification skill, never writes M9 and
+    never recommends.  It validates the snapshot against this process's trusted user and
+    task, then registers a NEW in-process handle (the old handle id is never reused) that the
+    existing ``submit_clarification_reply`` path can use.  The tool is therefore a
+    side-effect-free restore step: the real external effects start only when the client
+    submits the reply.
+    """
+    ctx = _context()
+    if not isinstance(continuation, Mapping):
+        raise ToolError("continuation_invalid: an object is required")
+    if continuation.get("schema") != CLARIFICATION_CONTINUATION_SCHEMA:
+        raise ToolError("continuation_unsupported_schema")
+    try:
+        version = int(continuation.get("version"))
+    except (TypeError, ValueError):
+        raise ToolError("continuation_unsupported_version") from None
+    if version != CLARIFICATION_CONTINUATION_VERSION:
+        raise ToolError("continuation_unsupported_version")
+    if continuation.get("mode") != "cpu_live":
+        raise ToolError("continuation_mode_unavailable: only cpu_live handles are restorable")
+    if str(continuation.get("user_key") or "") != ctx.user_key:
+        raise ToolError("continuation_user_mismatch: the snapshot belongs to another user")
+    snapshot_session = str(continuation.get("session_id") or "")
+    if not snapshot_session or snapshot_session != str(session_id):
+        raise ToolError("continuation_session_mismatch")
+    task_snapshot = continuation.get("task")
+    if not isinstance(task_snapshot, Mapping):
+        raise ToolError("continuation_invalid: task snapshot is required")
+    current_query = str(continuation.get("current_query") or "").strip()
+    if not current_query:
+        raise ToolError("continuation_invalid: current_query is required")
+    question = str(continuation.get("question") or "").strip()
+    if not question:
+        raise ToolError("continuation_invalid: question is required")
+    created_at = continuation.get("created_at")
+    expires_at = continuation.get("expires_at")
+    if isinstance(created_at, bool) or not isinstance(created_at, (int, float)):
+        raise ToolError("continuation_invalid: created_at is required")
+    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
+        raise ToolError("continuation_invalid: expires_at is required")
+    now = time.time()
+    if now > float(expires_at):
+        raise ToolError("continuation_expired")
+    # The snapshot must describe the SAME business task this process is configured with;
+    # any drift between processes is refused instead of silently resuming another task.
+    expected_task = ctx.current_task(current_query)
+    if dict(task_snapshot) != expected_task:
+        raise ToolError("continuation_task_mismatch: the snapshot task differs from this process")
+    constraints = _constraints_from_snapshot(continuation.get("task_constraints"))
+    restored_from = str(continuation.get("clarification_id") or "")
+    with ctx.lock:
+        state = ClarificationState(
+            clarification_id="clar_" + uuid.uuid4().hex,
+            user_key=ctx.user_key,
+            question=question,
+            current_query=current_query,
+            task=dict(task_snapshot),
+            created_at=float(created_at),
+            expires_at=float(expires_at),
+            session_id=str(session_id),
+            task_constraints=constraints,
+        )
+        ctx.handles[state.clarification_id] = state
+    LOGGER.info(
+        "clarification handle restored session=%s restored_from=%s new_handle=%s",
+        session_id, restored_from, state.clarification_id,
+    )
+    return {
+        "schema": CLARIFICATION_CONTINUATION_SCHEMA,
+        "status": "restored",
+        "clarification_id": state.clarification_id,
+        "restored_from_clarification_id": restored_from,
+        "question": state.question,
+        "reason": str(continuation.get("reason") or ""),
+        "expires_in_seconds": max(0.0, float(expires_at) - now),
+        "authorized_user_key": ctx.user_key,
+        "session_id": state.session_id,
+        "memory_write_enabled": ctx.writes_enabled,
+        "notes": ["restored from a durable continuation in a new MCP process; the original handle id was not reused",
+                  "restore performs no M9 write and no recommendation; the reply is still required"],
+    }
+
+
 def build_server(ctx: AppContext) -> MCPServer:
     global _CTX
     _CTX = ctx
@@ -1015,6 +1157,7 @@ def build_server(ctx: AppContext) -> MCPServer:
     server.add_tool(_compare_products, name="compare_products")
     server.add_tool(_request_preference_clarification, name="request_preference_clarification")
     server.add_tool(_submit_clarification_reply, name="submit_clarification_reply")
+    server.add_tool(_restore_clarification_handle, name="restore_clarification_handle")
     if ctx.qwen_configured:
         # Optional 8th tool.  It is absent unless Qwen Base Live is explicitly configured, so the
         # original 7-tool schema/default behaviour is unchanged for every legacy/CPU-only run.

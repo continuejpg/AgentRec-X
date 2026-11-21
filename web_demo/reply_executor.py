@@ -33,7 +33,9 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 from web_demo.handle_lifecycle import (
+    HANDLE_EXPIRED,
     HANDLE_MISSING,
+    HANDLE_STALE_PROCESS,
     HandleCheck,
     HandleRef,
 )
@@ -64,10 +66,13 @@ from web_demo.state_store import (
 )
 
 __all__ = [
+    "COLD_RESUME_FAILED",
     "CPU_RESUME_RANKING_SOURCE",
+    "ColdResumer",
     "HandleChecker",
     "ReplyAssembler",
     "ReplyExecutionOutcome",
+    "ResolvedClarificationHandle",
     "WarmReplyExecutor",
 ]
 
@@ -76,6 +81,12 @@ CallTool = Callable[[str, str, Mapping[str, Any]], Awaitable[Any]]
 HandleChecker = Callable[[HandleRef], HandleCheck]
 #: The production implementation is :func:`web_demo.reply_assembly.assemble_reply_presentation`.
 ReplyAssembler = Callable[[ReplyAssemblyRequest], Mapping[str, Any]]
+#: Cold Resume: rebuild a handle in the current MCP process from the durable snapshot.
+ColdResumer = Callable[[PendingRecord], Awaitable["ResolvedClarificationHandle"]]
+
+#: Warm-handle outcomes that may be answered by rebuilding the handle from a durable
+#: continuation.  A foreign-session ticket or a not-ready child is never "cold resumed".
+COLD_RESUMABLE_CODES = frozenset({HANDLE_MISSING, HANDLE_STALE_PROCESS, HANDLE_EXPIRED})
 
 #: Exactly the ranking source the in-memory rule-planner resume path records.
 CPU_RESUME_RANKING_SOURCE = "cpu_live:clarification_resume+recommend_products+gate"
@@ -90,6 +101,18 @@ CONFLICT = "conflict"
 AMBIGUOUS = "ambiguous"
 FENCED = "fenced"
 CHECKPOINT_FAILED = "checkpoint_failed"
+
+#: A cold resume failed before any external execution began (validation/MCP error).
+COLD_RESUME_FAILED = "cold_resume_failed"
+
+
+@dataclass(frozen=True)
+class ResolvedClarificationHandle:
+    """The handle a reply may use, and whether it was rebuilt in this process."""
+
+    handle: HandleCheck
+    clarification_id: str
+    restored: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,8 +177,10 @@ class WarmReplyExecutor:
 
     ``handle_check`` must be bound to the *current* MCP lifecycle (``MCPManager.check_handle``
     in production); the executor proves the handle itself, so a caller cannot assert warmth
-    with a boolean.  ``assemble`` is the pure BFF presentation builder.  ``call_tool`` is the
-    real ``MCPManager.call_tool`` in production and a controlled fake in tests.
+    with a boolean.  ``cold_resume`` (optional) rebuilds a handle in the current MCP process
+    from the pending's durable continuation before the claim; it performs no external business
+    effect.  ``assemble`` is the pure BFF presentation builder.  ``call_tool`` is the real
+    ``MCPManager.call_tool`` in production and a controlled fake in tests.
     """
 
     def __init__(
@@ -166,6 +191,7 @@ class WarmReplyExecutor:
         assemble: ReplyAssembler,
         profile_id: str,
         handle_check: HandleChecker | None = None,
+        cold_resume: ColdResumer | None = None,
         ranking_source: str = CPU_RESUME_RANKING_SOURCE,
         heartbeat_interval: float = 1.0,
         lease_duration: float = 60.0,
@@ -178,6 +204,7 @@ class WarmReplyExecutor:
         self._assemble = assemble
         self._profile_id = profile_id
         self._handle_check = handle_check or _reject_all_handles
+        self._cold_resume = cold_resume
         self._ranking_source = ranking_source
         self._heartbeat_interval = heartbeat_interval
         self._lease_duration = lease_duration
@@ -202,40 +229,84 @@ class WarmReplyExecutor:
         if pending is None:
             return ReplyExecutionOutcome(WARM_UNAVAILABLE, detail="no pending clarification")
 
-        # A completed request replays from its durable result even when the pending is
-        # consumed and the handle is long gone: no MCP call, no new turn.
+        # Ledger states first: a completed request replays, a durable checkpoint finalizes,
+        # and an already-started ambiguous execution stays refused — none of them needs a
+        # handle, an MCP process or a Cold Resume snapshot (the result is in SQLite).
         existing = self._store.get_request(session.session_id, pending.reply_turn_id)
-        if existing is not None and existing.status == "COMPLETED":
+        if existing is not None:
             if pending.clarification_id != clarification_id:
                 return ReplyExecutionOutcome(
                     CONFLICT, pending=pending, detail="clarification id mismatch"
                 )
-            return await self._claim(session, pending, message)
+            lease_live = (
+                existing.lease_expires_at is not None
+                and float(existing.lease_expires_at) > time.time()
+            )
+            # Only a claim that died before external execution (CLAIMED with an expired
+            # lease) may be reclaimed and executed again; that path still needs a handle.
+            needs_handle = (
+                existing.status == "PROCESSING"
+                and existing.execution_stage == "CLAIMED"
+                and not lease_live
+            )
+            if not needs_handle:
+                return await self._claim(session, pending, message)
 
         if pending.status != "OPEN":
             return ReplyExecutionOutcome(
                 WARM_UNAVAILABLE, pending=pending,
                 detail=f"pending is {pending.status}, not OPEN",
             )
-        # Prove the live handle before anything durable happens: no claim, no MCP call and
-        # no M9 write can occur for a handle this process did not issue.
-        handle = self._handle_check(HandleRef(
-            profile_id=self._profile_id,
-            session_id=session.session_id,
-            clarification_id=pending.clarification_id,
-        ))
-        if not handle.ok:
+        # Resolve the handle before anything durable happens: no claim, no MCP business call
+        # and no M9 write can occur for a handle this process cannot prove.  When the old
+        # handle died with a previous MCP process, the durable continuation may rebuild one.
+        resolved = await self._resolve_handle(session, pending)
+        if not resolved.handle.ok:
             return ReplyExecutionOutcome(
                 WARM_UNAVAILABLE, pending=pending,
-                detail=f"{handle.code}: {handle.detail}", handle=handle,
+                detail=f"{resolved.handle.code}: {resolved.handle.detail}",
+                handle=resolved.handle,
             )
         if pending.clarification_id != clarification_id:
             return ReplyExecutionOutcome(
-                CONFLICT, pending=pending, handle=handle,
+                CONFLICT, pending=pending, handle=resolved.handle,
                 detail="clarification id mismatch",
             )
-        return await self._claim(session, pending, message, handle=handle,
-                                 recommend_arguments=recommend_arguments)
+        return await self._claim(
+            session, pending, message, handle=resolved.handle,
+            handle_clarification_id=resolved.clarification_id,
+            recommend_arguments=recommend_arguments,
+        )
+
+    async def _resolve_handle(
+        self, session: Session, pending: PendingRecord
+    ) -> ResolvedClarificationHandle:
+        """Return the handle a reply may use, rebuilding it only when that is provable."""
+        ref = HandleRef(
+            profile_id=self._profile_id,
+            session_id=session.session_id,
+            clarification_id=pending.clarification_id,
+        )
+        check = self._handle_check(ref)
+        if check.ok:
+            return ResolvedClarificationHandle(check, pending.clarification_id)
+        if self._cold_resume is None or check.code not in COLD_RESUMABLE_CODES:
+            return ResolvedClarificationHandle(check, pending.clarification_id)
+        try:
+            restored = await self._cold_resume(pending)
+        except Exception as exc:  # noqa: BLE001 - a failed restore is never a success
+            return ResolvedClarificationHandle(
+                HandleCheck(False, COLD_RESUME_FAILED,
+                            f"{type(exc).__name__}: {exc}"),
+                pending.clarification_id,
+            )
+        if not isinstance(restored, ResolvedClarificationHandle):
+            return ResolvedClarificationHandle(
+                HandleCheck(False, COLD_RESUME_FAILED,
+                            "the cold resumer returned no resolved handle"),
+                pending.clarification_id,
+            )
+        return restored
 
     # -- claim -------------------------------------------------------------- #
 
@@ -246,6 +317,7 @@ class WarmReplyExecutor:
         message: str,
         *,
         handle: HandleCheck | None = None,
+        handle_clarification_id: str | None = None,
         recommend_arguments: Mapping[str, Any] | None = None,
     ) -> ReplyExecutionOutcome:
         payload = {
@@ -298,7 +370,8 @@ class WarmReplyExecutor:
             return self._finalize_from_checkpoint(session, pending, claim, handle=handle)
 
         return await self._execute_external(
-            session, pending, message, recommend_arguments, handle=handle
+            session, pending, message, recommend_arguments, handle=handle,
+            handle_clarification_id=handle_clarification_id,
         )
 
     # -- external execution ------------------------------------------------- #
@@ -311,11 +384,15 @@ class WarmReplyExecutor:
         recommend_arguments: Mapping[str, Any] | None,
         *,
         handle: HandleCheck | None = None,
+        handle_clarification_id: str | None = None,
     ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
         self._start_heartbeat(session.session_id, self._request_id, self._claim_token)
+        # A cold resume installs a NEW handle in the current process; the old id is never
+        # sent back to the child.  The durable pending/request identities stay unchanged.
+        reply_handle_id = str(handle_clarification_id or pending.clarification_id)
         starting_arguments = {
-            "clarification_id": pending.clarification_id,
+            "clarification_id": reply_handle_id,
             "user_message": message,
             "turn_id": pending.reply_turn_id,
             "confirmed_by_user": True,

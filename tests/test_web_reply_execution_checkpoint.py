@@ -1,4 +1,4 @@
-﻿"""Durable external-execution stages and result checkpoints (S5b-P2a)."""
+"""Durable external-execution stages and result checkpoints (S5b-P2a)."""
 
 from __future__ import annotations
 
@@ -293,7 +293,7 @@ def test_v4_database_migrates_to_v5_with_conservative_stage(tmp_path: Path) -> N
 
     store = SQLiteWebStateStore(db)
     try:
-        assert store.schema_version == 5
+        assert store.schema_version == 6
         completed = store.get_request("web-v4", "web-v4-r1")
         pending_req = store.get_request("web-v4", "web-v4-r2")
         assert completed.execution_stage == "COMPLETED"

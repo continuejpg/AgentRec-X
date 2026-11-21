@@ -46,6 +46,11 @@ EXPECTED_TOOLS = {
     "compare_products",
     "request_preference_clarification",
     "submit_clarification_reply",
+    # Registered unconditionally since d66f95a; the write permission is enforced at call
+    # time (`memory_writes_disabled`), not by hiding the tool from the read-only profile.
+    "remember_preference",
+    # M1-D S6: Cold Resume restore of a durable clarification continuation.
+    "restore_clarification_handle",
 }
 
 
@@ -138,8 +143,6 @@ async def _scenario(tmp_path: Path) -> dict[str, Any]:
             assert server["status"] == "ready", server
             assert server["startup_ms"] and server["startup_ms"] > 0
             expected_tools = set(EXPECTED_TOOLS)
-            if server["writes_enabled"]:
-                expected_tools.add("remember_preference")
             assert set(server["tools"] or []) == expected_tools, server["tools"]
         assert manager.ready() is True
         assert manager.aggregate_status()[2] is True  # at least one server ready -> cpu_live

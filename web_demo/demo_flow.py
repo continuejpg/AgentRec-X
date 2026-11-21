@@ -18,7 +18,20 @@ from typing import Any, AsyncIterator, Iterable, Mapping
 
 from web_demo import viewmodels as vm
 from web_demo.behavior import EXISTING_RANKER_VERSION  # re-exported: demo metadata helpers
-from web_demo.config import COMPARE_MAX, COMPARE_MIN, SEARCH_TOP_K, Settings
+from web_demo.config import (
+    COMPARE_MAX,
+    COMPARE_MIN,
+    PROFILE_BY_ID,
+    SEARCH_TOP_K,
+    Settings,
+)
+from web_demo.continuation import (
+    CONTINUATION_MALFORMED,
+    CONTINUATION_SESSION_MISMATCH,
+    build_web_continuation,
+    validate_continuation,
+)
+from web_demo.handle_lifecycle import HandleCheck, HandleRef
 from web_demo.mcp_manager import MCPManager, MCPManagerError
 from web_demo.reply_assembly import (
     assemble_reply_presentation,
@@ -30,17 +43,22 @@ from web_demo.reply_executor import (
     AMBIGUOUS,
     BUSY,
     CHECKPOINT_FAILED,
+    COLD_RESUME_FAILED,
     CONFLICT,
     FENCED,
     REPLAYED,
     RESULT_REUSED,
     SUCCESS,
     WARM_UNAVAILABLE,
+    ResolvedClarificationHandle,
     WarmReplyExecutor,
 )
 from web_demo.sessions import PendingClarification, Session, Turn
 
 LOGGER = logging.getLogger("agentrecx.web_demo.demo_flow")
+
+#: A cold restore is a process-local state rebuild, never a catalogue/LLM call.
+COLD_RESUME_TIMEOUT_S = 30.0
 
 TOOL_LABELS = {
     "search_products": "Search",
@@ -382,6 +400,17 @@ async def _search_and_recommend_turn(
         turn.clarification = clarification
         narrative = vm.narrative_clarification(clarification)
         turn.assistant_text = narrative
+        # Versioned Cold Resume snapshot: the child's exact task/question/deadline plus the
+        # Web binding.  It is committed in the same transaction as the pending row.
+        continuation = build_web_continuation(
+            mcp_continuation=clarification_raw.get("continuation"),
+            query=message,
+            profile_id=profile_id,
+        )
+        expires_at = (
+            float(continuation["expires_at"]) if continuation is not None
+            else time.time() + float(settings.clarification_ttl_s)
+        )
         # The ASK is committed to SQLite *before* the browser is told it exists.  In
         # persistent mode commit_ask allocates the single reply identity itself.
         if session._store is not None:
@@ -392,8 +421,9 @@ async def _search_and_recommend_turn(
                 query=message,
                 clarification_id=str(clarification.get("clarification_id") or ""),
                 mode="cpu_live",
-                expires_at=time.time() + float(settings.clarification_ttl_s),
+                expires_at=expires_at,
                 ranking_source="cpu_live:search_products+recommend_products+gate",
+                continuation=continuation,
             )
         else:
             session.pending_clarification = PendingClarification(
@@ -1131,6 +1161,88 @@ def _mirror_committed_reply(
         )
 
 
+async def _cold_resume_handle(
+    *,
+    manager: MCPManager,
+    store: Any,
+    session: Session,
+    pending: Any,
+) -> ResolvedClarificationHandle:
+    """Rebuild one pending's handle in the CURRENT MCP process from its durable snapshot.
+
+    This runs before the request claim and performs no business effect: the child only
+    installs an in-process handle.  The real M9 write / recommendation still happen after
+    ``EXTERNAL_STARTED`` through the normal coordinator path.
+    """
+    record = store.get_session(session.session_id)
+    if record is None:  # pragma: no cover - the HTTP route already resolved the session
+        return ResolvedClarificationHandle(
+            HandleCheck(False, CONTINUATION_SESSION_MISMATCH,
+                        "the session row no longer exists"),
+            pending.clarification_id,
+        )
+    check = validate_continuation(
+        pending.continuation,
+        session_id=session.session_id,
+        profile_id=session.profile_id,
+        task_id=pending.task_id,
+        pending_id=pending.pending_id,
+        clarification_id=pending.clarification_id,
+        reset_generation=record.reset_generation,
+        expires_at=pending.expires_at,
+        query=pending.query,
+        expected_user_key=PROFILE_BY_ID[session.profile_id].user_key,
+    )
+    if not check.ok:
+        return ResolvedClarificationHandle(
+            HandleCheck(False, check.code, check.detail), pending.clarification_id
+        )
+    try:
+        restored = await manager.call_tool(
+            session.profile_id,
+            "restore_clarification_handle",
+            {"continuation": check.payload, "session_id": session.session_id},
+            timeout_s=COLD_RESUME_TIMEOUT_S,
+        )
+    except Exception as exc:  # noqa: BLE001 - no business effect happened yet
+        return ResolvedClarificationHandle(
+            HandleCheck(False, COLD_RESUME_FAILED,
+                        f"restore_clarification_handle failed: {type(exc).__name__}"),
+            pending.clarification_id,
+        )
+    if not isinstance(restored, Mapping):
+        return ResolvedClarificationHandle(
+            HandleCheck(False, CONTINUATION_MALFORMED,
+                        "the child returned no restore object"),
+            pending.clarification_id,
+        )
+    new_handle = str(restored.get("clarification_id") or "")
+    if not new_handle or new_handle == pending.clarification_id:
+        return ResolvedClarificationHandle(
+            HandleCheck(False, CONTINUATION_MALFORMED,
+                        "the child did not issue a new handle"),
+            pending.clarification_id,
+        )
+    if str(restored.get("session_id") or "") != session.session_id:
+        return ResolvedClarificationHandle(
+            HandleCheck(False, CONTINUATION_SESSION_MISMATCH,
+                        "the restored handle belongs to another session"),
+            pending.clarification_id,
+        )
+    handle = manager.check_handle(HandleRef(
+        profile_id=session.profile_id,
+        session_id=session.session_id,
+        clarification_id=new_handle,
+    ))
+    if handle.ok:
+        LOGGER.info(
+            "cold resume restored session=%s pending=%s old_handle=%s new_handle=%s",
+            session.session_id, pending.pending_id,
+            pending.clarification_id, new_handle,
+        )
+    return ResolvedClarificationHandle(handle, new_handle, restored=True)
+
+
 async def _persistent_clarification_reply(
     *,
     manager: MCPManager,
@@ -1138,7 +1250,7 @@ async def _persistent_clarification_reply(
     clarification_id: str,
     message: str,
 ) -> dict[str, Any]:
-    """Durable Warm Reply: prove the handle, claim, execute, checkpoint, finalize, return."""
+    """Durable Warm/Cold Reply: resolve a handle, claim, execute, checkpoint, finalize."""
     store = getattr(session._store, "state_store", None)
     if store is None:  # pragma: no cover - persistent sessions always expose the state store
         raise MCPManagerError(
@@ -1163,8 +1275,9 @@ async def _persistent_clarification_reply(
             detail={"clarification_id": clarification_id, "status": pending.status},
         )
     if pending.mode != "cpu_live":
-        # Cold Resume (a new process resuming another process's handle) is deliberately not
-        # implemented; a Qwen-issued pending would need its continuation in the old child.
+        # Cold Resume is implemented for the CPU rule planner only.  A Qwen-issued handle
+        # carries in-child planner/executor continuation that is not JSON-serialisable, so it
+        # stays a 409 instead of resuming with a different task.
         raise MCPManagerError(
             "durable clarification replies are implemented for the CPU rule planner only; "
             f"this pending was issued by mode={pending.mode!r}",
@@ -1180,6 +1293,9 @@ async def _persistent_clarification_reply(
         ),
         profile_id=session.profile_id,
         handle_check=manager.check_handle,
+        cold_resume=lambda pending_row: _cold_resume_handle(
+            manager=manager, store=store, session=session, pending=pending_row,
+        ),
     )
     outcome = await executor.execute(
         session, pending, message=message, clarification_id=clarification_id,

@@ -291,7 +291,7 @@ def test_v3_database_migrates_to_v4_preserving_state(tmp_path: Path) -> None:
 
     store = SQLiteWebStateStore(db)
     try:
-        assert store.schema_version == WEB_STATE_SCHEMA_VERSION == 5
+        assert store.schema_version == WEB_STATE_SCHEMA_VERSION == 6
         pending = store.get_open_pending("task-v3")
         assert pending is not None and pending.pending_id == "pend-v3"
         assert store.get_request("web-v3", "web-v3-r1") is None

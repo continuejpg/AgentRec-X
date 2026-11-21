@@ -261,7 +261,7 @@ def test_real_mcp_warm_reply_commits_replays_and_survives_restart(tmp_path: Path
         assert calls2 == [], "a durable replay must not start a new MCP child call"
 
 
-def test_real_mcp_restored_pending_is_refused_after_restart(tmp_path: Path) -> None:
+def test_real_mcp_legacy_pending_without_continuation_is_refused(tmp_path: Path) -> None:
     settings = _real_settings(tmp_path)
     db_path = settings.web_state_db_path
     assert db_path is not None
@@ -271,6 +271,15 @@ def test_real_mcp_restored_pending_is_refused_after_restart(tmp_path: Path) -> N
         session_id = _create(client)
         clarification = _ask(client, session_id)
         clarification_id = clarification["clarification_id"]
+
+    # Simulate a pending written before Cold Resume existed: the row is intact but has no
+    # restorable snapshot, so the reply must fail closed instead of guessing a task.
+    raw = sqlite3.connect(str(db_path))
+    try:
+        raw.execute("UPDATE web_pending SET continuation_json = NULL")
+        raw.commit()
+    finally:
+        raw.close()
 
     # Everything that could prove the handle lived in the stopped child process.
     with TestClient(create_app(settings=settings)) as client2:
@@ -282,8 +291,8 @@ def test_real_mcp_restored_pending_is_refused_after_restart(tmp_path: Path) -> N
     assert response.status_code == 409, response.text
     error = response.json()
     assert error["code"] == "clarification_resume_not_ready"
-    assert error["detail"]["handle"]["code"] == "handle_missing"
-    assert calls == [], "no MCP call may follow a restored pending"
+    assert error["detail"]["handle"]["code"] == "continuation_missing"
+    assert calls == [], "no MCP call may follow a pending without a continuation"
     assert _turns(db_path, session_id) == before == [f"{session_id}-t1"]
 
     state = SQLiteWebStateStore(db_path)

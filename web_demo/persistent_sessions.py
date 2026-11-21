@@ -170,12 +170,14 @@ class PersistentSessionStore:
         mode: str,
         expires_at: float,
         ranking_source: str | None,
+        continuation: Mapping[str, Any] | None = None,
     ) -> PendingClarification:
         """Commit Task + Turn + Pending + Reply ID in one SQLite transaction.
 
         The reply identity is allocated *inside* that transaction (``commit_ask``), so the
         caller must not allocate one first.  Nothing is yielded to the browser until this
-        returns.
+        returns.  ``continuation`` is the versioned Cold Resume snapshot; the transaction
+        stores it with the pending row.
         """
         record = self._state.commit_ask(
             session.session_id,
@@ -189,6 +191,7 @@ class PersistentSessionStore:
             mode=mode,
             turn=turn.view(),
             ranking_source=ranking_source,
+            continuation=continuation,
         )
         pending = PendingClarification(
             payload=record.payload,

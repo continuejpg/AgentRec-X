@@ -199,7 +199,9 @@ def test_duplicate_persistent_reply_replays_without_second_mcp_call(tmp_path: Pa
     assert view["pending_clarification"] is None
 
 
-def test_persistent_reply_after_manager_restart_is_refused(tmp_path: Path) -> None:
+def test_persistent_reply_after_manager_restart_is_refused_without_a_continuation(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "state.sqlite3"
     app = _warm_app(tmp_path, db_path)
     manager = app.state.manager
@@ -216,13 +218,17 @@ def test_persistent_reply_after_manager_restart_is_refused(tmp_path: Path) -> No
 
     assert response.status_code == 409
     assert response.json()["code"] == REPLY_CODE
-    assert response.json()["detail"]["handle"]["code"] == "stale_process"
+    # This fake ASK never persisted a durable continuation, so the dead handle cannot be
+    # rebuilt and the reply is refused instead of guessed.
+    assert response.json()["detail"]["handle"]["code"] == "continuation_missing"
     assert len(manager.calls) == calls_before, "no MCP call may follow a dead handle"
     assert _snapshot(db_path, session_id) == before
     assert before["pending_status"] == "OPEN"
 
 
-def test_persistent_reply_after_handle_expiry_is_refused(tmp_path: Path) -> None:
+def test_persistent_reply_after_handle_expiry_is_refused_without_a_continuation(
+    tmp_path: Path,
+) -> None:
     db_path = tmp_path / "state.sqlite3"
     app = _warm_app(tmp_path, db_path)
     manager = app.state.manager
@@ -238,7 +244,7 @@ def test_persistent_reply_after_handle_expiry_is_refused(tmp_path: Path) -> None
 
     assert response.status_code == 409
     assert response.json()["code"] == REPLY_CODE
-    assert response.json()["detail"]["handle"]["code"] == "expired"
+    assert response.json()["detail"]["handle"]["code"] == "continuation_missing"
     assert len(manager.calls) == calls_before
 
 

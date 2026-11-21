@@ -178,7 +178,11 @@ class FakeManager:
 
     # -- tools ---------------------------------------------------------------
     async def call_tool(
-        self, profile_id: str, tool: str, arguments: Mapping[str, Any] | None = None
+        self,
+        profile_id: str,
+        tool: str,
+        arguments: Mapping[str, Any] | None = None,
+        **kwargs: Any,  # mirrors MCPManager.call_tool's optional timeout/progress kwargs
     ) -> dict[str, Any]:
         args = dict(arguments or {})
         self.calls.append((profile_id, tool, args))

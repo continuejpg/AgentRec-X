@@ -85,7 +85,7 @@ __all__ = [
 
 #: Current schema version. v1 = S2a (identity), v2 = S2b (tasks + clarifications),
 #: v3 = S3b (persisted chat turns), v4 = S5a (durable reply request ledger).
-WEB_STATE_SCHEMA_VERSION = 5
+WEB_STATE_SCHEMA_VERSION = 6
 
 #: Mirrors ``web_demo.sessions.DEFAULT_TITLE``; a test asserts the two stay equal.
 DEFAULT_SESSION_TITLE = "New shopping session"
@@ -268,6 +268,12 @@ _SCHEMA_V5_STATEMENTS: tuple[str, ...] = (
     """,
 )
 
+#: v6 adds the Cold Resume snapshot.  Existing rows stay NULL (``PendingRecord.continuation``
+#: is then ``None``) and such pendings are refused instead of being guessed at.
+_SCHEMA_V6_STATEMENTS: tuple[str, ...] = (
+    "ALTER TABLE web_pending ADD COLUMN continuation_json TEXT",
+)
+
 _SESSION_COLUMNS = (
     "session_id, profile_id, title, created_at, updated_at, behavior_enabled, "
     "turn_counter, reply_counter, reset_generation, retired"
@@ -279,7 +285,7 @@ _TASK_COLUMNS = (
 )
 _PENDING_COLUMNS = (
     "pending_id, task_id, clarification_id, query, turn_id, reply_turn_id, mode, "
-    "payload_json, status, created_at, expires_at, consumed_at"
+    "payload_json, status, created_at, expires_at, consumed_at, continuation_json"
 )
 _TURN_COLUMNS = "session_id, turn_seq, turn_id, task_id, payload_json, created_at"
 _REQUEST_COLUMNS = (
@@ -290,7 +296,8 @@ _REQUEST_COLUMNS = (
 )
 _PENDING_ALIASED_COLUMNS = (
     "p.pending_id, p.task_id, p.clarification_id, p.query, p.turn_id, p.reply_turn_id, "
-    "p.mode, p.payload_json, p.status, p.created_at, p.expires_at, p.consumed_at"
+    "p.mode, p.payload_json, p.status, p.created_at, p.expires_at, p.consumed_at, "
+    "p.continuation_json"
 )
 
 
@@ -451,6 +458,9 @@ class PendingRecord:
     created_at: float
     expires_at: float
     consumed_at: float | None
+    #: Versioned Cold Resume snapshot written by :meth:`commit_ask`; ``None`` for every
+    #: pending created before v6 or without a restorable MCP context.
+    continuation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -607,7 +617,7 @@ class SQLiteWebStateStore:
             for statement in (
                 _SCHEMA_V1_STATEMENTS + _SCHEMA_V2_STATEMENTS
                 + _SCHEMA_V3_STATEMENTS + _SCHEMA_V4_STATEMENTS
-                + _SCHEMA_V5_STATEMENTS
+                + _SCHEMA_V5_STATEMENTS + _SCHEMA_V6_STATEMENTS
             ):
                 connection.execute(statement)
             connection.execute(
@@ -621,7 +631,7 @@ class SQLiteWebStateStore:
             version = self._read_schema_version(connection)
             if version == WEB_STATE_SCHEMA_VERSION:
                 return  # another process migrated it while we waited for the write lock
-            if version not in (1, 2, 3, 4):
+            if version not in (1, 2, 3, 4, 5):
                 raise SchemaVersionError(
                     f"cannot migrate schema version {version} to {WEB_STATE_SCHEMA_VERSION}"
                 )
@@ -636,6 +646,9 @@ class SQLiteWebStateStore:
                     connection.execute(statement)
                 if version <= 4:
                     for statement in _SCHEMA_V5_STATEMENTS:
+                        connection.execute(statement)
+                if version <= 5:
+                    for statement in _SCHEMA_V6_STATEMENTS:
                         connection.execute(statement)
                 connection.execute(
                     "UPDATE meta SET value = ? WHERE key = 'schema_version'",
@@ -972,6 +985,7 @@ class SQLiteWebStateStore:
         mode: str = "cpu_live",
         turn: Mapping[str, Any] | None = None,
         ranking_source: str | None = None,
+        continuation: Mapping[str, Any] | None = None,
     ) -> PendingRecord:
         """Persist one ASK round atomically.
 
@@ -981,6 +995,11 @@ class SQLiteWebStateStore:
         reply identity, insert the pending row, move the task to ``WAITING_FOR_USER`` and
         bump ``task_version``.  Any failure rolls the whole unit back, so there is no
         state where a reply identity was issued without its pending row.
+
+        ``continuation`` is the versioned Cold Resume snapshot
+        (:mod:`web_demo.continuation`).  Its Web binding fields are overwritten with the
+        values committed here (session/profile/task/pending/clarification/mode/generation/
+        expiry), so the snapshot can never disagree with the row it belongs to.
         """
         session_id = _require_text(session_id, "session_id")
         task_id = _require_text(task_id, "task_id")
@@ -990,6 +1009,8 @@ class SQLiteWebStateStore:
         if mode not in PENDING_MODES:
             raise ValueError(f"mode must be one of {sorted(PENDING_MODES)}, got {mode!r}")
         payload_json = _dumps_json(payload, "payload")
+        if continuation is not None and not isinstance(continuation, Mapping):
+            raise ValueError("continuation must be a mapping")
         timestamp = time.time()
         expires_at = float(expires_at)
         if expires_at <= timestamp:
@@ -998,7 +1019,8 @@ class SQLiteWebStateStore:
 
         with self._transaction() as connection:
             session = connection.execute(
-                "SELECT reset_generation, retired FROM web_session WHERE session_id = ?",
+                "SELECT reset_generation, retired, profile_id FROM web_session "
+                "WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
             if session is None:
@@ -1046,13 +1068,32 @@ class SQLiteWebStateStore:
 
             reply_turn_id = self._allocate_in_transaction(connection, session_id, "reply")
 
+            continuation_json: str | None = None
+            if continuation is not None:
+                # The row is the authority for the Web binding: a caller cannot store a
+                # snapshot that points at another session/task/pending/generation/expiry.
+                stamped = dict(continuation)
+                stamped.update({
+                    "session_id": session_id,
+                    "profile_id": str(session["profile_id"]),
+                    "web_task_id": task_id,
+                    "pending_id": pending_id,
+                    "clarification_id": clarification_id,
+                    "mode": mode,
+                    "reset_generation": int(task["reset_generation"]),
+                    "expires_at": expires_at,
+                })
+                continuation_json = _dumps_json(stamped, "continuation")
+
             try:
                 connection.execute(
                     "INSERT INTO web_pending(pending_id, task_id, clarification_id, query, "
                     "turn_id, reply_turn_id, mode, payload_json, status, created_at, "
-                    "expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, NULL)",
+                    "expires_at, consumed_at, continuation_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, NULL, ?)",
                     (pending_id, task_id, clarification_id, query, source_turn_id,
-                     reply_turn_id, mode, payload_json, timestamp, expires_at),
+                     reply_turn_id, mode, payload_json, timestamp, expires_at,
+                     continuation_json),
                 )
             except sqlite3.IntegrityError as exc:
                 raise AskCommitError(
@@ -2223,6 +2264,13 @@ def _to_pending_record(row: sqlite3.Row) -> PendingRecord:
         created_at=float(row["created_at"]),
         expires_at=float(row["expires_at"]),
         consumed_at=None if row["consumed_at"] is None else float(row["consumed_at"]),
+        continuation=(
+            None if row["continuation_json"] is None
+            else _loads_json(
+                row["continuation_json"],
+                table="web_pending", row_key=pending_id, field="continuation_json",
+            )
+        ),
     )
 
 

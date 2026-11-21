@@ -329,7 +329,7 @@ def test_dead_handle_blocks_persistent_reply_without_touching_either_database(
 
     assert response.status_code == 409
     assert response.json()["code"] == "clarification_resume_not_ready"
-    assert response.json()["detail"]["handle"]["code"] == "stale_process"
+    assert response.json()["detail"]["handle"]["code"] == "continuation_missing"
     assert len(manager.calls) == calls_before
     assert not m9_path.exists() or sqlite3.connect(str(m9_path)).execute(
         "SELECT COUNT(*) FROM preference_memory"

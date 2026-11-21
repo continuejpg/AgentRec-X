@@ -246,7 +246,7 @@ def test_result_ready_reuses_checkpoint_without_mcp(tmp_path: Path) -> None:
             raw.close()
         tools = FakeTools()
         outcome = asyncio.run(_run(
-            _executor(store, tools), _session(), pending,
+            _executor(store, tools, handle_check=_handle_missing), _session(), pending,
             clarification_id=pending.clarification_id,
         ))
         assert outcome.outcome == "result_reused"
