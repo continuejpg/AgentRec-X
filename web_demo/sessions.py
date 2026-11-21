@@ -92,6 +92,15 @@ class PendingClarification:
         return dict(self.payload)
 
 
+def build_recommendation_record(
+    payload: dict[str, Any], *, turn_id: str, ranking_source: str
+) -> dict[str, Any]:
+    """Construct the frozen recommendation snapshot without writing it into a Session."""
+    snapshot = build_recommendation_snapshot(payload, request_id=turn_id, turn_id=turn_id)
+    snapshot["ranking_source"] = str(ranking_source)
+    return snapshot
+
+
 @dataclass
 class Session:
     session_id: str
@@ -173,8 +182,9 @@ class Session:
         fixed candidate pool for the behavior shadow.  It is process-local like the session
         itself; the event log (and its product snapshots) is the durable part.
         """
-        snapshot = build_recommendation_snapshot(payload, request_id=turn_id, turn_id=turn_id)
-        snapshot["ranking_source"] = ranking_source
+        snapshot = build_recommendation_record(
+            payload, turn_id=turn_id, ranking_source=ranking_source
+        )
         recommendation_id = str(snapshot.get("recommendation_id") or "")
         if not recommendation_id:
             raise ValueError("products payload has no recommendation_id")
