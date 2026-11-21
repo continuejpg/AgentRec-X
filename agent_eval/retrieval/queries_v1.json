@@ -1,0 +1,104 @@
+{
+  "schema": "agentrecx.retrieval_eval.queries.v1",
+  "dataset_version": "1.0.0",
+  "created_at": "2026-11-21",
+  "description": "M3-C retrieval query set: 10 representative laptop, headphones, tablet, mouse and keyboard requests. The retrieval experiment uses the current production effective query construction but a category-scoped candidate corpus.",
+  "queries": [
+    {
+      "query_id": "laptop_5000",
+      "query": "推荐一台 5000 元的笔记本",
+      "expected_category": "laptop",
+      "expected_use_cases": [],
+      "purpose": "Laptop budget request where chargers/adapters/batteries dominated the current top-5.",
+      "expected_features": []
+    },
+    {
+      "query_id": "laptop_gaming_8000",
+      "query": "推荐一台 8000 元的游戏笔记本",
+      "expected_category": "laptop",
+      "expected_use_cases": [
+        "gaming"
+      ],
+      "purpose": "Gaming laptop request with an explicit budget and use case.",
+      "expected_features": []
+    },
+    {
+      "query_id": "laptop_office_6000",
+      "query": "推荐一台 6000 元的办公笔记本",
+      "expected_category": "laptop",
+      "expected_use_cases": [
+        "office"
+      ],
+      "purpose": "Office laptop request; tests category scope under a different use case.",
+      "expected_features": []
+    },
+    {
+      "query_id": "laptop_gaming_1000",
+      "query": "推荐一台 1000 元的游戏笔记本",
+      "expected_category": "laptop",
+      "expected_use_cases": [
+        "gaming"
+      ],
+      "purpose": "A low-budget gaming laptop query; mostly a retrieval stress case.",
+      "expected_features": []
+    },
+    {
+      "query_id": "headphones_noise",
+      "query": "I need some new headphones. Not sure what matters yet.",
+      "expected_category": "headphones",
+      "expected_use_cases": [],
+      "purpose": "General headphones query from the M3-B Golden Dataset.",
+      "expected_features": []
+    },
+    {
+      "query_id": "headphones_gaming_500",
+      "query": "推荐一款 500 元的游戏耳机",
+      "expected_category": "headphones",
+      "expected_use_cases": [
+        "gaming"
+      ],
+      "purpose": "Gaming headphones with budget.",
+      "expected_features": []
+    },
+    {
+      "query_id": "headphones_noise_500",
+      "query": "推荐一款 500 元的降噪耳机",
+      "expected_category": "headphones",
+      "expected_use_cases": [
+        "noise_cancelling"
+      ],
+      "purpose": "Noise-cancelling headphones with budget.",
+      "expected_features": []
+    },
+    {
+      "query_id": "tablet_study_3000",
+      "query": "推荐一台 3000 元的学习平板",
+      "expected_category": "tablet",
+      "expected_use_cases": [
+        "study"
+      ],
+      "purpose": "Tablet request; tests whether category scope removes tablet cases/chargers.",
+      "expected_features": []
+    },
+    {
+      "query_id": "mouse_wireless_300",
+      "query": "推荐一个 300 元的无线鼠标",
+      "expected_category": "mouse",
+      "expected_use_cases": [],
+      "purpose": "Mouse request with a budget; tests mouse pads/other accessories.",
+      "expected_features": [
+        "wireless"
+      ]
+    },
+    {
+      "query_id": "keyboard_mechanical_500",
+      "query": "推荐一把 500 元的机械键盘",
+      "expected_category": "keyboard",
+      "expected_use_cases": [],
+      "purpose": "Keyboard request with a budget; tests keyboard covers/stickers/pads.",
+      "expected_features": [
+        "mechanical"
+      ]
+    }
+  ]
+}

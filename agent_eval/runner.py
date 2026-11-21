@@ -29,6 +29,7 @@ from agent_eval.dataset import GoldenCase, GoldenDataset, dataset_sha256, load_d
 from agent_eval.metrics import compute_metrics, evaluate_case
 from web_demo.app import create_app
 from web_demo.config import SEARCH_TOP_K, Settings
+from recommendation.control.catalog_search import BM25_B, BM25_K1
 from web_demo.handle_lifecycle import HandleRef
 from web_demo.mcp_manager import MCPManagerError
 
@@ -714,8 +715,8 @@ class AgentEvaluationRunner:
             "search": {
                 "mode": "bm25",
                 "top_k": int(SEARCH_TOP_K),
-                "bm25_k1": 1.5,
-                "bm25_b": 0.75,
+                "bm25_k1": BM25_K1,
+                "bm25_b": BM25_B,
                 "score_kind": "bm25",
             },
             "python": {
