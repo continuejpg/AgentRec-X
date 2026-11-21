@@ -1,0 +1,472 @@
+{
+  "schema": "agentrecx.golden.agent_tasks.v1",
+  "dataset_version": "1.0.0",
+  "created_at": "2026-11-21",
+  "description": "Versioned task-level Golden Dataset for the real CPU/BM25 AgentRec-X Web demo. Expected outcomes and relevance labels are manual task annotations, not outputs of the current BM25 ranker.",
+  "labeling_policy": "Binary relevance labels (0/1) were assigned by reading each pooled top-5 product title/description. BM25 scores and ranks were not used as labels. A case is included in Precision@5 only when every retrieved top-5 id has a manual label; newly retrieved unjudged ids are excluded from the metric and reported.",
+  "catalog": {
+    "name": "accepted C4 Electronics catalogue + Raw Meta historical USD sidecar",
+    "catalog_size": 76263,
+    "price_mode": "demo_historical_fx",
+    "fx_rate": "7.00",
+    "price_note": "演示参考价：历史美元价格按固定汇率换算，非当前市场售价。"
+  },
+  "cases": [
+    {
+      "case_id": "hp_noise_warm",
+      "dataset_version": "1.0.0",
+      "category": "normal",
+      "purpose": "Normal headphones recommendation after a real clarification reply.",
+      "user_query": "I need some new headphones. Not sure what matters yet.",
+      "clarification_reply": "I prefer noise cancelling.",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": null,
+        "category": "headphones",
+        "use_cases": []
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {},
+      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "relevance": {
+        "judged_ids": {
+          "B00Y2WGMAY": 0,
+          "B017YOH138": 0,
+          "B07F5PFRRF": 0,
+          "B07MY1X14M": 0,
+          "B00LJX4KZ8": 1
+        },
+        "note": "Only the Happy Plugs headphone is relevant to a general headphones query; the other four top-5 ids are LCD/tablet/remote accessories."
+      },
+      "notes": "The product has no catalogue price, which is allowed because this task has no budget."
+    },
+    {
+      "case_id": "hp_noise_cold",
+      "dataset_version": "1.0.0",
+      "category": "cold_resume",
+      "purpose": "The same headphones task across a real MCP child restart.",
+      "user_query": "I need some new headphones. Not sure what matters yet.",
+      "clarification_reply": "I prefer noise cancelling.",
+      "execution_mode": "cold_resume",
+      "expected_requirements": {
+        "budget": null,
+        "category": "headphones",
+        "use_cases": []
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {},
+      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "relevance": null,
+      "notes": "The old handle must be rejected and a new handle issued from the durable continuation."
+    },
+    {
+      "case_id": "hp_noise_replay",
+      "dataset_version": "1.0.0",
+      "category": "replay",
+      "purpose": "Completed headphones reply replayed without another MCP call.",
+      "user_query": "I need some new headphones. Not sure what matters yet.",
+      "clarification_reply": "I prefer noise cancelling.",
+      "execution_mode": "replay",
+      "expected_requirements": {
+        "budget": null,
+        "category": "headphones",
+        "use_cases": []
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {},
+      "acceptable_product_ids": ["B00LJX4KZ8"],
+      "relevance": null,
+      "notes": "Replay must return the same recommendation id and must add zero MCP calls."
+    },
+    {
+      "case_id": "hp_gaming_500_warm",
+      "dataset_version": "1.0.0",
+      "category": "category_use_case",
+      "purpose": "Category plus gaming use case and a real <=500 CNY budget.",
+      "user_query": "推荐一款 headphones，500 元以内",
+      "clarification_reply": "游戏用",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 500.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "headphones",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 500.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": null
+      },
+      "acceptable_product_ids": ["B0833X5GNK"],
+      "relevance": null,
+      "notes": "The reply supplies the missing gaming use case; the historical demo price is allowed only with its provenance."
+    },
+    {
+      "case_id": "hp_gaming_500_cold",
+      "dataset_version": "1.0.0",
+      "category": "cold_resume",
+      "purpose": "Budgeted gaming-headphones task across a real MCP restart.",
+      "user_query": "推荐一款 headphones，500 元以内",
+      "clarification_reply": "游戏用",
+      "execution_mode": "cold_resume",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 500.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "headphones",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 500.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": null
+      },
+      "acceptable_product_ids": ["B0833X5GNK"],
+      "relevance": null,
+      "notes": "Exercises Cold Resume with task requirements that include a budget and use case."
+    },
+    {
+      "case_id": "hp_gaming_500_replay",
+      "dataset_version": "1.0.0",
+      "category": "replay",
+      "purpose": "Budgeted gaming-headphones reply replayed with zero MCP.",
+      "user_query": "推荐一款 headphones，500 元以内",
+      "clarification_reply": "游戏用",
+      "execution_mode": "replay",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 500.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "headphones",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 500.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": null
+      },
+      "acceptable_product_ids": ["B0833X5GNK"],
+      "relevance": null,
+      "notes": "Second reply must be a COMPLETED replay, not a new recommendation."
+    },
+    {
+      "case_id": "laptop_update_warm",
+      "dataset_version": "1.0.0",
+      "category": "budget_update",
+      "purpose": "Budget revision from 5000 to 8000 CNY with a new gaming use case.",
+      "user_query": "推荐一台 5000 元的笔记本",
+      "clarification_reply": "游戏，预算改成 8000 元",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 8000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 8000.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": "main"
+      },
+      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "relevance": {
+        "judged_ids": {
+          "B08TR3PM8Z": 0,
+          "B08CVRB4T8": 0,
+          "B009X0LDQI": 0,
+          "B01M62JTH2": 0,
+          "B0B9XSCRZP": 0
+        },
+        "note": "All five retrieved items are laptop chargers/adapters/memory/accessories, not laptops; manually graded 0."
+      },
+      "notes": "The original 5000 text stays in history; retrieval must use the merged 8000/gaming requirements."
+    },
+    {
+      "case_id": "laptop_update_cold",
+      "dataset_version": "1.0.0",
+      "category": "cold_resume",
+      "purpose": "Budget-revision task across a real MCP child restart.",
+      "user_query": "推荐一台 5000 元的笔记本",
+      "clarification_reply": "游戏，预算改成 8000 元",
+      "execution_mode": "cold_resume",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 8000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 8000.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": "main"
+      },
+      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "relevance": null,
+      "notes": "Cold Resume must preserve the merged requirements, not only the old 5000 query."
+    },
+    {
+      "case_id": "laptop_update_replay",
+      "dataset_version": "1.0.0",
+      "category": "replay",
+      "purpose": "Budget-revision reply replayed under the original committed result.",
+      "user_query": "推荐一台 5000 元的笔记本",
+      "clarification_reply": "游戏，预算改成 8000 元",
+      "execution_mode": "replay",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 8000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 8000.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": "main"
+      },
+      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "relevance": null,
+      "notes": "Replay must preserve the recommendation id and converted historical price."
+    },
+    {
+      "case_id": "laptop_direct_8000",
+      "dataset_version": "1.0.0",
+      "category": "normal",
+      "purpose": "A fully specified gaming-laptop task that should finalize in one chat turn.",
+      "user_query": "推荐一台 8000 元的游戏笔记本",
+      "clarification_reply": null,
+      "execution_mode": "direct",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 8000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 8000.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": "main"
+      },
+      "acceptable_product_ids": ["B0BY2Z27LC"],
+      "relevance": {
+        "judged_ids": {
+          "B00178N5Q0": 0,
+          "B002DHIXRK": 0,
+          "B07NVLX7HH": 0,
+          "B000KU6DE2": 0,
+          "B08BHVWM1K": 0
+        },
+        "note": "All five retrieved items are batteries/adapters/monitor/flash accessories, not laptops; manually graded 0."
+      },
+      "notes": "No clarification should be necessary; the task is intentionally direct."
+    },
+    {
+      "case_id": "laptop_budget_exceeded_1000",
+      "dataset_version": "1.0.0",
+      "category": "no_within_budget",
+      "purpose": "A real budget revision to 1000 CNY where no verified within-budget laptop exists.",
+      "user_query": "推荐一台 5000 元的笔记本",
+      "clarification_reply": "游戏，预算改成 1000 元",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 1000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "refusal",
+        "refusal_codes": ["budget_exceeded"]
+      },
+      "hard_constraints": {},
+      "acceptable_product_ids": [],
+      "relevance": null,
+      "notes": "Correct refusal is HTTP 200 with no product and code budget_exceeded; a 503 is an execution failure, not a correct refusal."
+    },
+    {
+      "case_id": "hp_budget_unverifiable_500",
+      "dataset_version": "1.0.0",
+      "category": "no_price",
+      "purpose": "A 500 CNY noise-cancelling headphones task where the relevant product has no usable price.",
+      "user_query": "推荐一款 headphones",
+      "clarification_reply": "500 元以内，降噪的",
+      "execution_mode": "warm",
+      "price_mode": "strict",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 500.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "headphones",
+        "use_cases": ["noise_cancelling"]
+      },
+      "expected_outcome": {
+        "kind": "refusal",
+        "refusal_codes": ["budget_unverifiable"]
+      },
+      "hard_constraints": {},
+      "acceptable_product_ids": [],
+      "relevance": null,
+      "notes": "This case runs in strict price mode: no sidecar price is loaded, so a missing price must be reported as budget_unverifiable, not as a retrieval miss or a fabricated recommendation."
+    },
+    {
+      "case_id": "laptop_office_6000",
+      "dataset_version": "1.0.0",
+      "category": "category_use_case",
+      "purpose": "Office-laptop category/use-case task; expected to expose unsupported role/evidence behavior if it fails.",
+      "user_query": "推荐一台 6000 元的办公笔记本",
+      "clarification_reply": "轻便，续航长",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 6000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "laptop",
+        "use_cases": ["office"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 6000.0,
+        "currency": "CNY",
+        "price_kind": null,
+        "product_role": "main"
+      },
+      "acceptable_product_ids": [],
+      "relevance": null,
+      "notes": "No product is pinned; any verified main laptop within 6000 would count. The current system is expected to reveal a limitation here."
+    },
+    {
+      "case_id": "tablet_3000",
+      "dataset_version": "1.0.0",
+      "category": "category_use_case",
+      "purpose": "Tablet study task; expected to expose product-type support limits if it fails.",
+      "user_query": "推荐一台 3000 元的平板",
+      "clarification_reply": "学习用",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 3000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "tablet",
+        "use_cases": ["study"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 3000.0,
+        "currency": "CNY",
+        "price_kind": null,
+        "product_role": null
+      },
+      "acceptable_product_ids": [],
+      "relevance": null,
+      "notes": "No product is pinned; any verified tablet within 3000 would count. The current system is expected to reveal a limitation here."
+    },
+    {
+      "case_id": "hp_gaming_1000_warm",
+      "dataset_version": "1.0.0",
+      "category": "budget",
+      "purpose": "A second gaming-headphones budget value to check that the selected product remains within budget.",
+      "user_query": "推荐一款 headphones，1000 元以内",
+      "clarification_reply": "游戏用",
+      "execution_mode": "warm",
+      "expected_requirements": {
+        "budget": {
+          "max_amount": 1000.0,
+          "min_amount": null,
+          "currency": "CNY"
+        },
+        "category": "headphones",
+        "use_cases": ["gaming"]
+      },
+      "expected_outcome": {
+        "kind": "recommendation",
+        "refusal_codes": []
+      },
+      "hard_constraints": {
+        "max_price": 1000.0,
+        "currency": "CNY",
+        "price_kind": "historical_demo_converted",
+        "product_role": null
+      },
+      "acceptable_product_ids": ["B0833X5GNK"],
+      "relevance": null,
+      "notes": "Budget 1000 is looser than 500 but still requires the selected price and provenance to be verified."
+    }
+  ]
+}
