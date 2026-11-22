@@ -117,6 +117,9 @@ COLD_RESUME_FAILED = "cold_resume_failed"
 REFUSAL_STATUSES = frozenset({
     "budget_unverifiable",
     "budget_exceeded",
+    # A verified hard current-task constraint can make every candidate in the bounded pool
+    # ineligible.  That is a known, durable refusal, not an uncertain external outcome.
+    "no_verified_candidate_in_scope",
 })
 
 
@@ -170,6 +173,25 @@ def _payload_of(request: RequestRecord | None) -> dict[str, Any] | None:
     body = (request.result if request is not None else None) or {}
     payload = body.get("payload")
     return dict(payload) if isinstance(payload, Mapping) else None
+
+
+def _reply_task_constraints(
+    reply: Any, pending: PendingRecord
+) -> dict[str, Any] | None:
+    """Return the merged task constraints from the reply, with a Cold Resume fallback.
+
+    The MCP reply is authoritative; the durable continuation is the fallback for an older
+    child that does not echo the field.  This keeps the CPU recommendation and the restored
+    task on the same constraint snapshot without inventing a second store.
+    """
+    if isinstance(reply, Mapping) and isinstance(reply.get("task_constraints"), Mapping):
+        return dict(reply["task_constraints"])
+    continuation = pending.continuation
+    if isinstance(continuation, Mapping):
+        mcp = continuation.get("mcp")
+        if isinstance(mcp, Mapping) and isinstance(mcp.get("task_constraints"), Mapping):
+            return dict(mcp["task_constraints"])
+    return None
 
 
 def _validated_presentation(
@@ -623,6 +645,7 @@ class WarmReplyExecutor:
             if (isinstance(reply, Mapping)
                     and isinstance(reply.get("task_requirements"), Mapping)):
                 reply_requirements = dict(reply["task_requirements"])
+            reply_constraints = _reply_task_constraints(reply, pending)
 
             try:
                 started = time.perf_counter()
@@ -640,6 +663,8 @@ class WarmReplyExecutor:
                 )
                 if reply_requirements is not None:
                     recommend_payload["task_requirements"] = reply_requirements
+                if reply_constraints is not None:
+                    recommend_payload["task_constraints"] = reply_constraints
                 started = time.perf_counter()
                 recommendation = await asyncio.wait_for(
                     self._call_tool(
@@ -694,6 +719,7 @@ class WarmReplyExecutor:
                         recommendation if isinstance(recommendation, Mapping) else {}
                     ),
                     reply_requirements=reply_requirements,
+                    reply_constraints=reply_constraints,
                     steps=steps,
                     handle=handle,
                 )
@@ -745,6 +771,8 @@ class WarmReplyExecutor:
                         and recommendation.get("effective_query") else None
                     ),
                 }
+                if isinstance(reply_constraints, Mapping):
+                    result["task_constraints"] = dict(reply_constraints)
                 turn = turn_from_result(result)
                 return self._checkpoint_and_finalize(
                     session, pending, turn=turn, result=result, handle=handle
@@ -809,6 +837,8 @@ class WarmReplyExecutor:
                     and recommendation.get("effective_query") else None
                 ),
             }
+            if isinstance(reply_constraints, Mapping):
+                result["task_constraints"] = dict(reply_constraints)
             # The durable turn carries the same BFF extras as the live response so a restored
             # transcript shows the memory update and tool activity without re-running MCP.
             turn = turn_from_result(result)
@@ -828,6 +858,7 @@ class WarmReplyExecutor:
         preferences: Any,
         recommendation: Mapping[str, Any],
         reply_requirements: Mapping[str, Any] | None,
+        reply_constraints: Mapping[str, Any] | None,
         steps: list[dict[str, Any]],
         handle: HandleCheck | None,
     ) -> ReplyExecutionOutcome:
@@ -931,6 +962,8 @@ class WarmReplyExecutor:
                 if recommendation.get("effective_query") else None
             ),
         }
+        if isinstance(reply_constraints, Mapping):
+            result["task_constraints"] = dict(reply_constraints)
         turn = turn_from_result(result)
         return self._checkpoint_and_finalize(
             session, pending, turn=turn, result=result, handle=handle

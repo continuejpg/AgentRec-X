@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
-from experiments.p14b1.diagnose import canonical
+from experiments.p14b1.diagnose import CONFLICT_PAIRS, canonical
 from recommendation.memory.schemas import PreferenceKind
 
 CURRENT_TASK_CONSTRAINT_SCHEMA = "agentrecx.current_task_constraints.v1"
@@ -283,6 +283,51 @@ def _attribute_present(
     return False
 
 
+def _attribute_known_absent(
+    attributes: Mapping[str, Any],
+    form_factor: str | None,
+    constraint: CurrentTaskConstraint,
+    product_type: str | None = None,
+) -> bool:
+    """Whether trusted evidence proves the excluded attribute is absent.
+
+    Absence from the attribute map is **not** proof.  Only a known single-valued
+    slot (form factor / product type / brand) or an explicit mutually-exclusive
+    counterpart (the existing ``CONFLICT_PAIRS`` vocabulary) can establish absence.
+    """
+    attribute = constraint.attribute
+    if attribute in FORM_ATTRS:
+        observed = _norm(form_factor)
+        return bool(observed and observed != attribute)
+    if attribute == "product_type":
+        observed = _norm(product_type)
+        return bool(observed and observed != _norm(constraint.value))
+    if attribute == "brand":
+        if "brand" not in {_norm(name) for name in attributes}:
+            return False
+        fact = attributes.get("brand")
+        evidence = _norm(fact.get("evidence") if isinstance(fact, Mapping) else fact)
+        wanted = _norm(constraint.value)
+        return bool(wanted and evidence and wanted not in evidence.split())
+    for left, right in CONFLICT_PAIRS:
+        if attribute not in {left, right}:
+            continue
+        counterpart = right if attribute == left else left
+        other = CurrentTaskConstraint(
+            attribute=counterpart,
+            value=counterpart,
+            kind=constraint.kind,
+            polarity=constraint.polarity,
+            source_text=constraint.source_text,
+            source_turn_id=constraint.source_turn_id,
+        )
+        if _attribute_present(
+            attributes, form_factor, other, product_type=product_type
+        ):
+            return True
+    return False
+
+
 def candidate_constraint_status(
     *,
     attributes: Mapping[str, Any],
@@ -290,17 +335,33 @@ def candidate_constraint_status(
     constraints: CurrentTaskConstraints | None,
     product_type: str | None = None,
 ) -> dict[str, Any]:
-    """Check one candidate's trusted catalogue attributes against current constraints."""
+    """Check one candidate's trusted catalogue attributes against current constraints.
+
+    ``hard_unknown`` is narrower than ``unknown``: it contains only excluded
+    attributes the catalogue cannot decide.  A hard exclusion is satisfied only
+    when the candidate's trusted evidence proves the attribute is absent; a missing
+    attribute is never treated as compliance.
+    """
     if constraints is None or constraints.is_empty:
-        return {"violations": [], "unknown": [], "matched": [], "status": "none"}
+        return {
+            "violations": [], "unknown": [], "matched": [], "hard_unknown": [],
+            "hard_verified": [], "status": "none",
+        }
     violations: list[dict[str, Any]] = []
     unknown: list[dict[str, Any]] = []
     matched: list[dict[str, Any]] = []
+    hard_unknown: list[dict[str, Any]] = []
+    hard_verified: list[dict[str, Any]] = []
     for item in constraints.hard_exclusions:
         if _attribute_present(attributes, form_factor, item, product_type=product_type):
             violations.append(item.as_dict())
+        elif _attribute_known_absent(
+            attributes, form_factor, item, product_type=product_type
+        ):
+            hard_verified.append(item.as_dict())
         else:
             unknown.append(item.as_dict())
+            hard_unknown.append(item.as_dict())
     for item in constraints.soft_preferences:
         if _attribute_present(attributes, form_factor, item, product_type=product_type):
             matched.append(item.as_dict())
@@ -311,5 +372,7 @@ def candidate_constraint_status(
         "violations": violations,
         "unknown": unknown,
         "matched": matched,
+        "hard_unknown": hard_unknown,
+        "hard_verified": hard_verified,
         "status": status,
     }

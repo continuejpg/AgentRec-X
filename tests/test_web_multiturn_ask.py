@@ -22,6 +22,7 @@ from recommendation.preference.task_requirements import (  # noqa: E402
 )
 from tests.test_web_demo_unit import (  # noqa: E402
     preferences_payload,
+    recommend_payload,
     reply_payload,
 )
 from tests.test_web_reply_executor import (  # noqa: E402
@@ -36,6 +37,7 @@ from web_demo.continuation import (  # noqa: E402
     MCP_CONTINUATION_SCHEMA,
     CONTINUATION_VERSION,
 )
+from web_demo.reply_assembly import reply_response_from_result  # noqa: E402
 from web_demo.reply_result_contract import build_clarification_payload  # noqa: E402
 from web_demo.state_store import (  # noqa: E402
     PendingStateConflict,
@@ -232,6 +234,46 @@ def test_reply_that_asks_again_commits_next_pending_atomically(tmp_path: Path) -
             pending.reply_turn_id,
         ]
         assert len(store.list_pending(pending.task_id)) == 2
+    finally:
+        store.close()
+
+
+def test_reply_task_constraints_reach_recommend_and_durable_result(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        constraints = {
+            "schema": "agentrecx.current_task_constraints.v1",
+            "hard_exclusions": [{
+                "attribute": "wired", "value": "wired", "kind": "feature",
+                "polarity": "exclude", "source_text": "Please avoid wired headphones.",
+                "source_turn_id": "reply-1",
+            }],
+            "soft_preferences": [],
+            "source_turns": ["reply-1"],
+        }
+        tools = FakeTools(
+            recommend=recommend_payload(),
+            reply={**reply_payload(), "task_requirements": _requirements(),
+                   "task_constraints": constraints},
+        )
+        outcome = asyncio.run(_run(
+            _executor(store, tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+        ))
+        assert outcome.outcome == "completed", outcome.detail
+        recommend_args = next(
+            arguments for tool, arguments in tools.calls
+            if tool == "recommend_products"
+        )
+        assert recommend_args["task_constraints"] == constraints
+        assert outcome.result["task_constraints"] == constraints
+        assert outcome.result["task_requirements"]["category"] == "laptop"
+        # The response projection must expose the executed constraints for audit.
+        response = reply_response_from_result(
+            outcome.result, clarification_id=pending.clarification_id
+        )
+        assert response["task_constraints"] == constraints
     finally:
         store.close()
 

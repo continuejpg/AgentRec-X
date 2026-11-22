@@ -86,12 +86,16 @@ def test_product_evidence_matching_distinguishes_wired_wireless_unknown_and_nega
     assert wired["status"] == "violated"
     assert wired["violations"][0]["attribute"] == "wired"
 
+    # An explicit mutually-exclusive counterpart is trusted evidence of absence; bare
+    # absence from the attribute map is not.
     wireless = candidate_constraint_status(
         attributes={"wireless": {"evidence": "Wireless Bluetooth Headphones"}},
         form_factor="in_ear", constraints=constraints, product_type="headphones",
     )
-    assert wireless["status"] == "unknown"  # absence of wired evidence is not proof
+    assert wireless["status"] == "verified"
     assert wireless["violations"] == []
+    assert wireless["hard_unknown"] == []
+    assert wireless["hard_verified"][0]["attribute"] == "wired"
     assert wireless["matched"][0]["attribute"] == "wireless"
 
     unknown = candidate_constraint_status(
@@ -99,12 +103,14 @@ def test_product_evidence_matching_distinguishes_wired_wireless_unknown_and_nega
     )
     assert unknown["status"] == "unknown"
     assert unknown["violations"] == []
+    assert unknown["hard_unknown"][0]["attribute"] == "wired"
 
     negated = candidate_constraint_status(
         attributes={"wired": {"evidence": "wireless headphones, not wired"}},
         form_factor="in_ear", constraints=constraints, product_type="headphones",
     )
     assert negated["violations"] == []
+    assert negated["hard_unknown"][0]["attribute"] == "wired"
 
 
 def test_brand_exclusion_requires_trusted_brand_evidence():
@@ -141,7 +147,7 @@ def test_explicit_remove_is_not_a_current_task_hard_exclusion():
     assert constraints.is_empty
 
 
-def _row(item_id: str, rank: int, *, task_conflicts=None):
+def _row(item_id: str, rank: int, *, task_conflicts=None, hard_unknown=None):
     return {
         "product_ref": {"namespace": NS, "item_id": item_id},
         "query_rank": rank,
@@ -153,7 +159,12 @@ def _row(item_id: str, rank: int, *, task_conflicts=None):
         "conflicting_preferences": [],
         "unknown_preferences": [],
         "task_constraint_conflicts": task_conflicts or [],
-        "task_constraint_status": {"status": "violated" if task_conflicts else "unknown"},
+        "task_constraint_hard_unknown": hard_unknown or [],
+        "task_constraint_status": {
+            "status": "violated" if task_conflicts else (
+                "unknown" if hard_unknown else "verified"
+            )
+        },
         "evidence_refs": [],
     }
 
@@ -163,7 +174,11 @@ def test_gate_filters_current_task_violation_and_never_finalizes_wired_candidate
     constraint = _reply_constraints().hard_exclusions[0].as_dict()
     context = GateContext(
         query="I need headphones.",
-        candidates=[_row("WIRED", 1, task_conflicts=[constraint]), _row("UNKNOWN", 2)],
+        candidates=[
+            _row("WIRED", 1, task_conflicts=[constraint]),
+            _row("UNKNOWN", 2, hard_unknown=[constraint]),
+            _row("VERIFIED", 3),
+        ],
         active_preferences=[{"value": "wireless", "polarity": "positive"}],
         hard_requirements=[],
         preference_conflicts=[],
@@ -177,8 +192,25 @@ def test_gate_filters_current_task_violation_and_never_finalizes_wired_candidate
     decision = gate.check(context)
     assert decision.allow_finalize is True
     assert decision.action == ALLOW_FINALIZE
-    assert decision.selected_candidate_id == "UNKNOWN"
-    assert decision.task_constraint_status == "unknown"
+    assert decision.selected_candidate_id == "VERIFIED"
+    assert decision.task_constraint_status == "verified"
+
+    unknown_only = gate.check(GateContext(
+        query="I need headphones.",
+        candidates=[_row("UNKNOWN", 1, hard_unknown=[constraint])],
+        active_preferences=[],
+        hard_requirements=[],
+        preference_conflicts=[],
+        namespace=NS,
+        query_specificity=True,
+        expected_product_type="headphones",
+        expected_product_role="main",
+        budget=GateBudget(),
+        task_constraints=[constraint],
+    ))
+    assert unknown_only.allow_finalize is False
+    assert unknown_only.reason_code == "current_task_constraint_unknown"
+    assert unknown_only.task_constraint_status == "unknown"
 
     blocked = gate.check(GateContext(
         query="I need headphones.",

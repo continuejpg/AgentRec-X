@@ -259,7 +259,7 @@ def reply_response_from_result(
         "clarification_id": clarification_id,
         "message": narrative,
         "clarification": next_clarification,
-        "task_constraints": None,
+        "task_constraints": result.get("task_constraints"),
         "candidate_reevaluation": None,
         "planner": None,
         "planner_model": None,

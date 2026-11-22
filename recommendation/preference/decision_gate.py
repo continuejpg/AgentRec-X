@@ -235,6 +235,31 @@ class DecisionGate:
                     budget_used=budget_used,
                 )
 
+        # 0c. A hard current-task exclusion is not satisfied by missing evidence.  Only
+        #     candidates the executor proved compliant may reach selection; an all-unknown
+        #     pool is a bounded refusal, never a product.
+        hard_unknown = [
+            candidate for candidate in candidates
+            if candidate.get("task_constraint_hard_unknown")
+        ]
+        if hard_unknown:
+            candidates = [
+                candidate for candidate in candidates
+                if not candidate.get("task_constraint_hard_unknown")
+            ]
+            if not candidates:
+                return GateDecision(
+                    action=NO_VERIFIED_CANDIDATE_IN_SCOPE,
+                    allow_finalize=False,
+                    reason_code="current_task_constraint_unknown",
+                    reason=("the current task excludes an attribute that the examined candidates "
+                            "cannot verify; missing evidence is not compliance"),
+                    hard_constraint_status={"current_task_constraints": "unknown"},
+                    task_constraint_status="unknown",
+                    bounded_scope=True,
+                    budget_used=budget_used,
+                )
+
         # 1. An unresolved clarification blocks FINALIZE; no fabricated answer is allowed.
         if context.ask_pending:
             return GateDecision(

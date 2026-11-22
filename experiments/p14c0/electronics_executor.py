@@ -251,7 +251,9 @@ class ElectronicsPlannerExecutor:
             row["task_constraint_status"] = constraint_status
             row["task_constraint_conflicts"] = constraint_status["violations"]
             row["task_constraint_unknown"] = constraint_status["unknown"]
-            if constraint_status["violations"]:
+            row["task_constraint_hard_unknown"] = constraint_status["hard_unknown"]
+            row["task_constraint_hard_verified"] = constraint_status["hard_verified"]
+            if constraint_status["violations"] or constraint_status["hard_unknown"]:
                 row["presentable"] = False
             if self.price_budget is not None:
                 view = self.catalogue.inspect(
@@ -274,17 +276,38 @@ class ElectronicsPlannerExecutor:
         ]
         # A current hard exclusion is authoritative for this task.  Excluded rows stay
         # in the CandidateLedger score rows for audit, but never enter last_rows/Gate.
+        # A missing attribute is not proof of compliance: hard-unknown rows are excluded
+        # exactly like violations, and the Gate is left to its existing bounded refusal.
         # Budget evidence is attached to every row; the final selection prefers a verified
         # within-budget row (see the FINALIZE check) while the Gate still sees the full
         # role-compatible pool so it can ask for missing criteria.
-        eligible = [row for row in compatible if not row.get("task_constraint_conflicts")]
+        def _task_excluded(row: dict[str, Any]) -> bool:
+            return bool(
+                row.get("task_constraint_conflicts")
+                or row.get("task_constraint_hard_unknown")
+            )
+
+        eligible = [row for row in compatible if not _task_excluded(row)]
         self._role_compatible_rows = compatible
-        self._task_filtered_rows = [row for row in compatible if row.get("task_constraint_conflicts")]
+        self._task_filtered_rows = [row for row in compatible if _task_excluded(row)]
         self.last_task_constraint_summary = {
             "hard_exclusions": [item.as_dict() for item in self.task_constraints.hard_exclusions],
             "soft_preferences": [item.as_dict() for item in self.task_constraints.soft_preferences],
             "compatible_candidates": len(compatible),
-            "task_constraint_violations": len(self._task_filtered_rows),
+            "task_constraint_violations": sum(
+                1 for row in compatible if row.get("task_constraint_conflicts")
+            ),
+            "task_constraint_unknown": sum(
+                1 for row in compatible if row.get("task_constraint_hard_unknown")
+            ),
+            "task_constraint_verified": sum(
+                1 for row in compatible
+                if not row.get("task_constraint_conflicts")
+                and not row.get("task_constraint_hard_unknown")
+                and row.get("task_constraint_status")
+                and row["task_constraint_status"].get("status") in {"verified", "unknown"}
+                and not row["task_constraint_status"].get("hard_unknown")
+            ),
             "eligible_candidates": len(eligible),
             "excluded_candidate_ids": [
                 row["product_ref"]["item_id"] for row in self._task_filtered_rows
@@ -361,10 +384,13 @@ class ElectronicsPlannerExecutor:
             "verified": feasibility.verified_eligible_count,
             "ineligible": feasibility.ineligible_count,
             "unresolved": feasibility.unresolved_count,
-            "task_constraint_violations": len(self._task_filtered_rows),
-            "task_constraint_unknown": sum(
-                1 for row in eligible if (row.get("task_constraint_status") or {}).get("status") == "unknown"
+            "task_constraint_violations": sum(
+                1 for row in compatible if row.get("task_constraint_conflicts")
             ),
+            "task_constraint_unknown": sum(
+                1 for row in compatible if row.get("task_constraint_hard_unknown")
+            ),
+            "task_constraint_excluded": len(self._task_filtered_rows),
             # The CandidateEligibilityEvaluator above checks only the catalogue-category
             # requirement used for this projection.  It is NOT the Gate's hard-constraint
             # verification.  Keep the scope explicit so "verified=5" cannot be mistaken
@@ -716,15 +742,18 @@ class ElectronicsPlannerExecutor:
                 # ALLOW_FINALIZE with stale candidate rows, the current task hard exclusion
                 # is checked against the selected row immediately before presentation.
                 task_conflicts = list((row or {}).get("task_constraint_conflicts") or ())
-                if task_conflicts:
+                task_unknown = list((row or {}).get("task_constraint_hard_unknown") or ())
+                if task_conflicts or task_unknown:
                     self.terminal_status = "current_task_constraint_violation"
                     return (replace(observation, terminal=True, candidate_ids=(),
                                     m5_state={**observation.m5_state, "phase": PHASE_FINALIZE,
                                               "gate_action": decision.action,
                                               "status": self.terminal_status,
-                                              "task_constraint_conflicts": task_conflicts}),
+                                              "task_constraint_conflicts": task_conflicts,
+                                              "task_constraint_hard_unknown": task_unknown}),
                             {"status": self.terminal_status, "gate": decision.as_dict(),
                              "candidate_id": selected, "task_constraint_conflicts": task_conflicts,
+                             "task_constraint_hard_unknown": task_unknown,
                              "bounded_scope": True}, True)
                 # A task budget is a hard constraint.  The Gate keeps the full role-compatible
                 # pool (so it can still ask for missing criteria), but only a candidate with a
@@ -736,6 +765,7 @@ class ElectronicsPlannerExecutor:
                         candidate for candidate in self.last_rows
                         if str(candidate.get("budget_status")) == PRICE_WITHIN
                         and not candidate.get("task_constraint_conflicts")
+                        and not candidate.get("task_constraint_hard_unknown")
                     ]
                     if not within_rows:
                         counts = self.last_budget or {}

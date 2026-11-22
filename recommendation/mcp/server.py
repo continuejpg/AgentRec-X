@@ -383,6 +383,7 @@ def _awaiting_recommendation(
     started: float,
     gate: Mapping[str, Any] | None = None,
     issue_clarification: bool,
+    task_constraints: CurrentTaskConstraints | None = None,
 ) -> dict[str, Any]:
     """Return a real ``awaiting_clarification`` result, never a fake product.
 
@@ -398,6 +399,7 @@ def _awaiting_recommendation(
             question=question,
             reason=reason,
             session_id=session_id,
+            task_constraints=task_constraints,
         )
         if issue_clarification else None
     )
@@ -419,6 +421,9 @@ def _awaiting_recommendation(
         "query": task["current_query"],
         "effective_query": effective_query,
         "task_requirements": requirements.as_dict(),
+        "task_constraints": (
+            task_constraints.as_dict() if task_constraints is not None else None
+        ),
         "budget_verification": None,
         "selected_product_id": None,
         "selected_product": None,
@@ -445,6 +450,9 @@ def _recommend_products(
     task_requirements: Annotated[dict[str, Any] | None, Field(
         description="Optional task-scoped requirements (budget/currency/category/use case) "
                     "merged from the original query and the real clarification reply")] = None,
+    task_constraints: Annotated[dict[str, Any] | None, Field(
+        description="Optional task-scoped CurrentTaskConstraints snapshot (hard exclusions and "
+                    "soft preferences) persisted by the Web reply coordinator")] = None,
 ) -> dict[str, Any]:
     """Run the existing Rule Planner + shared tools + V0/Role/Eligibility/Gate; never fake a FINALIZE."""
     started = time.perf_counter()
@@ -457,6 +465,12 @@ def _recommend_products(
     requirements = extract_task_requirements(query)
     if isinstance(task_requirements, Mapping):
         requirements = requirements.merged(TaskRequirements.from_dict(task_requirements))
+    # Reuse the same snapshot decoder as Cold Resume.  Constraints are task-scoped; they are
+    # never written to M9 and never replace TaskRequirements.
+    constraints = (
+        _constraints_from_snapshot(task_constraints)
+        if isinstance(task_constraints, Mapping) else CurrentTaskConstraints()
+    )
     effective_query = augment_query(query, requirements)
     if session_id:
         task["task_id"] = str(session_id)
@@ -470,11 +484,13 @@ def _recommend_products(
             reason=need.reason, session_id=session_id, effective_query=effective_query,
             started=started,
             issue_clarification=task_requirements is not None,
+            task_constraints=constraints,
         )
     executor = ElectronicsPlannerExecutor(
         catalogue=ctx.catalogue, current_query=effective_query,
         preferences=prepare_preferences(history), hard=prepare_hard(effective_query),
         task_context=task, memory_history=history,
+        task_constraints=constraints,
         corrective_rag=ctx.corrective_rag,
         price_budget=requirements.budget,
     )
@@ -530,7 +546,7 @@ def _recommend_products(
             # A resumed reply is the multi-round path: issue the next durable ASK now.
             clarification = _issue_clarification(
                 task=task, requirements=requirements, question=question, reason=reason,
-                session_id=session_id,
+                session_id=session_id, task_constraints=constraints,
             )
         if not isinstance(gate_payload, Mapping):
             gate_payload = {
@@ -567,6 +583,7 @@ def _recommend_products(
         "query": query,
         "effective_query": effective_query,
         "task_requirements": requirements.as_dict(),
+        "task_constraints": constraints.as_dict(),
         "budget_verification": executor.last_budget,
         "selected_product_id": selected,
         "selected_product": selected_product.as_dict() if selected_product else None,
