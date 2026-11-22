@@ -1571,6 +1571,9 @@ async def _recommendation_view(
         recommended_product_id=str(selected_id) if selected_id else None,
         gate=gate,
     )
+    for key in ("memory_retrieval", "behavior_rerank"):
+        if key in recommendation:
+            products[key] = recommendation[key]
     return _attach_recommendation(
         session, products, turn_id=turn_id,
         ranking_source="cpu_live:clarification_resume+recommend_products+gate",
