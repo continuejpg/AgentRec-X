@@ -18,8 +18,11 @@
 
 | Document | Read it when you want to… |
 | --- | --- |
-| [../README.md](../README.md) | project overview, quick start, model/Agent boundaries, evidence summary |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | **the current architecture**: Serving V1, `/v1/recommend`, the shopping Agent, adaptive preferences, evaluation boundaries, directory map |
+| [../README.md](../README.md) | project overview, CPU Web Demo quick start, M1–M4/P0/P1 capabilities, evidence boundaries |
+| [development/INTERNSHIP_DEMO.md](development/INTERNSHIP_DEMO.md) | **the current internship demo**: startup, flags, laptop ASK×2, Memory/Behavior scenarios, browser evidence and troubleshooting |
+| [development/P1_PERSONALIZATION.md](development/P1_PERSONALIZATION.md) | **current P1 implementation**: opt-in memory retrieval, behavior rerank, four flag combinations and limits |
+| [development/P0_TASK_CONSTRAINTS_FIX.md](development/P0_TASK_CONSTRAINTS_FIX.md) | **current P0 task-constraint boundary**: hard exclusion, hard_unknown safety and budget enforcement |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | the broader architecture (including Serving V1 / `/v1/recommend` history); the current CPU Web Demo path is summarized in ../README.md |
 | [ONBOARDING.md](ONBOARDING.md) | current coordinates, reading order, hard rules and a short self-check |
 | [USAGE.md](USAGE.md) | install, run the demo, call the API, run tests/smokes, troubleshoot |
 | [EXPERIMENTS.md](EXPERIMENTS.md) | the formal evaluation protocol, accepted metrics and threats to validity |

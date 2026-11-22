@@ -3,14 +3,15 @@
 # AgentRec-X
 
 > **一个面向电子产品购物的 LLM Shopping Agent 工程原型。**
-> 用真实商品检索、可追溯证据、长期偏好记忆和 Decision Gate，演示一个“能被验证、知道边界”的购物 Agent，而不是一个只会生成文本的聊天壳。
+> 用真实商品检索、可追溯证据、长期偏好记忆、短期行为反馈和 Decision Gate，演示一个“能被验证、知道边界”的购物 Agent，而不是一个只会生成文本的聊天壳。
 
 ![Status: Engineering Prototype](https://img.shields.io/badge/status-engineering%20prototype-orange)
 ![Python 3.10](https://img.shields.io/badge/Python-3.10-blue)
 ![MCP v2](https://img.shields.io/badge/MCP-2026--07--28-purple)
 ![Quality: NOT ESTABLISHED](https://img.shields.io/badge/quality-NOT%20ESTABLISHED-lightgrey)
 
-> 完整英文版保留在 [`README_EN.md`](README_EN.md)。本中文版是项目展示入口；更深的技术细节在 [`docs/`](docs/) 和 [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md)。
+> 当前正式展示的是 **体系 A：本地 CPU Shopping Agent**。体系 B（V2/ShopRanker/历史研究链路）源码与实验记录保留在仓库中，但当前不启动、不作为已启用能力宣传。
+> 完整英文版保留在 [`README_EN.md`](README_EN.md)；本中文版是当前展示入口。更深的技术细节在 [`docs/`](docs/)、[`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md) 和 [`docs/development/P1_PERSONALIZATION.md`](docs/development/P1_PERSONALIZATION.md)。
 
 ---
 
@@ -22,7 +23,10 @@
 - [系统架构](#系统架构)
 - [运行模式](#运行模式)
 - [快速开始](#快速开始)
+- [打开两个个性化增强](#打开两个个性化增强)
+- [完整演示路线](#完整演示路线)
 - [关键结果（口径必须一起读）](#关键结果口径必须一起读)
+- [历史与研究资产](#历史与研究资产)
 - [目录结构](#目录结构)
 - [文档导航](#文档导航)
 - [质量与安全边界](#质量与安全边界)
@@ -33,40 +37,64 @@
 
 用户输入一句自然语言购物需求后，AgentRec-X 会：
 
-1. 用 **BGE / BM25 / 传统推荐源** 检索真实商品；
-2. 读取 **M5/M9** 中当前用户已明确表达的偏好；
+1. 用 **BGE / BM25** 检索真实 Electronics catalogue；
+2. 读取 **M9** 中用户明确表达过的长期偏好；
 3. 用 **V0 Scorer、Product Type/Role、Eligibility** 约束候选；
 4. 通过 **Decision Gate** 决定“推荐、继续找、还是先澄清”；
 5. 用 **P15 Evidence Bundle** 给出可追溯的商品证据和 UNKNOWN；
 6. 用 **P16 Skills** 比较商品或完成澄清 → 记忆更新 → 继续推荐；
-7. 通过 **P17 官方 MCP stdio Server** 把这些能力暴露给独立客户端；
-8. 在 **P19 本地 Web Demo** 中把完整链路展示给用户。
+7. 通过 **P17 官方 MCP stdio Server** 暴露给独立客户端；
+8. 在 **P19 Next.js Web Demo + FastAPI BFF** 中展示完整链路。
 
-Planner 默认使用确定性的 **Rule Planner**；可选的真实 **Qwen3.5-9B Base Live Planner** 已通过远端 GPU + 本地 BFF/MCP 链路验证，失败时明确报告不可用，不静默降级。
+它最有价值的部分不是“接了一个 LLM”，而是围绕检索、事实、状态和评测建立的**边界**：
 
-它最有价值的部分不是“接了一个 LLM”，而是围绕检索、事实、状态和评测建立的那些**边界**：
-
-- 模型不能编造商品 ID、分数、证据或最终排名；
+- 模型/UI 不能编造商品 ID、价格、证据或最终排名；
 - 未确认的偏好不能自动写成长期记忆；
 - 商品资料没有的字段必须保留为 UNKNOWN；
-- 工程验收 PASS 与真实用户质量 PASS 分开报告。
+- 工程验收 PASS 与真实用户质量 PASS 分开报告；
+- 硬性 Task Constraints、Eligibility、Budget 和 Decision Gate 始终是最终权威。
+
+### 和普通商品搜索 / 聊天机器人有什么区别？
+
+普通搜索通常只返回一个排序列表；聊天机器人可能生成没有出处的推荐。AgentRec-X 展示的是完整、可检查的决策链：
+
+```text
+自然语言需求
+  -> 澄清 / 任务约束
+  -> 真实 catalogue 检索
+  -> 候选审计与偏好打分
+  -> Eligibility + Budget + Decision Gate
+  -> 可追溯 evidence / UNKNOWN
+  -> 可恢复的多轮状态
+```
+
+当一个候选无法验证是否满足硬排除时，系统会安全拒绝，而不是“猜一个”或让模型补全。
 
 ---
 
 ## 核心能力
 
-| 层 | 已实现能力 |
+| 层 | 当前可展示能力 |
 |---|---|
 | 商品与检索 | 76,263 件真实 Electronics 商品；BM25 + 768 维 BGE dense index；catalogue grounding |
-| 推荐 | Serving V1（SASRec / Two-Tower / BM25 + RRF）；V0 Preference Scorer；Student/规则基线 |
-| Agent | ShoppingIntent、CandidatePlane、候选审计、Product Research、Clarification、恢复；Qwen3.5-9B Base Live PlannerAction（可选） |
-| 长期记忆 | M5 event-sourced state、M9 preference memory、更新 / 撤回 / audit trail；**浏览器 Session 独立 M9 namespace** |
+| 购物 Agent | 单轮推荐、澄清、真实检索、商品卡、Gate、Evidence、Comparison；CPU Rule Planner 为默认路径 |
+| 多轮任务状态 | M4 多轮 ASK（如笔记本用途 → 预算）；Task Requirements；Pending/Reply/Checkpoint；M1 Warm/Cold Resume |
+| 硬性约束 | P0 Task Constraints：当前任务硬排除优先于历史偏好；无法验证时 `hard_unknown` 安全拒绝；Budget Gate |
+| 长期记忆 | M9 显式偏好：更新 / 撤回 / audit trail；浏览器 Session 独立 namespace；记忆可在 V0 Scorer 中影响排序 |
+| 短期行为 | 真实 Click / Like / Dislike；第一方 SQLite 事件；短时兴趣 Profile；Behavior Inspector / Shadow 预览 |
+| **P1 记忆召回** | 开关启用时，M9 正向偏好生成最多 2 条辅助 Query，与 base 检索做 RRF；新增候选可审计 |
+| **P1 行为重排** | 开关启用时，短时行为 Snapshot 以固定权重软信号进入正式 V0 评分；不绕过 Gate |
 | 证据 | P15 Evidence Bundle；raw field / span / source record；UNKNOWN；Claim 自动验证 |
-| 技能 | P16 `shopping-comparison`、`preference-clarification` |
-| 协议 | P17 官方 MCP Python SDK v2；本地 stdio；默认 7 个工具；write-enabled Demo 额外 1 个显式 `remember_preference` 适配器 |
-| 行为反馈 | 真实浏览器可见曝光 / 点击 / 比较 / 短时 Like-Dislike；第一方 SQLite 事件；短期兴趣 → Behavior OFF/ON Shadow；**不自动写 M9** |
-| 界面 | P19 Next.js Web Shopping Assistant + FastAPI BFF + MCP；本地 CPU Live；真实 Qwen Live；Qwen Replay；Session Memory / Memory Timeline / Ranker Replay；Behavior Inspector |
-| 外部评测 | ESCI 真实 query 的 judged-candidate reranking；C4 proxy 检索评测 |
+| 协议 | P17 MCP Python SDK v2；本地 stdio；默认工具集；write-enabled Demo 额外显式 Memory 写入适配器 |
+| 观测 | 请求 ID / trace ID / span；可选 Phoenix OTLP；现有 `/api/health` 与 tool timeline |
+| 界面 | P19 Next.js Shopping Assistant；Memory Timeline、Memory Lab、Behavior Inspector、Replay、只读个性化证据条 |
+
+**M1～M4 是能力分组，不是当前页面上的内部里程碑编号：**
+
+- **M1**：可恢复的 Web 会话、Cold/Warm Resume、Replay。
+- **M2**：请求级持久化、幂等 Fencing、durable result。
+- **M3**：可观测性、Trace 关联与评测口径。
+- **M4**：多轮 ASK 与任务级回复；回复后继续同一条 `recommend_products` 链路。
 
 ---
 
@@ -77,90 +105,68 @@ Planner 默认使用确定性的 **Rule Planner**；可选的真实 **Qwen3.5-9B
 | ![实时搜索结果与 UNKNOWN 字段](docs/assets/web_demo/desktop-search.png) | ![P16 商品比较](docs/assets/web_demo/desktop-comparison.png) |
 | **证据详情** | **移动端（390×844）** |
 | ![Evidence 原始字段与 span](docs/assets/web_demo/desktop-evidence.png) | ![移动端布局](docs/assets/web_demo/mobile-search.png) |
-
-**V2.1 实况：Qwen Live、Memory 生命周期与 Ranker Replay**
-
-| Qwen Live（真实浏览器轨迹） | Memory Timeline + Memory Lab |
-|---|---|
-| ![Qwen Live 真实 PlannerAction、Top-K 与 UNKNOWN evidence](docs/assets/web_demo/qwen-live.png) | ![M9 事件时间线与显式 Memory Lab](docs/assets/web_demo/memory-timeline-memory-lab.png) |
-| **Ranker Comparison（Recorded Replay）** | **V2.1 首页 / Session 状态** |
-| ![P100 Ranker 与 Memory OFF/ON Replay，明确标注 Replay](docs/assets/web_demo/ranker-replay.png) | ![V2.1 首页、Active Memory 与 Scenario 入口](docs/assets/web_demo/desktop-home-v21.png) |
+| **P1 Memory + Behavior 正式路径证据** | |
+| ![真实 Memory 辅助召回与 Behavior 软评分贡献](docs/assets/web_demo/desktop-internship-personalization.png) | |
 
 截图来自真实本地运行与真实浏览器调用，不是静态 mock；商品来自真实 catalogue，缺失字段显示 UNKNOWN。
-Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
+界面中的 **Personalization evidence** 条只展示正式 `recommend_products` 返回的只读诊断：Memory 辅助召回数量/新增 ID，以及 Behavior 的软评分贡献；它不改变 Gate。
 
-**Behavior Feedback V2 实况（Qwen Live + BGE）**
+> 下列截图记录的是历史 Qwen Live / Memory Lab / P100 Ranker Replay 研究场景，保留用于说明项目历史；它们不是当前 CPU Demo 的必需启动条件。
 
-| Qwen Live + BGE + Gate | Eligible OFF/ON Shadow |
+| 历史 Qwen Live 轨迹 | Memory Timeline + Memory Lab |
 |---|---|
-| ![Qwen Live 真实 PlannerAction 与 BGE 候选](docs/assets/web_demo/behavior-v2-qwen-live-browser.png) | ![Eligible-only Behavior OFF/ON](docs/assets/web_demo/behavior-v11-eligible-shadow.png) |
+| ![Qwen Live 真实 PlannerAction、Top-K 与 UNKNOWN evidence](docs/assets/web_demo/qwen-live.png) | ![M9 事件时间线与显式 Memory Lab](docs/assets/web_demo/memory-timeline-memory-lab.png) |
+| **Ranker Comparison（Recorded Replay）** | **历史首页 / Session 状态** |
+| ![P100 Ranker 与 Memory OFF/ON Replay，明确标注 Replay](docs/assets/web_demo/ranker-replay.png) | ![V2.1 首页、Active Memory 与 Scenario 入口](docs/assets/web_demo/desktop-home-v21.png) |
 
-**Behavior Feedback V1.1（新增）**：真实浏览器可见曝光、点击、比较和短时 Like/Dislike 通过第一方
-BFF 事件链路进入 SQLite；`LIVE_USER_INTERACTION` 与 `AUTOMATED_BROWSER_E2E` 可进入短期画像但
-分别计数，只有 LIVE 可作为人类偏好统计。V1.1 明确 **Impression 只做曝光上下文、零正向兴趣**；Compare 区分
-attempted / succeeded / failed 且不自动变成偏好；Behavior Shadow 只对 Gate
-`ALLOW_FINALIZE + candidate_presentable_ids` 的 Eligible 候选做正式 OFF/ON，Ineligible 候选只出现在
-“Diagnostic Ranking — Not Final Recommendations”。浏览器验证：10 次 impression → 0 兴趣；
-点击/Like 后 Eligible OFF #5 → ON #4；单 Eligible 场景 Ineligible 只进入诊断；Session A/B 隔离；
-Personalization OFF 返回 409 且正常推荐继续。真实人工偏好标签未采集，`preference_lift` 标记为
-unavailable。报告见
-[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V11_REPORT.md)，
-V1 记录见
-[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V1_REPORT.md)，
-技术选型见 [`docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md`](docs/BEHAVIOR_FEEDBACK_TECH_SELECTION.md)。
-
-**Behavior Feedback V2（GPU Live E2E）**：真实 Qwen3.5-9B Base 在远端 RTX 4090 上返回结构化
-PlannerAction，BGE dense 检索在本地 CPU；真实 Chrome 完成 Qwen Live + BGE + 点击/Like + 下一轮
-Eligible OFF/ON。100 个自动化场景、延迟与安全边界的完整数字见
-[关键结果](#关键结果口径必须一起读) 和
-[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。
-自动化浏览器事件不等同于真实人类偏好。
+Ranker Comparison 是 **P100 记录回放（Replay）**，不是实时 ShopRanker/Hybrid 推理。
 
 ---
 
 ## 系统架构
 
+当前正式展示路径（体系 A）：
+
 ```text
-Browser / MCP Client
+Browser (Next.js, :3000)
         |
         v
-Next.js Web UI  ->  FastAPI BFF  ->  AgentRec-X MCP Server (local stdio)
-                                      |
-                                      +-- ElectronicsCatalogue + BGE / BM25
-                                      +-- Planner
-                                      |     +-- CPU default: Rule Planner
-                                      |     +-- optional: Qwen3.5-9B Base -> PlannerAction
-                                      +-- CandidateLedger + V0 Scorer
-                                      +-- Product Type/Role + Eligibility + Decision Gate
-                                      +-- P15 Evidence Bundle + Claim Validation
-                                      +-- P16 Shopping Skills
-                                      +-- M5/M9 Memory + HistoryStateReader
-                                      |     +-- browser Session namespace (A/B isolated)
-                                      |
-                                      v
-                          User-readable answer + machine-readable trace/evidence
+FastAPI BFF (web_demo/, :8787)
+        |
+        v
+Per-profile MCP stdio child (P17)
+        |
+        +-- ElectronicsCatalogue + BM25 / BGE
+        +-- CPU Rule Planner (default)
+        +-- M5/M9 HistoryStateReader -> preferences
+        +-- optional P1 memory-aware auxiliary retrieval -> RRF
+        +-- V0 Scorer + optional P1 behavior-aware soft rerank
+        +-- Product Type/Role + Eligibility + Task Constraints + Budget
+        +-- Decision Gate
+        +-- P15 Evidence Bundle + P16 Skills
+        |
+        v
+SSE products / evidence / text / clarification + machine-readable trace
 ```
-
-V2.1 真实浏览器 Qwen Live 轨迹：
-
-```text
-Browser -> Next.js -> FastAPI BFF -> MCP stdio -> Qwen3.5-9B
-  -> RETRIEVE -> RERANK -> FINALIZE
-  -> DecisionGate: ALLOW_FINALIZE (evidence_sufficient)
-```
-
-更完整的组件、信任边界和时序见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、
-[`docs/AGENTREC_X_DEMO_ARCHITECTURE.md`](docs/AGENTREC_X_DEMO_ARCHITECTURE.md) 与
-[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
 
 关键原则：
 
 - **MCP 是薄适配层**，不复制 Catalogue、Search、Memory、Scorer、Gate 或 Agent Runtime；
-- **Gate 是 FINALIZE 的唯一权威**，RAG / Skills 不能绕过它；
+- **Gate 是 FINALIZE 的唯一权威**，RAG / Skills / Behavior 不能绕过它；
+- **Task Constraints 优先于 M9 和 Behavior**；无法验证的硬排除不会被“猜成满足”；
 - **商品文本是不可信数据**，只能证明 catalogue 写了什么，不能证明真实质量、库存或使用效果；
 - **UNKNOWN 不补全**，自动验证不等于人工语义审核。
 
-更完整的组件与信任边界见 [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md) 和 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+V2 / Qwen 历史路径保留为研究资料，不在当前默认启动：
+
+```text
+Browser -> Next.js -> BFF -> MCP -> Qwen3.5-9B (optional GPU)
+  -> RETRIEVE -> RERANK -> FINALIZE -> DecisionGate
+```
+
+更完整的组件、信任边界和时序见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)、
+[`docs/AGENTREC_X_DEMO_ARCHITECTURE.md`](docs/AGENTREC_X_DEMO_ARCHITECTURE.md) 和
+[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
 
 ---
 
@@ -168,21 +174,33 @@ Browser -> Next.js -> FastAPI BFF -> MCP stdio -> Qwen3.5-9B
 
 | 模式 | 运行条件 | 是否真实调用 Qwen | 用途 |
 |---|---|---|---|
-| **CPU Live（默认）** | 本地 CPU；无 GPU 也可 | 否 | 本地 Web Demo、MCP、P15/P16、Rule Planner + Gate |
-| **Qwen Base Live（已验证）** | 现有 Qwen3.5-9B Base 服务 + GPU + WSL-local tunnel | 是，真实 `/plan` | 真实模型规划；V2.1 真实浏览器调用已通过；服务不可用时明确显示 unavailable，不静默降级 |
+| **CPU Live（默认）** | 本地 CPU；无 GPU 也可 | 否 | 当前正式 Web Demo；Rule Planner + BGE/BM25 + M9/Behavior + Gate |
+| **BM25 CPU** | 本地 CPU；无需 BGE 模型 | 否 | 快速测试、无模型环境的稳定路径 |
+| **Qwen Base Live（历史/可选）** | 已有 Qwen3.5-9B Base 服务 + GPU + WSL-local tunnel | 是，真实 `/plan` | 历史验证过的可选 Planner；当前不要求 AutoDL；不可用时明确 unavailable，不静默降级 |
 | **Qwen Replay（历史）** | 读取已保存轨迹 | 否，`live_call=false` | 展示历史真实 Qwen 验收，不冒充当前实时调用 |
 
 **CPU 路径不需要 GPU。** Qwen Live 的模型服务/tunnel 默认停止；需要时按
 [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) 启动，不要新建第二套 Runtime。
 Qwen Live 的 BFF health 是真实 PlannerAction 校验，不是端口探测；失败不会回退 Rule 并冒充 Qwen。
 
+### BM25、BGE、Qwen 的运行条件
+
+- **BM25**：只要 catalogue 可用即可；不需要 BGE 模型/索引；适合快速单元/HTTP/浏览器测试。
+- **BGE**：需要本地 `models/bge-base-en-v1.5` 与 `runs/p14d2/bge_index.npz`；CPU 可运行，但两个 MCP 子进程冷启动可能各需数十秒。默认 `scripts/run_web_demo.ps1` 使用 BGE。
+- **Qwen Live**：需要远端或本机 Qwen 服务、GPU、tunnel；当前 CPU Demo 不依赖它。没有服务时 UI 显示 unavailable，Qwen Replay 只读历史。
+
 ---
 
 ## 快速开始
 
-### 1. 本地 Web Demo（推荐展示入口）
+### 前置条件
 
-前置条件：Windows + WSL2 Ubuntu-22.04、仓库根目录下的 WSL `.venv`、Node.js + pnpm、Chrome/Edge。无需 GPU。
+- Windows + WSL2 Ubuntu-22.04（推荐）；或 Linux/macOS 等价环境。
+- 仓库根目录的 WSL `.venv`，已安装 `requirements.txt`。
+- Node.js + pnpm；Chrome/Edge（浏览器 E2E）。
+- 无需 GPU、无需 V2 Runtime、无需 AutoDL 即可展示 CPU 路径。
+
+### 1. 一键启动 CPU Web Demo（默认 BGE）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
@@ -191,18 +209,221 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
 - 前端：<http://127.0.0.1:3000>
 - BFF 健康检查：<http://127.0.0.1:8787/api/health>
 - 停止：`powershell -ExecutionPolicy Bypass -File scripts/stop_web_demo.ps1`
-- E2E：`powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
+- 一键浏览器验收：`powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
 
-详细步骤、资产路径和已知问题见 [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) 与 [`DEMO_GUIDE.md`](DEMO_GUIDE.md)。
+BGE 冷启动会为两个 profile 各加载一次 catalogue/index，日志出现 `status=starting` 是正常的；等待 `/api/health` 的 `ready=true` 再输入。默认价格模式是 **strict**：catalogue 没有价格时保持 UNKNOWN，并可能安全拒绝预算无法验证的请求。
 
-面向 V2.1 的完整操作/截图说明：[`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md)。
-本地 CPU 与远程 Qwen Live 的完整启动、SSH tunnel、环境变量和故障排查：
-[`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md)。
-架构与时序：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+### 2. 最小手动启动（BM25；适合调试）
 
-### Legacy Serving Demo 的主要 HTTP 接口
+```bash
+# WSL / Linux，仓库根目录；MCP 由 BFF 自动 spawn，无需另开端口
+AGENTRECX_WEB_DEMO_SEARCH_MODE=bm25 \
+AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1 \
+.venv/bin/python -m web_demo
+```
 
-Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍保留在 `recommendation/api`，用于推荐/Agent 接口调试：
+```powershell
+# Windows，另一个终端
+cmd /c "pnpm --dir web install"
+cmd /c "pnpm --dir web dev"
+```
+
+打开 <http://localhost:3000>。默认 BFF 地址是 `http://127.0.0.1:8787`；可用 `NEXT_PUBLIC_BFF_URL` 覆盖。
+
+### 3. 直接运行 MCP Server（调试 P17 工具）
+
+```bash
+.venv/bin/python -m recommendation.mcp.server \
+  --user-key p14e2_lite_0049 \
+  --memory-fixture data/p14e2/benchmark/dev.agent.jsonl \
+  --search-mode bm25
+```
+
+默认写入关闭；只有显式 `--allow-memory-writes` 的本地测试 server 才接受真实测试用户回复。工具、客户端调用和失败案例见 [`docs/milestones/P15-P17/P17_REPORT.md`](docs/milestones/P15-P17/P17_REPORT.md)。
+
+### 4. 定向测试
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_web_multiturn_ask.py \
+  tests/test_web_personalization_e2e.py \
+  tests/test_task_constraints_execution.py \
+  tests/test_web_reply_executor.py \
+  tests/test_observability_tracing.py
+```
+
+完整测试/复现说明见 [`docs/USAGE.md`](docs/USAGE.md) 与 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
+真实 Qwen Agent 任务评测见 [`docs/REPRODUCE_AGENT_EVAL.md`](docs/REPRODUCE_AGENT_EVAL.md)；
+Advanced Retrieval v2 见 [`docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md`](docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md)。
+
+---
+
+## 打开两个个性化增强
+
+两个开关都是**服务端配置，默认 OFF**，不能由聊天请求打开；修改后必须重启 BFF/MCP。
+
+```text
+AGENTRECX_MEMORY_AWARE_RETRIEVAL=0|1   # 默认 0
+AGENTRECX_BEHAVIOR_AWARE_RERANK=0|1    # 默认 0
+```
+
+### 方式 A：一键启动时设置环境变量（PowerShell）
+
+```powershell
+$env:AGENTRECX_PRICE_MODE = "demo_historical_fx"   # 仅用于笔记本预算演示
+$env:AGENTRECX_MEMORY_AWARE_RETRIEVAL = "1"
+$env:AGENTRECX_BEHAVIOR_AWARE_RERANK = "1"
+powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
+```
+
+`run_web_demo.ps1` 只转发这些显式环境变量，默认值仍为 strict / OFF；它不会引入运行时开关。
+
+### 方式 B：手动启动 BFF
+
+```bash
+AGENTRECX_WEB_DEMO_SEARCH_MODE=bm25 \
+AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1 \
+AGENTRECX_PRICE_MODE=demo_historical_fx \
+AGENTRECX_MEMORY_AWARE_RETRIEVAL=1 \
+AGENTRECX_BEHAVIOR_AWARE_RERANK=1 \
+.venv/bin/python -m web_demo
+```
+
+开启后，`GET /api/health` / `GET /api/demo/config` 会返回：
+
+```json
+{"price_mode":"demo_historical_fx","features":{"memory_aware_retrieval":true,"behavior_aware_rerank":true}}
+```
+
+商品区的 **Personalization evidence** 条会显示：
+
+- Memory：base 候选数、新增候选 ID、辅助 Query 数、额外延迟；
+- Behavior：活跃 product/attribute 信号、top behavior score（正负贡献）。
+
+这些是**只读诊断**；Task Constraints、Eligibility、Budget、Decision Gate 仍然是硬边界。
+
+### 记忆召回与行为重排的边界
+
+- **Memory-aware Retrieval**：M9 中 ACTIVE 的正向偏好生成最多 2 条辅助 Query，每条 10 个候选，RRF 合并上限 40；base 候选始终保留。`USB` 的真实 BM25 示例新增 2 个候选，BGE 示例新增 3 个候选。
+- **Behavior-aware Rerank**：Click=弱兴趣，Like=强于 Click，Dislike=负贡献；Snapshot 只包含有界商品/属性信号，不含原始文本。固定权重软信号上限 ±0.30，不会绕过硬约束或 Gate。
+- **Behavior 改变分数不等于每次改变 Top-1**。如果当前 Query 的候选分数差距更大，Top-1 可以保持不变；不要伪造排序变化。
+- Replay 使用已提交的 durable result，不重新读取 Behavior；Cold Resume 使用服务端当前配置和当前 Session Profile。
+
+详细实现、真实延迟和限制见 [`docs/development/P1_PERSONALIZATION.md`](docs/development/P1_PERSONALIZATION.md)。
+
+---
+
+## 完整演示路线
+
+稳定的三场景路线（详细操作、输入和排错见 [`docs/development/INTERNSHIP_DEMO.md`](docs/development/INTERNSHIP_DEMO.md)）：
+
+### 场景 1：基础购物 Agent + 多轮 ASK + Budget Gate
+
+使用 **Demo B · Memory write**，开启 `AGENTRECX_PRICE_MODE=demo_historical_fx`：
+
+```text
+推荐一台笔记本
+  -> 这台笔记本主要用来办公还是游戏？
+游戏
+  -> 预算大约是多少？
+8000 元
+  -> 真实 BGE/BM25 检索 + 真实商品卡 + Gate ALLOW_FINALIZE
+```
+
+预期结果：笔记本候选的商品卡显示 **¥6,293.00 CNY**，并明确标注“演示参考价：历史美元价格按固定汇率换算，非当前市场售价”。历史美元价格不是实时价格。
+
+### 场景 2：Memory-aware Retrieval
+
+1. 在 **Memory lab** 保存一条 M9 确实能识别的偏好，例如 `I prefer USB.`；
+2. 发送通用需求：`studio headphones`；
+3. 开启 `AGENTRECX_MEMORY_AWARE_RETRIEVAL=1` 后，查看商品区 Personalization evidence：
+   - `Memory retrieval` 出现；
+   - 显示 base 候选数、新增 candidate IDs、辅助 Query 数和额外延迟；
+   - 侧栏 M9 Active preferences / Memory timeline 保持真实状态。
+
+不要求 Top-1 改变；展示真实候选新增或日志即可。不要用修改文案冒充召回。
+
+### 场景 3：Behavior-aware Rerank
+
+1. 在同一 Session 的商品卡点击 **Like**（不是只打开 Shadow Preview）；
+2. 确认 `/api/behavior/events` 真实写入；
+3. 再次发送 `studio headphones`；
+4. 开启 `AGENTRECX_BEHAVIOR_AWARE_RERANK=1` 后查看 Personalization evidence 的 `Behavior rerank`：
+   - 活跃 product/attribute 信号；
+   - `top +0.xxx` 的真实行为贡献；
+   - 正式 `recommend_products` 返回的 metadata。
+
+若 Top-1 不变，只报告分数贡献；这是软信号，不是学习型排序模型。
+
+### 场景 4：安全与恢复
+
+- 当前任务硬约束优先于 Memory 和 Behavior；`hard_unknown` 候选会安全拒绝。
+- 预算无法验证时 Budget Gate 拒绝，不会用历史价格猜测通过。
+- 已提交 Reply 的 Replay 直接返回 durable result，不重新执行 MCP。
+- M4 的两轮 ASK 在 BFF/MCP 重启后可以 Cold Resume。
+- Phoenix 可选：启用 OTel 后查看真实 trace；没有 exporter 时 UI 明确显示 observability disabled。
+
+---
+
+## 关键结果（口径必须一起读）
+
+| 结果 | 数值 | 正确口径 |
+|---|---:|---|
+| Electronics catalogue | **76,263** | 真实接受商品数，不是模拟数据 |
+| M3 单轮任务 | **13/15** | **原有单轮 Runner 口径**，不是多轮任务成功率 |
+| M3-C Precision@5 | **探索性** | 机器辅助标签实验，不是生产质量提升，不写成线上指标 |
+| C4 Dev 135，BGE Hit@100 | **66/135** | P14-D2；BGE 候选可达性 |
+| C4 Dev 135，BM25 Hit@100 | **20/135** | 同一 Dev；与 proxy test 不同 |
+| C4 Proxy Test 129，BGE Hit@100 | **50.39%** | 评论衍生的 proxy query，不是真实搜索日志 |
+| ESCI semantic gain，BGE nDCG@10 | **0.7366** | 真实 query + 人工 judgments；judged-candidate reranking |
+| ESCI semantic gain，BM25 nDCG@10 | **0.6907** | 同口径；差 **+0.0459**，95% CI [0.0420, 0.0497] |
+| P18 Reserved Test | **Top-1 11/12** | **模拟规则标签**，只用于受限工作流泛化检查 |
+| 当前 Browser Demo | **新 09 场景 1/1 passed** | 真实 FastAPI + MCP + BM25 + Demo FX 的笔记本多轮、Memory、Behavior 浏览器验收；另有 02–05 CPU 场景通过 |
+| P1 Memory 真实召回 | **BM25 +2 / BGE +3 候选** | 同一 Query 的真实辅助检索；不是全库 Recall |
+
+这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见
+[`docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) 和
+[`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
+
+已确认的成功是：真实 catalogue、BGE 候选可达性提升、工具链/协议/记忆闭环可运行、Task Constraints/Budget/Gate 安全边界。
+未证明/失败的部分同样重要：真实长期历史没有超过 shuffled 负对照；Planner SFT 未超过 Base；
+SFT Adapter 不采用；解释语义真实性没有人工审核；ESCI 不是全库 Recall；
+Behavior 改变分数不等于每次都改变 Top-1。
+
+### P1 当前验证（单次真实运行）
+
+| 项目 | 结果 |
+|---|---:|
+| Memory BM25 额外候选 | 2 |
+| Memory BM25 额外延迟 | 约 44 ms |
+| Memory BGE 额外候选 | 3 |
+| Memory BGE 额外延迟 | 约 105 ms |
+| Behavior Like -> 正式 `recommend_products` | `top_behavior_score` 约 0.233（单次） |
+| Behavior Top-1 变化 | **不保证**；展示真实分数贡献 |
+| Flags 全 OFF | 仍走原 M1–M4/P0 路径；新 metadata 不出现 |
+
+完整证据：[`docs/development/P1_PERSONALIZATION.md`](docs/development/P1_PERSONALIZATION.md)、
+[`tests/test_web_personalization_e2e.py`](tests/test_web_personalization_e2e.py)。
+
+---
+
+## 历史与研究资产
+
+以下内容保留，但不再是当前默认展示能力：
+
+- **体系 B / V2 Runtime**：`recommendation/api`、SASRec/Two-Tower/RRF Serving、LightGBM、TIGER 等历史研究资产保留源码与文档；当前不启动，不修改。相关历史说明仍见
+  [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md)、[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
+- **Qwen Base Live**：历史真实 GPU 实验与浏览器轨迹保留；当前 CPU Demo 不依赖 AutoDL。需要时按
+  [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) 配置真实服务。
+- **Behavior V2 GPU E2E**：100 个自动化场景、21 个真实 Qwen Live、BGE 延迟等历史结果保留在
+  [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。自动化事件为 `AUTOMATED_BROWSER_E2E`，不是人类偏好标签；`human_review_count=0`。
+- **Ranker Comparison**：P100 recorded Replay，页面明确标注，不是实时推理。
+
+这些历史结果可以帮助理解项目演进，但不能用来声称当前 CPU Demo 具备 GPU/Qwen/V2 线上能力。
+
+### Legacy Serving Demo 的主要 HTTP 接口（历史，不在当前 Web Demo 启动）
+
+Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍保留在 `recommendation/api`，用于历史推荐/Agent 接口调试：
 
 | Method | Path | 用途 |
 |---|---|---|
@@ -218,100 +439,6 @@ Web Shopping Assistant 使用自己的 BFF；下面的 legacy serving demo 仍�
 | `POST` | `/v1/demo/agent/recommend` | 无状态 Agent 推荐 |
 
 完整字段与错误码见 [`docs/USAGE.md`](docs/USAGE.md) 和运行中的 `/docs` OpenAPI。
-
-### 2. CPU MCP Server
-
-```bash
-.venv/bin/python -m recommendation.mcp.server \
-  --user-key p14e2_lite_0049 \
-  --memory-fixture data/p14e2/benchmark/dev.agent.jsonl \
-  --search-mode bge
-```
-
-默认写入关闭；只有显式 `--allow-memory-writes` 的本地测试 server 才接受真实测试用户回复。MCP 工具、客户端调用和失败案例见 [`P17_REPORT.md`](docs/milestones/P15-P17/P17_REPORT.md)。
-
-### 3. 定向测试
-
-```bash
-.venv/bin/python -m pytest -q tests/test_p18_final.py tests/test_p17_mcp.py \
-  tests/test_p16_skills.py tests/test_p15_rag.py
-```
-
-完整测试/复现说明见 [`docs/USAGE.md`](docs/USAGE.md) 与 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
-
-真实 Qwen Agent 任务评测（30-task baseline/corrective/shadow、GPU 服务、数据与复现命令）见
-[`docs/REPRODUCE_AGENT_EVAL.md`](docs/REPRODUCE_AGENT_EVAL.md)；对应依赖文件为
-[`requirements-eval.txt`](requirements-eval.txt)。
-
-Advanced Retrieval v2 的 Phase 1 实现与 Phase 2 GPU 交接见
-[`docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md`](docs/ADVANCED_RETRIEVAL_V2_PHASE1_REPORT.md)
-与 [`docs/ADVANCED_RETRIEVAL_V2_GPU_HANDOFF.md`](docs/ADVANCED_RETRIEVAL_V2_GPU_HANDOFF.md)。
-
----
-
-## 关键结果（口径必须一起读）
-
-| 结果 | 数值 | 正确口径 |
-|---|---:|---|
-| Electronics catalogue | **76,263** | 真实接受商品数，不是模拟数据 |
-| C4 Dev 135，BGE Hit@100 | **66/135** | P14-D2；BGE 候选可达性 |
-| C4 Dev 135，BM25 Hit@100 | **20/135** | 同一 Dev；与 129 条 proxy test 不同 |
-| C4 Proxy Test 129，BGE Hit@100 | **50.39%** | 评论衍生的 proxy query，不是真实搜索日志 |
-| ESCI semantic gain，BGE nDCG@10 | **0.7366** | 真实 query + 人工 judgments；judged-candidate reranking |
-| ESCI semantic gain，BM25 nDCG@10 | **0.6907** | 同口径；差 **+0.0459**，95% CI [0.0420, 0.0497] |
-| P18 Reserved Test | **Top-1 11/12** | **模拟规则标签**，只用于受限工作流泛化检查 |
-| Web E2E | **9/9** | 7 CPU/Replay + 2 真实 Qwen Live；另有 1/1 ASK→M9→resume 专项 |
-| MCP / Skills | **7 tools / 2 Skills** | P17 默认工具；配置 Qwen Live 时另有 1 个入口 |
-
-这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见 [`AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) 和 [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md)。
-
-已确认的成功是：真实 catalogue、BGE 候选可达性提升、工具链/协议/记忆闭环可运行。
-未证明/失败的部分同样重要：真实长期历史没有超过 shuffled 负对照；Planner SFT 未超过 Base；
-SFT Adapter 不采用；解释语义真实性没有人工审核；ESCI 不是全库 Recall。
-
-### V2.1 Demo Verification（单次真实运行 / 测试，不是离线平均指标）
-
-| 项目 | 结果 |
-|---|---:|
-| Qwen Live 真实浏览器 turn | **20.58 s**（单次；3 planner calls，不是平均值） |
-| Qwen Planner latency sum | 10,229.11 ms |
-| Qwen Agent E2E | 19,760.87 ms |
-| GPU resident | 17,551 MiB |
-| First user BGE query after warmup | **0.552 s**（同机实测；warmup 前约 **16.28 s**；不是 Qwen 延迟） |
-| Qwen actions | `RETRIEVE → RERANK → FINALIZE` |
-| Final Gate | `ALLOW_FINALIZE / evidence_sufficient` |
-| Selected product | `B08D32JM5F` |
-| Rule fallback | **none** |
-| Session A/B isolation | **PASS**（A 写入/B 不可见、A 撤回/B 不变、Reset A/B 保持、read-only 写入 HTTP 400） |
-| WSL tests | **38 passed** |
-| Local tests | **20 passed** |
-| TypeScript | `pnpm exec tsc --noEmit` **PASS** |
-
-Qwen Live 的单次延迟来自 **一次真实浏览器运行**，不能写成平均 E2E 延迟。Session Memory
-当前是 **BFF 进程内状态**，BFF 重启会丢失；不是持久化多租户 Memory。完整证据见
-[`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md)。
-
-### Behavior Feedback V2 GPU Live E2E（真实运行，不是离线平均）
-
-| 项目 | 结果 | 口径 |
-|---|---:|---|
-| 自动化场景 | **100 / 100 passed** | 独立 Session；结构校验，不等于质量结论 |
-| Qwen GPU Live / CPU-BGE | **21 / 79** | 21 个真实 Qwen Live；其余 Rule/CPU-BGE |
-| Qwen Live turns / raw actions | **31 / 31** | 真实远端 RTX 4090 推理，0 parser error |
-| BGE retrieval turns | **136** | 全部 `bge` / `bge_dense`，非 BM25 回退 |
-| BGE retrieval latency | **p50 159.64 ms / p95 187.18 ms** | 本地 CPU/WSL |
-| Qwen Planner latency | **p50 11.17 s / p95 14.23 s** | 每 turn 的真实 planner call 总和 |
-| Qwen turn total | **p50 17.98 s / p95 24.77 s** | 含工具与 Gate，不含浏览器渲染 |
-| Eligible-comparable OFF/ON | **42** | 仅统计 ≥2 Eligible 候选 |
-| Eligible ranking changes | **2 / 42** | `v2-022` / `v2-028`，OFF #5 → ON #4 |
-| Hard-constraint violations | **0** | Gate / Eligibility 不变 |
-| Human LIVE behavior events | **0** | 全部自动化事件为 `AUTOMATED_BROWSER_E2E` |
-| Human preference labels | **0** | `preference_lift = unavailable_no_human_labels` |
-
-**设备边界**：Qwen3.5-9B Planner 在远程 GPU；BGE encoder/index、FastAPI BFF 和 MCP 在本地
-CPU/WSL。**不能把 100 个场景称为 100 个 GPU Planner 测试**，也不能把自动化点击称为真实人类偏好。
-完整证据与失败边界见
-[`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md)。
 
 ---
 
@@ -337,27 +464,27 @@ third_party/        第三方来源、licence 与 provenance
 
 | 文档 | 适合阅读 |
 |---|---|
+| [`docs/development/INTERNSHIP_DEMO.md`](docs/development/INTERNSHIP_DEMO.md) | **本轮实习展示：真实启动、三场景、Flags、Phoenix、排错** |
+| [`docs/development/P1_PERSONALIZATION.md`](docs/development/P1_PERSONALIZATION.md) | **P1 Memory 召回 / Behavior 重排实现与真实证据** |
+| [`docs/development/P0_TASK_CONSTRAINTS_FIX.md`](docs/development/P0_TASK_CONSTRAINTS_FIX.md) | P0 Task Constraints、Budget/Gate 安全边界 |
 | [`AGENTRECX_HANDOFF.md`](docs/handoff/AGENTRECX_HANDOFF.md) | 接任者/新会话先读的完整交接 |
 | [`AGENTRECX_EXPERIMENT_SUMMARY.md`](docs/handoff/AGENTRECX_EXPERIMENT_SUMMARY.md) | 全项目实验口径与失败经验 |
 | [`EXPERIMENT_SUMMARY.md`](EXPERIMENT_SUMMARY.md) | 更短的项目实验总结 |
 | [`PROJECT_ARCHITECTURE.md`](PROJECT_ARCHITECTURE.md) | 当前架构与两种运行模式 |
-| [`DEMO_GUIDE.md`](DEMO_GUIDE.md) | P18 三场景 Demo 与 MCP 启动 |
-| [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | **V2.1 当前 Web Demo 操作说明、截图与功能验证** |
-| [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) | **Local CPU / 远程 Qwen Live 完整启动与部署** |
+| [`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md) | V2.1 历史 Web Demo 操作说明（含 Qwen 历史场景） |
+| [`docs/SETUP_AND_DEPLOYMENT.md`](docs/SETUP_AND_DEPLOYMENT.md) | Local CPU / 远程 Qwen Live 完整启动与部署 |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 当前架构、Qwen Live / Memory / Session 隔离时序 |
-| [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md) | **V2.1 Qwen Live 与 Session Isolation 验收证据** |
-| [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md) | **V2：真实 Qwen3.5-9B GPU Live + BGE + 100 场景 E2E 证据、延迟与边界** |
-| [`docs/AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md`](docs/AGENTREC_X_PORTFOLIO_REFINEMENT_REPORT.md) | 本次 GitHub 展示整理、安全审计与发布建议 |
-| [`docs/README_REVIEW_REPORT.md`](docs/README_REVIEW_REPORT.md) | 更早的 README pre-edit 审查记录（历史基线） |
-| [`WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
+| [`docs/AGENTREC_X_DEMO_V21_VERIFICATION.md`](docs/AGENTREC_X_DEMO_V21_VERIFICATION.md) | V2.1 Qwen Live 与 Session Isolation 历史验收证据 |
+| [`docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md`](docs/AGENTREC_X_BEHAVIOR_FEEDBACK_V2_GPU_E2E_REPORT.md) | V2 历史 GPU Live + BGE + 100 场景 E2E 证据、延迟与边界 |
+| [`docs/web-demo/WEB_DEMO_GUIDE.md`](docs/web-demo/WEB_DEMO_GUIDE.md) | P19 Web Demo 一键运行与排错 |
 | [`P15_REPORT.md`](docs/milestones/P15-P17/P15_REPORT.md) | Evidence Bundle、Claim Validation |
 | [`P16_REPORT.md`](docs/milestones/P15-P17/P16_REPORT.md) | 两个 Shopping Skills |
 | [`P17_REPORT.md`](docs/milestones/P15-P17/P17_REPORT.md) | MCP 协议、工具与客户端联调 |
-| [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md) | 冻结、Reserved Test、最终集成 |
+| [`P18_FINAL_REPORT.md`](P18_FINAL_REPORT.md) | 冻结、Reserved Test、历史最终集成 |
 | [`ESCI_EXTERNAL_EVAL_REPORT.md`](docs/external-eval/ESCI_EXTERNAL_EVAL_REPORT.md) | ESCI 外部评测 |
 | [`REAL_RETRIEVAL_EVAL_REPORT.md`](docs/external-eval/REAL_RETRIEVAL_EVAL_REPORT.md) | C4 proxy 冻结评测 |
 | [`docs/README.md`](docs/README.md) | 完整文档索引 |
-| [`README_EN.md`](README_EN.md) | 完整英文版 README |
+| [`README_EN.md`](README_EN.md) | 英文版 README（可能滞后于本中文入口） |
 
 ---
 
@@ -369,11 +496,14 @@ third_party/        第三方来源、licence 与 provenance
 - P18 Reserved Test 使用模拟规则标签；11/12 只用于工作流检查，不是真实用户准确率。
 - 自动证据验证只检查引用、字段、span 和用户范围；`semantic_truth_verified=false`，不能称为人工语义审核。
 - 商品 price / brand / stock / material 等缺失字段必须保持 UNKNOWN；不得用模型参数知识补齐。
+- **Historical FX 不是实时价格**：`demo_historical_fx` 仅把历史美元价格按固定 7.00 汇率换算，并显示“演示参考价”；不得写成当前市场售价。
 - ItemCF 只有工程基线，**no same-artifact** 全量数据基准；不能与其他模型做不可比的横向排名。
 - 本地 Web Demo 没有 auth/TLS；Memory 写入默认关闭；MCP 默认只允许启动时绑定的单一可信用户，不允许调用方传任意 user id。
-- V2.1 起浏览器 Session 拥有独立 M9 namespace（A/B 不互读、不互相撤回）；但 Session Memory 仍是 **BFF 进程内状态，BFF 重启会丢失**，不是持久化多租户 Memory。
-- Qwen Live 已在 V2.1 用真实浏览器完成一次 `RETRIEVE → RERANK → FINALIZE` 调用；它需要 GPU 服务 + **WSL-local loopback tunnel**，tunnel/模型停止时 UI 明确显示 unavailable，不能声称 Qwen 成功。
-- Behavior V2 的 100 个自动化场景使用 `AUTOMATED_BROWSER_E2E` provenance；Qwen Planner 在远程 GPU，BGE 在本地 CPU。它们验证机制与排序响应，不是人类偏好标签；`human_review_count=0`，`preference_lift` 为 `unavailable_no_human_labels`，不声称 CTR/满意度提升。
+- V2.1 起浏览器 Session 拥有独立 M9 namespace（A/B 不互读、不互相撤回）；但默认 in-memory Session 仍是 **BFF 进程内状态，BFF 重启会丢失**；durable 路径使用 Web SQLite ledger，两者不能混称持久化多租户 Memory。
+- Qwen Live 需要 GPU 服务 + **WSL-local loopback tunnel**；tunnel/模型停止时 UI 明确显示 unavailable，不能声称 Qwen 成功。
+- Behavior V2 的 100 个自动化场景使用 `AUTOMATED_BROWSER_E2E` provenance；它们验证机制与排序响应，不是人类偏好标签；`human_review_count=0`，`preference_lift` 为 `unavailable_no_human_labels`，不声称 CTR/满意度提升。
+- P1 的 Behavior 是固定权重软信号，不是训练后的学习型排序模型；Top-1 不保证变化。
+- P1 的 Memory 辅助召回受 base top-20 + 2×10 约束，不能召回两者都找不到的商品；M9 仍是规则抽取，中文长期偏好支持有限。
 - Ranker Comparison 当前是 **P100 recorded Replay**，页面明确标注；不是实时 ShopRanker/Hybrid 推理。
 - 未运行 Reserved Test 的二次调参，也未基于最终指标修改模型或规则。
 
@@ -382,5 +512,8 @@ third_party/        第三方来源、licence 与 provenance
 ---
 
 <p align="center">
-  <a href="README_EN.md">Read the full English README</a> · <a href="docs/handoff/AGENTRECX_HANDOFF.md">Handoff</a> · <a href="EXPERIMENT_SUMMARY.md">Experiments</a>
+  <a href="docs/development/INTERNSHIP_DEMO.md">Internship Demo Guide</a> ·
+  <a href="README_EN.md">English README</a> ·
+  <a href="docs/handoff/AGENTRECX_HANDOFF.md">Handoff</a> ·
+  <a href="EXPERIMENT_SUMMARY.md">Experiments</a>
 </p>
