@@ -278,6 +278,98 @@ def test_reply_task_constraints_reach_recommend_and_durable_result(tmp_path: Pat
         store.close()
 
 
+def test_reply_behavior_snapshot_reaches_recommend(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        snapshot = {
+            "schema": "agentrecx.behavior_snapshot.v1",
+            "session_id": "web-r",
+            "product_interests": [{"product_id": "B004K6R43G", "score": 2.0}],
+            "attribute_interests": [],
+        }
+        tools = FakeTools(recommend=recommend_payload(), reply=reply_payload())
+        outcome = asyncio.run(_run(
+            _executor(store, tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+            behavior_snapshot=snapshot,
+        ))
+        assert outcome.outcome == "completed", outcome.detail
+        recommend_args = next(
+            arguments for tool, arguments in tools.calls
+            if tool == "recommend_products"
+        )
+        assert recommend_args["behavior_snapshot"] == snapshot
+    finally:
+        store.close()
+
+
+def test_reply_feature_metadata_is_durable_and_projected(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        recommendation = {
+            **recommend_payload(),
+            "memory_retrieval": {
+                "enabled": True, "queries": ["q aux"], "new_item_ids": ["B0NEW"],
+                "base_candidate_count": 20, "merged_candidate_count": 21,
+            },
+            "behavior_rerank": {
+                "enabled": True, "active_product_signals": 1,
+                "top_behavior_score": 0.2,
+            },
+        }
+        tools = FakeTools(recommend=recommendation, reply=reply_payload())
+        outcome = asyncio.run(_run(
+            _executor(store, tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+        ))
+        assert outcome.outcome == "completed"
+        assert outcome.result["memory_retrieval"]["new_item_ids"] == ["B0NEW"]
+        assert outcome.result["behavior_rerank"]["top_behavior_score"] == 0.2
+        response = reply_response_from_result(
+            outcome.result, clarification_id=pending.clarification_id
+        )
+        assert response["memory_retrieval"]["new_item_ids"] == ["B0NEW"]
+        assert response["behavior_rerank"]["top_behavior_score"] == 0.2
+        request = store.get_request("web-r", pending.reply_turn_id)
+        assert request is not None
+        assert request.result["payload"]["memory_retrieval"]["new_item_ids"] == ["B0NEW"]
+    finally:
+        store.close()
+
+
+def test_replay_does_not_reread_changed_behavior_snapshot(tmp_path: Path) -> None:
+    store = _new_store(tmp_path)
+    try:
+        _, pending = _setup(store)
+        snapshot_a = {
+            "schema": "agentrecx.behavior_snapshot.v1",
+            "session_id": "web-r",
+            "product_interests": [{"product_id": "B004K6R43G", "score": 3.0}],
+            "attribute_interests": [],
+        }
+        first = asyncio.run(_run(
+            _executor(store, FakeTools(recommend=recommend_payload())),
+            _session(), pending, clarification_id=pending.clarification_id,
+            behavior_snapshot=snapshot_a,
+        ))
+        assert first.outcome == "completed"
+        replay_tools = FakeTools()
+        replay = asyncio.run(_run(
+            _executor(store, replay_tools), _session(), pending,
+            clarification_id=pending.clarification_id,
+            behavior_snapshot={**snapshot_a, "product_interests": [
+                {"product_id": "OTHER", "score": -3.0},
+            ]},
+        ))
+        assert replay.outcome == "replayed"
+        assert replay.result == first.result
+        assert replay_tools.calls == []
+    finally:
+        store.close()
+
+
 def test_replayed_reply_returns_the_same_next_ask_without_mcp(tmp_path: Path) -> None:
     store = _new_store(tmp_path)
     try:

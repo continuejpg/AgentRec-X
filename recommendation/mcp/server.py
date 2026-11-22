@@ -24,7 +24,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Any, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping, Sequence
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
@@ -52,6 +52,7 @@ from recommendation.preference.clarification_policy import next_laptop_clarifica
 from recommendation.preference.current_task_constraints import (
     CurrentTaskConstraint,
     CurrentTaskConstraints,
+    effective_preferences,
 )
 from recommendation.preference.history import HistoryStateReader
 from recommendation.preference.task_requirements import (
@@ -76,6 +77,10 @@ ENV_EVIDENCE_VERIFIER = "AGENTRECX_EVIDENCE_VERIFIER"
 #: closure.  The Web BFF persists the wrapped form (``web_demo.continuation``).
 CLARIFICATION_CONTINUATION_SCHEMA = "agentrecx.mcp.clarification_continuation.v1"
 CLARIFICATION_CONTINUATION_VERSION = 1
+#: The BFF's versioned short-term behavior snapshot.  It is accepted only when the
+#: deployment-level flag is on; it is never an M9 write or a raw event dump.
+BEHAVIOR_SNAPSHOT_SCHEMA = "agentrecx.behavior_snapshot.v1"
+MEMORY_RETRIEVAL_MAX_QUERIES = 2
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -124,6 +129,10 @@ class AppContext:
     writes_enabled: bool
     corrective_rag: bool = False
     evidence_verifier: bool = False
+    #: Independent, default-off formal personalization flags.  The Web BFF passes them
+    #: explicitly; a direct MCP client cannot enable them by request argument.
+    memory_aware_retrieval: bool = False
+    behavior_aware_rerank: bool = False
     clarification_ttl_seconds: float = 1800.0
     # Optional browser-session namespace for the local demo.  None preserves the original bound
     # fixture behavior for tests/production MCP clients.
@@ -444,6 +453,36 @@ def _awaiting_recommendation(
     }
 
 
+def _memory_query_values(
+    base_query: str,
+    preferences: Sequence[Mapping[str, Any]],
+    *,
+    limit: int = MEMORY_RETRIEVAL_MAX_QUERIES,
+) -> list[str]:
+    """Build a bounded set of auxiliary lexical queries from positive M9 preferences.
+
+    Only canonical, positive values are used.  Task-scoped exclusions have already been
+    applied by ``effective_preferences``; negatives are never turned into retrieval terms.
+    The original query remains the first retrieval in every case.
+    """
+    base = " ".join(str(base_query or "").casefold().split())
+    queries: list[str] = []
+    seen: set[str] = set()
+    for preference in preferences:
+        polarity = str(preference.get("polarity") or "positive").lower()
+        value = " ".join(str(preference.get("value") or "").split())
+        if polarity not in {"positive", "prefer"} or not value:
+            continue
+        key = value.casefold()
+        if key in seen or key in base:
+            continue
+        seen.add(key)
+        queries.append(f"{base_query} {value}")
+        if len(queries) >= max(1, int(limit)):
+            break
+    return queries
+
+
 def _recommend_products(
     query: Annotated[str, Field(min_length=1, description="Current shopping query")],
     session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
@@ -453,6 +492,9 @@ def _recommend_products(
     task_constraints: Annotated[dict[str, Any] | None, Field(
         description="Optional task-scoped CurrentTaskConstraints snapshot (hard exclusions and "
                     "soft preferences) persisted by the Web reply coordinator")] = None,
+    behavior_snapshot: Annotated[dict[str, Any] | None, Field(
+        description="Optional versioned short-term behavior snapshot from the trusted Web BFF; "
+                    "accepted only when behavior-aware rerank is enabled")] = None,
 ) -> dict[str, Any]:
     """Run the existing Rule Planner + shared tools + V0/Role/Eligibility/Gate; never fake a FINALIZE."""
     started = time.perf_counter()
@@ -471,7 +513,23 @@ def _recommend_products(
         _constraints_from_snapshot(task_constraints)
         if isinstance(task_constraints, Mapping) else CurrentTaskConstraints()
     )
+    preferences = prepare_preferences(history)
+    effective = effective_preferences(preferences, constraints)
+    behavior_payload: dict[str, Any] | None = None
+    if ctx.behavior_aware_rerank and behavior_snapshot is not None:
+        if not isinstance(behavior_snapshot, Mapping):
+            raise ToolError("invalid_behavior_snapshot: expected a JSON object")
+        if str(behavior_snapshot.get("schema") or "") != BEHAVIOR_SNAPSHOT_SCHEMA:
+            raise ToolError("invalid_behavior_snapshot: unsupported schema")
+        snapshot_session = str(behavior_snapshot.get("session_id") or "")
+        if session_id and snapshot_session != str(session_id):
+            raise ToolError("behavior_snapshot_session_mismatch")
+        behavior_payload = dict(behavior_snapshot)
     effective_query = augment_query(query, requirements)
+    memory_queries = (
+        _memory_query_values(effective_query, effective)
+        if ctx.memory_aware_retrieval else []
+    )
     if session_id:
         task["task_id"] = str(session_id)
         task["user_id"] = str(session_id)
@@ -488,11 +546,14 @@ def _recommend_products(
         )
     executor = ElectronicsPlannerExecutor(
         catalogue=ctx.catalogue, current_query=effective_query,
-        preferences=prepare_preferences(history), hard=prepare_hard(effective_query),
+        preferences=preferences, hard=prepare_hard(effective_query),
         task_context=task, memory_history=history,
         task_constraints=constraints,
         corrective_rag=ctx.corrective_rag,
         price_budget=requirements.budget,
+        memory_retrieval=ctx.memory_aware_retrieval,
+        memory_queries=memory_queries,
+        behavior_snapshot=behavior_payload,
     )
     observation = PlannerObservation(
         step=0, query=effective_query,
@@ -576,8 +637,10 @@ def _recommend_products(
         "agentrecx.clarification.reason": (
             clarification.get("reason") if isinstance(clarification, Mapping) else None
         ),
+        "agentrecx.feature.memory_retrieval": bool(ctx.memory_aware_retrieval),
+        "agentrecx.feature.behavior_rerank": bool(ctx.behavior_aware_rerank),
     })
-    return {
+    payload = {
         "schema": "agentrecx.p17.recommend_products.v1",
         "status": status,
         "query": query,
@@ -603,6 +666,11 @@ def _recommend_products(
                   "the candidate pool is bounded and does not imply the full catalogue has no product",
                   "a task budget is enforced against the catalogue price; an UNKNOWN price or a currency mismatch is never treated as compliance"],
     }
+    if ctx.memory_aware_retrieval:
+        payload["memory_retrieval"] = executor.last_memory_retrieval
+    if ctx.behavior_aware_rerank and behavior_payload is not None:
+        payload["behavior_rerank"] = executor.last_behavior
+    return payload
 
 
 def _qwen_config() -> dict[str, Any]:
@@ -877,11 +945,21 @@ async def _run_agent_turn(
         )
         prior_planner_calls = list(continuation.get("planner_calls") or [])
     else:
+        qwen_preferences = prepare_preferences(history)
+        qwen_effective = effective_preferences(
+            qwen_preferences, resume_task_constraints
+        )
         executor = ElectronicsPlannerExecutor(
             catalogue=context.catalogue, current_query=query,
-            preferences=prepare_preferences(history), hard=prepare_hard(query),
+            preferences=qwen_preferences, hard=prepare_hard(query),
             task_context=task, memory_history=history, explainer=explainer,
             corrective_rag=context.corrective_rag,
+            task_constraints=resume_task_constraints,
+            memory_retrieval=context.memory_aware_retrieval,
+            memory_queries=(
+                _memory_query_values(query, qwen_effective)
+                if context.memory_aware_retrieval else ()
+            ),
         )
         observation = PlannerObservation(
             step=0, query=query,
@@ -1473,6 +1551,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="enable one evidence-driven corrective retrieval after a Gate evidence gap")
     parser.add_argument("--evidence-verifier", action="store_true",
                         help="run the independent Qwen claim-evidence verifier in shadow mode")
+    parser.add_argument("--memory-aware-retrieval", action="store_true",
+                        help="enable M9-assisted auxiliary catalogue retrieval (default off)")
+    parser.add_argument("--behavior-aware-rerank", action="store_true",
+                        help="enable bounded short-term behavior contributions in the formal scorer (default off)")
     args = parser.parse_args(argv)
     # The stdio child is a separate process.  MCP SDK's official OpenTelemetryMiddleware
     # resolves the global provider when a tools/call request arrives, so the child configures
@@ -1482,6 +1564,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     corrective_rag = bool(args.corrective_rag or _env_bool(ENV_CORRECTIVE_RAG))
     evidence_verifier = bool(args.evidence_verifier or _env_bool(ENV_EVIDENCE_VERIFIER))
+    memory_aware_retrieval = bool(
+        args.memory_aware_retrieval or _env_bool("AGENTRECX_MEMORY_AWARE_RETRIEVAL")
+    )
+    behavior_aware_rerank = bool(
+        args.behavior_aware_rerank or _env_bool("AGENTRECX_BEHAVIOR_AWARE_RERANK")
+    )
     startup_started = time.perf_counter()
     catalogue_started = time.perf_counter()
     catalogue = ElectronicsCatalogue.load(metadata_mode=args.metadata_mode,
@@ -1539,6 +1627,8 @@ def main(argv: list[str] | None = None) -> int:
                      search_mode=search_mode, writes_enabled=bool(args.allow_memory_writes),
                      corrective_rag=corrective_rag,
                      evidence_verifier=evidence_verifier,
+                     memory_aware_retrieval=memory_aware_retrieval,
+                     behavior_aware_rerank=behavior_aware_rerank,
                      clarification_ttl_seconds=float(args.clarification_ttl_seconds),
                      qwen_configured=qwen_configured, qwen_model=qwen_model,
                      memory_store=memory_store)
@@ -1553,6 +1643,8 @@ def main(argv: list[str] | None = None) -> int:
         "demo_price_stats": catalogue.demo_price_stats,
         "corrective_rag": corrective_rag,
         "evidence_verifier": evidence_verifier,
+        "memory_aware_retrieval": memory_aware_retrieval,
+        "behavior_aware_rerank": behavior_aware_rerank,
         "qwen_live_configured": qwen_configured, "qwen_model": qwen_model,
         "search_ready": bool(search_ready),
         "startup_timings": {

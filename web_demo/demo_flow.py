@@ -187,6 +187,7 @@ async def chat_events(
     mode: str = "cpu_live",
     qwen_health: Any | None = None,
     tracing: Tracing | None = None,
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Open one Agent span around the real SSE turn, then delegate unchanged."""
     runtime = tracing or get_tracing()
@@ -209,6 +210,7 @@ async def chat_events(
             selected_product_ids=selected_product_ids,
             mode=mode,
             qwen_health=qwen_health,
+            behavior_snapshot=behavior_snapshot,
         ):
             yield payload_event
 
@@ -222,6 +224,7 @@ async def _chat_events_impl(
     selected_product_ids: list[str] | None = None,
     mode: str = "cpu_live",
     qwen_health: Any | None = None,
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Full chat turn as contract-ordered SSE events (including ``done``)."""
     # Persistent mode: bind this chat to a durable task before any identity is issued.
@@ -267,6 +270,7 @@ async def _chat_events_impl(
             async for payload_event in _search_and_recommend_turn(
                 manager=manager, session=session, settings=settings, turn=turn,
                 recorder=recorder, message=message, state=state, task=task,
+                behavior_snapshot=behavior_snapshot,
             ):
                 yield payload_event
     except MCPManagerError as exc:
@@ -348,6 +352,7 @@ async def _search_and_recommend_turn(
     message: str,
     state: dict[str, Any],
     task: Any | None = None,
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     profile_id = session.profile_id
 
@@ -385,8 +390,13 @@ async def _search_and_recommend_turn(
     recommend_entry = recorder.start("recommend_products")
     yield event("tool_status", recommend_entry)
     started = time.perf_counter()
+    recommend_arguments: dict[str, Any] = {
+        "query": message, "session_id": session.session_id,
+    }
+    if behavior_snapshot is not None:
+        recommend_arguments["behavior_snapshot"] = dict(behavior_snapshot)
     recommendation = await manager.call_tool(
-        profile_id, "recommend_products", {"query": message, "session_id": session.session_id}
+        profile_id, "recommend_products", recommend_arguments
     )
     recorder.ok(recommend_entry, latency_ms=_ms(started))
     yield event("tool_status", recommend_entry)
@@ -545,6 +555,9 @@ async def _search_and_recommend_turn(
         recommended_product_id=str(selected_id) if selected_id else None,
         gate=gate,
     )
+    for key in ("memory_retrieval", "behavior_rerank"):
+        if key in recommendation:
+            products[key] = recommendation[key]
     _attach_recommendation(
         session, products, turn_id=turn.turn_id,
         ranking_source="cpu_live:search_products+recommend_products+gate",
@@ -876,6 +889,7 @@ async def clarification_reply(
     message: str,
     qwen_health: Any | None = None,
     tracing: Tracing | None = None,
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a real user reply through M9, refresh preferences and resume the pending query.
 
@@ -895,6 +909,7 @@ async def clarification_reply(
             clarification_id=clarification_id,
             message=message,
             tracing=tracing,
+            behavior_snapshot=behavior_snapshot,
         )
     pending = session.pending_clarification
     if pending is None:
@@ -1051,9 +1066,13 @@ async def clarification_reply(
             turn.planner = "rule"
             rec_entry = recorder.start("recommend_products", label="Recommend")
             started = time.perf_counter()
+            rec_arguments: dict[str, Any] = {
+                "query": pending.query, "session_id": session.session_id,
+            }
+            if behavior_snapshot is not None:
+                rec_arguments["behavior_snapshot"] = dict(behavior_snapshot)
             rec_payload = await manager.call_tool(
-                profile_id, "recommend_products",
-                {"query": pending.query, "session_id": session.session_id},
+                profile_id, "recommend_products", rec_arguments,
             )
             recorder.ok(rec_entry, latency_ms=_ms(started))
             steps.append(_step("recommend_products", started))
@@ -1367,6 +1386,7 @@ async def _persistent_clarification_reply(
     clarification_id: str,
     message: str,
     tracing: Tracing | None = None,
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Durable Warm/Cold Reply: resolve a handle, claim, execute, checkpoint, finalize."""
     store = getattr(session._store, "state_store", None)
@@ -1446,6 +1466,7 @@ async def _persistent_clarification_reply(
     ) as reply_span:
         outcome = await executor.execute(
             session, pending, message=message, clarification_id=clarification_id,
+            behavior_snapshot=behavior_snapshot,
         )
         if runtime.enabled:
             if outcome.outcome == REPLAYED:

@@ -17,6 +17,8 @@ Environment variables (all optional):
     AGENTRECX_BEHAVIOR_WINDOW_S              short-term profile window, default 21600 s (6 h)
     AGENTRECX_BEHAVIOR_HALF_LIFE_S           decay half-life, default 1800 s
     AGENTRECX_BEHAVIOR_RETENTION_DAYS        event retention, default 7 days
+    AGENTRECX_MEMORY_AWARE_RETRIEVAL         opt-in M9 auxiliary retrieval, default 0
+    AGENTRECX_BEHAVIOR_AWARE_RERANK          opt-in formal behavior rerank, default 0
     AGENTRECX_WEB_STATE_DB                   optional SQLite path for durable session
                                              identity/counters/metadata; unset keeps the
                                              original process-local SessionStore
@@ -177,6 +179,10 @@ class Settings:
     behavior_window_s: float = DEFAULT_WINDOW_S
     behavior_half_life_s: float = DEFAULT_HALF_LIFE_S
     behavior_retention_days: float = DEFAULT_RETENTION_DAYS
+    # Personalized formal-ranking flags.  Both default OFF so the existing A path is
+    # byte-compatible unless the deployment explicitly opts in.
+    memory_aware_retrieval: bool = False
+    behavior_aware_rerank: bool = False
     # Durable Web Demo session state (identity, counters, metadata).  ``None`` keeps the
     # process-local SessionStore so every existing test and the default demo are unchanged.
     web_state_db_path: Path | None = None
@@ -313,6 +319,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         console_only_log=_env_bool(want.get("AGENTRECX_WEB_DEMO_CONSOLE_ONLY_LOG")),
         behavior_enabled=_env_bool(want.get("AGENTRECX_BEHAVIOR_ENABLED", "1")),
         behavior_db_path=behavior_db,
+        memory_aware_retrieval=_env_bool(want.get("AGENTRECX_MEMORY_AWARE_RETRIEVAL")),
+        behavior_aware_rerank=_env_bool(want.get("AGENTRECX_BEHAVIOR_AWARE_RERANK")),
         web_state_db_path=web_state_db,
         memory_db_path=memory_db,
         price_mode=price_mode,

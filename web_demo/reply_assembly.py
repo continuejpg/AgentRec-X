@@ -268,6 +268,9 @@ def reply_response_from_result(
         "planner_actions": None,
         "error": None,
     }
+    for key in ("memory_retrieval", "behavior_rerank"):
+        if isinstance(result.get(key), Mapping):
+            response[key] = dict(result[key])
     if next_clarification is not None:
         # Additive field only on the multi-round path; the finalized/refusal shape is unchanged.
         response["status"] = "awaiting_clarification"

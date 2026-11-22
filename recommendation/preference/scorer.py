@@ -39,9 +39,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
-__all__ = ["PreferenceAwareScorer", "ScorerConfig", "SCORER_VERSION"]
+__all__ = [
+    "BEHAVIOR_ATTRIBUTE_WEIGHT",
+    "BEHAVIOR_MAX_CONTRIBUTION",
+    "BEHAVIOR_PRODUCT_WEIGHT",
+    "BEHAVIOR_SCORE_VERSION",
+    "PreferenceAwareScorer",
+    "ScorerConfig",
+    "SCORER_VERSION",
+]
 
 SCORER_VERSION = "preference_scorer_v0.1"
+BEHAVIOR_SCORE_VERSION = "behavior_scorer_v1"
+#: Bounded soft contributions.  A Like (profile score 2) is stronger than a click (1);
+#: Dislike is negative.  Profile scores are capped at 3 by web_demo.behavior.
+BEHAVIOR_PRODUCT_WEIGHT = 0.25
+BEHAVIOR_ATTRIBUTE_WEIGHT = 0.10
+BEHAVIOR_MAX_CONTRIBUTION = 0.30
 
 
 @dataclass(frozen=True)
@@ -53,9 +67,16 @@ class ScorerConfig:
     negative_weight: float = 0.35
     max_positive_terms: int = 3
     hard_unknown_penalty: float = 0.10
+    behavior_product_weight: float = BEHAVIOR_PRODUCT_WEIGHT
+    behavior_attribute_weight: float = BEHAVIOR_ATTRIBUTE_WEIGHT
+    behavior_max_contribution: float = BEHAVIOR_MAX_CONTRIBUTION
 
     def __post_init__(self) -> None:
-        for value in (self.query_weight, self.positive_weight, self.negative_weight):
+        for value in (
+            self.query_weight, self.positive_weight, self.negative_weight,
+            self.behavior_product_weight, self.behavior_attribute_weight,
+            self.behavior_max_contribution,
+        ):
             if value < 0:
                 raise ValueError("weights must be non-negative")
         if self.max_positive_terms < 1:
@@ -90,6 +111,74 @@ def _hard_status(requirement: Mapping[str, Any], candidate: Mapping[str, Any]) -
     return "verified" if value in {_norm(name) for name in attributes} else "unknown"
 
 
+def _behavior_signals(
+    snapshot: Mapping[str, Any] | None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Normalize the bounded BFF snapshot; malformed values are ignored, never guessed."""
+    product_scores: dict[str, float] = {}
+    attribute_scores: dict[str, float] = {}
+    if not isinstance(snapshot, Mapping):
+        return product_scores, attribute_scores
+    for item in snapshot.get("product_interests") or ():
+        if not isinstance(item, Mapping) or not item.get("product_id"):
+            continue
+        try:
+            score = float(item.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if score:
+            product_scores[str(item["product_id"])] = max(-3.0, min(3.0, score))
+    for item in snapshot.get("attribute_interests") or ():
+        if not isinstance(item, Mapping) or not item.get("attribute"):
+            continue
+        try:
+            score = float(item.get("score") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if score:
+            attribute_scores[_norm(item["attribute"])] = max(-3.0, min(3.0, score))
+    return product_scores, attribute_scores
+
+
+def _behavior_contribution(
+    *,
+    item_id: str,
+    present_attributes: set[str],
+    product_scores: Mapping[str, float],
+    attribute_scores: Mapping[str, float],
+    config: ScorerConfig,
+) -> tuple[float, dict[str, Any]]:
+    product_raw = float(product_scores.get(item_id, 0.0))
+    product_signal = max(-1.0, min(1.0, product_raw / 3.0))
+    matched_attributes = {
+        name: float(attribute_scores[name])
+        for name in present_attributes
+        if name in attribute_scores
+    }
+    attribute_raw = sum(matched_attributes.values())
+    attribute_signal = max(-1.0, min(1.0, attribute_raw / 3.0))
+    raw = (
+        config.behavior_product_weight * product_signal
+        + config.behavior_attribute_weight * attribute_signal
+    )
+    score = max(-config.behavior_max_contribution,
+                min(config.behavior_max_contribution, raw))
+    evidence = {
+        "version": BEHAVIOR_SCORE_VERSION,
+        "product_score": round(product_raw, 4),
+        "product_contribution": round(
+            config.behavior_product_weight * product_signal, 6
+        ),
+        "attribute_scores": {
+            name: round(value, 4) for name, value in sorted(matched_attributes.items())
+        },
+        "attribute_contribution": round(
+            config.behavior_attribute_weight * attribute_signal, 6
+        ),
+    }
+    return round(score, 6), evidence
+
+
 class PreferenceAwareScorer:
     """Deterministic reranker over a fixed candidate set."""
 
@@ -112,12 +201,14 @@ class PreferenceAwareScorer:
         candidates: Sequence[Mapping[str, Any]],
         hard_requirements: Sequence[Mapping[str, Any]] = (),
         namespace: str,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         expected_namespace = str(namespace or "").strip()
         if not expected_namespace:
             raise ValueError("namespace is required")
         if not candidates:
             return []
+        behavior_products, behavior_attributes = _behavior_signals(behavior_snapshot)
         refs = [_ref(candidate) for candidate in candidates]
         for ref in refs:
             if ref["namespace"] != expected_namespace:
@@ -191,11 +282,19 @@ class PreferenceAwareScorer:
             else:
                 hard_tier = 0
             hard_penalty = self._config.hard_unknown_penalty if hard_tier == 1 else 0.0
+            behavior_score, behavior_evidence = _behavior_contribution(
+                item_id=ref["item_id"],
+                present_attributes=present,
+                product_scores=behavior_products,
+                attribute_scores=behavior_attributes,
+                config=self._config,
+            )
             raw = (
                 self._config.query_weight * q_norm
                 + positive_score
                 - conflict_score
                 - hard_penalty
+                + behavior_score
             )
             if hard_tier == 2:
                 final_score = -1.0 - rank / max(n, 1)  # below every non-violator
@@ -222,6 +321,8 @@ class PreferenceAwareScorer:
                     "query_raw_score": candidate.get("query_score"),
                     "preference_match_score": round(positive_score, 6),
                     "preference_conflict_score": round(conflict_score, 6),
+                    "behavior_score": behavior_score,
+                    "behavior_evidence": behavior_evidence,
                     "hard_requirement_penalty": hard_penalty,
                     "hard_status": hard_states,
                     "hard_tier": hard_tier,

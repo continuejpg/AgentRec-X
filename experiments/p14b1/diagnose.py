@@ -21,7 +21,7 @@ import re
 from dataclasses import replace
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from experiments.p14e.catalogue import ELECTRONICS_NAMESPACE, ElectronicsCatalogue
 from experiments.p14e.labeling import assess_candidate
@@ -207,6 +207,7 @@ def candidate_rows(
     scorer: PreferenceAwareScorer,
     prefs: list[dict[str, Any]],
     hard: list[dict[str, Any]],
+    behavior_snapshot: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     candidates = []
     for rank, item_id in enumerate(task["candidate_ids"], start=1):
@@ -227,6 +228,7 @@ def candidate_rows(
     return scorer.score(
         preferences=prefs, current_query=task["current_query"], candidates=candidates,
         hard_requirements=hard, namespace=ELECTRONICS_NAMESPACE,
+        behavior_snapshot=behavior_snapshot,
     )
 
 

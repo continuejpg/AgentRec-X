@@ -45,6 +45,7 @@ from web_demo.behavior import (
     BehaviorError,
     BehaviorStore,
     MAX_BATCH_EVENTS,
+    build_behavior_snapshot,
     build_shadow,
     build_suggestion,
 )
@@ -485,6 +486,26 @@ def create_app(
     def require_ready(session: Session) -> None:
         manager.ensure_ready(session.profile_id)
 
+    def behavior_snapshot_for(session: Session) -> dict[str, Any] | None:
+        """Bounded short-term profile for the formal CPU recommendation path.
+
+        The flag is server-owned and checked here *and* in the MCP child.  Replay never
+        calls this helper: a committed reply is returned from its durable result.
+        """
+        if (
+            not settings.behavior_aware_rerank
+            or not settings.behavior_enabled
+            or not session.behavior_enabled
+        ):
+            return None
+        profile = behavior_store.profile(
+            session.session_id,
+            enabled=True,
+            window_s=settings.behavior_window_s,
+            half_life_s=settings.behavior_half_life_s,
+        )
+        return build_behavior_snapshot(profile, session_id=session.session_id)
+
     # -- system --------------------------------------------------------------
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -500,6 +521,10 @@ def create_app(
             "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
             "qwen_live": qwen,
             "memory_writes_enabled": bool(settings.allow_memory_writes),
+            "features": {
+                "memory_aware_retrieval": bool(settings.memory_aware_retrieval),
+                "behavior_aware_rerank": bool(settings.behavior_aware_rerank),
+            },
             # Non-sensitive diagnostic only: no collector URL, headers or credentials.
             "observability": tracing.health(),
         }
@@ -517,6 +542,10 @@ def create_app(
             "qwen_live": qwen,
             "notices": list(NOTICES),
             "behavior": behavior_public(settings),
+            "features": {
+                "memory_aware_retrieval": bool(settings.memory_aware_retrieval),
+                "behavior_aware_rerank": bool(settings.behavior_aware_rerank),
+            },
         }
 
     @app.post("/api/demo/restart")
@@ -660,6 +689,7 @@ def create_app(
             mode=body.mode,
             qwen_health=monitor,
             tracing=tracing,
+            behavior_snapshot=behavior_snapshot_for(session),
         )
         return sse_response(events)
 
@@ -693,6 +723,7 @@ def create_app(
             message=body.message,
             qwen_health=monitor,
             tracing=tracing,
+            behavior_snapshot=behavior_snapshot_for(session),
         )
 
     # -- behavior feedback V1 ------------------------------------------------

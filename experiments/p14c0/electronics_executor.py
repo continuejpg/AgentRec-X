@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from observability import OPENINFERENCE_CHAIN, get_tracing
 from experiments.p14b1.diagnose import (
@@ -22,7 +22,7 @@ from experiments.p14b1.diagnose import (
 )
 from experiments.p14e.catalogue import ELECTRONICS_NAMESPACE, ElectronicsCatalogue
 from recommendation.control.arguments import CandidateSource
-from recommendation.control.candidate_ledger import CandidateLedger
+from recommendation.control.candidate_ledger import CandidateLedger, reciprocal_rank_fusion
 from recommendation.control.constraint_eligibility import CandidateEligibilityEvaluator, ConstraintRequirement
 from recommendation.control.corrective_rag import RETRIEVAL_GAP, classify_evidence_gap
 from recommendation.control.grounded_reasoning import ConstraintKind, GroundedReasoner
@@ -68,6 +68,11 @@ INSPECT_TOP_K = 5
 MAX_STEPS = 8
 GATE_EVIDENCE_ROUNDS = 2
 GATE_RETRIEVAL_ROUNDS = 1
+#: Memory-aware retrieval is an auxiliary recall step, bounded so it cannot dominate the
+#: original query or turn a demo turn into an unbounded search.
+MEMORY_RETRIEVAL_MAX_QUERIES = 2
+MEMORY_RETRIEVAL_QUERY_LIMIT = 10
+MEMORY_RETRIEVAL_MAX_CANDIDATES = 40
 
 
 class ElectronicsPlannerExecutor:
@@ -89,6 +94,9 @@ class ElectronicsPlannerExecutor:
         price_budget: PriceBudget | None = None,
         corrective_rag: bool = False,
         corrective_max_attempts: int = 1,
+        memory_retrieval: bool = False,
+        memory_queries: Sequence[str] | None = None,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> None:
         self.catalogue = catalogue
         self.current_query = current_query
@@ -145,6 +153,19 @@ class ElectronicsPlannerExecutor:
         self.corrective_trace: list[dict[str, Any]] = []
         self.last_corrective: dict[str, Any] | None = None
         self.search_queries: list[str] = []
+        #: Optional M9-derived auxiliary queries.  Empty means the original single-query
+        #: retrieval path, byte-for-byte.
+        self.memory_retrieval = bool(memory_retrieval)
+        self.memory_queries = tuple(
+            str(query).strip() for query in (memory_queries or ()) if str(query).strip()
+        )[:MEMORY_RETRIEVAL_MAX_QUERIES]
+        #: Bounded short-term behavior signals from the Web BFF.  The scorer applies only a
+        #: soft contribution; task constraints/eligibility/budget/Gate remain authoritative.
+        self.behavior_snapshot = (
+            dict(behavior_snapshot) if isinstance(behavior_snapshot, Mapping) else None
+        )
+        self.last_memory_retrieval: dict[str, Any] | None = None
+        self.last_behavior: dict[str, Any] | None = None
 
     # -- helpers ------------------------------------------------------------ #
     def _log(self, tool: str, inputs: dict[str, Any], output: dict[str, Any]) -> None:
@@ -203,28 +224,131 @@ class ElectronicsPlannerExecutor:
         result = self.search_source.search(query, limit=TOPK)
         self.retrievals += 1
         self.search_queries.append(query)
-        ids = [hit.parent_asin.split(":", 1)[-1] for hit in result.hits]
+        base_ids = [hit.parent_asin for hit in result.hits]
+        base_scores = {hit.parent_asin: float(hit.score) for hit in result.hits}
         self.ledger.record_from_source(
             source=CandidateSource.CATALOG_SEARCH,
             candidates=[(hit.parent_asin, rank + 1, hit.score) for rank, hit in enumerate(result.hits)],
             score_kind=result.score_kind,
             source_query=query[:200],
             step_index=len(self.tool_calls) + 1,
-            grounded=frozenset(hit.parent_asin for hit in result.hits),
+            grounded=frozenset(base_ids),
         )
-        self.last_search = {
-            "query": query, "hit_ids": ids, "catalogue_size": result.catalogue_size,
-            "score_kind": result.score_kind, "scores": {ids[i]: hit.score for i, hit in enumerate(result.hits)},
+
+        # Memory-aware retrieval: keep the base query and its complete candidate list, add a
+        # bounded number of auxiliary queries derived from ACTIVE positive M9 preferences,
+        # then merge by rank.  The first ranking is always the base retrieval, so memory can
+        # never evict it.  Auxiliary failure is a recorded fallback, never a failed turn.
+        merged_ids = list(base_ids)
+        merged_scores = dict(base_scores)
+        memory_meta: dict[str, Any] = {
+            "enabled": bool(self.memory_retrieval),
+            "queries": [],
+            "base_candidate_count": len(base_ids),
+            "auxiliary_candidate_counts": [],
+            "new_item_ids": [],
+            "merged_candidate_count": len(base_ids),
+            "extra_latency_ms": 0.0,
+            "error": None,
+            "fallback": False,
         }
-        self._log("product_search", {"query": query, "limit": TOPK},
-                  {"hit_ids": ids, "ledger_entries": len(self.ledger.ranked_parent_asins())})
+        if self.memory_retrieval and self.memory_queries and query == self.current_query:
+            started = time.perf_counter()
+            auxiliary_rankings: list[list[str]] = []
+            try:
+                for auxiliary_query in self.memory_queries:
+                    auxiliary = self.search_source.search(
+                        auxiliary_query, limit=MEMORY_RETRIEVAL_QUERY_LIMIT
+                    )
+                    auxiliary_ids = [hit.parent_asin for hit in auxiliary.hits]
+                    self.ledger.record_from_source(
+                        source=CandidateSource.CATALOG_SEARCH,
+                        candidates=[
+                            (hit.parent_asin, rank + 1, hit.score)
+                            for rank, hit in enumerate(auxiliary.hits)
+                        ],
+                        score_kind=auxiliary.score_kind,
+                        source_query=auxiliary_query[:200],
+                        step_index=len(self.tool_calls) + 1,
+                        grounded=frozenset(auxiliary_ids),
+                    )
+                    if auxiliary_ids:
+                        auxiliary_rankings.append(auxiliary_ids)
+                    memory_meta["queries"].append(auxiliary_query)
+                    memory_meta["auxiliary_candidate_counts"].append(len(auxiliary_ids))
+                if auxiliary_rankings:
+                    fused = reciprocal_rank_fusion([base_ids, *auxiliary_rankings])
+                    fused = fused[:MEMORY_RETRIEVAL_MAX_CANDIDATES]
+                    merged_ids = [identity for identity, _score in fused]
+                    merged_scores = {identity: float(score) for identity, score in fused}
+                    base_set = set(base_ids)
+                    memory_meta["new_item_ids"] = [
+                        identity.split(":", 1)[-1]
+                        for identity in merged_ids if identity not in base_set
+                    ]
+            except Exception as exc:  # noqa: BLE001 - recoverable auxiliary retrieval
+                memory_meta["error"] = f"{type(exc).__name__}: {exc}"
+                memory_meta["fallback"] = True
+                merged_ids = list(base_ids)
+                merged_scores = dict(base_scores)
+            memory_meta["extra_latency_ms"] = round(
+                (time.perf_counter() - started) * 1000.0, 2
+            )
+        memory_meta["merged_candidate_count"] = len(merged_ids)
+        self.last_memory_retrieval = memory_meta
+
+        ids = [identity.split(":", 1)[-1] for identity in merged_ids]
+        self.last_search = {
+            "query": query,
+            "hit_ids": ids,
+            "catalogue_size": result.catalogue_size,
+            "score_kind": (
+                "rrf_base_memory" if memory_meta["queries"] else result.score_kind
+            ),
+            "scores": {
+                identity.split(":", 1)[-1]: float(score)
+                for identity, score in merged_scores.items()
+            },
+            "base_hit_ids": [identity.split(":", 1)[-1] for identity in base_ids],
+            "memory_hit_ids": list(memory_meta["new_item_ids"]),
+            "memory_retrieval": memory_meta,
+        }
+        self._log(
+            "product_search",
+            {"query": query, "limit": TOPK, "memory_queries": list(self.memory_queries)},
+            {
+                "hit_ids": ids,
+                "ledger_entries": len(self.ledger.ranked_parent_asins()),
+                "memory_retrieval": memory_meta,
+            },
+        )
         return ids
 
     def _score_and_inspect(self, ids: list[str]) -> list[dict[str, Any]]:
         scores = (self.last_search or {}).get("scores", {})
         pool = {"task_id": "p14c0", "current_query": self.current_query,
                 "candidate_ids": ids, "search_scores": {item_id: scores.get(item_id) for item_id in ids}}
-        rows = candidate_rows(pool, self.catalogue, self.scorer, self.preferences, self.hard)
+        rows = candidate_rows(
+            pool, self.catalogue, self.scorer, self.preferences, self.hard,
+            behavior_snapshot=self.behavior_snapshot,
+        )
+        self.last_behavior = {
+            "enabled": bool(self.behavior_snapshot),
+            "snapshot_schema": (
+                self.behavior_snapshot.get("schema")
+                if isinstance(self.behavior_snapshot, Mapping) else None
+            ),
+            "active_product_signals": (
+                len(self.behavior_snapshot.get("product_interests") or ())
+                if isinstance(self.behavior_snapshot, Mapping) else 0
+            ),
+            "active_attribute_signals": (
+                len(self.behavior_snapshot.get("attribute_interests") or ())
+                if isinstance(self.behavior_snapshot, Mapping) else 0
+            ),
+            "candidates_with_behavior_signal": 0,
+            "top_behavior_score": 0.0,
+        }
         task_checked: list[dict[str, Any]] = []
         for row in rows:
             product = self.catalogue.get(row["product_ref"]["item_id"])
@@ -269,6 +393,33 @@ class ElectronicsPlannerExecutor:
                 if evaluation.status == PRICE_OVER:
                     row["presentable"] = False
             task_checked.append(row)
+        behavior_rows = [
+            row for row in task_checked
+            if float(row.get("behavior_score") or 0.0) != 0.0
+        ]
+        if self.last_behavior is not None:
+            top_behavior = max(
+                task_checked,
+                key=lambda row: abs(float(row.get("behavior_score") or 0.0)),
+                default=None,
+            )
+            self.last_behavior.update({
+                "candidates_with_behavior_signal": len(behavior_rows),
+                "top_behavior_candidate_id": (
+                    top_behavior["product_ref"]["item_id"]
+                    if top_behavior is not None
+                    and float(top_behavior.get("behavior_score") or 0.0) != 0.0
+                    else None
+                ),
+                "top_behavior_score": round(
+                    max(
+                        (float(row.get("behavior_score") or 0.0) for row in task_checked),
+                        key=abs,
+                        default=0.0,
+                    ),
+                    6,
+                ),
+            })
         compatible = [
             row for row in task_checked
             if row.get("role_status") in {"MATCH", "NOT_REQUIRED"}

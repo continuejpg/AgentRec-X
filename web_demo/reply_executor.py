@@ -175,6 +175,17 @@ def _payload_of(request: RequestRecord | None) -> dict[str, Any] | None:
     return dict(payload) if isinstance(payload, Mapping) else None
 
 
+def _recommendation_features(recommendation: Any) -> dict[str, Any]:
+    """Copy only the opt-in personalization metadata actually returned by MCP."""
+    if not isinstance(recommendation, Mapping):
+        return {}
+    return {
+        key: recommendation[key]
+        for key in ("memory_retrieval", "behavior_rerank")
+        if key in recommendation
+    }
+
+
 def _reply_task_constraints(
     reply: Any, pending: PendingRecord
 ) -> dict[str, Any] | None:
@@ -335,6 +346,7 @@ class WarmReplyExecutor:
         message: str,
         clarification_id: str,
         recommend_arguments: Mapping[str, Any] | None = None,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> ReplyExecutionOutcome:
         if pending is None:
             return ReplyExecutionOutcome(WARM_UNAVAILABLE, detail="no pending clarification")
@@ -386,6 +398,7 @@ class WarmReplyExecutor:
             session, pending, message, handle=resolved.handle,
             handle_clarification_id=resolved.clarification_id,
             recommend_arguments=recommend_arguments,
+            behavior_snapshot=behavior_snapshot,
         )
 
     async def _resolve_handle(
@@ -488,6 +501,7 @@ class WarmReplyExecutor:
         handle: HandleCheck | None = None,
         handle_clarification_id: str | None = None,
         recommend_arguments: Mapping[str, Any] | None = None,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> ReplyExecutionOutcome:
         payload = {
             "message": message,
@@ -542,6 +556,7 @@ class WarmReplyExecutor:
         return await self._execute_external(
             session, pending, message, recommend_arguments, handle=handle,
             handle_clarification_id=handle_clarification_id,
+            behavior_snapshot=behavior_snapshot,
         )
 
     # -- external execution ------------------------------------------------- #
@@ -555,6 +570,7 @@ class WarmReplyExecutor:
         *,
         handle: HandleCheck | None = None,
         handle_clarification_id: str | None = None,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> ReplyExecutionOutcome:
         with self._tracing.span(
             "reply.external_execution",
@@ -569,6 +585,7 @@ class WarmReplyExecutor:
             outcome = await self._execute_external_impl(
                 session, pending, message, recommend_arguments,
                 handle=handle, handle_clarification_id=handle_clarification_id,
+                behavior_snapshot=behavior_snapshot,
             )
             span.set_attributes({
                 "agentrecx.reply.outcome": outcome.outcome,
@@ -590,6 +607,7 @@ class WarmReplyExecutor:
         *,
         handle: HandleCheck | None = None,
         handle_clarification_id: str | None = None,
+        behavior_snapshot: Mapping[str, Any] | None = None,
     ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
         self._start_heartbeat(session.session_id, self._request_id, self._claim_token)
@@ -665,6 +683,8 @@ class WarmReplyExecutor:
                     recommend_payload["task_requirements"] = reply_requirements
                 if reply_constraints is not None:
                     recommend_payload["task_constraints"] = reply_constraints
+                if behavior_snapshot is not None:
+                    recommend_payload["behavior_snapshot"] = dict(behavior_snapshot)
                 started = time.perf_counter()
                 recommendation = await asyncio.wait_for(
                     self._call_tool(
@@ -773,6 +793,7 @@ class WarmReplyExecutor:
                 }
                 if isinstance(reply_constraints, Mapping):
                     result["task_constraints"] = dict(reply_constraints)
+                result.update(_recommendation_features(recommendation))
                 turn = turn_from_result(result)
                 return self._checkpoint_and_finalize(
                     session, pending, turn=turn, result=result, handle=handle
@@ -839,6 +860,7 @@ class WarmReplyExecutor:
             }
             if isinstance(reply_constraints, Mapping):
                 result["task_constraints"] = dict(reply_constraints)
+            result.update(_recommendation_features(recommendation))
             # The durable turn carries the same BFF extras as the live response so a restored
             # transcript shows the memory update and tool activity without re-running MCP.
             turn = turn_from_result(result)
@@ -964,6 +986,7 @@ class WarmReplyExecutor:
         }
         if isinstance(reply_constraints, Mapping):
             result["task_constraints"] = dict(reply_constraints)
+        result.update(_recommendation_features(recommendation))
         turn = turn_from_result(result)
         return self._checkpoint_and_finalize(
             session, pending, turn=turn, result=result, handle=handle

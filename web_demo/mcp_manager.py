@@ -250,6 +250,10 @@ class MCPManager:
                 parts.append("--warmup")
         if runtime.writes_enabled:
             parts.append("--allow-memory-writes")
+        if self.settings.memory_aware_retrieval:
+            parts.append("--memory-aware-retrieval")
+        if self.settings.behavior_aware_rerank:
+            parts.append("--behavior-aware-rerank")
         if self.settings.price_mode == "demo_historical_fx":
             parts.extend(["--price-mode", "demo_historical_fx"])
             if self.settings.demo_price_sidecar is not None:

@@ -40,6 +40,9 @@ from typing import Any, Iterable, Mapping, Sequence
 BEHAVIOR_EVENT_SCHEMA = "agentrecx.behavior.event.v1.2"
 BEHAVIOR_PROFILE_VERSION = "behavior_feedback_profile_v1.2"
 BEHAVIOR_SHADOW_VERSION = "behavior_shadow_v1.2"
+#: Versioned, bounded snapshot of the short-term profile passed to the formal CPU scorer.
+#: It contains no raw event text, product titles or M9 preferences.
+BEHAVIOR_SNAPSHOT_SCHEMA = "agentrecx.behavior_snapshot.v1"
 BEHAVIOR_SEMANTICS_VERSION = "behavior_semantics_v1.2"
 EXISTING_RANKER_VERSION = "existing_ranking_v1"
 
@@ -1206,6 +1209,56 @@ def build_behavior_profile(
     }
 
 
+def build_behavior_snapshot(
+    profile: Mapping[str, Any],
+    *,
+    session_id: str,
+    max_products: int = 5,
+    max_attributes: int = 5,
+) -> dict[str, Any]:
+    """Project a profile into the bounded snapshot consumed by the formal scorer.
+
+    The snapshot deliberately keeps scores/counts/provenance types, not raw event text,
+    product titles or M9 values.  It is still a behavior signal only: the scorer applies a
+    bounded soft contribution; task constraints, eligibility, budget and the Gate remain
+    authoritative.
+    """
+    products = []
+    for item in list(profile.get("product_interests") or ())[: max(1, int(max_products))]:
+        if not isinstance(item, Mapping) or not item.get("product_id"):
+            continue
+        products.append({
+            "product_id": str(item["product_id"]),
+            "score": round(float(item.get("score") or 0.0), 4),
+            "positive_score": round(float(item.get("positive_score") or 0.0), 4),
+            "negative_score": round(float(item.get("negative_score") or 0.0), 4),
+            "counted_events": int(item.get("counted_events") or 0),
+            "last_event_at": item.get("last_event_at"),
+        })
+    attributes = []
+    for item in list(profile.get("attribute_interests") or ())[: max(1, int(max_attributes))]:
+        if not isinstance(item, Mapping) or not item.get("attribute"):
+            continue
+        attributes.append({
+            "attribute": str(item["attribute"]),
+            "score": round(float(item.get("score") or 0.0), 4),
+            "distinct_products": int(item.get("distinct_products") or 0),
+            "evidence_count": int(item.get("evidence_count") or 0),
+            "source_event_types": list(item.get("source_event_types") or ()),
+        })
+    return {
+        "schema": BEHAVIOR_SNAPSHOT_SCHEMA,
+        "session_id": str(session_id),
+        "profile_schema": profile.get("schema"),
+        "generated_at": profile.get("generated_at"),
+        "as_of": profile.get("as_of"),
+        "window_seconds": profile.get("window_seconds"),
+        "half_life_seconds": profile.get("half_life_seconds"),
+        "product_interests": products,
+        "attribute_interests": attributes,
+    }
+
+
 def build_suggestion(
     profile: Mapping[str, Any],
     *,
@@ -1692,6 +1745,7 @@ __all__ = [
     "BEHAVIOR_PROFILE_VERSION",
     "BEHAVIOR_SEMANTICS_VERSION",
     "BEHAVIOR_SHADOW_VERSION",
+    "BEHAVIOR_SNAPSHOT_SCHEMA",
     "AUTOMATED_SOURCE",
     "COMPARE_ACTION_STATUSES",
     "COMPARE_INTEREST_WEIGHT",
@@ -1710,6 +1764,7 @@ __all__ = [
     "MAX_BATCH_EVENTS",
     "PROFILE_SOURCES",
     "build_behavior_profile",
+    "build_behavior_snapshot",
     "build_recommendation_snapshot",
     "build_shadow",
     "build_suggestion",
