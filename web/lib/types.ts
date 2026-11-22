@@ -306,6 +306,28 @@ export interface GateDecision {
   candidate_presentable_ids: string[];
 }
 
+export interface MemoryRetrievalEvidence {
+  enabled: boolean;
+  queries: string[];
+  base_candidate_count: number;
+  auxiliary_candidate_counts: number[];
+  new_item_ids: string[];
+  merged_candidate_count: number;
+  extra_latency_ms: number;
+  error: string | null;
+  fallback: boolean;
+}
+
+export interface BehaviorRerankEvidence {
+  enabled: boolean;
+  snapshot_schema: string | null;
+  active_product_signals: number;
+  active_attribute_signals: number;
+  candidates_with_behavior_signal: number;
+  top_behavior_candidate_id: string | null;
+  top_behavior_score: number;
+}
+
 export interface ProductsPayload {
   query: string;
   search_mode: string | null;
@@ -318,6 +340,9 @@ export interface ProductsPayload {
   recommendation_id?: string | null;
   request_id?: string | null;
   ranker_version?: string | null;
+  /** Read-only evidence from the opt-in formal personalization features. */
+  memory_retrieval?: MemoryRetrievalEvidence | null;
+  behavior_rerank?: BehaviorRerankEvidence | null;
   /** Optional real planner metadata; product/evidence shapes are otherwise unchanged. */
   planner?: PlannerMetaWire;
   planner_model?: string | null;

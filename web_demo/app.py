@@ -521,6 +521,7 @@ def create_app(
             "modes": modes_public(cpu_live_available=cpu_available, qwen_health=qwen),
             "qwen_live": qwen,
             "memory_writes_enabled": bool(settings.allow_memory_writes),
+            "price_mode": settings.price_mode,
             "features": {
                 "memory_aware_retrieval": bool(settings.memory_aware_retrieval),
                 "behavior_aware_rerank": bool(settings.behavior_aware_rerank),
@@ -542,6 +543,7 @@ def create_app(
             "qwen_live": qwen,
             "notices": list(NOTICES),
             "behavior": behavior_public(settings),
+            "price_mode": settings.price_mode,
             "features": {
                 "memory_aware_retrieval": bool(settings.memory_aware_retrieval),
                 "behavior_aware_rerank": bool(settings.behavior_aware_rerank),

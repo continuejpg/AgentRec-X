@@ -1069,6 +1069,13 @@ async def clarification_reply(
             rec_arguments: dict[str, Any] = {
                 "query": pending.query, "session_id": session.session_id,
             }
+            # Use the merged requirements/constraints returned by the real reply.  Without
+            # this the in-memory browser path would ask the same ASK again after Reply1.
+            if isinstance(reply, Mapping):
+                if isinstance(reply.get("task_requirements"), Mapping):
+                    rec_arguments["task_requirements"] = dict(reply["task_requirements"])
+                if isinstance(reply.get("task_constraints"), Mapping):
+                    rec_arguments["task_constraints"] = dict(reply["task_constraints"])
             if behavior_snapshot is not None:
                 rec_arguments["behavior_snapshot"] = dict(behavior_snapshot)
             rec_payload = await manager.call_tool(
@@ -1086,6 +1093,19 @@ async def clarification_reply(
                 steps=steps,
                 turn_id=turn.turn_id,
             )
+            if rec_payload.get("status") == "awaiting_clarification" and rec_payload.get("clarification"):
+                followup_clarification = vm.clarification_payload(rec_payload["clarification"])
+                followup_clarification["memory_write_enabled"] = bool(
+                    (rec_payload.get("clarification") or {}).get("memory_write_enabled")
+                )
+                turn.clarification = followup_clarification
+                session.pending_clarification = PendingClarification(
+                    payload=followup_clarification,
+                    query=pending.query,
+                    turn_id=turn.turn_id,
+                    reply_turn_id=session.next_reply_turn_id(),
+                    mode="cpu_live",
+                )
     else:
         rec_payload = None
 
@@ -1134,7 +1154,16 @@ async def clarification_reply(
         "clarification_id": clarification_id,
         "message": narrative,
         "clarification": followup_clarification,
-        "task_constraints": resume_task_constraints,
+        "task_requirements": (
+            dict(reply["task_requirements"])
+            if isinstance(reply, Mapping) and isinstance(reply.get("task_requirements"), Mapping)
+            else None
+        ),
+        "task_constraints": (
+            dict(reply["task_constraints"])
+            if isinstance(reply, Mapping) and isinstance(reply.get("task_constraints"), Mapping)
+            else resume_task_constraints
+        ),
         "candidate_reevaluation": candidate_reevaluation,
         "planner": turn.planner,
         "planner_model": turn.planner_model,

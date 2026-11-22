@@ -244,13 +244,18 @@ def reply_response_from_result(
     next_clarification = (
         dict(next_clarification) if isinstance(next_clarification, Mapping) else None
     )
+    recommendation_payload = dict(products) if has_products else None
+    if recommendation_payload is not None:
+        for key in ("memory_retrieval", "behavior_rerank"):
+            if isinstance(result.get(key), Mapping):
+                recommendation_payload[key] = dict(result[key])
     response = {
         "turn_id": reply.get("reply_turn_id"),
         "memory_update": result.get("memory_update"),
         "preferences": result.get("preferences"),
         # A bounded refusal or a next ASK has no product: never present an empty list as a
         # recommendation.
-        "recommendation": dict(products) if has_products else None,
+        "recommendation": recommendation_payload,
         "refusal": dict(refusal) if isinstance(refusal, Mapping) else None,
         "task_requirements": result.get("task_requirements"),
         "budget_verification": result.get("budget_verification"),

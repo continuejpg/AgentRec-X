@@ -6,7 +6,13 @@
 
 "use client";
 
-import type { GateDecision, ProductCard as ProductCardModel, ProductsPayload } from "@/lib/types";
+import type {
+  BehaviorRerankEvidence,
+  GateDecision,
+  MemoryRetrievalEvidence,
+  ProductCard as ProductCardModel,
+  ProductsPayload,
+} from "@/lib/types";
 import { attributeLabel, formatNumber, humanize, plural, statusLabel } from "@/lib/format";
 import { useProductImpression } from "@/lib/behavior";
 import { Icon } from "./icons";
@@ -76,6 +82,72 @@ function GateCard({ gate }: { gate: GateDecision }) {
       ) : null}
       <p className="mt-1.5 text-[10.5px] leading-snug text-(--ink-faint)">
         Passed through verbatim from the P16 Decision Gate; this UI does not recompute the action.
+      </p>
+    </div>
+  );
+}
+
+function memoryEvidenceText(evidence: MemoryRetrievalEvidence): string {
+  if (!evidence.enabled) return "disabled";
+  const newCount = evidence.new_item_ids?.length ?? 0;
+  const latency = Number.isFinite(evidence.extra_latency_ms)
+    ? `+${formatNumber(evidence.extra_latency_ms)} ms`
+    : "";
+  if (!evidence.queries?.length) {
+    return `enabled · no active positive preference · base ${formatNumber(evidence.base_candidate_count)}`;
+  }
+  return [
+    `${formatNumber(evidence.base_candidate_count)} base`,
+    `${formatNumber(newCount)} new`,
+    `${formatNumber(evidence.queries.length)} aux quer${evidence.queries.length === 1 ? "y" : "ies"}`,
+    latency,
+  ].filter(Boolean).join(" · ");
+}
+
+function behaviorEvidenceText(evidence: BehaviorRerankEvidence): string {
+  if (!evidence.enabled) return "disabled";
+  const top = evidence.top_behavior_score
+    ? `top ${evidence.top_behavior_score > 0 ? "+" : ""}${evidence.top_behavior_score.toFixed(3)}`
+    : "no active signal";
+  return [
+    `${formatNumber(evidence.active_product_signals)} product`,
+    `${formatNumber(evidence.active_attribute_signals)} attribute`,
+    top,
+  ].join(" · ");
+}
+
+function PersonalizationEvidence({ payload }: { payload: ProductsPayload }) {
+  const memory = payload.memory_retrieval;
+  const behavior = payload.behavior_rerank;
+  if (!memory && !behavior) return null;
+  return (
+    <div
+      className="mt-2 rounded-xl border border-(--line) bg-(--well)/45 px-3 py-2"
+      data-testid="personalization-evidence"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-(--ink-soft)">
+          Personalization evidence
+        </span>
+        {memory ? (
+          <Pill tone={memory.error ? "warn" : "muted"}>
+            Memory retrieval · {memoryEvidenceText(memory)}
+          </Pill>
+        ) : null}
+        {behavior ? (
+          <Pill tone={behavior.top_behavior_score ? "ok" : "muted"}>
+            Behavior rerank · {behaviorEvidenceText(behavior)}
+          </Pill>
+        ) : null}
+      </div>
+      {memory?.new_item_ids?.length ? (
+        <p className="mt-1 truncate text-[10.5px] text-(--ink-faint)" title={memory.new_item_ids.join(", ")}>
+          New candidate ids: {memory.new_item_ids.join(", ")}
+        </p>
+      ) : null}
+      <p className="mt-1 text-[10.5px] leading-snug text-(--ink-faint)">
+        Read-only diagnostics from the formal recommend_products path. Behavior is a bounded soft
+        signal; Task Constraints, Eligibility, Budget and the Decision Gate remain authoritative.
       </p>
     </div>
   );
@@ -185,6 +257,8 @@ export default function ProductsBlock({
           <GateCard gate={payload.gate} />
         </div>
       ) : null}
+
+      <PersonalizationEvidence payload={payload} />
 
       {recommended ? (
         <div
