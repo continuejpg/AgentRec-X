@@ -425,17 +425,27 @@ async def _search_and_recommend_turn(
         turn.products = products
         yield event("products", products)
 
-        clarification_entry = recorder.start(
-            "request_preference_clarification", label="Clarification"
-        )
-        yield event("tool_status", clarification_entry)
-        started = time.perf_counter()
-        clarification_raw = await manager.call_tool(
-            profile_id, "request_preference_clarification",
-            {"query": message, "session_id": session.session_id},
-        )
-        recorder.ok(clarification_entry, latency_ms=_ms(started))
-        yield event("tool_status", clarification_entry)
+        existing_clarification = recommendation.get("clarification")
+        if (
+            isinstance(existing_clarification, Mapping)
+            and existing_clarification.get("clarification_id")
+            and isinstance(existing_clarification.get("continuation"), Mapping)
+        ):
+            # recommend_products already issued the real ASK (task-slot policy or Gate).
+            # Reuse that exact handle instead of asking the same MCP question twice.
+            clarification_raw = dict(existing_clarification)
+        else:
+            clarification_entry = recorder.start(
+                "request_preference_clarification", label="Clarification"
+            )
+            yield event("tool_status", clarification_entry)
+            started = time.perf_counter()
+            clarification_raw = await manager.call_tool(
+                profile_id, "request_preference_clarification",
+                {"query": message, "session_id": session.session_id},
+            )
+            recorder.ok(clarification_entry, latency_ms=_ms(started))
+            yield event("tool_status", clarification_entry)
 
         clarification = vm.clarification_payload(clarification_raw)
         turn.clarification = clarification
@@ -1167,13 +1177,17 @@ def _reply_outcome_error(outcome: Any) -> MCPManagerError:
 
 
 def _mirror_committed_reply(
-    session: Session, pending: Any, result: Mapping[str, Any]
+    session: Session,
+    pending: Any,
+    result: Mapping[str, Any],
+    *,
+    next_pending: Any | None = None,
 ) -> None:
     """Reflect a committed reply in the cached Session (the database is already authoritative).
 
-    The Finalize transaction wrote the reply turn, consumed the pending and completed the
-    task.  This only mirrors that committed state for subsequent in-process reads and does
-    not perform any durable write.
+    The Finalize transaction wrote the reply turn, consumed the pending and either completed
+    the task or opened the next ASK.  This only mirrors that committed state for subsequent
+    in-process reads and does not perform any durable write.
     """
     turn_view = turn_from_result(result)
     known = {row.turn_id for row in session.turns}
@@ -1186,8 +1200,36 @@ def _mirror_committed_reply(
             memory_update=turn_view.get("memory_update"),
             tool_activity=list(turn_view.get("tool_activity") or []),
         ))
-    session.pending_clarification = None
     session.last_query = str(pending.query)
+    clarification = result.get("clarification")
+    if isinstance(clarification, Mapping):
+        # Multi-round ASK: the same transaction also opened the next pending.  On a replay
+        # the caller has no new PendingRecord, so only attach it if it is still the current
+        # OPEN question; never clear or replace a newer one.
+        record = next_pending
+        if record is None:
+            store = getattr(session._store, "state_store", None)
+            candidate = (
+                store.get_open_pending_for_session(session.session_id)
+                if store is not None else None
+            )
+            if (
+                candidate is not None
+                and candidate.clarification_id
+                == str(clarification.get("clarification_id") or "")
+            ):
+                record = candidate
+        if record is not None:
+            session.pending_clarification = PendingClarification(
+                payload=dict(record.payload),
+                query=record.query,
+                turn_id=record.turn_id,
+                reply_turn_id=record.reply_turn_id,
+                mode=record.mode,
+                created_at=vm.iso_from_epoch(record.created_at),
+            )
+        return
+    session.pending_clarification = None
     reply_payload = (result.get("reply") or {}) if isinstance(result, Mapping) else {}
     recommendation_meta = reply_payload.get("recommendation") or {}
     ranking_source = str(recommendation_meta.get("ranking_source") or "")
@@ -1433,7 +1475,9 @@ async def _persistent_clarification_reply(
     response = reply_response_from_result(
         result, clarification_id=pending.clarification_id
     )
-    _mirror_committed_reply(session, pending, result)
+    _mirror_committed_reply(
+        session, pending, result, next_pending=outcome.next_pending
+    )
     return response
 
 

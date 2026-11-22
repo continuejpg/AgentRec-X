@@ -1838,6 +1838,250 @@ class SQLiteWebStateStore:
             _to_request_record(request_row),
         )
 
+    def finalize_reply_with_clarification(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        claim_token: str,
+        requirements: Mapping[str, Any] | None,
+        turn: Mapping[str, Any],
+        ranking_source: str | None,
+        result: Mapping[str, Any],
+        next_clarification_id: str,
+        next_payload: Mapping[str, Any],
+        next_continuation: Mapping[str, Any],
+        next_expires_at: float,
+        mode: str = "cpu_live",
+        now: float | None = None,
+    ) -> tuple[TaskRecord, PendingRecord, PendingRecord, RequestRecord]:
+        """Finalize one reply and commit its next ASK in the *same* transaction.
+
+        This is the multi-round extension of :meth:`finalize_reply_request`.  The reply turn,
+        the consumed old pending, the new pending/reply identity and the completed request are
+        one atomic unit: a crash before commit leaves the old pending OPEN and the request
+        PROCESSING (so the checkpoint can be finalized again), while a commit leaves exactly
+        one OPEN pending for the next question.  The task stays ``WAITING_FOR_USER``; its
+        requirements are replaced with the merged snapshot carried by the reply.
+
+        Returns ``(task, consumed_pending, new_pending, request)``.
+        """
+        if mode not in PENDING_MODES:
+            raise ValueError(f"mode must be one of {sorted(PENDING_MODES)}, got {mode!r}")
+        if not isinstance(result, Mapping):
+            raise ValueError("result must be a mapping")
+        if not isinstance(next_payload, Mapping):
+            raise ValueError("next_payload must be a mapping")
+        if not isinstance(next_continuation, Mapping):
+            raise ValueError("next_continuation must be a mapping")
+        session_id = _require_text(session_id, "session_id")
+        request_id = _require_text(request_id, "request_id")
+        next_clarification_id = _require_text(
+            next_clarification_id, "next_clarification_id"
+        )
+        if str(next_payload.get("clarification_id") or "") != next_clarification_id:
+            raise ValueError(
+                "next_payload clarification id disagrees with next_clarification_id"
+            )
+        if not str(next_payload.get("question") or "").strip():
+            raise ValueError("next_payload must carry the next question")
+        reference = time.time() if now is None else float(now)
+        expires_at = float(next_expires_at)
+        if expires_at <= reference:
+            raise ValueError("next_expires_at must be in the future")
+        requirements_json = (
+            None if requirements is None else _dumps_json(requirements, "requirements")
+        )
+        payload_json = _dumps_json(next_payload, "next_payload")
+        turn_id = str(turn.get("turn_id") or "")
+
+        with self._transaction() as connection:
+            session = connection.execute(
+                "SELECT reset_generation, retired, profile_id FROM web_session "
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                raise UnknownSession(f"no session {session_id!r}")
+            if int(session["retired"]):
+                raise SessionRetired(f"session {session_id!r} is retired")
+
+            request = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+            if request is None:
+                raise RequestNotFound(f"no request {request_id!r} for {session_id!r}")
+            if (
+                str(request["status"]) != "PROCESSING"
+                or request["claim_token"] != claim_token
+            ):
+                raise RequestFenced("claim token is stale or the request is not processing")
+            if (
+                request["lease_expires_at"] is not None
+                and float(request["lease_expires_at"]) <= reference
+            ):
+                raise RequestFenced("claim lease expired before finalize; the result was lost")
+            if str(request["execution_stage"]) not in {
+                "CLAIMED", "EXTERNAL_STARTED", "RESULT_DURABLE",
+            }:
+                raise RequestFenced(
+                    f"request in stage {request['execution_stage']!r} cannot be finalized"
+                )
+            if int(request["reset_generation_at_claim"]) != int(session["reset_generation"]):
+                raise RequestFenced("session was reset after this request was claimed")
+
+            task = connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM web_task WHERE task_id = ?",
+                (request["task_id"],),
+            ).fetchone()
+            if task is None or str(task["session_id"]) != session_id:
+                raise RequestFenced("request task no longer belongs to this session")
+            if int(task["reset_generation"]) != int(session["reset_generation"]):
+                raise RequestFenced("task belongs to a previous reset generation")
+
+            pending = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (request["pending_id"],),
+            ).fetchone()
+            if pending is None or str(pending["task_id"]) != str(task["task_id"]):
+                raise PendingStateConflict("pending no longer belongs to the request task")
+            if str(pending["status"]) != "OPEN":
+                raise PendingStateConflict(
+                    f"pending is {pending['status']!r}, not OPEN"
+                )
+            if next_clarification_id == str(pending["clarification_id"]):
+                raise ValueError(
+                    "the next clarification id must be newly issued, not the answered one"
+                )
+            if turn_id != str(pending["reply_turn_id"]):
+                raise RequestFenced(
+                    "reply turn id must equal the reply_turn_id issued at ASK time"
+                )
+            if str(request["execution_stage"]) == "RESULT_DURABLE" and (
+                request["result_json"] is not None
+            ):
+                checkpoint = _loads_json(
+                    request["result_json"], table="web_request",
+                    row_key=request_id, field="result_json",
+                )
+                if checkpoint.get("payload") != dict(result):
+                    raise RequestConflict(
+                        "finalize result differs from the durable checkpoint"
+                    )
+
+            # 1. Persist the answered reply turn first.  The new pending's source turn is this
+            #    exact reply turn, so the next ASK can never point at a turn that did not commit.
+            self._insert_turn_in_transaction(
+                connection, session_id, str(task["task_id"]), turn,
+                ranking_source, reference,
+            )
+            # 2. Consume the answered question, then create exactly one new OPEN pending.
+            consumed = connection.execute(
+                "UPDATE web_pending SET status = 'CONSUMED', consumed_at = ? "
+                "WHERE pending_id = ? AND task_id = ? AND status = 'OPEN'",
+                (reference, request["pending_id"], task["task_id"]),
+            )
+            if consumed.rowcount != 1:
+                raise PendingStateConflict("pending is no longer consumable by this request")
+            new_reply_turn_id = self._allocate_in_transaction(
+                connection, session_id, "reply"
+            )
+            new_pending_id = f"pend-{uuid.uuid4().hex}"
+            stamped = dict(next_continuation)
+            stamped.update({
+                "session_id": session_id,
+                "profile_id": str(session["profile_id"]),
+                "web_task_id": str(task["task_id"]),
+                "pending_id": new_pending_id,
+                "clarification_id": next_clarification_id,
+                "mode": mode,
+                "reset_generation": int(task["reset_generation"]),
+                "expires_at": expires_at,
+            })
+            try:
+                connection.execute(
+                    "INSERT INTO web_pending(pending_id, task_id, clarification_id, query, "
+                    "turn_id, reply_turn_id, mode, payload_json, status, created_at, "
+                    "expires_at, consumed_at, continuation_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, NULL, ?)",
+                    (new_pending_id, str(task["task_id"]), next_clarification_id,
+                     str(pending["query"]), turn_id, new_reply_turn_id, mode,
+                     payload_json, reference, expires_at,
+                     _dumps_json(stamped, "continuation")),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise AskCommitError(
+                    f"could not persist the next clarification for task {task['task_id']!r}"
+                ) from exc
+            # 3. Keep the same task and its original requirements history; replace the
+            #    requirements snapshot with the reply-merged one and advance the version.
+            if requirements_json is None:
+                updated_task = connection.execute(
+                    "UPDATE web_task SET status = 'WAITING_FOR_USER', "
+                    "task_version = task_version + 1, updated_at = ? "
+                    "WHERE task_id = ? AND status = 'WAITING_FOR_USER' AND task_version = ?",
+                    (reference, task["task_id"], int(request["task_version_at_claim"])),
+                )
+            else:
+                updated_task = connection.execute(
+                    "UPDATE web_task SET status = 'WAITING_FOR_USER', "
+                    "task_version = task_version + 1, current_requirements_json = ?, "
+                    "requirements_version = requirements_version + 1, updated_at = ? "
+                    "WHERE task_id = ? AND status = 'WAITING_FOR_USER' AND task_version = ?",
+                    (requirements_json, reference, task["task_id"],
+                     int(request["task_version_at_claim"])),
+                )
+            if updated_task.rowcount != 1:
+                raise StaleTaskVersion("task changed since this request was claimed")
+
+            result_payload = {
+                "schema": REPLY_RESULT_SCHEMA,
+                "outcome": "awaiting_clarification",
+                "request_id": request_id,
+                "pending_id": str(request["pending_id"]),
+                "task_id": str(task["task_id"]),
+                "turn_id": turn_id,
+                "next_pending_id": new_pending_id,
+                "next_reply_turn_id": new_reply_turn_id,
+                "next_clarification_id": next_clarification_id,
+                "payload": dict(result),
+            }
+            finalized = connection.execute(
+                "UPDATE web_request SET status = 'COMPLETED', execution_stage = 'COMPLETED', "
+                "result_json = ?, updated_at = ? "
+                "WHERE session_id = ? AND request_id = ? AND status = 'PROCESSING' "
+                "AND claim_token = ?",
+                (json.dumps(result_payload, sort_keys=True, ensure_ascii=False), reference,
+                 session_id, request_id, claim_token),
+            )
+            if finalized.rowcount != 1:  # pragma: no cover - guarded above
+                raise RequestFenced("request was completed by another executor")
+
+            task_row = connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM web_task WHERE task_id = ?", (task["task_id"],)
+            ).fetchone()
+            consumed_row = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (request["pending_id"],),
+            ).fetchone()
+            new_pending_row = connection.execute(
+                f"SELECT {_PENDING_COLUMNS} FROM web_pending WHERE pending_id = ?",
+                (new_pending_id,),
+            ).fetchone()
+            request_row = connection.execute(
+                f"SELECT {_REQUEST_COLUMNS} FROM web_request "
+                "WHERE session_id = ? AND request_id = ?",
+                (session_id, request_id),
+            ).fetchone()
+        return (
+            _to_task_record(task_row),
+            _to_pending_record(consumed_row),
+            _to_pending_record(new_pending_row),
+            _to_request_record(request_row),
+        )
+
     def consume_pending(
         self,
         session_id: str,

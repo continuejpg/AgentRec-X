@@ -83,10 +83,14 @@ Failure cases:
 - `laptop_office_6000`: HTTP 503 `clarification_reply_ambiguous`.
 - `tablet_3000`: HTTP 503 `clarification_reply_ambiguous`.
 
-Both are caused by the current **single ASK → one reply** boundary: after merging the reply,
-`recommend_products` still returns `awaiting_clarification`, and the durable coordinator
-reports 503 rather than inventing a second pending or retrying M9. They are execution
+Both are caused by the M3-era **single ASK → one reply** boundary: after merging the reply,
+`recommend_products` still returned `awaiting_clarification`, and the durable coordinator
+reported 503 rather than inventing a second pending or retrying M9. They are execution
 failures, not correct refusals.
+
+> **M4 note:** the CPU/BM25 multi-round boundary was subsequently implemented. If the M3-B
+> suite is re-run on M4 code, those two cases expose a real next ASK instead of the 503. The
+> numbers above remain the historical M3 archive at the M3 commit.
 
 Important metric boundaries:
 
@@ -226,8 +230,8 @@ adds documentation and annotation-provenance wording only.
 1. **No independent human relevance review**; M3-B and M3-C labels remain machine-assisted.
 2. **Category scope has recall/coverage issues and sidecar false positives**; not production.
 3. **No full-corpus recall evaluation**; only pooled top-5 labels.
-4. **Single ASK → one reply**: office/tablet tasks fail with 503 by design of the current
-   state machine.
+4. **M3-era single ASK → one reply**: office/tablet tasks failed with 503 at the M3 archive;
+   M4 subsequently implements the CPU/BM25 durable next ASK.  This M3 record is historical.
 5. **No integrated candidate run**: no M3-B downstream suite exists for a category-scoped
    production path.
 6. **Small samples**: 15 tasks and 10 retrieval queries are engineering fixtures; no

@@ -678,7 +678,7 @@ def narrative_qwen(
 
 def narrative_clarification(clarification: Mapping[str, Any]) -> str:
     lines = [
-        "Recommendation paused: the Decision Gate requires a user clarification before it can select a product.",
+        "Recommendation paused: one more task detail is required before a product can be selected.",
         f"Clarification reason: {clarification.get('reason')}.",
         f"Question: {clarification.get('question')}",
     ]

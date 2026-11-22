@@ -19,20 +19,21 @@
 | M9 偏好持久化与 Session 隔离 | 完成（英文显式偏好） | `preference_memory` schema v1；`user_key` 隔离；reply_turn 幂等；m9 共享 schema 初始化幂等 |
 | 严格 / 演示价格模式隔离 | 完成 | 默认 strict；仅 `AGENTRECX_PRICE_MODE=demo_historical_fx` 启用；strict 重启 replay 不重算 |
 | 本地 CPU/BM25 真实检索 | 完成 | 真实 C4 目录 + BM25；不接 GPU、不接外部模型 |
+| CPU/BM25 多轮 ASK（M4） | 完成（`cpu_live`） | ASK1→Reply1→ASK2→Reply2→最终推荐；Reply1 完成与 ASK2 Pending/Continuation 同一 SQLite 事务；两次真实 MCP 重启后均可恢复；`tests/test_web_multiturn_ask_e2e.py`、`tests/test_web_multiturn_ask.py` |
 
 ## 2. 未完成能力（不要误报为已完成）
 
 ### 2.1 多轮 ASK
 
-当前只支持 **一次 ASK → 一次 reply → 一次推荐**。如果 reply 后 `recommend_products`
-再次返回 `awaiting_clarification`，Coordinator 返回
-**503 `clarification_reply_ambiguous`**：M9 可能已经写入，但结果不能最终展示，也禁止自动重跑。
-要支持多轮，需要：
+CPU/BM25 的两轮 ASK 已由 M4 实现并真实验收：Reply1 完成与 ASK2 Pending/Continuation 在
+同一个 Web SQLite 事务提交；新 Pending/Reply Turn/Continuation 均重新签发；真实 MCP 重启
+后 ASK2 可 Cold Resume。详见 [`M4_MULTITURN_ASK.md`](M4_MULTITURN_ASK.md)。
 
-- 新的 pending/continuation 轮次，而不是复用已消费的 pending；
-- 每轮唯一的 reply turn 幂等键；
-- ASK 问题的上下文/已合并 requirements 的持久化；
-- 对“同一 session 只有一个 active task/OPEN pending”的约束做显式状态机扩展。
+仍未支持：
+
+- Qwen 的持久化多轮状态；
+- 任意轮数/任意对话策略（当前是可验证的两轮任务槽策略）；
+- 跨 Web SQLite 与 M9 的 exactly-once。
 
 ### 2.2 qwen_live 持久化 Pending
 

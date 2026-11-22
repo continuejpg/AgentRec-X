@@ -240,11 +240,16 @@ def reply_response_from_result(
     refusal = result.get("refusal")
     if refusal is None and isinstance(products, Mapping):
         refusal = products.get("refusal")
-    return {
+    next_clarification = result.get("clarification")
+    next_clarification = (
+        dict(next_clarification) if isinstance(next_clarification, Mapping) else None
+    )
+    response = {
         "turn_id": reply.get("reply_turn_id"),
         "memory_update": result.get("memory_update"),
         "preferences": result.get("preferences"),
-        # A bounded refusal has no product: never present an empty list as a recommendation.
+        # A bounded refusal or a next ASK has no product: never present an empty list as a
+        # recommendation.
         "recommendation": dict(products) if has_products else None,
         "refusal": dict(refusal) if isinstance(refusal, Mapping) else None,
         "task_requirements": result.get("task_requirements"),
@@ -253,7 +258,7 @@ def reply_response_from_result(
         "steps": list(result.get("steps") or []),
         "clarification_id": clarification_id,
         "message": narrative,
-        "clarification": None,
+        "clarification": next_clarification,
         "task_constraints": None,
         "candidate_reevaluation": None,
         "planner": None,
@@ -263,3 +268,7 @@ def reply_response_from_result(
         "planner_actions": None,
         "error": None,
     }
+    if next_clarification is not None:
+        # Additive field only on the multi-round path; the finalized/refusal shape is unchanged.
+        response["status"] = "awaiting_clarification"
+    return response

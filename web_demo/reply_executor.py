@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 from observability import OPENINFERENCE_CHAIN, Tracing, get_tracing
+from web_demo import viewmodels as vm
+from web_demo.continuation import build_web_continuation
 from web_demo.handle_lifecycle import (
     HANDLE_EXPIRED,
     HANDLE_MISSING,
@@ -49,10 +51,11 @@ from web_demo.reply_assembly import (
 )
 from web_demo.reply_result_contract import (
     RecommendationResultError,
+    build_clarification_payload,
     build_refusal_payload,
     build_reply_payload,
 )
-from web_demo.sessions import Session
+from web_demo.sessions import PendingClarification, Session
 from web_demo.state_store import (
     PendingRecord,
     RequestAmbiguous,
@@ -136,6 +139,8 @@ class ReplyExecutionOutcome:
     pending: PendingRecord | None = None
     turn: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
+    #: The newly committed OPEN pending when this reply produced a next ASK.
+    next_pending: PendingRecord | None = None
     detail: str = ""
     #: The handle decision that gated this run (``None`` for replay/no pending).
     handle: HandleCheck | None = None
@@ -676,6 +681,22 @@ class WarmReplyExecutor:
                 str(recommendation.get("status") or "")
                 if isinstance(recommendation, Mapping) else ""
             )
+            if recommendation_status == "awaiting_clarification":
+                # A complete, newly issued next ASK is a known outcome of this reply: the M9
+                # write happened and the MCP explicitly asked one more question.  Persist it
+                # atomically instead of collapsing it into the old 503 AMBIGUOUS.
+                return self._clarification_and_finalize(
+                    session, pending,
+                    message=message,
+                    reply=reply,
+                    preferences=preferences,
+                    recommendation=(
+                        recommendation if isinstance(recommendation, Mapping) else {}
+                    ),
+                    reply_requirements=reply_requirements,
+                    steps=steps,
+                    handle=handle,
+                )
             if recommendation_status in REFUSAL_STATUSES:
                 # The real recommendation ran and explicitly declined to finalize a product
                 # (for example the task budget cannot be verified against the catalogue
@@ -797,6 +818,124 @@ class WarmReplyExecutor:
         finally:
             await self._stop_heartbeat()
 
+    def _clarification_and_finalize(
+        self,
+        session: Session,
+        pending: PendingRecord,
+        *,
+        message: str,
+        reply: Any,
+        preferences: Any,
+        recommendation: Mapping[str, Any],
+        reply_requirements: Mapping[str, Any] | None,
+        steps: list[dict[str, Any]],
+        handle: HandleCheck | None,
+    ) -> ReplyExecutionOutcome:
+        """Persist a real next ASK as the reply's committed outcome.
+
+        The MCP has already written M9 and returned an explicit ``awaiting_clarification``
+        result with a newly issued handle.  This method validates that result, builds the
+        durable turn and checkpoint, and lets the store commit the answered pending, the reply
+        turn, the new pending and the completed request in one transaction.
+        """
+        raw = recommendation.get("clarification")
+        if not isinstance(raw, Mapping):
+            self._mark_ambiguous("recommendation asked for clarification but issued no handle")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail="the recommendation requested a next ASK without a clarification handle",
+            )
+        next_clarification_id = str(raw.get("clarification_id") or "").strip()
+        question = str(raw.get("question") or "").strip()
+        if not next_clarification_id or not question:
+            self._mark_ambiguous("the next ASK is missing its id or question")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail="the next ASK is incomplete",
+            )
+        if next_clarification_id == pending.clarification_id:
+            self._mark_ambiguous("the next ASK reused the answered clarification id")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail="the next ASK reused the answered handle",
+            )
+        continuation = build_web_continuation(
+            mcp_continuation=raw.get("continuation"),
+            query=pending.query,
+            profile_id=self._profile_id,
+        )
+        if continuation is None:
+            self._mark_ambiguous("the next ASK has no restorable continuation")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail="the next ASK has no restorable continuation",
+            )
+        expires_at = float(continuation["expires_at"])
+        if expires_at <= time.time():
+            self._mark_ambiguous("the next ASK continuation is already expired")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail="the next ASK continuation is already expired",
+            )
+
+        clarification = vm.clarification_payload(raw)
+        clarification["memory_write_enabled"] = bool(raw.get("memory_write_enabled"))
+        narrative = (
+            "One more task detail is required before a product can be recommended.\n"
+            f"Question: {question}\n"
+            "No product recommendation has been finalized in this reply."
+        )
+        try:
+            contract = build_clarification_payload(
+                reply_turn_id=pending.reply_turn_id,
+                pending_id=pending.pending_id,
+                user_message=message,
+                question=question,
+                reason=str(raw.get("reason") or "task_clarification"),
+                ranking_source=self._ranking_source,
+                query=pending.query,
+                retrieval_query=(
+                    str(recommendation.get("effective_query"))
+                    if recommendation.get("effective_query") else None
+                ),
+                task_requirements=reply_requirements,
+            )
+        except Exception as exc:  # noqa: BLE001 - never persist half a reply
+            self._mark_ambiguous(f"next-ASK reply contract failed: {exc}")
+            return ReplyExecutionOutcome(
+                AMBIGUOUS, pending=pending, handle=handle,
+                detail=f"next-ASK reply contract failed: {type(exc).__name__}",
+            )
+        # The durable turn asks the question; the response's narrative is the same text.
+        contract["assistant_text"] = narrative
+        preference_view = (
+            vm.preference_state(dict(preferences), profile_id=self._profile_id)
+            if isinstance(preferences, Mapping) else None
+        )
+        memory_update = vm.memory_update_payload(
+            dict(reply) if isinstance(reply, Mapping) else {},
+            preference_view,
+        )
+        result = {
+            "reply": contract,
+            "preferences": preference_view,
+            "memory_update": memory_update,
+            "steps": steps,
+            "task_requirements": reply_requirements,
+            "clarification": clarification,
+            "clarification_continuation": continuation,
+            "clarification_expires_at": expires_at,
+            "clarification_mode": "cpu_live",
+            "retrieval_query": (
+                str(recommendation.get("effective_query"))
+                if recommendation.get("effective_query") else None
+            ),
+        }
+        turn = turn_from_result(result)
+        return self._checkpoint_and_finalize(
+            session, pending, turn=turn, result=result, handle=handle
+        )
+
     # -- commit ------------------------------------------------------------- #
 
     def _checkpoint_and_finalize(
@@ -875,8 +1014,8 @@ class WarmReplyExecutor:
         if outcome.outcome == SUCCESS:
             return ReplyExecutionOutcome(
                 RESULT_REUSED, request=outcome.request, task=outcome.task,
-                pending=outcome.pending, turn=outcome.turn, result=outcome.result,
-                handle=handle,
+                pending=outcome.pending, next_pending=outcome.next_pending,
+                turn=outcome.turn, result=outcome.result, handle=handle,
             )
         return outcome
 
@@ -891,6 +1030,9 @@ class WarmReplyExecutor:
         source: str = "execute",
     ) -> ReplyExecutionOutcome:
         assert self._claim_token is not None and self._request_id is not None
+        clarification = result.get("clarification")
+        continuation = result.get("clarification_continuation")
+        next_pending: PendingRecord | None = None
         try:
             with self._tracing.span(
                 "reply.finalize",
@@ -899,25 +1041,61 @@ class WarmReplyExecutor:
                     "agentrecx.request_id": self._request_id,
                     "agentrecx.reply_turn_id": pending.reply_turn_id,
                     "agentrecx.finalize.source": source,
+                    "agentrecx.finalize.next_ask": isinstance(clarification, Mapping),
                 },
             ) as span:
-                task, consumed, request = self._store.finalize_reply_request(
-                    session.session_id, self._request_id,
-                    claim_token=self._claim_token, outcome="completed",
-                    turn=turn, result=result,
-                )
+                if isinstance(clarification, Mapping) and isinstance(continuation, Mapping):
+                    task, consumed, next_pending, request = (
+                        self._store.finalize_reply_with_clarification(
+                            session.session_id, self._request_id,
+                            claim_token=self._claim_token,
+                            requirements=(
+                                result.get("task_requirements")
+                                if isinstance(result.get("task_requirements"), Mapping)
+                                else None
+                            ),
+                            turn=turn,
+                            # No product was ranked in this turn; the reply only asks again.
+                            ranking_source=None,
+                            result=result,
+                            next_clarification_id=str(
+                                clarification.get("clarification_id") or ""
+                            ),
+                            next_payload=clarification,
+                            next_continuation=continuation,
+                            next_expires_at=float(
+                                result.get("clarification_expires_at") or 0.0
+                            ),
+                            mode=str(result.get("clarification_mode") or "cpu_live"),
+                        )
+                    )
+                else:
+                    task, consumed, request = self._store.finalize_reply_request(
+                        session.session_id, self._request_id,
+                        claim_token=self._claim_token, outcome="completed",
+                        turn=turn, result=result,
+                    )
                 span.set_attributes({
                     "agentrecx.execution_stage": request.execution_stage,
                     "agentrecx.request_status": request.status,
                     "agentrecx.turn_id": pending.reply_turn_id,
+                    "agentrecx.next_pending_id": (
+                        None if next_pending is None else next_pending.pending_id
+                    ),
                 })
         except (RequestFenced, StaleTaskVersion, TaskStateConflict,
                 PendingStateConflict, RequestConflict) as exc:
             return ReplyExecutionOutcome(FENCED, pending=pending, detail=str(exc),
                                          handle=handle)
+        except (ValueError, TypeError, StateStoreError) as exc:
+            # The checkpoint is already durable; never invent a replacement ASK or clear it.
+            return ReplyExecutionOutcome(
+                CHECKPOINT_FAILED, pending=pending, handle=handle,
+                detail=f"the next ASK could not be committed: {exc}",
+            )
         return ReplyExecutionOutcome(
             SUCCESS, request=request, task=task, pending=consumed,
-            turn=turn, result=dict(result), handle=handle,
+            next_pending=next_pending, turn=turn, result=dict(result), handle=handle,
         )
 
     # -- heartbeat ---------------------------------------------------------- #

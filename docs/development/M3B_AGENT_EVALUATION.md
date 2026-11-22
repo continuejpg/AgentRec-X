@@ -119,10 +119,11 @@ The pre-commit run (`m3b-pre-02`, 15 cases) produced:
 | Execution failures | **2** (`laptop_office_6000`, `tablet_3000`; HTTP 503) |
 | End-to-end latency | mean 8804.52 ms; p50 181.96 ms; p95 42219.35 ms; max 42240.13 ms |
 
-The two failures are multi-round ASK limitations: the reply's merged requirements still lead
-`recommend_products` to `awaiting_clarification`, which the durable coordinator reports as
-HTTP 503 `clarification_reply_ambiguous`; no second ASK/pending exists in the current scope.
-They are recorded as execution errors, not as correct refusals.
+The two failures are M3-era multi-round ASK limitations: the reply's merged requirements still
+led `recommend_products` to `awaiting_clarification`, which the durable coordinator reported as
+HTTP 503 `clarification_reply_ambiguous`; no second ASK/pending existed in the M3 scope.
+They are recorded as execution errors, not as correct refusals.  The M4 milestone later adds
+the durable next ASK (CPU/BM25); these M3 numbers remain the historical archive.
 
 Cold Resume and Replay cases all passed. The no-price strict case returned a real
 `budget_unverifiable` refusal. The no-within-budget case returned `budget_exceeded`. No

@@ -124,10 +124,15 @@ web_session 1 ── N web_identity    (turn/reply id 的序列，永不复用)
 - 校验失败/缺失/过期/版本不符/绑定不符/generation 不符 → **HTTP 409
   `clarification_resume_not_ready`**，不猜测、不恢复。
 - 范围限制：
-  - 只支持 `pending.mode == "cpu_live"` 的单轮 resume；
+  - 只支持 `pending.mode == "cpu_live"` 的 resume；
   - `qwen_live` 的持久化 pending 仍是 409；
-  - reply 后若再次需要 ASK，返回 503 `clarification_reply_ambiguous`（禁止自动重跑）；
   - 不承诺 Web SQLite 与 M9 的跨库 exactly-once。
+
+> **M4 update (2026-11-22):** the M1 line `reply 后若再次需要 ASK -> 503` is superseded.
+> A complete CPU/BM25 next ASK is now committed atomically as a new pending and returns HTTP
+> 200 `awaiting_clarification`; the genuine uncertain-execution path still returns 503
+> `AMBIGUOUS`. See [`M4_MULTITURN_ASK.md`](M4_MULTITURN_ASK.md). The historical M1 statement
+> above is retained as the state at `af07cc5`.
 
 ## 6. Request Ledger、Checkpoint、Finalize、Replay
 

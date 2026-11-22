@@ -48,6 +48,7 @@ from recommendation.demo.planner_http_proposer import (
     planner_enabled,
 )
 from recommendation.memory.store import MEMORY_DB_ENV_VAR, SQLitePreferenceStore
+from recommendation.preference.clarification_policy import next_laptop_clarification
 from recommendation.preference.current_task_constraints import (
     CurrentTaskConstraint,
     CurrentTaskConstraints,
@@ -283,6 +284,161 @@ def _get_product_info(product_ref: Annotated[str, Field(min_length=1, descriptio
     }
 
 
+def _question_and_reason(
+    *,
+    task: Mapping[str, Any],
+    requirements: TaskRequirements,
+    session_id: str | None,
+    gate: Mapping[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Choose the one next question from the task policy, the Gate, or the P16 skill."""
+    if isinstance(gate, Mapping):
+        gate_question = str(gate.get("ask_question") or "").strip()
+        if gate.get("action") in {"NEED_USER_CLARIFICATION", "ASK"} and gate_question:
+            return gate_question, str(gate.get("reason_code") or "gate_need_user_clarification")
+    need = next_laptop_clarification(requirements, str(task.get("current_query") or ""))
+    if need is not None:
+        return need.question, need.reason
+    history = _context().read_history(session_id)
+    skill = ask_clarification(
+        task=dict(task), preferences=prepare_preferences(history), gate=gate,
+    )
+    return str(skill["question"]), str(skill.get("reason") or "missing_key_need")
+
+
+def _issue_clarification(
+    *,
+    task: Mapping[str, Any],
+    requirements: TaskRequirements,
+    question: str,
+    reason: str,
+    session_id: str | None,
+    task_constraints: CurrentTaskConstraints | None = None,
+) -> dict[str, Any]:
+    """Create one real clarification handle and its JSON-only Cold Resume snapshot.
+
+    The handle lives only in this process.  The continuation is what a different process can
+    validate and rebuild; it never reuses this handle id.  No M9 write and no recommendation
+    happen here.
+    """
+    ctx = _context()
+    # The Cold Resume verifier rebuilds the expected task with ``ctx.current_task(query)``.
+    # Use that exact canonical form here: a session-scoped recommendation task carries extra
+    # task_id/user_id overrides that must not leak into the restorable snapshot.
+    canonical_task = ctx.current_task(str(task.get("current_query") or ""))
+    clarification_id = "clar_" + uuid.uuid4().hex
+    now = time.time()
+    expires_at = now + ctx.clarification_ttl_seconds
+    constraints = task_constraints or CurrentTaskConstraints()
+    requirements_payload = requirements.as_dict()
+    state = ClarificationState(
+        clarification_id=clarification_id,
+        user_key=ctx.user_key,
+        question=str(question),
+        current_query=str(canonical_task["current_query"]),
+        task=canonical_task,
+        created_at=now,
+        expires_at=expires_at,
+        session_id=session_id,
+        task_constraints=constraints,
+        task_requirements=requirements_payload,
+    )
+    with ctx.lock:
+        ctx.handles[clarification_id] = state
+    continuation = {
+        "schema": CLARIFICATION_CONTINUATION_SCHEMA,
+        "version": CLARIFICATION_CONTINUATION_VERSION,
+        "mode": "cpu_live",
+        "user_key": ctx.user_key,
+        "session_id": session_id,
+        "clarification_id": clarification_id,
+        "question": str(question),
+        "reason": str(reason),
+        "current_query": str(canonical_task["current_query"]),
+        "task": canonical_task,
+        "task_constraints": constraints.as_dict(),
+        "task_requirements": requirements_payload,
+        "created_at": now,
+        "expires_at": expires_at,
+    }
+    return {
+        "clarification_id": clarification_id,
+        "question": str(question),
+        "reason": str(reason),
+        "expires_in_seconds": ctx.clarification_ttl_seconds,
+        "memory_write_enabled": ctx.writes_enabled,
+        "continuation": continuation,
+        "task_requirements": requirements_payload,
+    }
+
+
+def _awaiting_recommendation(
+    *,
+    task: Mapping[str, Any],
+    requirements: TaskRequirements,
+    question: str,
+    reason: str,
+    session_id: str | None,
+    effective_query: str,
+    started: float,
+    gate: Mapping[str, Any] | None = None,
+    issue_clarification: bool,
+) -> dict[str, Any]:
+    """Return a real ``awaiting_clarification`` result, never a fake product.
+
+    ``issue_clarification`` is true only for a resumed reply (the caller already carries the
+    merged task requirements).  The initial chat path keeps its existing contract: it calls
+    ``request_preference_clarification`` after recommend asks, so no duplicate handle is
+    created here.
+    """
+    clarification = (
+        _issue_clarification(
+            task=task,
+            requirements=requirements,
+            question=question,
+            reason=reason,
+            session_id=session_id,
+        )
+        if issue_clarification else None
+    )
+    gate_payload = dict(gate) if isinstance(gate, Mapping) else {
+        "action": "NEED_USER_CLARIFICATION",
+        "allow_finalize": False,
+        "reason_code": reason,
+        "reason": f"one task requirement is still missing: {reason}",
+        "ask_question": question,
+        "source": "task_clarification_policy",
+    }
+    annotate_current_span({
+        "agentrecx.recommend.status": "awaiting_clarification",
+        "agentrecx.clarification.reason": reason,
+    })
+    return {
+        "schema": "agentrecx.p17.recommend_products.v1",
+        "status": "awaiting_clarification",
+        "query": task["current_query"],
+        "effective_query": effective_query,
+        "task_requirements": requirements.as_dict(),
+        "budget_verification": None,
+        "selected_product_id": None,
+        "selected_product": None,
+        "gate": gate_payload,
+        "evidence_bundle": None,
+        "planner_steps": {"steps": [], "termination": "awaiting_clarification"},
+        "search_mode": _context().search_mode,
+        "corrective_retrieval": {"enabled": False, "attempts": 0, "trace": []},
+        "clarification": clarification,
+        "error": None,
+        "latency_ms": round((time.perf_counter() - started) * 1000.0, 2),
+        "notes": [
+            "a deterministic task clarification policy requested one missing requirement; "
+            "no product recommendation was produced",
+            "the clarification handle is bound to this user/session/task and is restorable "
+            "in a different MCP process through its continuation",
+        ],
+    }
+
+
 def _recommend_products(
     query: Annotated[str, Field(min_length=1, description="Current shopping query")],
     session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
@@ -305,6 +461,16 @@ def _recommend_products(
     if session_id:
         task["task_id"] = str(session_id)
         task["user_id"] = str(session_id)
+    # A task slot that is still missing is a *known* next ASK, not a recommendation.  Only
+    # the explicit laptop policy participates; every other category keeps the old path.
+    need = next_laptop_clarification(requirements, query)
+    if need is not None:
+        return _awaiting_recommendation(
+            task=task, requirements=requirements, question=need.question,
+            reason=need.reason, session_id=session_id, effective_query=effective_query,
+            started=started,
+            issue_clarification=task_requirements is not None,
+        )
     executor = ElectronicsPlannerExecutor(
         catalogue=ctx.catalogue, current_query=effective_query,
         preferences=prepare_preferences(history), hard=prepare_hard(effective_query),
@@ -354,6 +520,27 @@ def _recommend_products(
         })
     budget_trace = dict(executor.last_budget or {})
     gate_trace = gate_payload if isinstance(gate_payload, Mapping) else {}
+    clarification = None
+    if status == "awaiting_clarification":
+        question, reason = _question_and_reason(
+            task=task, requirements=requirements, session_id=session_id,
+            gate=gate_trace,
+        )
+        if task_requirements is not None:
+            # A resumed reply is the multi-round path: issue the next durable ASK now.
+            clarification = _issue_clarification(
+                task=task, requirements=requirements, question=question, reason=reason,
+                session_id=session_id,
+            )
+        if not isinstance(gate_payload, Mapping):
+            gate_payload = {
+                "action": "NEED_USER_CLARIFICATION",
+                "allow_finalize": False,
+                "reason_code": reason,
+                "reason": "the planner requested one user clarification",
+                "ask_question": question,
+            }
+            gate_trace = gate_payload
     annotate_current_span({
         "agentrecx.recommend.status": status,
         "agentrecx.recommend.selected_product_id": selected,
@@ -370,6 +557,9 @@ def _recommend_products(
         "agentrecx.budget.refusal_reason": (
             status if status in {"budget_unverifiable", "budget_exceeded"} else None
         ),
+        "agentrecx.clarification.reason": (
+            clarification.get("reason") if isinstance(clarification, Mapping) else None
+        ),
     })
     return {
         "schema": "agentrecx.p17.recommend_products.v1",
@@ -383,6 +573,7 @@ def _recommend_products(
         "gate": gate_payload,
         "evidence_bundle": bundle,
         "planner_steps": steps,
+        "clarification": clarification,
         "search_mode": ctx.search_mode,
         "corrective_retrieval": {
             "enabled": bool(ctx.corrective_rag),
@@ -976,47 +1167,38 @@ def _request_preference_clarification(
     query: Annotated[str | None, Field(description="Optional current query; defaults to the bound user task query")] = None,
     session_id: Annotated[str | None, Field(description="Optional local Web Demo session namespace")] = None,
 ) -> dict[str, Any]:
-    """Create a user-bound clarification handle using the existing P16 Clarification Skill."""
+    """Create a user-bound clarification handle using the P16 skill or the task-slot policy."""
     ctx = _context()
     task = ctx.current_task(query)
     history = ctx.read_history(session_id)
-    result = ask_clarification(task=task, preferences=prepare_preferences(history), gate=None)
-    clarification_id = "clar_" + uuid.uuid4().hex
-    now = time.time()
-    state = ClarificationState(clarification_id=clarification_id, user_key=ctx.user_key,
-                               question=str(result["question"]), current_query=str(task["current_query"]),
-                               task=task, created_at=now, expires_at=now + ctx.clarification_ttl_seconds,
-                               session_id=session_id,
-                               task_requirements=extract_task_requirements(
-                                   str(task["current_query"])).as_dict())
-    with ctx.lock:
-        ctx.handles[clarification_id] = state
-    result = dict(result)
+    requirements = extract_task_requirements(str(task["current_query"]))
+    question, reason = _question_and_reason(
+        task=task, requirements=requirements, session_id=session_id,
+    )
+    # Keep the accepted P16 result shape; only the question/reason are selected by the
+    # task policy.  The handle and continuation come from the one shared issuer.
+    result = dict(ask_clarification(
+        task=task, preferences=prepare_preferences(history), gate=None,
+    ))
+    issued = _issue_clarification(
+        task=task, requirements=requirements, question=question, reason=reason,
+        session_id=session_id,
+    )
+    result.update(issued)
     result.update({
-        "clarification_id": clarification_id,
+        "schema": "agentrecx.p16.preference_clarification.v1",
+        "skill": "preference-clarification",
+        "status": "awaiting_clarification",
+        "current_query": str(task["current_query"]),
+        "requires_user_reply": True,
+        "finalize_allowed": False,
+        "final_answer": question,
         "authorized_user_key": ctx.user_key,
-        "expires_in_seconds": ctx.clarification_ttl_seconds,
-        "memory_write_enabled": ctx.writes_enabled,
-        # Everything a different process needs to rebuild *this* handle for the same task.
-        # It is JSON-only and contains no handle identity, process object or closure.
-        "continuation": {
-            "schema": CLARIFICATION_CONTINUATION_SCHEMA,
-            "version": CLARIFICATION_CONTINUATION_VERSION,
-            "mode": "cpu_live",
-            "user_key": ctx.user_key,
-            "session_id": session_id,
-            "clarification_id": clarification_id,
-            "question": str(result["question"]),
-            "reason": str(result.get("reason") or ""),
-            "current_query": str(task["current_query"]),
-            "task": task,
-            "task_constraints": state.task_constraints.as_dict(),
-            "task_requirements": state.task_requirements,
-            "created_at": now,
-            "expires_at": now + ctx.clarification_ttl_seconds,
-        },
-        "notes": ["clarification handle is bound to the server's trusted local user; it cannot be reused by another user",
-                  "a real user reply is required; a model-generated reply is not accepted as user confirmation"],
+        "notes": [
+            "clarification handle is bound to the server's trusted local user; it cannot be reused by another user",
+            "a real user reply is required; a model-generated reply is not accepted as user confirmation",
+            "the question may come from the deterministic laptop task-slot policy (use case then budget)",
+        ],
     })
     return result
 

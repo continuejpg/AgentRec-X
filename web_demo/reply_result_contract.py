@@ -12,6 +12,7 @@ from typing import Any, Mapping
 __all__ = [
     "CONTRACT_SCHEMA",
     "RecommendationResultError",
+    "build_clarification_payload",
     "build_refusal_payload",
     "build_reply_payload",
     "turn_from_payload",
@@ -168,6 +169,80 @@ def turn_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "user_text": str(payload["user_text"]),
         "assistant_text": str(payload["assistant_text"]),
         "products": dict(products),
+    }
+
+
+def build_clarification_payload(
+    *,
+    reply_turn_id: str,
+    pending_id: str,
+    user_message: str,
+    question: str,
+    reason: str,
+    ranking_source: str,
+    query: str,
+    retrieval_query: str | None = None,
+    task_requirements: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the durable turn for a reply that produced a real next ASK.
+
+    The reply itself succeeded: M9 was written and the MCP returned an explicit
+    ``awaiting_clarification`` result with a new handle.  The turn therefore has no product
+    and no recommendation id, but it must still be a real persisted turn so the transcript
+    shows the question and a replay can rebuild it without re-running MCP.
+    """
+    _require(bool(str(reply_turn_id or "").strip()), "reply_turn_id is required")
+    _require(bool(str(pending_id or "").strip()), "pending_id is required")
+    _require(bool(str(user_message or "").strip()), "user_message is required")
+    _require(bool(str(question or "").strip()), "the next clarification question is required")
+    _require(bool(str(reason or "").strip()), "the next clarification reason is required")
+    _require(bool(str(ranking_source or "").strip()), "ranking source is required")
+    _require(bool(str(query or "").strip()), "query is required")
+    requirements = (
+        dict(task_requirements) if isinstance(task_requirements, Mapping) else None
+    )
+    gate = {
+        "action": "NEED_USER_CLARIFICATION",
+        "allow_finalize": False,
+        "reason_code": str(reason),
+        "reason": "one task requirement is still missing",
+        "ask_question": str(question),
+        "source": "task_clarification_policy",
+    }
+    products = {
+        "items": [],
+        "query": str(query),
+        "retrieval_query": retrieval_query,
+        "search_mode": None,
+        "score_kind": None,
+        "catalogue_size": None,
+        "recommended_product_id": None,
+        "gate": gate,
+        "recommendation_id": None,
+        "request_id": str(reply_turn_id),
+        "ranker_version": None,
+    }
+    return {
+        "schema": CONTRACT_SCHEMA,
+        "reply_turn_id": str(reply_turn_id),
+        "pending_id": str(pending_id),
+        "request_id": str(reply_turn_id),
+        "user_text": str(user_message),
+        "assistant_text": str(question),
+        "products": products,
+        "recommendation": {
+            "id": None,
+            "ranking_source": str(ranking_source),
+            "status": _CLARIFY,
+            "gate": gate,
+            "retrieval_query": retrieval_query,
+        },
+        "preference_evidence": [],
+        "clarification": {
+            "question": str(question),
+            "reason": str(reason),
+            "task_requirements": requirements,
+        },
     }
 
 

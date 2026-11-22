@@ -324,13 +324,14 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest \
 
 ## 4. 剩余工作与真实阻断
 
-1. **Cold Resume 仅覆盖 CPU/BM25 单轮**（本轮范围）：`pending.mode == "cpu_live"` 且
-   `recommend_products` 一次能给出结果。以下仍是明确的 409：
+1. **Cold Resume 的 Qwen 限制仍在**：`pending.mode == "cpu_live"` 已支持单轮和 M4 的两轮
+   跟随 ASK；`qwen_live` 持久化 Pending 仍是 409：
    - **qwen_live 持久化 Pending**：Qwen 的 handle 依赖子进程内的 planner/executor continuation，
      不是 JSON 可序列化状态；需要事件化/重放式设计，不在本轮。
-   - **多轮跟随 ASK**：回复后 `recommend_products` 若再次 `awaiting_clarification`
-     → 503 `clarification_reply_ambiguous`（M9 已写、结果不可最终展示、禁止自动重试）；
-     需要新的 ASK/Pending + continuation 轮次。
+   - **多轮跟随 ASK（M4 已完成）**：CPU/BM25 的合法下一轮 ASK 现在会原子创建新
+     Pending/Reply Turn/Continuation，返回 200 `awaiting_clarification`；只有真正不确定的
+     外部执行才保留 503 `clarification_reply_ambiguous`。见
+     [`development/M4_MULTITURN_ASK.md`](development/M4_MULTITURN_ASK.md)。
 2. **价格模式（M1-F 真实结论）**：
    - **strict（默认）**：C4 目录没有 price；enriched sidecar 是 USD 历史价；CNY 预算仍
      `budget_unverifiable`，行为不变。
