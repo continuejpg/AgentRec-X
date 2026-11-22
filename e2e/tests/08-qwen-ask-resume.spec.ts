@@ -33,6 +33,14 @@ const QUERY = "I need headphones. Can you recommend something suitable for me?";
 const FIRST_REPLY = "For this purchase, I prefer wireless headphones for commuting. Please avoid wired headphones.";
 
 test.describe("Qwen ASK → task constraint → resume (real GPU)", () => {
+  test.beforeEach(async ({ request }) => {
+    const health = await bffGetJson(request, "/api/health");
+    test.skip(
+      health.body?.qwen_live?.available !== true,
+      "Qwen GPU Live is unavailable; this optional GPU suite is not part of the CPU acceptance run",
+    );
+  });
+
   test("one real reply changes current task, preserves history and prevents explicit-wired final", async ({
     page,
     request,

@@ -210,8 +210,18 @@ powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
 - BFF 健康检查：<http://127.0.0.1:8787/api/health>
 - 停止：`powershell -ExecutionPolicy Bypass -File scripts/stop_web_demo.ps1`
 - 一键浏览器验收：`powershell -ExecutionPolicy Bypass -File scripts/run_web_demo_e2e.ps1`
+- CPU 浏览器 Suite（BFF/前端已启动）：`cmd /c "pnpm --dir e2e test:cpu"`；Qwen GPU 可选 Suite：`cmd /c "pnpm --dir e2e test:qwen"`
 
 BGE 冷启动会为两个 profile 各加载一次 catalogue/index，日志出现 `status=starting` 是正常的；等待 `/api/health` 的 `ready=true` 再输入。默认价格模式是 **strict**：catalogue 没有价格时保持 UNKNOWN，并可能安全拒绝预算无法验证的请求。
+
+默认是 **快速体验模式**（BFF 进程内 Session/M9），适合聊天、Memory、Behavior、M4 ASK；它**不能**宣传为已经验证跨 BFF 重启的持久化恢复。要验证 Task/Pending/Request Ledger、Cold Resume 和 Replay，请显式启用 **持久化恢复模式**：
+
+```powershell
+$env:AGENTRECX_WEB_STATE_DB = "runs/web_demo/durable_state.sqlite"
+powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
+```
+
+详细差异见 [`docs/development/INTERNSHIP_DEMO.md`](docs/development/INTERNSHIP_DEMO.md#21-两种真实运行模式不要混称)。
 
 ### 2. 最小手动启动（BM25；适合调试）
 
@@ -378,7 +388,8 @@ AGENTRECX_BEHAVIOR_AWARE_RERANK=1 \
 | ESCI semantic gain，BGE nDCG@10 | **0.7366** | 真实 query + 人工 judgments；judged-candidate reranking |
 | ESCI semantic gain，BM25 nDCG@10 | **0.6907** | 同口径；差 **+0.0459**，95% CI [0.0420, 0.0497] |
 | P18 Reserved Test | **Top-1 11/12** | **模拟规则标签**，只用于受限工作流泛化检查 |
-| 当前 Browser Demo | **新 09 场景 1/1 passed** | 真实 FastAPI + MCP + BM25 + Demo FX 的笔记本多轮、Memory、Behavior 浏览器验收；另有 02–05 CPU 场景通过 |
+| 当前 CPU Browser Suite | **7 passed / 0 failed / 4 skipped** | 默认 BGE、Flags OFF、strict price；跳过的 3 个为可选 Qwen GPU 测试，1 个为需 P1 配置的 09 |
+| 当前 P1 Browser Demo | **09：1/1 passed** | 真实 BM25 + Demo FX 的笔记本多轮、Memory、Behavior；单独运行，不与默认 CPU Suite 混算 |
 | P1 Memory 真实召回 | **BM25 +2 / BGE +3 候选** | 同一 Query 的真实辅助检索；不是全库 Recall |
 
 这些数字来自不同数据集、候选池和测试阶段，**不能横向相加，也不能当真实用户准确率**。严格口径与失败实验见

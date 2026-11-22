@@ -57,6 +57,44 @@ Open <http://127.0.0.1:3000>. MCP 不是一个需要单独启动的 HTTP 端口�
 `/api/health` 和 `/api/demo/config` 会显示 `price_mode` 与两个 `features` 布尔值，演示前先核对。
 没有前端运行时开关；修改这些值后必须重启 BFF/MCP。客户端不能绕过服务端配置。
 
+## 2.1 两种真实运行模式（不要混称）
+
+### 快速体验模式（默认，in-memory）
+
+不设置 `AGENTRECX_WEB_STATE_DB` 时，BFF 使用进程内 Session；`scripts/run_web_demo.ps1`
+默认就是该模式。
+
+- 适合：浏览器聊天、M4 ASK、Memory Lab、Behavior、商品卡、Demo FX；
+- M9/Session 是进程内状态，BFF 重启会丢失；
+- **不能宣称它验证了跨 BFF 重启的持久化 Cold Resume 或 durable Replay**；
+- 本轮 `03` 和 `09` 的快速模式浏览器证据在该模式完成。
+
+### 持久化恢复模式（Web SQLite）
+
+设置真实的 Web state SQLite 路径后，BFF 使用 Task/Pending/Request Ledger 与 durable result：
+
+```powershell
+$env:AGENTRECX_WEB_STATE_DB = "runs/web_demo/durable_state.sqlite"
+powershell -ExecutionPolicy Bypass -File scripts/run_web_demo.ps1
+```
+
+手动 BFF：
+
+```bash
+AGENTRECX_WEB_STATE_DB=runs/web_demo/durable_state.sqlite \
+AGENTRECX_WEB_DEMO_SEARCH_MODE=bm25 \
+.venv/bin/python -m web_demo
+```
+
+- 适合：MCP/BFF 重启后的 M4/Cold Resume、请求幂等、Replay；
+- Task/Pending/Request Ledger 写入 SQLite；已提交回复从 durable result 返回；
+- 这是恢复能力的验证模式；未设置该变量时不要把它和快速体验模式混称；
+- 需要换一套干净演示状态时，停止 BFF 后使用新的 SQLite 文件路径，不要删除已有数据；
+- 真实回归：`tests/test_web_cold_resume_e2e.py`、`tests/test_web_multiturn_ask_e2e.py`。
+
+两种模式共用同一套 Gate、Task Constraints、Eligibility 和 Budget 边界；区别是状态生命周期，
+不是推荐算法。
+
 ## 3. 三个主要场景（已验证输入）
 
 ### 场景 1 — 基础 Agent + M4 多轮 ASK + Budget Gate
@@ -152,16 +190,36 @@ e2e/tests/09-internship-demo.spec.ts
 运行环境：真实 Windows Chrome（Playwright `channel="chrome"`）、真实 Next.js、真实 FastAPI BFF、
 真实 MCP/BM25、真实 M9/Behavior；不是 mock。
 
-同时运行的 CPU 浏览器场景：
+CPU 必跑 Suite 与 Qwen 可选 Suite 分开运行（BFF/前端已启动）：
 
+```powershell
+cmd /c "pnpm --dir e2e test:cpu"   # 01-06；09 默认配置下会 skip
+cmd /c "pnpm --dir e2e test:qwen"  # 07/08；需要真实 Qwen GPU，否则 skip
+```
+
+
+最终 CPU 浏览器 Suite（默认 BGE、Flags OFF、strict price）：
+
+```text
+e2e: 7 passed / 0 failed / 4 skipped (of 11)
+```
+
+通过的 CPU 场景：
+
+- `01-search-recommend`：显式 `wireless` query，真实 `ALLOW_FINALIZE`
 - `02-comparison`：通过
 - `03-clarification-memory`：通过
 - `04-mobile`（2 个）：通过
 - `05-modes`：通过
+- `06-real-errors`：vague query 正确 `NEED_USER_CLARIFICATION`，不伪造 Memory/推荐
 
-旧 `01`/`06` 浏览器断言仍假设旧 query 会直接 `ALLOW_FINALIZE`，与当前真实的
-`NEED_USER_CLARIFICATION` 行为不一致；`07`/`08` 需要真实 Qwen GPU 服务，当前未启动。
-因此不要声称整个旧 E2E suite 全部通过；以本轮通过的 CPU 场景和 09 为准。
+4 个 skipped：
+
+- `07`（2 个）与 `08`：缺少真实 Qwen GPU 服务，属于可选 Qwen Suite；
+- `09`：默认 Flags OFF / strict price 时按设计跳过，需用 P1 演示配置单独运行。
+
+`01` 的旧 query 已替换为显式 `wireless` 需求；`06` 的断言已改为验证真实澄清，
+没有放宽 Gate 或安全约束。Qwen 测试仍保留，只是无 GPU 时合理 Skip。
 
 ### 4.2 如何运行 09
 
@@ -215,8 +273,8 @@ Phoenix 不是启动前置条件。需要 trace 时：
 | Behavior 没有贡献 | 确认 Behavior flag=1；确认 Like 真正写入 `/api/behavior/events`，不是只点开 Shadow |
 | Demo B 不能写 Memory | 确认 BFF 启动带 `AGENTRECX_WEB_DEMO_ALLOW_MEMORY_WRITES=1` |
 | 换了 profile/重启后旧 Memory 消失 | 默认 in-memory Session/M9 生命周期；使用 durable 路径的测试另行验证 |
-| 旧 01/06 浏览器测试失败 | 旧断言已过期；以 09 + 02–05 为准，不要改成伪造 ALLOW |
-| 07/08 Qwen 失败 | 未启动真实 GPU/Qwen；演示说明中明确标为可选/历史，不静默回退 |
+| 01/06 行为与旧文档不一致 | 已更新：01 使用显式 wireless query；06 断言真实 ASK；Gate 未放宽 |
+| 07/08 Qwen 显示 skipped | 未启动真实 GPU/Qwen；这是可选 Qwen Suite，不是 CPU 失败，不静默回退 |
 
 ## 7. 不要做的事
 

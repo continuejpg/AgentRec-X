@@ -4,10 +4,8 @@
  *
  * Verified product reality (probed against the live demo, recorded in the report):
  *  - profile_0049 is a real read-only MCP server (`memory_writes=false`);
- *  - its fixture already holds 3 active preferences, so even a deliberately vague query is
- *    really `ALLOW_FINALIZE`d — the shipped UI never reaches the clarification reply flow on this
- *    profile (measured with 7 vague queries; the writes-disabled notice is therefore unreachable
- *    in the UI with the current fixture, not faked);
+ *  - a deliberately vague query reaches the real `NEED_USER_CLARIFICATION` Gate and emits a real
+ *    clarification card; the UI must not fabricate a memory write or a recommendation;
  *  - the real error boundaries that ARE reachable are asserted here:
  *      1. read-only chat turn does not fabricate any memory update;
  *      2. POST /api/clarification/reply with a handle that is not pending → real 409
@@ -53,12 +51,15 @@ test.describe("Real failure visibility — real BFF errors are surfaced, never f
     const cardCount = await block.getByTestId("product-card").count();
     recordCheck(
       testInfo,
-      "readonly.turn.real",
-      `real read-only search/recommend turn: ${cardCount} cards, gate=${gateAction} (the current 0049 fixture finalizes vague queries; the writes-disabled clarification UI path is unreachable)`,
-      cardCount >= 1 && gateAction === "ALLOW_FINALIZE",
+      "readonly.turn.asks_clarification",
+      `real read-only turn: ${cardCount} search cards, gate=${gateAction}; vague query correctly asks for clarification instead of fabricating a final recommendation`,
+      cardCount >= 1 && gateAction === "NEED_USER_CLARIFICATION",
     );
     expect(cardCount).toBeGreaterThanOrEqual(1);
-    expect(gateAction).toBe("ALLOW_FINALIZE");
+    expect(gateAction).toBe("NEED_USER_CLARIFICATION");
+    await expect(page.getByTestId("clarification-card").last()).toBeVisible({
+      timeout: 60_000,
+    });
 
     const fakeMemoryUi =
       (await page.getByTestId("memory-update").count()) +

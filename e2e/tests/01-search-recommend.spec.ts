@@ -2,9 +2,12 @@
  * Scenario 1 — Search & Recommend (real BFF → real P17 MCP tools → real BGE / P16 Gate / P15
  * evidence / real catalogue).
  *
- * Real query used: the P18 Demo-1 working-out query, documented in P18_FINAL_REPORT.md §2 and
- * runs/p18/demos/search_and_recommend.json (real trajectory: selected B004K6R43G,
- * Gate ALLOW_FINALIZE, UNKNOWN price/brand/stock/material/size/warranty).
+ * Query used: "I need wireless earbuds I can use while working out."
+ *
+ * The original P18 Demo-1 query omitted the explicit "wireless" requirement; with the current
+ * DecisionGate it correctly asks for clarification (insufficient_decision_criteria).  This
+ * scenario accepts a real explicit preference so it tests search -> ALLOW_FINALIZE, while the
+ * clarification path remains covered by 03/09.
  */
 import { expect, test } from "@playwright/test";
 import {
@@ -27,7 +30,7 @@ import {
 } from "../fixtures/demo";
 
 const DESKTOP = { width: 1440, height: 900 };
-const QUERY = "I need earbuds I can use while working out.";
+const QUERY = "I need wireless earbuds I can use while working out.";
 const ASIN = /^[A-Z0-9]{10}$/;
 
 test.describe("Scenario 1 — Search & Recommend", () => {
@@ -94,7 +97,7 @@ test.describe("Scenario 1 — Search & Recommend", () => {
     // ---- send the real natural-language query ---------------------------------------
     await sendChat(page, testInfo, QUERY);
     const turn = lastTurn(page);
-    await expect(turn.getByTestId("user-bubble")).toContainText("I need earbuds I can use while working out");
+    await expect(turn.getByTestId("user-bubble")).toContainText("I need wireless earbuds I can use while working out");
 
     const block = lastProductsBlock(page);
     await expect(block).toBeVisible({ timeout: 120_000 });
@@ -112,7 +115,7 @@ test.describe("Scenario 1 — Search & Recommend", () => {
     );
     expect(
       gateAction,
-      `expected the real Gate to ALLOW_FINALIZE for the P18 Demo-1 query, got ${gateAction}; gate text: ${gateText}`,
+      `expected the real Gate to ALLOW_FINALIZE for the explicit wireless query, got ${gateAction}; gate text: ${gateText}`,
     ).toBe("ALLOW_FINALIZE");
     // humanize() only capitalises the first character ("ALLOW_FINALIZE" → "ALLOW FINALIZE").
     expect(gateText.toUpperCase()).toContain("ALLOW FINALIZE");

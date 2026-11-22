@@ -58,6 +58,14 @@ async function assertRealPlannerTurn(turn: import("@playwright/test").Locator, t
 }
 
 test.describe("REAL Qwen Base Live (GPU)", () => {
+  test.beforeEach(async ({ request }) => {
+    const health = await bffGetJson(request, "/api/health");
+    test.skip(
+      health.body?.qwen_live?.available !== true,
+      "Qwen GPU Live is unavailable; this optional GPU suite is not part of the CPU acceptance run",
+    );
+  });
+
   test("real Qwen planner multi-step recommendation + products/evidence/Gate + screenshot", async ({
     page,
     request,

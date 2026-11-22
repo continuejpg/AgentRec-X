@@ -101,7 +101,9 @@ $qwenEnvNames = @(
     "AGENTRECX_WEB_DEMO_ASK_TEST_PROFILE", "AGENTRECX_WEB_DEMO_BGE_WARMUP",
     # Opt-in demo capabilities.  Defaults remain OFF/strict when these are absent.
     "AGENTRECX_MEMORY_AWARE_RETRIEVAL", "AGENTRECX_BEHAVIOR_AWARE_RERANK",
-    "AGENTRECX_PRICE_MODE", "AGENTRECX_DEMO_PRICE_SIDECAR"
+    "AGENTRECX_PRICE_MODE", "AGENTRECX_DEMO_PRICE_SIDECAR",
+    # Opt-in durable Web state (Task/Pending/Request Ledger).  Absent = quick in-memory demo.
+    "AGENTRECX_WEB_STATE_DB"
 )
 $qwenConfigured = $false
 foreach ($name in $qwenEnvNames) {

@@ -5,6 +5,8 @@
   "description": "Playwright E2E acceptance tests for the AgentRec-X local Web Demo (real BFF + real BGE + real M9; no mocks)",
   "scripts": {
     "test": "playwright test",
+    "test:cpu": "playwright test --grep-invert Qwen",
+    "test:qwen": "playwright test --grep Qwen",
     "report": "node generate-report.mjs",
     "install-deps": "pnpm install"
   },

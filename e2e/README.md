@@ -4,6 +4,10 @@ Independent Playwright project for the **real** local Web Demo. The suite drives
 Next.js UI against the real FastAPI BFF, the real P17 MCP servers (BGE retrieval, P16 Gate /
 comparison, P15 evidence, M9 memory) — **no mocks, no fabricated products/prices/preferences**.
 
+The **CPU mandatory suite** is `01`–`06` plus the P1 demo `09`; `07`/`08` are the optional
+**Qwen GPU** suite. Without a real Qwen service, `07`/`08` are reported as skipped, never as a
+CPU failure. `09` is opt-in because it requires the two P1 flags and Demo FX mode.
+
 - Browser: system Google Chrome via `channel: "chrome"` (no Playwright browser download).
 - Trace: `retain-on-failure`; failure screenshot: `only-on-failure`; final acceptance screenshots
   are saved explicitly at exactly 1440×900 (desktop) / 390×844 (mobile).
@@ -28,6 +32,13 @@ cmd /c "cd /d D:\IT\CODE\PROJECTION\agentrec\X\e2e && pnpm exec playwright test"
 node e2e/generate-report.mjs
 ```
 
+CPU / Qwen split (demo already running):
+
+```powershell
+cmd /c "pnpm --dir e2e test:cpu"   # 01-06; 09 skips without P1 flags
+cmd /c "pnpm --dir e2e test:qwen"  # 07/08; real Qwen GPU only
+```
+
 ## What is verified
 
 | Spec | Scenario | Real assertions |
@@ -37,7 +48,8 @@ node e2e/generate-report.mjs
 | `tests/03-clarification-memory.spec.ts` | Scenario 3: vague query → clarification → reply → M9 write (profile_0057) | real clarification question, `memory_update.added=2`, `web_ui_explicit_user_reply`, refreshed wireless + noise cancelling, continued recommendation |
 | `tests/04-mobile.spec.ts` | Mobile 390×844 | single column, left drawer, docked composer, real search, real comparison inside the sheet |
 | `tests/05-modes.spec.ts` | Modes | CPU Live default real; `Historical Replay — Not a Live Model Call` visible; Qwen Live disabled with real reason; replay read-only |
-| `tests/06-real-errors.spec.ts` | Real failure visibility | read-only profile refuses memory writes in UI and at the BFF (403/409), never a fake success |
+| `tests/06-real-errors.spec.ts` | Real failure visibility | read-only vague request reaches `NEED_USER_CLARIFICATION`, never fabricates a Memory write or final recommendation; BFF 409/422 error boundaries are real |
+| `tests/09-internship-demo.spec.ts` | P1 opt-in browser demo | laptop M4 ASK×2 + Demo FX budget, Memory Lab → formal candidate metadata, real Like → formal Behavior rerank metadata |
 
 ## Artifacts
 
@@ -55,7 +67,10 @@ All under `runs/web_demo/`:
 ## Notes
 
 - `e2e/` is self-contained; it is not added to `web/` and never modifies application code.
-- The demo stack must be freshly started per acceptance run: M9 memory lives in the MCP server
-  process, so `added=2` is only guaranteed on a fresh process.
+- The demo stack should be freshly started per acceptance run. In the default quick demo,
+  Session/M9 state is process-local; the durable Web SQLite mode keeps Task/Pending/Request
+  Ledger and is the mode that verifies MCP/BFF recovery and Replay.
+- `07`/`08` require a real Qwen GPU service; absent it they skip. Do not report them as CPU
+  passes, and do not delete them.
 - Ports 3000/8787 must be free before `scripts/run_web_demo_e2e.ps1` starts; it refuses to kill
   processes owned by anyone else.
